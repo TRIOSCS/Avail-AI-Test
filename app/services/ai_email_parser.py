@@ -140,6 +140,7 @@ def _normalize_quotes(result: dict) -> None:
     quotes = result.get("quotes", [])
     if isinstance(quotes, str):
         import json
+
         try:
             quotes = json.loads(quotes)
             result["quotes"] = quotes

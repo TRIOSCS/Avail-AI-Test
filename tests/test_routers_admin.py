@@ -22,8 +22,6 @@ from app.models import (
     ApiSource,
     Company,
     CustomerSite,
-    EnrichmentQueue,
-    SiteContact,
     SystemConfig,
     User,
     VendorCard,
@@ -81,24 +79,39 @@ class TestAdminUserList:
 
 class TestAdminCreateUser:
     def test_create_user(self, admin_client):
-        resp = admin_client.post("/api/admin/users", json={
-            "name": "New Buyer", "email": "newbuyer@trioscs.com", "role": "buyer",
-        })
+        resp = admin_client.post(
+            "/api/admin/users",
+            json={
+                "name": "New Buyer",
+                "email": "newbuyer@trioscs.com",
+                "role": "buyer",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["email"] == "newbuyer@trioscs.com"
         assert data["role"] == "buyer"
 
     def test_create_user_invalid_role(self, admin_client):
-        resp = admin_client.post("/api/admin/users", json={
-            "name": "Bad Role", "email": "bad@trioscs.com", "role": "superuser",
-        })
+        resp = admin_client.post(
+            "/api/admin/users",
+            json={
+                "name": "Bad Role",
+                "email": "bad@trioscs.com",
+                "role": "superuser",
+            },
+        )
         assert resp.status_code == 400
 
     def test_create_duplicate_email(self, admin_client, admin_user):
-        resp = admin_client.post("/api/admin/users", json={
-            "name": "Dup", "email": admin_user.email, "role": "buyer",
-        })
+        resp = admin_client.post(
+            "/api/admin/users",
+            json={
+                "name": "Dup",
+                "email": admin_user.email,
+                "role": "buyer",
+            },
+        )
         assert resp.status_code == 409
 
 
@@ -106,8 +119,11 @@ class TestAdminUpdateUser:
     def test_update_role(self, admin_client, db_session):
         # Create a target user first
         target = User(
-            email="target@trioscs.com", name="Target", role="buyer",
-            azure_id="az-target", created_at=datetime.now(timezone.utc),
+            email="target@trioscs.com",
+            name="Target",
+            role="buyer",
+            azure_id="az-target",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(target)
         db_session.commit()
@@ -127,7 +143,8 @@ class TestAdminUpdateUser:
 class TestAdminConfig:
     def test_list_config(self, admin_client, db_session):
         row = SystemConfig(
-            key="test_setting", value="test_val",
+            key="test_setting",
+            value="test_val",
             updated_at=datetime.now(timezone.utc),
         )
         db_session.add(row)
@@ -162,8 +179,11 @@ class TestAdminHealth:
 class TestAdminDeleteUser:
     def test_delete_user_success(self, admin_client, db_session):
         target = User(
-            email="deleteme@trioscs.com", name="Delete Me", role="buyer",
-            azure_id="az-delete", created_at=datetime.now(timezone.utc),
+            email="deleteme@trioscs.com",
+            name="Delete Me",
+            role="buyer",
+            azure_id="az-delete",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(target)
         db_session.commit()
@@ -195,7 +215,8 @@ class TestAdminConfigUpdate:
     def test_config_upsert(self, admin_client, db_session):
         # Seed the key first — set_config_value only updates existing rows
         row = SystemConfig(
-            key="upsert_test_key", value="old_val",
+            key="upsert_test_key",
+            value="old_val",
             updated_at=datetime.now(timezone.utc),
         )
         db_session.add(row)
@@ -245,7 +266,12 @@ class TestAdminCredentials:
     @patch("app.routers.admin.decrypt_value", return_value="sk-secret1234567890")
     @patch("app.routers.admin.mask_value", return_value="●●●●7890")
     def test_get_credentials_masked(
-        self, mock_mask, mock_decrypt, admin_client, db_session, api_source,
+        self,
+        mock_mask,
+        mock_decrypt,
+        admin_client,
+        db_session,
+        api_source,
     ):
         # Pre-populate an encrypted credential
         api_source.credentials = {"TEST_API_KEY": "encrypted_blob"}
@@ -266,7 +292,11 @@ class TestAdminCredentials:
 
     @patch("app.routers.admin.encrypt_value", return_value="encrypted_blob_123")
     def test_set_credentials_encrypted(
-        self, mock_encrypt, admin_client, db_session, api_source,
+        self,
+        mock_encrypt,
+        admin_client,
+        db_session,
+        api_source,
     ):
         resp = admin_client.put(
             f"/api/admin/sources/{api_source.id}/credentials",
@@ -299,7 +329,11 @@ class TestAdminCredentials:
 
     @patch("app.services.credential_service.credential_is_set", return_value=False)
     def test_credential_status_downgrade(
-        self, mock_cred_set, admin_client, db_session, api_source,
+        self,
+        mock_cred_set,
+        admin_client,
+        db_session,
+        api_source,
     ):
         # Source starts as "live" with credentials
         api_source.status = "live"
@@ -353,10 +387,7 @@ class TestAdminImportCustomers:
         # Reset rate limiter — prior tests may have consumed the 2/min budget
         limiter.reset()
 
-        csv_content = (
-            b"company_name,site_name,contact_name,contact_email\n"
-            b"DedupCo,Main Site,Alice,alice@dedup.com\n"
-        )
+        csv_content = b"company_name,site_name,contact_name,contact_email\nDedupCo,Main Site,Alice,alice@dedup.com\n"
         # First import
         resp1 = admin_client.post(
             "/api/admin/import/customers",
@@ -378,9 +409,13 @@ class TestAdminImportCustomers:
         assert resp2.json()["companies_created"] == 0
 
         # Only one company in DB
-        count = db_session.query(Company).filter(
-            Company.name.ilike("DedupCo"),
-        ).count()
+        count = (
+            db_session.query(Company)
+            .filter(
+                Company.name.ilike("DedupCo"),
+            )
+            .count()
+        )
         assert count == 1
 
 
@@ -402,17 +437,18 @@ class TestAdminImportVendors:
         assert data["rows_processed"] == 2
 
         # Verify DB records
-        vc = db_session.query(VendorCard).filter(
-            VendorCard.normalized_name == "vendor alpha",
-        ).first()
+        vc = (
+            db_session.query(VendorCard)
+            .filter(
+                VendorCard.normalized_name == "vendor alpha",
+            )
+            .first()
+        )
         assert vc is not None
         assert vc.display_name == "Vendor Alpha"
 
     def test_import_vendors_dedup(self, admin_client, db_session):
-        csv_content = (
-            b"vendor_name,domain,contact_name,contact_email\n"
-            b"DedupVendor,dedup.com,Dup Person,dup@dedup.com\n"
-        )
+        csv_content = b"vendor_name,domain,contact_name,contact_email\nDedupVendor,dedup.com,Dup Person,dup@dedup.com\n"
         resp1 = admin_client.post(
             "/api/admin/import/vendors",
             files={"file": ("v1.csv", io.BytesIO(csv_content), "text/csv")},
@@ -431,9 +467,13 @@ class TestAdminImportVendors:
         assert resp2.status_code == 200
         assert resp2.json()["vendors_created"] == 0
 
-        count = db_session.query(VendorCard).filter(
-            VendorCard.normalized_name == "dedupvendor",
-        ).count()
+        count = (
+            db_session.query(VendorCard)
+            .filter(
+                VendorCard.normalized_name == "dedupvendor",
+            )
+            .count()
+        )
         assert count == 1
 
 
@@ -464,15 +504,23 @@ class TestAdminTeamsConfig:
         assert resp.json()["status"] == "saved"
 
         # Verify persisted in SystemConfig
-        row = db_session.query(SystemConfig).filter(
-            SystemConfig.key == "teams_team_id",
-        ).first()
+        row = (
+            db_session.query(SystemConfig)
+            .filter(
+                SystemConfig.key == "teams_team_id",
+            )
+            .first()
+        )
         assert row is not None
         assert row.value == "team-abc-123"
 
-        ch_row = db_session.query(SystemConfig).filter(
-            SystemConfig.key == "teams_channel_id",
-        ).first()
+        ch_row = (
+            db_session.query(SystemConfig)
+            .filter(
+                SystemConfig.key == "teams_channel_id",
+            )
+            .first()
+        )
         assert ch_row is not None
         assert ch_row.value == "channel-def-456"
 
@@ -629,8 +677,11 @@ class TestAdminUpdateUserEdgeCases:
     def test_update_user_invalid_role(self, admin_client, db_session):
         """Updating a user with invalid role returns error."""
         target = User(
-            email="invalid_role_target@trioscs.com", name="Invalid", role="buyer",
-            azure_id="az-invalid-role", created_at=datetime.now(timezone.utc),
+            email="invalid_role_target@trioscs.com",
+            name="Invalid",
+            role="buyer",
+            azure_id="az-invalid-role",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(target)
         db_session.commit()
@@ -645,8 +696,11 @@ class TestAdminUpdateUserEdgeCases:
     def test_update_user_deactivate(self, admin_client, db_session):
         """Deactivating a user via is_active=False."""
         target = User(
-            email="deactivate@trioscs.com", name="Deactivate", role="buyer",
-            azure_id="az-deactivate", created_at=datetime.now(timezone.utc),
+            email="deactivate@trioscs.com",
+            name="Deactivate",
+            role="buyer",
+            azure_id="az-deactivate",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(target)
         db_session.commit()
@@ -770,11 +824,7 @@ class TestAdminImportCustomersEdgeCases:
 
     def test_import_customers_skips_empty_company(self, admin_client, db_session):
         """Rows with empty company_name are skipped."""
-        csv_content = (
-            b"company_name,site_name,contact_name\n"
-            b",Main,Jane\n"
-            b"Valid Corp,Main,Bob\n"
-        )
+        csv_content = b"company_name,site_name,contact_name\n,Main,Jane\nValid Corp,Main,Bob\n"
         resp = admin_client.post(
             "/api/admin/import/customers",
             files={"file": ("skip.csv", io.BytesIO(csv_content), "text/csv")},
@@ -784,10 +834,7 @@ class TestAdminImportCustomersEdgeCases:
 
     def test_import_customers_with_contact_no_email(self, admin_client, db_session):
         """Import customer with contact name but no email."""
-        csv_content = (
-            b"company_name,site_name,contact_name,contact_email\n"
-            b"NoEmail Corp,Main,John Doe,\n"
-        )
+        csv_content = b"company_name,site_name,contact_name,contact_email\nNoEmail Corp,Main,John Doe,\n"
         resp = admin_client.post(
             "/api/admin/import/customers",
             files={"file": ("noemail.csv", io.BytesIO(csv_content), "text/csv")},
@@ -819,10 +866,7 @@ class TestAdminImportVendorsEdgeCases:
         assert resp.json()["vendors_created"] == 1
 
     def test_import_vendors_contact_no_email(self, admin_client, db_session):
-        csv_content = (
-            b"vendor_name,domain,contact_name,contact_email\n"
-            b"NoEmail Vendor,noemail.com,John Doe,\n"
-        )
+        csv_content = b"vendor_name,domain,contact_name,contact_email\nNoEmail Vendor,noemail.com,John Doe,\n"
         resp = admin_client.post(
             "/api/admin/import/vendors",
             files={"file": ("noemail.csv", io.BytesIO(csv_content), "text/csv")},
@@ -845,6 +889,7 @@ class TestAdminTeamsConfigEdgeCases:
     def test_get_teams_config_with_db_overrides(self, admin_client, db_session):
         """Teams config reads runtime overrides from SystemConfig."""
         from datetime import datetime, timezone
+
         rows = [
             SystemConfig(key="teams_team_id", value="db-team-123", updated_at=datetime.now(timezone.utc)),
             SystemConfig(key="teams_channel_id", value="db-channel-456", updated_at=datetime.now(timezone.utc)),
@@ -867,7 +912,8 @@ class TestAdminTeamsConfigEdgeCases:
     def test_get_teams_config_invalid_threshold(self, admin_client, db_session):
         """Invalid hot_threshold value in DB is ignored."""
         row = SystemConfig(
-            key="teams_hot_threshold", value="not-a-number",
+            key="teams_hot_threshold",
+            value="not-a-number",
             updated_at=datetime.now(timezone.utc),
         )
         db_session.add(row)
@@ -890,9 +936,7 @@ class TestAdminTeamsConfigEdgeCases:
         )
         assert resp.status_code == 200
 
-        row = db_session.query(SystemConfig).filter(
-            SystemConfig.key == "teams_hot_threshold"
-        ).first()
+        row = db_session.query(SystemConfig).filter(SystemConfig.key == "teams_hot_threshold").first()
         assert row is not None
         assert row.value == "25000.0"
 
@@ -918,15 +962,21 @@ class TestCompanyDedup:
 
     def _make_company(self, db, name, sites=0, owner_id=None, is_strategic=False, **kw):
         c = Company(
-            name=name, is_active=True, account_owner_id=owner_id,
-            is_strategic=is_strategic, created_at=datetime.now(timezone.utc), **kw,
+            name=name,
+            is_active=True,
+            account_owner_id=owner_id,
+            is_strategic=is_strategic,
+            created_at=datetime.now(timezone.utc),
+            **kw,
         )
         db.add(c)
         db.flush()
         for i in range(sites):
             s = CustomerSite(
-                company_id=c.id, site_name=f"Site {i+1}",
-                owner_id=owner_id, created_at=datetime.now(timezone.utc),
+                company_id=c.id,
+                site_name=f"Site {i + 1}",
+                owner_id=owner_id,
+                created_at=datetime.now(timezone.utc),
             )
             db.add(s)
         db.flush()
@@ -958,8 +1008,7 @@ class TestCompanyDedup:
 
     def test_company_merge_preview(self, admin_client, db_session, admin_user):
         keep = self._make_company(db_session, "Keep Corp", sites=2, owner_id=admin_user.id)
-        remove = self._make_company(db_session, "Remove Corp", sites=1, owner_id=admin_user.id,
-                                    domain="remove.com")
+        remove = self._make_company(db_session, "Remove Corp", sites=1, owner_id=admin_user.id, domain="remove.com")
         db_session.commit()
 
         resp = admin_client.get(f"/api/admin/company-merge-preview?keep_id={keep.id}&remove_id={remove.id}")
@@ -975,9 +1024,13 @@ class TestCompanyDedup:
         remove = self._make_company(db_session, "Remove Corp", sites=2, owner_id=admin_user.id)
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
@@ -995,49 +1048,66 @@ class TestCompanyDedup:
     def test_merge_companies_empty_hq_deleted(self, admin_client, db_session, admin_user):
         keep = self._make_company(db_session, "Keep Corp")
         remove = Company(
-            name="Remove Corp", is_active=True,
+            name="Remove Corp",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(remove)
         db_session.flush()
         # Empty HQ site: name=HQ, no contact info, no site contacts, no reqs
         empty_hq = CustomerSite(
-            company_id=remove.id, site_name="HQ",
+            company_id=remove.id,
+            site_name="HQ",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(empty_hq)
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["sites_deleted"] == 1
         assert resp.json()["sites_moved"] == 0
 
     def test_merge_companies_not_found(self, admin_client):
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": 99999, "remove_id": 99998,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": 99999,
+                "remove_id": 99998,
+            },
+        )
         assert resp.status_code == 400
 
     def test_merge_companies_same_id(self, admin_client, db_session):
         c = self._make_company(db_session, "Self Corp")
         db_session.commit()
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": c.id, "remove_id": c.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": c.id,
+                "remove_id": c.id,
+            },
+        )
         assert resp.status_code == 400
 
     def test_merge_enrichment_fields(self, admin_client, db_session):
         keep = self._make_company(db_session, "Keep Corp")
-        remove = self._make_company(db_session, "Remove Corp",
-                                    domain="remove.com", website="https://remove.com")
+        remove = self._make_company(db_session, "Remove Corp", domain="remove.com", website="https://remove.com")
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         kept = db_session.get(Company, keep.id)
@@ -1051,9 +1121,13 @@ class TestCompanyDedup:
         remove.brand_tags = ["Vishay", "Texas Instruments"]
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         kept = db_session.get(Company, keep.id)
@@ -1069,9 +1143,13 @@ class TestCompanyDedup:
         remove.notes = "Remove notes"
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         kept = db_session.get(Company, keep.id)
@@ -1084,9 +1162,13 @@ class TestCompanyDedup:
         remove = self._make_company(db_session, "Remove Corp", is_strategic=True)
         db_session.commit()
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         kept = db_session.get(Company, keep.id)
@@ -1096,16 +1178,23 @@ class TestCompanyDedup:
         keep = self._make_company(db_session, "Keep Corp")
         remove = self._make_company(db_session, "Remove Corp")
         act = ActivityLog(
-            user_id=admin_user.id, activity_type="note", channel="manual",
-            company_id=remove.id, created_at=datetime.now(timezone.utc),
+            user_id=admin_user.id,
+            activity_type="note",
+            channel="manual",
+            company_id=remove.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(act)
         db_session.commit()
         act_id = act.id
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["reassigned"] >= 1
         db_session.expire_all()
@@ -1115,14 +1204,16 @@ class TestCompanyDedup:
         keep = self._make_company(db_session, "Keep Corp")
         # Add a site named "Main" to keep
         s1 = CustomerSite(
-            company_id=keep.id, site_name="Main",
+            company_id=keep.id,
+            site_name="Main",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(s1)
         remove = self._make_company(db_session, "Remove Corp")
         # Add a site named "Main" to remove — will collide
         s2 = CustomerSite(
-            company_id=remove.id, site_name="Main",
+            company_id=remove.id,
+            site_name="Main",
             contact_name="Someone",  # not empty so it won't be deleted
             created_at=datetime.now(timezone.utc),
         )
@@ -1130,9 +1221,13 @@ class TestCompanyDedup:
         db_session.commit()
         s2_id = s2.id
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         moved = db_session.get(CustomerSite, s2_id)
@@ -1142,32 +1237,43 @@ class TestCompanyDedup:
     def test_merge_preserves_site_owners(self, admin_client, db_session, admin_user):
         # Create a second user as site owner
         user2 = User(
-            email="siteowner@trioscs.com", name="Site Owner", role="sales",
-            azure_id="az-siteowner", created_at=datetime.now(timezone.utc),
+            email="siteowner@trioscs.com",
+            name="Site Owner",
+            role="sales",
+            azure_id="az-siteowner",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(user2)
         db_session.flush()
 
         keep = self._make_company(db_session, "Keep Corp", sites=0)
         s_keep = CustomerSite(
-            company_id=keep.id, site_name="Keep Site",
-            owner_id=admin_user.id, created_at=datetime.now(timezone.utc),
+            company_id=keep.id,
+            site_name="Keep Site",
+            owner_id=admin_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(s_keep)
 
         remove = self._make_company(db_session, "Remove Corp", sites=0)
         s_remove = CustomerSite(
-            company_id=remove.id, site_name="Remove Site",
-            owner_id=user2.id, contact_name="X",
+            company_id=remove.id,
+            site_name="Remove Site",
+            owner_id=user2.id,
+            contact_name="X",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(s_remove)
         db_session.commit()
         s_remove_id = s_remove.id
 
-        resp = admin_client.post("/api/admin/company-merge", json={
-            "keep_id": keep.id, "remove_id": remove.id,
-        })
+        resp = admin_client.post(
+            "/api/admin/company-merge",
+            json={
+                "keep_id": keep.id,
+                "remove_id": remove.id,
+            },
+        )
         assert resp.status_code == 200
         db_session.expire_all()
         # Both site owners retained
@@ -1188,10 +1294,16 @@ class TestConnectorHealth:
 
     def test_connector_health_returns_fields(self, admin_client, db_session):
         src = ApiSource(
-            name="test_src", display_name="Test Source",
-            category="distributor", source_type="api", status="live",
-            is_active=True, total_searches=100, total_results=500,
-            avg_response_ms=250, error_count_24h=2,
+            name="test_src",
+            display_name="Test Source",
+            category="distributor",
+            source_type="api",
+            status="live",
+            is_active=True,
+            total_searches=100,
+            total_results=500,
+            avg_response_ms=250,
+            error_count_24h=2,
         )
         db_session.add(src)
         db_session.commit()
@@ -1212,9 +1324,14 @@ class TestConnectorHealth:
 
     def test_connector_health_auto_degraded(self, admin_client, db_session):
         src = ApiSource(
-            name="bad_src", display_name="Bad Source",
-            category="broker", source_type="api", status="live",
-            is_active=True, total_searches=10, error_count_24h=8,
+            name="bad_src",
+            display_name="Bad Source",
+            category="broker",
+            source_type="api",
+            status="live",
+            is_active=True,
+            total_searches=10,
+            error_count_24h=8,
         )
         db_session.add(src)
         db_session.commit()
@@ -1226,9 +1343,14 @@ class TestConnectorHealth:
 
     def test_connector_health_not_degraded_low_errors(self, admin_client, db_session):
         src = ApiSource(
-            name="ok_src", display_name="OK Source",
-            category="distributor", source_type="api", status="live",
-            is_active=True, total_searches=100, error_count_24h=3,
+            name="ok_src",
+            display_name="OK Source",
+            category="distributor",
+            source_type="api",
+            status="live",
+            is_active=True,
+            total_searches=100,
+            error_count_24h=3,
         )
         db_session.add(src)
         db_session.commit()
@@ -1242,8 +1364,7 @@ class TestConnectorHealth:
 class TestIntegrityCheck:
     """Tests for /api/admin/integrity (lines 323-325)."""
 
-    @patch("app.services.integrity_service.run_integrity_check",
-           return_value={"status": "healthy", "issues": []})
+    @patch("app.services.integrity_service.run_integrity_check", return_value={"status": "healthy", "issues": []})
     def test_integrity_check(self, mock_check, admin_client):
         resp = admin_client.get("/api/admin/integrity")
         assert resp.status_code == 200
@@ -1264,6 +1385,7 @@ class TestMaterialAudit:
     def test_material_audit_with_filter(self, admin_client, db_session):
         """Filter by card_id and action."""
         from app.models import MaterialCardAudit
+
         audit = MaterialCardAudit(
             material_card_id=1,
             action="merge",
@@ -1309,15 +1431,15 @@ class TestCompanyMergePreview:
         empty_hq = CustomerSite(company_id=remove.id, site_name="HQ")
         # Add a non-empty site to remove (should count as sites_to_move)
         real_site = CustomerSite(
-            company_id=remove.id, site_name="Branch",
-            contact_name="John", contact_email="john@remove.com",
+            company_id=remove.id,
+            site_name="Branch",
+            contact_name="John",
+            contact_email="john@remove.com",
         )
         db_session.add_all([empty_hq, real_site])
         db_session.commit()
 
-        resp = admin_client.get(
-            f"/api/admin/company-merge-preview?keep_id={keep.id}&remove_id={remove.id}"
-        )
+        resp = admin_client.get(f"/api/admin/company-merge-preview?keep_id={keep.id}&remove_id={remove.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["keep"]["name"] == "Keep Co"

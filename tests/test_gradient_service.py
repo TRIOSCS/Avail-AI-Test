@@ -34,6 +34,7 @@ def _ensure_gradient_api_key():
     settings object so _call_llm doesn't short-circuit.
     """
     from app.config import settings
+
     original = settings.do_gradient_api_key
     settings.do_gradient_api_key = "test-key-for-testing"
     yield
@@ -165,9 +166,7 @@ async def test_gradient_text_no_api_key():
 async def test_gradient_text_api_error():
     """Returns None on non-retryable API error (e.g. 401)."""
     with patch("app.services.gradient_service.http") as mock_http:
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(401, text="Unauthorized")
-        )
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
         result = await gradient_text("Hello")
 
     assert result is None
@@ -363,9 +362,7 @@ async def test_retry_on_exception():
 async def test_no_retry_on_401():
     """Does NOT retry on 401 (auth error)."""
     with patch("app.services.gradient_service.http") as mock_http:
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(401, text="Unauthorized")
-        )
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
         result = await gradient_text("Test no retry")
 
     assert result is None
@@ -376,9 +373,7 @@ async def test_no_retry_on_401():
 async def test_no_retry_on_403():
     """Does NOT retry on 403 (forbidden)."""
     with patch("app.services.gradient_service.http") as mock_http:
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(403, text="Forbidden")
-        )
+        mock_http.post = AsyncMock(return_value=_mock_response(403, text="Forbidden"))
         result = await gradient_text("Test no retry 403")
 
     assert result is None
@@ -389,9 +384,7 @@ async def test_no_retry_on_403():
 async def test_max_retries_exhausted():
     """Returns None after all retries are exhausted."""
     with patch("app.services.gradient_service.http") as mock_http:
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(500, text="Server error")
-        )
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server error"))
         with patch("app.services.gradient_service.asyncio.sleep", new_callable=AsyncMock):
             result = await gradient_text("Test exhaustion")
 
@@ -408,9 +401,7 @@ async def test_exponential_backoff_delays():
         sleep_calls.append(delay)
 
     with patch("app.services.gradient_service.http") as mock_http:
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(500, text="Server error")
-        )
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server error"))
         with patch("app.services.gradient_service.asyncio.sleep", side_effect=mock_sleep):
             await gradient_text("Test backoff")
 

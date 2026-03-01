@@ -25,6 +25,4 @@ class NcConfig:
         self.NC_DEDUP_WINDOW_DAYS = int(os.environ.get("NC_DEDUP_WINDOW_DAYS", "7"))
         self.NC_BUSINESS_HOURS_START = int(os.environ.get("NC_BUSINESS_HOURS_START", "8"))
         self.NC_BUSINESS_HOURS_END = int(os.environ.get("NC_BUSINESS_HOURS_END", "18"))
-        self.NC_BROWSER_PROFILE_DIR = os.environ.get(
-            "NC_BROWSER_PROFILE_DIR", "/root/nc_browser_profile"
-        )
+        self.NC_BROWSER_PROFILE_DIR = os.environ.get("NC_BROWSER_PROFILE_DIR", "/root/nc_browser_profile")

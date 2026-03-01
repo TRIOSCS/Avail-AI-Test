@@ -108,10 +108,7 @@ def vite_js_tags(app_version: str = "") -> Markup:
     crm_url = _manifest_url("crm.js")
     touch_url = _manifest_url("touch.js")
     if app_url and crm_url:
-        tags = (
-            f'<script type="module" src="{app_url}"></script>\n'
-            f'    <script type="module" src="{crm_url}"></script>'
-        )
+        tags = f'<script type="module" src="{app_url}"></script>\n    <script type="module" src="{crm_url}"></script>'
         if touch_url:
             tags += f'\n    <script type="module" src="{touch_url}"></script>'
         return Markup(tags)

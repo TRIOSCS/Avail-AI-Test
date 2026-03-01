@@ -83,10 +83,21 @@ async def search_part(page, part_number: str) -> dict:
     """)
     logger.info("ICS search: page diagnostic — url={}, title={}", page_info.get("url"), page_info.get("title"))
     for btn in page_info.get("buttons", []):
-        logger.debug("ICS search: found element: tag={} id='{}' type={} value='{}' text='{}' visible={} display={} onclick='{}'",
-                      btn["tag"], btn["id"], btn["type"], btn["value"], btn["text"], btn["visible"], btn["display"], btn["onclick"])
+        logger.debug(
+            "ICS search: found element: tag={} id='{}' type={} value='{}' text='{}' visible={} display={} onclick='{}'",
+            btn["tag"],
+            btn["id"],
+            btn["type"],
+            btn["value"],
+            btn["text"],
+            btn["visible"],
+            btn["display"],
+            btn["onclick"],
+        )
     for form in page_info.get("forms", []):
-        logger.debug("ICS search: found form: id='{}' action='{}' method='{}'", form["id"], form["action"], form["method"])
+        logger.debug(
+            "ICS search: found form: id='{}' action='{}' method='{}'", form["id"], form["action"], form["method"]
+        )
 
     # Take a diagnostic screenshot
     try:

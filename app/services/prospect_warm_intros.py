@@ -12,7 +12,6 @@ Called by: prospect_suggested router (serialization), prospect_signals (enrichme
 Depends on: models (VendorCard, SiteContact, EmailSignatureExtract, Sighting)
 """
 
-
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -53,11 +52,7 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
     }
 
     # 1. VendorCard domain match
-    vc = (
-        db.query(VendorCard)
-        .filter(VendorCard.domain == domain)
-        .first()
-    )
+    vc = db.query(VendorCard).filter(VendorCard.domain == domain).first()
     if vc:
         result["vendor_card_id"] = vc.id
         result["engagement_score"] = vc.engagement_score
@@ -73,19 +68,19 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
             .all()
         )
         for c in contacts:
-            result["contacts"].append({
-                "name": c.full_name,
-                "email": c.email,
-                "title": c.title,
-                "relationship_score": c.relationship_score,
-                "activity_trend": c.activity_trend,
-            })
+            result["contacts"].append(
+                {
+                    "name": c.full_name,
+                    "email": c.email,
+                    "title": c.title,
+                    "relationship_score": c.relationship_score,
+                    "activity_trend": c.activity_trend,
+                }
+            )
 
         # Determine warmth from engagement
         eng = vc.engagement_score or 0
-        if eng >= 60 or (contacts and any(
-            (c.relationship_score or 0) >= 60 for c in contacts
-        )):
+        if eng >= 60 or (contacts and any((c.relationship_score or 0) >= 60 for c in contacts)):
             result["warmth"] = "hot"
             result["has_warm_intro"] = True
         elif eng >= 30 or contacts:
@@ -107,11 +102,13 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
         .all()
     )
     for row in internal:
-        result["internal_contacts"].append({
-            "name": row.full_name,
-            "email": row.email,
-            "company": row.company_name,
-        })
+        result["internal_contacts"].append(
+            {
+                "name": row.full_name,
+                "email": row.email,
+                "company": row.company_name,
+            }
+        )
         if not result["has_warm_intro"]:
             result["has_warm_intro"] = True
             result["warmth"] = "warm"
@@ -121,10 +118,7 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
         from app.models.sourcing import Sighting
 
         sighting_count = (
-            db.query(func.count(Sighting.id))
-            .filter(Sighting.vendor_email.ilike(domain_pattern))
-            .scalar()
-            or 0
+            db.query(func.count(Sighting.id)).filter(Sighting.vendor_email.ilike(domain_pattern)).scalar() or 0
         )
         result["sighting_count"] = sighting_count
         if sighting_count > 0 and not result["has_warm_intro"]:

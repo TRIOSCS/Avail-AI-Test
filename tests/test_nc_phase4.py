@@ -12,7 +12,6 @@ from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.human_behavior import HumanBehavior
 from app.services.nc_worker.session_manager import NcSessionManager
 
-
 # ── HumanBehavior Tests ─────────────────────────────────────────────
 
 
@@ -65,9 +64,7 @@ def test_human_click_random_position():
     page.mouse = MagicMock()
     page.mouse.click = AsyncMock()
     locator = MagicMock()
-    locator.bounding_box = AsyncMock(return_value={
-        "x": 100, "y": 200, "width": 80, "height": 30
-    })
+    locator.bounding_box = AsyncMock(return_value={"x": 100, "y": 200, "width": 80, "height": 30})
 
     loop.run_until_complete(HumanBehavior.human_click(page, locator))
     loop.close()

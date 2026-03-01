@@ -81,8 +81,8 @@ class TestRfqDraftRequest:
 
 from app.schemas.ai import (
     CompareQuotesRequest,
-    NormalizePartsRequest,
     NormalizedPart,
+    NormalizePartsRequest,
     ParsedQuote,
     ParseEmailRequest,
     ParseEmailResponse,

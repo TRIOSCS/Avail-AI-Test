@@ -209,11 +209,7 @@ async def list_verification_group(
     db: Session = Depends(get_db),
 ):
     """List all members of the ops verification group."""
-    members = (
-        db.query(VerificationGroupMember)
-        .options(joinedload(VerificationGroupMember.user))
-        .all()
-    )
+    members = db.query(VerificationGroupMember).options(joinedload(VerificationGroupMember.user)).all()
     return {
         "items": [
             {
@@ -244,11 +240,7 @@ async def update_verification_group(
         raise HTTPException(404, "User not found")
 
     if body.action == "add":
-        existing = (
-            db.query(VerificationGroupMember)
-            .filter_by(user_id=body.user_id)
-            .first()
-        )
+        existing = db.query(VerificationGroupMember).filter_by(user_id=body.user_id).first()
         if existing:
             existing.is_active = True
         else:
@@ -257,11 +249,7 @@ async def update_verification_group(
         return {"ok": True, "action": "added", "user_id": body.user_id}
 
     elif body.action == "remove":
-        member = (
-            db.query(VerificationGroupMember)
-            .filter_by(user_id=body.user_id)
-            .first()
-        )
+        member = db.query(VerificationGroupMember).filter_by(user_id=body.user_id).first()
         if member:
             member.is_active = False
             db.commit()
@@ -351,14 +339,11 @@ async def list_buy_plans_v3(
     db: Session = Depends(get_db),
 ):
     """List buy plans with optional filters for queue views."""
-    q = (
-        db.query(BuyPlanV3)
-        .options(
-            joinedload(BuyPlanV3.quote),
-            joinedload(BuyPlanV3.submitted_by),
-            joinedload(BuyPlanV3.approved_by),
-            joinedload(BuyPlanV3.lines),
-        )
+    q = db.query(BuyPlanV3).options(
+        joinedload(BuyPlanV3.quote),
+        joinedload(BuyPlanV3.submitted_by),
+        joinedload(BuyPlanV3.approved_by),
+        joinedload(BuyPlanV3.lines),
     )
     if status:
         q = q.filter(BuyPlanV3.status == status)
@@ -420,7 +405,10 @@ async def submit_plan_v3(
 
     try:
         plan = submit_buy_plan(
-            plan_id, body.sales_order_number, user, db,
+            plan_id,
+            body.sales_order_number,
+            user,
+            db,
             customer_po_number=body.customer_po_number,
             line_edits=edits,
             salesperson_notes=body.salesperson_notes,
@@ -434,8 +422,7 @@ async def submit_plan_v3(
         run_v3_notify_bg(notify_v3_approved, plan.id)
     else:
         run_v3_notify_bg(notify_v3_submitted, plan.id)
-    return {"ok": True, "plan_id": plan.id, "status": plan.status,
-            "auto_approved": plan.auto_approved}
+    return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
 # ── Approval ─────────────────────────────────────────────────────────
@@ -458,8 +445,12 @@ async def approve_plan_v3(
 
     try:
         plan = approve_buy_plan(
-            plan_id, body.action, user, db,
-            line_overrides=overrides, notes=body.notes,
+            plan_id,
+            body.action,
+            user,
+            db,
+            line_overrides=overrides,
+            notes=body.notes,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
@@ -485,7 +476,10 @@ async def resubmit_plan_v3(
     """Resubmit a rejected (draft) buy plan with corrected SO#."""
     try:
         plan = resubmit_buy_plan(
-            plan_id, body.sales_order_number, user, db,
+            plan_id,
+            body.sales_order_number,
+            user,
+            db,
             customer_po_number=body.customer_po_number,
             salesperson_notes=body.salesperson_notes,
         )
@@ -497,8 +491,7 @@ async def resubmit_plan_v3(
         run_v3_notify_bg(notify_v3_approved, plan.id)
     else:
         run_v3_notify_bg(notify_v3_submitted, plan.id)
-    return {"ok": True, "plan_id": plan.id, "status": plan.status,
-            "auto_approved": plan.auto_approved}
+    return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
 # ── SO Verification ──────────────────────────────────────────────────
@@ -514,7 +507,10 @@ async def verify_so_v3(
     """Ops verifies the Sales Order setup in Acctivate."""
     try:
         plan = verify_so(
-            plan_id, body.action, user, db,
+            plan_id,
+            body.action,
+            user,
+            db,
             rejection_note=body.rejection_note,
         )
     except ValueError as e:
@@ -527,8 +523,7 @@ async def verify_so_v3(
         run_v3_notify_bg(notify_v3_so_verified, plan.id)
     else:
         run_v3_notify_bg(notify_v3_so_rejected, plan.id, action=body.action)
-    return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status,
-            "status": plan.status}
+    return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status, "status": plan.status}
 
 
 # ── PO Confirmation ──────────────────────────────────────────────────
@@ -545,16 +540,19 @@ async def confirm_po_v3(
     """Buyer confirms PO was cut in Acctivate for a line."""
     try:
         line = confirm_po(
-            plan_id, line_id, body.po_number,
-            body.estimated_ship_date, user, db,
+            plan_id,
+            line_id,
+            body.po_number,
+            body.estimated_ship_date,
+            user,
+            db,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
 
     db.commit()
     run_v3_notify_bg(notify_v3_po_confirmed, plan_id, line_id=line.id)
-    return {"ok": True, "line_id": line.id, "status": line.status,
-            "po_number": line.po_number}
+    return {"ok": True, "line_id": line.id, "status": line.status, "po_number": line.po_number}
 
 
 # ── PO Verification ──────────────────────────────────────────────────
@@ -571,7 +569,11 @@ async def verify_po_v3(
     """Ops verifies a PO was properly entered."""
     try:
         line = verify_po(
-            plan_id, line_id, body.action, user, db,
+            plan_id,
+            line_id,
+            body.action,
+            user,
+            db,
             rejection_note=body.rejection_note,
         )
     except ValueError as e:
@@ -602,7 +604,11 @@ async def flag_issue_v3(
     """Buyer flags an issue on a line (sold out, price changed, etc.)."""
     try:
         line = flag_line_issue(
-            plan_id, line_id, body.issue_type, user, db,
+            plan_id,
+            line_id,
+            body.issue_type,
+            user,
+            db,
             note=body.note,
         )
     except ValueError as e:
@@ -610,8 +616,7 @@ async def flag_issue_v3(
 
     db.commit()
     run_v3_notify_bg(notify_v3_issue_flagged, plan_id, line_id=line.id, issue_type=body.issue_type)
-    return {"ok": True, "line_id": line.id, "status": line.status,
-            "issue_type": line.issue_type}
+    return {"ok": True, "line_id": line.id, "status": line.status, "issue_type": line.issue_type}
 
 
 # ── Offer Comparison ─────────────────────────────────────────────────
@@ -634,30 +639,25 @@ async def offer_comparison_v3(
         raise HTTPException(404, "Requirement not found")
 
     # Current selections
-    selected_ids = {
-        ln.offer_id for ln in (plan.lines or [])
-        if ln.requirement_id == requirement_id and ln.offer_id
-    }
+    selected_ids = {ln.offer_id for ln in (plan.lines or []) if ln.requirement_id == requirement_id and ln.offer_id}
 
-    offers = (
-        db.query(Offer)
-        .filter(Offer.requirement_id == requirement_id, Offer.status == "active")
-        .all()
-    )
+    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == "active").all()
     items = []
     for o in offers:
-        items.append({
-            "offer_id": o.id,
-            "vendor_name": o.vendor_name,
-            "unit_price": float(o.unit_price) if o.unit_price else None,
-            "qty_available": o.qty_available,
-            "lead_time": o.lead_time,
-            "condition": o.condition,
-            "date_code": o.date_code,
-            "packaging": o.packaging,
-            "is_selected": o.id in selected_ids,
-            "created_at": str(o.created_at) if o.created_at else None,
-        })
+        items.append(
+            {
+                "offer_id": o.id,
+                "vendor_name": o.vendor_name,
+                "unit_price": float(o.unit_price) if o.unit_price else None,
+                "qty_available": o.qty_available,
+                "lead_time": o.lead_time,
+                "condition": o.condition,
+                "date_code": o.date_code,
+                "packaging": o.packaging,
+                "is_selected": o.id in selected_ids,
+                "created_at": str(o.created_at) if o.created_at else None,
+            }
+        )
 
     return {
         "requirement_id": requirement_id,

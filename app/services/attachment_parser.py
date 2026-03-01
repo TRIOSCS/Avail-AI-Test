@@ -17,16 +17,10 @@ from loguru import logger
 
 # Standard column header patterns (deterministic, no AI needed)
 HEADER_PATTERNS = {
-    "mpn": re.compile(
-        r"(?i)^(part\s*(?:no|number|#|num)|mpn|mfr?\s*part|mfg\s*p/?n|p/?n|item\s*(?:no|#))$"
-    ),
+    "mpn": re.compile(r"(?i)^(part\s*(?:no|number|#|num)|mpn|mfr?\s*part|mfg\s*p/?n|p/?n|item\s*(?:no|#))$"),
     "manufacturer": re.compile(r"(?i)^(manufacturer|mfr|mfg|brand|make|vendor)$"),
-    "qty": re.compile(
-        r"(?i)^(qty|quantity|qoh|avail(?:able)?|stock|on\s*hand|inv(?:entory)?)$"
-    ),
-    "unit_price": re.compile(
-        r"(?i)^(price|unit\s*price|cost|unit\s*cost|rate|ea|each|\$/ea|usd)$"
-    ),
+    "qty": re.compile(r"(?i)^(qty|quantity|qoh|avail(?:able)?|stock|on\s*hand|inv(?:entory)?)$"),
+    "unit_price": re.compile(r"(?i)^(price|unit\s*price|cost|unit\s*cost|rate|ea|each|\$/ea|usd)$"),
     "condition": re.compile(r"(?i)^(cond(?:ition)?|grade|quality|status)$"),
     "date_code": re.compile(r"(?i)^(date\s*code|dc|d/?c|lot|batch)$"),
     "lead_time": re.compile(r"(?i)^(lead\s*time|lt|delivery|tat|ard|eta|ship)$"),
@@ -173,9 +167,7 @@ async def _get_or_detect_mapping(
             .first()
         )
         if cached and cached.mapping:
-            logger.info(
-                f"Cache hit for column mapping: {vendor_domain}/{file_fingerprint[:8]}"
-            )
+            logger.info(f"Cache hit for column mapping: {vendor_domain}/{file_fingerprint[:8]}")
             # Convert string keys back to int
             return {int(k): v for k, v in cached.mapping.items()}
 
@@ -396,7 +388,5 @@ async def parse_attachment(
         if extracted:
             results.append(extracted)
 
-    logger.info(
-        f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)"
-    )
+    logger.info(f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)")
     return results

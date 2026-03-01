@@ -86,7 +86,7 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
     from app.utils.graph_client import GraphClient
 
     payload = {
-        "body": {"contentType": "html", "content": "<attachment id=\"card\"></attachment>"},
+        "body": {"contentType": "html", "content": '<attachment id="card"></attachment>'},
         "attachments": [
             {
                 "id": "card",
@@ -98,9 +98,7 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
 
     try:
         gc = GraphClient(token)
-        result = await gc.post_json(
-            f"/teams/{team_id}/channels/{channel_id}/messages", payload
-        )
+        result = await gc.post_json(f"/teams/{team_id}/channels/{channel_id}/messages", payload)
         if "error" in result:
             logger.warning(f"Teams post failed: {result.get('detail', result.get('error'))}")
             return False
@@ -113,11 +111,19 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
 def _build_deep_link(path: str) -> str:
     """Build a deep link back to AVAIL."""
     from app.config import settings
+
     base = settings.app_url.rstrip("/")
     return f"{base}/{path.lstrip('/')}"
 
 
-def _make_card(title: str, subtitle: str, facts: list[dict], action_url: str, action_title: str = "View in AVAIL", accent_color: str = "attention") -> dict:
+def _make_card(
+    title: str,
+    subtitle: str,
+    facts: list[dict],
+    action_url: str,
+    action_title: str = "View in AVAIL",
+    accent_color: str = "attention",
+) -> dict:
     """Build a standard Adaptive Card for Teams notifications.
 
     Args:
@@ -363,11 +369,7 @@ async def _get_system_token() -> str | None:
 
         db = SessionLocal()
         try:
-            admin = (
-                db.query(User)
-                .filter(User.access_token.isnot(None), User.m365_connected.is_(True))
-                .first()
-            )
+            admin = db.query(User).filter(User.access_token.isnot(None), User.m365_connected.is_(True)).first()
             if not admin:
                 return None
             return await get_valid_token(admin, db)

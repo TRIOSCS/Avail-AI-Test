@@ -103,7 +103,7 @@ def compute_vendor_scorecard(
     # Match responses by email domain (vendor_name stores person name, not company)
     rfqs_answered = 0
     domains = [vc.domain.lower()] if vc.domain else []
-    for alias in (vc.domain_aliases or []):
+    for alias in vc.domain_aliases or []:
         if alias:
             domains.append(alias.lower())
     if domains:
@@ -140,11 +140,7 @@ def compute_vendor_scorecard(
         # Build lookup on demand if not pre-loaded (single-vendor call)
         if quoted_offer_ids is None:
             quoted_offer_ids = set()
-            for (items,) in (
-                db.query(Quote.line_items)
-                .filter(Quote.status.in_(["sent", "won", "lost"]))
-                .all()
-            ):
+            for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
                 for item in items or []:
                     oid = item.get("offer_id")
                     if oid:
@@ -185,9 +181,7 @@ def compute_vendor_scorecard(
         )
         .scalar()
     )
-    avg_review_rating = (
-        float(avg_rating_row) / 5.0 if avg_rating_row else None
-    )  # Normalize to 0-1
+    avg_review_rating = float(avg_rating_row) / 5.0 if avg_rating_row else None  # Normalize to 0-1
 
     # ── Interaction count & cold-start ──
     interaction_count = rfqs_sent + total_offers
@@ -259,11 +253,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     # ── Preload quote and buy-plan offer-id lookups ONCE ──
     # Load only the JSON column (not full ORM objects) to reduce memory
     quoted_offer_ids: set[int] = set()
-    for (items,) in (
-        db.query(Quote.line_items)
-        .filter(Quote.status.in_(["sent", "won", "lost"]))
-        .all()
-    ):
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -271,9 +261,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
 
     po_offer_ids: set[int] = set()
     for (items,) in (
-        db.query(BuyPlan.line_items)
-        .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
-        .all()
+        db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"])).all()
     ):
         for item in items or []:
             oid = item.get("offer_id")
@@ -286,12 +274,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
 
     for chunk_offset in range(0, total_vendors, CHUNK_SIZE):
         vendor_ids_chunk = [
-            r[0]
-            for r in db.query(VendorCard.id)
-            .order_by(VendorCard.id)
-            .offset(chunk_offset)
-            .limit(CHUNK_SIZE)
-            .all()
+            r[0] for r in db.query(VendorCard.id).order_by(VendorCard.id).offset(chunk_offset).limit(CHUNK_SIZE).all()
         ]
 
         for vid in vendor_ids_chunk:
@@ -393,8 +376,13 @@ def get_vendor_scorecard_list(
 
     # Sort — whitelist allowed columns to prevent attribute probing
     _ALLOWED_SORT_COLS = {
-        "composite_score", "response_rate", "quote_conversion", "po_conversion",
-        "avg_review_rating", "interaction_count", "snapshot_date",
+        "composite_score",
+        "response_rate",
+        "quote_conversion",
+        "po_conversion",
+        "avg_review_rating",
+        "interaction_count",
+        "snapshot_date",
     }
     if sort_by not in _ALLOWED_SORT_COLS:
         sort_by = "composite_score"
@@ -495,12 +483,8 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     else:
         month_end = month_start.replace(month=month_start.month + 1)
 
-    month_start_dt = datetime(
-        month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc
-    )
-    month_end_dt = datetime(
-        month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc
-    )
+    month_start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
+    month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
 
     # Grace period: last 7 days of previous month
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
@@ -511,11 +495,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
     # Load only needed columns to reduce memory
     quoted_offer_ids = set()
-    for (items,) in (
-        db.query(Quote.line_items)
-        .filter(Quote.status.in_(["sent", "won", "lost"]))
-        .all()
-    ):
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -524,9 +504,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     # Buy plans: line_items JSON contains offer_id
     buyplan_offer_ids = set()
     po_confirmed_offer_ids = set()
-    for bp_status, items in (
-        db.query(BuyPlan.status, BuyPlan.line_items).all()
-    ):
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -580,10 +558,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         grace_offers = grace_offers_by_buyer.get(buyer.id, [])
 
         # Grace offers only count if they advanced during this month
-        grace_advanced = [
-            o for o in grace_offers
-            if o.id in quoted_offer_ids or o.id in buyplan_offer_ids
-        ]
+        grace_advanced = [o for o in grace_offers if o.id in quoted_offer_ids or o.id in buyplan_offer_ids]
 
         all_offers = month_offers + grace_advanced
         offer_ids = {o.id for o in all_offers}
@@ -708,25 +683,27 @@ def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
     result = []
     for snap, user_name in rows:
         ytd = ytd_map.get(snap.user_id, {})
-        result.append({
-            "user_id": snap.user_id,
-            "user_name": user_name,
-            "rank": snap.rank,
-            "offers_logged": snap.offers_logged,
-            "offers_quoted": snap.offers_quoted,
-            "offers_in_buyplan": snap.offers_in_buyplan,
-            "offers_po_confirmed": snap.offers_po_confirmed,
-            "stock_lists_uploaded": snap.stock_lists_uploaded or 0,
-            "points_offers": snap.points_offers,
-            "points_quoted": snap.points_quoted,
-            "points_buyplan": snap.points_buyplan,
-            "points_po": snap.points_po,
-            "points_stock": snap.points_stock or 0,
-            "total_points": snap.total_points,
-            "ytd_offers_logged": ytd.get("ytd_offers_logged", 0),
-            "ytd_offers_po_confirmed": ytd.get("ytd_offers_po_confirmed", 0),
-            "ytd_total_points": ytd.get("ytd_total_points", 0),
-        })
+        result.append(
+            {
+                "user_id": snap.user_id,
+                "user_name": user_name,
+                "rank": snap.rank,
+                "offers_logged": snap.offers_logged,
+                "offers_quoted": snap.offers_quoted,
+                "offers_in_buyplan": snap.offers_in_buyplan,
+                "offers_po_confirmed": snap.offers_po_confirmed,
+                "stock_lists_uploaded": snap.stock_lists_uploaded or 0,
+                "points_offers": snap.points_offers,
+                "points_quoted": snap.points_quoted,
+                "points_buyplan": snap.points_buyplan,
+                "points_po": snap.points_po,
+                "points_stock": snap.points_stock or 0,
+                "total_points": snap.total_points,
+                "ytd_offers_logged": ytd.get("ytd_offers_logged", 0),
+                "ytd_offers_po_confirmed": ytd.get("ytd_offers_po_confirmed", 0),
+                "ytd_total_points": ytd.get("ytd_total_points", 0),
+            }
+        )
     return result
 
 
@@ -815,15 +792,9 @@ def get_salesperson_scorecard(db: Session, month: date) -> dict:
 
     ytd_start = date(month_start.year, 1, 1)
 
-    month_start_dt = datetime(
-        month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc
-    )
-    month_end_dt = datetime(
-        month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc
-    )
-    ytd_start_dt = datetime(
-        ytd_start.year, ytd_start.month, ytd_start.day, tzinfo=timezone.utc
-    )
+    month_start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
+    month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
+    ytd_start_dt = datetime(ytd_start.year, ytd_start.month, ytd_start.day, tzinfo=timezone.utc)
 
     users = db.query(User).filter(User.is_active == True).all()  # noqa: E712
 
@@ -835,12 +806,14 @@ def get_salesperson_scorecard(db: Session, month: date) -> dict:
 
     entries = []
     for user in users:
-        entries.append({
-            "user_id": user.id,
-            "user_name": user.name or user.email,
-            "monthly": monthly_batch.get(user.id, {}),
-            "ytd": ytd_batch.get(user.id, {}),
-        })
+        entries.append(
+            {
+                "user_id": user.id,
+                "user_name": user.name or user.email,
+                "monthly": monthly_batch.get(user.id, {}),
+                "ytd": ytd_batch.get(user.id, {}),
+            }
+        )
 
     # Default sort: won_revenue descending
     entries.sort(key=lambda e: float(e["monthly"]["won_revenue"] or 0), reverse=True)
@@ -862,12 +835,23 @@ def _salesperson_metrics_batch(
     from sqlalchemy import case
 
     # Initialize results for all users
-    results = {uid: {
-        "new_accounts": 0, "new_contacts": 0, "calls_made": 0, "emails_sent": 0,
-        "requisitions_entered": 0, "quotes_sent": 0, "orders_won": 0,
-        "won_revenue": 0.0, "proactive_sent": 0, "proactive_converted": 0,
-        "proactive_revenue": 0.0, "boms_uploaded": 0,
-    } for uid in user_ids}
+    results = {
+        uid: {
+            "new_accounts": 0,
+            "new_contacts": 0,
+            "calls_made": 0,
+            "emails_sent": 0,
+            "requisitions_entered": 0,
+            "quotes_sent": 0,
+            "orders_won": 0,
+            "won_revenue": 0.0,
+            "proactive_sent": 0,
+            "proactive_converted": 0,
+            "proactive_revenue": 0.0,
+            "boms_uploaded": 0,
+        }
+        for uid in user_ids
+    }
 
     if not user_ids:
         return results
@@ -885,7 +869,9 @@ def _salesperson_metrics_batch(
     for uid, cnt in (
         db.query(CustomerSite.owner_id, sqlfunc.count(SiteContact.id))
         .join(CustomerSite, CustomerSite.id == SiteContact.customer_site_id)
-        .filter(CustomerSite.owner_id.in_(user_ids), SiteContact.created_at >= start_dt, SiteContact.created_at < end_dt)
+        .filter(
+            CustomerSite.owner_id.in_(user_ids), SiteContact.created_at >= start_dt, SiteContact.created_at < end_dt
+        )
         .group_by(CustomerSite.owner_id)
         .all()
     ):
@@ -894,8 +880,12 @@ def _salesperson_metrics_batch(
     # Batch 3: ActivityLog — calls
     for uid, cnt in (
         db.query(ActivityLog.user_id, sqlfunc.count(ActivityLog.id))
-        .filter(ActivityLog.user_id.in_(user_ids), ActivityLog.activity_type == "call_outbound",
-                ActivityLog.created_at >= start_dt, ActivityLog.created_at < end_dt)
+        .filter(
+            ActivityLog.user_id.in_(user_ids),
+            ActivityLog.activity_type == "call_outbound",
+            ActivityLog.created_at >= start_dt,
+            ActivityLog.created_at < end_dt,
+        )
         .group_by(ActivityLog.user_id)
         .all()
     ):
@@ -904,8 +894,12 @@ def _salesperson_metrics_batch(
     # Batch 4: Contacts — emails sent
     for uid, cnt in (
         db.query(Contact.user_id, sqlfunc.count(Contact.id))
-        .filter(Contact.user_id.in_(user_ids), Contact.contact_type == "email",
-                Contact.created_at >= start_dt, Contact.created_at < end_dt)
+        .filter(
+            Contact.user_id.in_(user_ids),
+            Contact.contact_type == "email",
+            Contact.created_at >= start_dt,
+            Contact.created_at < end_dt,
+        )
         .group_by(Contact.user_id)
         .all()
     ):
@@ -914,8 +908,9 @@ def _salesperson_metrics_batch(
     # Batch 5: Requisitions entered
     for uid, cnt in (
         db.query(Requisition.created_by, sqlfunc.count(Requisition.id))
-        .filter(Requisition.created_by.in_(user_ids),
-                Requisition.created_at >= start_dt, Requisition.created_at < end_dt)
+        .filter(
+            Requisition.created_by.in_(user_ids), Requisition.created_at >= start_dt, Requisition.created_at < end_dt
+        )
         .group_by(Requisition.created_by)
         .all()
     ):
@@ -925,9 +920,23 @@ def _salesperson_metrics_batch(
     for uid, q_sent, q_won, q_rev in (
         db.query(
             Quote.created_by_id,
-            sqlfunc.count(case((and_(Quote.sent_at.isnot(None), Quote.sent_at >= start_dt, Quote.sent_at < end_dt), 1))),
-            sqlfunc.count(case((and_(Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt), 1))),
-            sqlfunc.coalesce(sqlfunc.sum(case((and_(Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt), Quote.won_revenue))), 0),
+            sqlfunc.count(
+                case((and_(Quote.sent_at.isnot(None), Quote.sent_at >= start_dt, Quote.sent_at < end_dt), 1))
+            ),
+            sqlfunc.count(
+                case((and_(Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt), 1))
+            ),
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (
+                            and_(Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt),
+                            Quote.won_revenue,
+                        )
+                    )
+                ),
+                0,
+            ),
         )
         .filter(Quote.created_by_id.in_(user_ids))
         .group_by(Quote.created_by_id)
@@ -942,8 +951,33 @@ def _salesperson_metrics_batch(
         db.query(
             ProactiveOffer.salesperson_id,
             sqlfunc.count(case((and_(ProactiveOffer.sent_at >= start_dt, ProactiveOffer.sent_at < end_dt), 1))),
-            sqlfunc.count(case((and_(ProactiveOffer.status == "converted", ProactiveOffer.converted_at >= start_dt, ProactiveOffer.converted_at < end_dt), 1))),
-            sqlfunc.coalesce(sqlfunc.sum(case((and_(ProactiveOffer.status == "converted", ProactiveOffer.converted_at >= start_dt, ProactiveOffer.converted_at < end_dt), ProactiveOffer.total_sell))), 0),
+            sqlfunc.count(
+                case(
+                    (
+                        and_(
+                            ProactiveOffer.status == "converted",
+                            ProactiveOffer.converted_at >= start_dt,
+                            ProactiveOffer.converted_at < end_dt,
+                        ),
+                        1,
+                    )
+                )
+            ),
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (
+                            and_(
+                                ProactiveOffer.status == "converted",
+                                ProactiveOffer.converted_at >= start_dt,
+                                ProactiveOffer.converted_at < end_dt,
+                            ),
+                            ProactiveOffer.total_sell,
+                        )
+                    )
+                ),
+                0,
+            ),
         )
         .filter(ProactiveOffer.salesperson_id.in_(user_ids))
         .group_by(ProactiveOffer.salesperson_id)
@@ -956,8 +990,11 @@ def _salesperson_metrics_batch(
     # Batch 8: BOMs uploaded
     for uid, cnt in (
         db.query(StockListHash.user_id, sqlfunc.count(StockListHash.id))
-        .filter(StockListHash.user_id.in_(user_ids),
-                StockListHash.first_seen_at >= start_dt, StockListHash.first_seen_at < end_dt)
+        .filter(
+            StockListHash.user_id.in_(user_ids),
+            StockListHash.first_seen_at >= start_dt,
+            StockListHash.first_seen_at < end_dt,
+        )
         .group_by(StockListHash.user_id)
         .all()
     ):
@@ -966,17 +1003,26 @@ def _salesperson_metrics_batch(
     return results
 
 
-def _salesperson_metrics(
-    db: Session, user_id: int, start_dt: datetime, end_dt: datetime
-) -> dict:
+def _salesperson_metrics(db: Session, user_id: int, start_dt: datetime, end_dt: datetime) -> dict:
     """Compute all 12 metrics for a single user over a date range.
 
     Delegates to batch function for consistency.
     """
     batch = _salesperson_metrics_batch(db, [user_id], start_dt, end_dt)
-    return batch.get(user_id, {
-        "new_accounts": 0, "new_contacts": 0, "calls_made": 0, "emails_sent": 0,
-        "requisitions_entered": 0, "quotes_sent": 0, "orders_won": 0,
-        "won_revenue": 0.0, "proactive_sent": 0, "proactive_converted": 0,
-        "proactive_revenue": 0.0, "boms_uploaded": 0,
-    })
+    return batch.get(
+        user_id,
+        {
+            "new_accounts": 0,
+            "new_contacts": 0,
+            "calls_made": 0,
+            "emails_sent": 0,
+            "requisitions_entered": 0,
+            "quotes_sent": 0,
+            "orders_won": 0,
+            "won_revenue": 0.0,
+            "proactive_sent": 0,
+            "proactive_converted": 0,
+            "proactive_revenue": 0.0,
+            "boms_uploaded": 0,
+        },
+    )

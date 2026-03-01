@@ -27,7 +27,9 @@ from app.services.admin_service import (
 
 def _make_config(db, key, value, desc=""):
     row = SystemConfig(
-        key=key, value=value, description=desc,
+        key=key,
+        value=value,
+        description=desc,
         updated_at=datetime.now(timezone.utc),
     )
     db.add(row)
@@ -180,13 +182,11 @@ class TestSystemHealth:
     def test_count_exception_returns_neg1(self, db_session, monkeypatch):
         """If a count query fails, the count is -1."""
         # Make one of the count queries fail
-        from app.models import Quote
 
         original_query = db_session.query
 
         def patched_query(*args, **kwargs):
             # Make Quote count fail
-            from sqlalchemy import func as sqlfunc
             result = original_query(*args, **kwargs)
             return result
 

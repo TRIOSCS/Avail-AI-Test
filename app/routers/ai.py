@@ -81,16 +81,10 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     ) or 0
 
     # Combine offer count + last contact into parallel-style queries
-    total_offers = (
-        db.query(func.count(Offer.id))
-        .filter(Offer.vendor_name.ilike(f"%{safe_vendor}%"))
-        .scalar()
-    ) or 0
+    total_offers = (db.query(func.count(Offer.id)).filter(Offer.vendor_name.ilike(f"%{safe_vendor}%")).scalar()) or 0
 
     last_contact_date = (
-        db.query(func.max(Contact.created_at))
-        .filter(Contact.vendor_name.ilike(f"%{safe_vendor}%"))
-        .scalar()
+        db.query(func.max(Contact.created_at)).filter(Contact.vendor_name.ilike(f"%{safe_vendor}%")).scalar()
     )
 
     return {
@@ -157,9 +151,7 @@ async def ai_find_contacts(
     if len(apollo_results) < 3:
         from app.services.ai_service import enrich_contacts_websearch
 
-        web_results = await enrich_contacts_websearch(
-            company_name, domain, title_keywords, limit=5
-        )
+        web_results = await enrich_contacts_websearch(company_name, domain, title_keywords, limit=5)
 
     seen_emails: set[str] = set()
     merged = []
@@ -433,11 +425,7 @@ async def ai_parse_response(
 
     rfq_context = None
     if vr.requisition_id:
-        reqs = (
-            db.query(Requirement)
-            .filter(Requirement.requisition_id == vr.requisition_id)
-            .all()
-        )
+        reqs = db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all()
         rfq_context = [
             {
                 "mpn": r.primary_mpn,
@@ -506,11 +494,7 @@ async def save_parsed_offers(
         if o.mpn:
             from app.utils.normalization import fuzzy_mpn_match
 
-            reqs = (
-                db.query(Requirement)
-                .filter(Requirement.requisition_id == requisition_id)
-                .all()
-            )
+            reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
             for r in reqs:
                 if fuzzy_mpn_match(o.mpn, r.primary_mpn):
                     req_id = r.id

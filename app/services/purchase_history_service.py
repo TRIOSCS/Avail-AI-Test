@@ -56,9 +56,7 @@ def upsert_purchase(
             existing.last_unit_price = price
             # Rolling average: (old_avg * old_count + new_price) / new_count
             old_avg = existing.avg_unit_price or price
-            existing.avg_unit_price = (
-                old_avg * (existing.purchase_count - 1) + price
-            ) / existing.purchase_count
+            existing.avg_unit_price = (old_avg * (existing.purchase_count - 1) + price) / existing.purchase_count
         if qty is not None:
             existing.last_quantity = qty
             existing.total_quantity = (existing.total_quantity or 0) + qty
@@ -66,7 +64,10 @@ def upsert_purchase(
             existing.source_ref = source_ref
         logger.info(
             "CPH_UPSERT: updated company=%d card=%d source=%s count=%d",
-            company_id, material_card_id, source, existing.purchase_count,
+            company_id,
+            material_card_id,
+            source,
+            existing.purchase_count,
         )
         return existing
 
@@ -86,6 +87,8 @@ def upsert_purchase(
     db.add(record)
     logger.info(
         "CPH_UPSERT: created company=%d card=%d source=%s",
-        company_id, material_card_id, source,
+        company_id,
+        material_card_id,
+        source,
     )
     return record

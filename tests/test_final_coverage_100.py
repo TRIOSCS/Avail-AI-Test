@@ -7,27 +7,21 @@ Depends on: conftest.py fixtures
 
 import asyncio
 import io
-import json
 import secrets
-import time
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.models import (
     ActivityLog,
     ApiSource,
     BuyPlan,
     Company,
-    Contact,
     CustomerSite,
     GraphSubscription,
     MaterialCard,
-    MaterialVendorHistory,
     Offer,
     ProactiveMatch,
     ProactiveOffer,
@@ -35,14 +29,12 @@ from app.models import (
     Quote,
     Requirement,
     Requisition,
-    SiteContact,
     Sighting,
+    SiteContact,
     User,
     VendorCard,
-    VendorContact,
     VendorReview,
 )
-
 
 # =========================================================================
 # 1. buyplan_service.py -- lines 43-44, 181-182, 267, 319-320, 395-396,
@@ -54,8 +46,13 @@ def _make_plan(db, user, **kw):
     # BuyPlan requires a valid requisition and quote (NOT NULL FKs)
     req_id = kw.get("requisition_id")
     if not req_id:
-        req = Requisition(name="REQ-BP-AUTO", customer_name="Test", status="open",
-                          created_by=user.id, created_at=datetime.now(timezone.utc))
+        req = Requisition(
+            name="REQ-BP-AUTO",
+            customer_name="Test",
+            status="open",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
         db.add(req)
         db.flush()
         req_id = req.id
@@ -70,10 +67,18 @@ def _make_plan(db, user, **kw):
             site = CustomerSite(company_id=co.id, site_name="HQ")
             db.add(site)
             db.flush()
-        q = Quote(requisition_id=req_id, customer_site_id=site.id,
-                  quote_number=f"Q-BP-{secrets.token_hex(4)}", status="sent",
-                  line_items=[], subtotal=0, total_cost=0, total_margin_pct=0,
-                  created_by_id=user.id, created_at=datetime.now(timezone.utc))
+        q = Quote(
+            requisition_id=req_id,
+            customer_site_id=site.id,
+            quote_number=f"Q-BP-{secrets.token_hex(4)}",
+            status="sent",
+            line_items=[],
+            subtotal=0,
+            total_cost=0,
+            total_margin_pct=0,
+            created_by_id=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
         db.add(q)
         db.flush()
         quote_id = q.id
@@ -82,11 +87,21 @@ def _make_plan(db, user, **kw):
         status=kw.get("status", "pending_approval"),
         requisition_id=req_id,
         quote_id=quote_id,
-        line_items=kw.get("line_items", [
-            {"offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-             "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
-             "lead_time": "2 weeks", "entered_by_id": None}
-        ]),
+        line_items=kw.get(
+            "line_items",
+            [
+                {
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
+                    "lead_time": "2 weeks",
+                    "entered_by_id": None,
+                }
+            ],
+        ),
         approval_token=secrets.token_urlsafe(32),
         submitted_by_id=kw.get("submitted_by_id", user.id),
         salesperson_notes=kw.get("salesperson_notes", None),
@@ -125,8 +140,11 @@ async def test_notify_submitted_email_failure(db_session, test_user):
     from app.services.buyplan_service import notify_buyplan_submitted
 
     admin = User(
-        email="admin-bp@test.com", name="Admin", role="admin",
-        azure_id="adm-bp-001", m365_connected=True,
+        email="admin-bp@test.com",
+        name="Admin",
+        role="admin",
+        azure_id="adm-bp-001",
+        m365_connected=True,
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(admin)
@@ -157,20 +175,36 @@ async def test_notify_approved_salesperson_notes(db_session, test_user):
     from app.services.buyplan_service import notify_buyplan_approved
 
     # Create offer so the function can find a buyer via entered_by_id
-    req = Requisition(name="REQ-APPNOTE", customer_name="Test", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-APPNOTE",
+        customer_name="Test",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(req)
     db_session.flush()
-    offer = Offer(requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=req.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
 
-    plan = _make_plan(db_session, test_user, status="approved", requisition_id=req.id,
-                      salesperson_notes="Urgent delivery needed",
-                      line_items=[{"offer_id": offer.id, "mpn": "LM317T",
-                                   "vendor_name": "Arrow", "entered_by_id": test_user.id}])
+    plan = _make_plan(
+        db_session,
+        test_user,
+        status="approved",
+        requisition_id=req.id,
+        salesperson_notes="Urgent delivery needed",
+        line_items=[{"offer_id": offer.id, "mpn": "LM317T", "vendor_name": "Arrow", "entered_by_id": test_user.id}],
+    )
     gc_mock = MagicMock()
     gc_mock.post_json = AsyncMock(return_value=MagicMock(status_code=202))
 
@@ -191,19 +225,35 @@ async def test_notify_approved_email_failure(db_session, test_user):
     """buyplan_service lines 319-320: except when buyer approved email fails."""
     from app.services.buyplan_service import notify_buyplan_approved
 
-    req = Requisition(name="REQ-APPFAIL", customer_name="Test", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-APPFAIL",
+        customer_name="Test",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(req)
     db_session.flush()
-    offer = Offer(requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=req.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
 
-    plan = _make_plan(db_session, test_user, status="approved", requisition_id=req.id,
-                      line_items=[{"offer_id": offer.id, "mpn": "LM317T",
-                                   "vendor_name": "Arrow", "entered_by_id": test_user.id}])
+    plan = _make_plan(
+        db_session,
+        test_user,
+        status="approved",
+        requisition_id=req.id,
+        line_items=[{"offer_id": offer.id, "mpn": "LM317T", "vendor_name": "Arrow", "entered_by_id": test_user.id}],
+    )
     gc_mock = MagicMock()
     gc_mock.post_json = AsyncMock(side_effect=Exception("Network error"))
 
@@ -291,36 +341,66 @@ async def test_verify_po_offer_fallback_and_no_entered_by(db_session, test_user)
     """buyplan_service lines 718 + 722: offer lookup for entered_by_id and continue when None."""
     from app.services.buyplan_service import verify_po_sent
 
-    req = Requisition(name="REQ-PO-001", customer_name="Acme", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-PO-001",
+        customer_name="Acme",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(req)
     db_session.flush()
 
-    offer = Offer(requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=req.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
 
-    offer_none = Offer(requisition_id=req.id, vendor_name="Mouser", mpn="LM317T",
-                       qty_available=50, unit_price=0.60, entered_by_id=None,
-                       status="active", created_at=datetime.now(timezone.utc))
+    offer_none = Offer(
+        requisition_id=req.id,
+        vendor_name="Mouser",
+        mpn="LM317T",
+        qty_available=50,
+        unit_price=0.60,
+        entered_by_id=None,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer_none)
     db_session.flush()
 
-    plan = _make_plan(db_session, test_user, line_items=[
-        {"offer_id": offer.id, "mpn": "LM317T", "vendor_name": "Arrow",
-         "po_number": "PO-001", "entered_by_id": None},
-        {"offer_id": offer_none.id, "mpn": "LM317T", "vendor_name": "Mouser",
-         "po_number": "PO-002", "entered_by_id": None},
-    ])
+    plan = _make_plan(
+        db_session,
+        test_user,
+        line_items=[
+            {
+                "offer_id": offer.id,
+                "mpn": "LM317T",
+                "vendor_name": "Arrow",
+                "po_number": "PO-001",
+                "entered_by_id": None,
+            },
+            {
+                "offer_id": offer_none.id,
+                "mpn": "LM317T",
+                "vendor_name": "Mouser",
+                "po_number": "PO-002",
+                "entered_by_id": None,
+            },
+        ],
+    )
     db_session.commit()
 
     gc_mock = MagicMock()
-    gc_mock.get = AsyncMock(return_value=MagicMock(
-        status_code=200,
-        json=lambda: {"value": [{"subject": "PO-001"}]}
-    ))
+    gc_mock.get = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: {"value": [{"subject": "PO-001"}]}))
 
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
@@ -340,6 +420,7 @@ async def test_verify_po_offer_fallback_and_no_entered_by(db_session, test_user)
 def test_match_headers_empty_skipped():
     """attachment_parser line 52: empty header string is skipped."""
     from app.services.attachment_parser import _match_headers_deterministic
+
     result = _match_headers_deterministic(["", "Part Number", "Qty", "Price"])
     assert len(result) > 0
 
@@ -348,8 +429,8 @@ def test_match_headers_empty_skipped():
 async def test_ai_mapping_none_result():
     """attachment_parser line 139: AI returns None -> {}."""
     from app.services.attachment_parser import _ai_detect_columns
-    with patch("app.utils.claude_client.claude_structured",
-               new_callable=AsyncMock, return_value=None):
+
+    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
         result = await _ai_detect_columns(["Col1", "Col2"], [["a", "b"]], "test.com")
         assert result == {}
 
@@ -358,16 +439,18 @@ async def test_ai_mapping_none_result():
 async def test_cache_write_failure(db_session):
     """attachment_parser lines 232-233: cache write fails gracefully."""
     from app.services.attachment_parser import _get_or_detect_mapping
-    with patch("app.services.attachment_parser._ai_detect_columns",
-               new_callable=AsyncMock, return_value={0: "mpn", 1: "qty"}):
-        result = await _get_or_detect_mapping(
-            ["MPN", "QTY"], [["LM317T", "1000"]], "test.com", "abc", db_session)
+
+    with patch(
+        "app.services.attachment_parser._ai_detect_columns", new_callable=AsyncMock, return_value={0: "mpn", 1: "qty"}
+    ):
+        result = await _get_or_detect_mapping(["MPN", "QTY"], [["LM317T", "1000"]], "test.com", "abc", db_session)
         assert "mpn" in result.values()
 
 
 def test_parse_csv_tsv_file():
     """attachment_parser lines 275, 282, 285: TSV detection."""
     from app.services.attachment_parser import _parse_csv
+
     data = "MPN\tQTY\tPrice\nLM317T\t1000\t0.50\n".encode()
     headers, rows = _parse_csv(data, "stock.tsv")
     assert len(headers) >= 1
@@ -376,6 +459,7 @@ def test_parse_csv_tsv_file():
 def test_parse_csv_auto_tab():
     """attachment_parser line 282: auto-detect tab in CSV."""
     from app.services.attachment_parser import _parse_csv
+
     data = "MPN\tQTY\tPrice\nLM317T\t1000\t0.50\n".encode()
     headers, rows = _parse_csv(data, "data.csv")
     assert len(headers) >= 1
@@ -385,6 +469,7 @@ def test_parse_csv_auto_tab():
 async def test_parse_unsupported_type(db_session):
     """attachment_parser line 375: unsupported file returns []."""
     from app.services.attachment_parser import parse_attachment
+
     result = await parse_attachment(b"data", "file.pdf", "v.com", db_session)
     assert result == []
 
@@ -393,6 +478,7 @@ async def test_parse_unsupported_type(db_session):
 async def test_parse_empty_csv_headers(db_session):
     """attachment_parser lines 379-380: empty headers returns []."""
     from app.services.attachment_parser import parse_attachment
+
     with patch("app.services.attachment_parser._parse_csv", return_value=([], [])):
         result = await parse_attachment(b"x", "s.csv", "v.com", db_session)
         assert result == []
@@ -402,9 +488,9 @@ async def test_parse_empty_csv_headers(db_session):
 async def test_parse_no_mpn_column(db_session):
     """attachment_parser line 383: no MPN column returns []."""
     from app.services.attachment_parser import parse_attachment
+
     csv_data = "Foo,Bar\n1,2\n".encode()
-    with patch("app.services.attachment_parser._get_or_detect_mapping",
-               new_callable=AsyncMock, return_value={}):
+    with patch("app.services.attachment_parser._get_or_detect_mapping", new_callable=AsyncMock, return_value={}):
         result = await parse_attachment(csv_data, "s.csv", "v.com", db_session)
         assert result == []
 
@@ -425,21 +511,35 @@ async def test_proactive_contacts_no_email(db_session, test_user, test_company, 
     sc = SiteContact(customer_site_id=site.id, full_name="X", email=None)
     db_session.add(sc)
     db_session.flush()
-    offer = Offer(requisition_id=test_requisition.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
     req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-    match = ProactiveMatch(customer_site_id=site.id, salesperson_id=test_user.id,
-                           mpn="LM317T", status="new", offer_id=offer.id,
-                           requirement_id=req_item.id, requisition_id=test_requisition.id)
+    match = ProactiveMatch(
+        customer_site_id=site.id,
+        salesperson_id=test_user.id,
+        mpn="LM317T",
+        status="new",
+        offer_id=offer.id,
+        requirement_id=req_item.id,
+        requisition_id=test_requisition.id,
+    )
     db_session.add(match)
     db_session.flush()
 
     with pytest.raises(ValueError, match="no email"):
-        await send_proactive_offer(db=db_session, user=test_user, token="t",
-                                   match_ids=[match.id], contact_ids=[sc.id], sell_prices={})
+        await send_proactive_offer(
+            db=db_session, user=test_user, token="t", match_ids=[match.id], contact_ids=[sc.id], sell_prices={}
+        )
 
 
 @pytest.mark.asyncio
@@ -447,22 +547,34 @@ async def test_proactive_match_no_offer(db_session, test_user, test_company, tes
     """proactive_service line 274-275: match.offer is None -> continue (skip)."""
     from app.services.proactive_service import send_proactive_offer
 
-    site = CustomerSite(company_id=test_company.id, site_name="S-B",
-                        contact_email="b@acme.com")
+    site = CustomerSite(company_id=test_company.id, site_name="S-B", contact_email="b@acme.com")
     db_session.add(site)
     db_session.flush()
     sc = SiteContact(customer_site_id=site.id, full_name="J", email="j@acme.com")
     db_session.add(sc)
     db_session.flush()
-    offer = Offer(requisition_id=test_requisition.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
     req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-    match = ProactiveMatch(customer_site_id=site.id, salesperson_id=test_user.id,
-                           mpn="LM317T", offer_id=offer.id, status="new",
-                           requirement_id=req_item.id, requisition_id=test_requisition.id)
+    match = ProactiveMatch(
+        customer_site_id=site.id,
+        salesperson_id=test_user.id,
+        mpn="LM317T",
+        offer_id=offer.id,
+        status="new",
+        requirement_id=req_item.id,
+        requisition_id=test_requisition.id,
+    )
     db_session.add(match)
     db_session.commit()
 
@@ -475,6 +587,7 @@ async def test_proactive_match_no_offer(db_session, test_user, test_company, tes
     fake_match.offer = None  # This is the key — triggers the "continue" on line 274-275
 
     orig_query = db_session.query
+
     def patched_query(*args, **kwargs):
         q = orig_query(*args, **kwargs)
         if args and args[0] is ProactiveMatch:
@@ -494,8 +607,9 @@ async def test_proactive_match_no_offer(db_session, test_user, test_company, tes
     ):
         # All matches have offer=None, so line_items will be empty.
         # The function should proceed without error (offers are simply skipped).
-        await send_proactive_offer(db=db_session, user=test_user, token="tok",
-                                   match_ids=[match.id], contact_ids=[sc.id], sell_prices={})
+        await send_proactive_offer(
+            db=db_session, user=test_user, token="tok", match_ids=[match.id], contact_ids=[sc.id], sell_prices={}
+        )
 
 
 @pytest.mark.asyncio
@@ -509,19 +623,33 @@ async def test_proactive_throttle_update(db_session, test_user, test_company, te
     sc = SiteContact(customer_site_id=site.id, full_name="B", email="b@acme.com")
     db_session.add(sc)
     db_session.flush()
-    offer = Offer(requisition_id=test_requisition.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
     req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-    match = ProactiveMatch(customer_site_id=site.id, salesperson_id=test_user.id,
-                           mpn="LM317T", offer_id=offer.id, status="new",
-                           requirement_id=req_item.id, requisition_id=test_requisition.id)
+    match = ProactiveMatch(
+        customer_site_id=site.id,
+        salesperson_id=test_user.id,
+        mpn="LM317T",
+        offer_id=offer.id,
+        status="new",
+        requirement_id=req_item.id,
+        requisition_id=test_requisition.id,
+    )
     db_session.add(match)
     db_session.flush()
-    throttle = ProactiveThrottle(mpn="LM317T", customer_site_id=site.id,
-                                  last_offered_at=datetime.now(timezone.utc) - timedelta(days=30))
+    throttle = ProactiveThrottle(
+        mpn="LM317T", customer_site_id=site.id, last_offered_at=datetime.now(timezone.utc) - timedelta(days=30)
+    )
     db_session.add(throttle)
     db_session.commit()
 
@@ -533,24 +661,34 @@ async def test_proactive_throttle_update(db_session, test_user, test_company, te
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
     ):
         await send_proactive_offer(
-            db=db_session, user=test_user, token="tok",
-            match_ids=[match.id], contact_ids=[sc.id],
-            sell_prices={str(match.id): 0.75})
+            db=db_session,
+            user=test_user,
+            token="tok",
+            match_ids=[match.id],
+            contact_ids=[sc.id],
+            sell_prices={str(match.id): 0.75},
+        )
 
     throttles = db_session.query(ProactiveThrottle).filter_by(mpn="LM317T").all()
     assert len(throttles) == 1
     assert throttles[0].proactive_offer_id is not None
 
 
-def test_proactive_convert_vendor_card(db_session, test_user, test_company,
-                                       test_requisition, test_vendor_card):
+def test_proactive_convert_vendor_card(db_session, test_user, test_company, test_requisition, test_vendor_card):
     """proactive_service line 479-480: vendor_card_id set on new offer."""
     from app.services.proactive_service import convert_proactive_to_win
 
-    offer = Offer(requisition_id=test_requisition.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", vendor_card_id=test_vendor_card.id,
-                  created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        vendor_card_id=test_vendor_card.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
 
@@ -559,19 +697,33 @@ def test_proactive_convert_vendor_card(db_session, test_user, test_company,
     db_session.flush()
 
     po = ProactiveOffer(
-        customer_site_id=site.id, salesperson_id=test_user.id,
-        line_items=[{"mpn": "LM317T", "vendor_name": "Arrow", "qty": 100,
-                     "unit_price": 0.50, "sell_price": 0.75, "offer_id": offer.id,
-                     "manufacturer": "TI"}],
-        subject="Offer", recipient_emails=["b@acme.com"], status="sent",
+        customer_site_id=site.id,
+        salesperson_id=test_user.id,
+        line_items=[
+            {
+                "mpn": "LM317T",
+                "vendor_name": "Arrow",
+                "qty": 100,
+                "unit_price": 0.50,
+                "sell_price": 0.75,
+                "offer_id": offer.id,
+                "manufacturer": "TI",
+            }
+        ],
+        subject="Offer",
+        recipient_emails=["b@acme.com"],
+        status="sent",
     )
     db_session.add(po)
     db_session.commit()
 
     result = convert_proactive_to_win(db=db_session, proactive_offer_id=po.id, user=test_user)
     assert "requisition_id" in result
-    new_offers = db_session.query(Offer).filter(
-        Offer.requisition_id == result["requisition_id"], Offer.source == "proactive").all()
+    new_offers = (
+        db_session.query(Offer)
+        .filter(Offer.requisition_id == result["requisition_id"], Offer.source == "proactive")
+        .all()
+    )
     assert any(o.vendor_card_id == test_vendor_card.id for o in new_offers)
 
 
@@ -584,9 +736,16 @@ def test_get_quote_offer_ids(db_session, test_user, test_requisition, test_compa
     """vendor_score lines 274-278."""
     from app.services.vendor_score import _get_quote_offer_ids
 
-    offer = Offer(requisition_id=test_requisition.id, vendor_name="Arrow", mpn="LM317T",
-                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
-                  status="active", created_at=datetime.now(timezone.utc))
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow",
+        mpn="LM317T",
+        qty_available=100,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(offer)
     db_session.flush()
 
@@ -596,11 +755,18 @@ def test_get_quote_offer_ids(db_session, test_user, test_requisition, test_compa
         db_session.add(site)
         db_session.flush()
 
-    q = Quote(requisition_id=test_requisition.id, customer_site_id=site.id,
-              quote_number="Q-SC-001", status="sent",
-              line_items=[{"offer_id": offer.id, "mpn": "LM317T"}],
-              subtotal=100, total_cost=50, total_margin_pct=50,
-              created_by_id=test_user.id, created_at=datetime.now(timezone.utc))
+    q = Quote(
+        requisition_id=test_requisition.id,
+        customer_site_id=site.id,
+        quote_number="Q-SC-001",
+        status="sent",
+        line_items=[{"offer_id": offer.id, "mpn": "LM317T"}],
+        subtotal=100,
+        total_cost=50,
+        total_margin_pct=50,
+        created_by_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(q)
     db_session.commit()
 
@@ -610,10 +776,9 @@ def test_get_quote_offer_ids(db_session, test_user, test_requisition, test_compa
 
 def test_get_buyplan_offer_ids(db_session, test_user):
     """vendor_score lines 295-299."""
-    from app.services.vendor_score import _get_buyplan_offer_ids, AWARDED_STATUSES
+    from app.services.vendor_score import AWARDED_STATUSES, _get_buyplan_offer_ids
 
-    plan = _make_plan(db_session, test_user, status="approved",
-                      line_items=[{"offer_id": 42, "mpn": "X"}])
+    plan = _make_plan(db_session, test_user, status="approved", line_items=[{"offer_id": 42, "mpn": "X"}])
 
     found = _get_buyplan_offer_ids(db_session, {42, 99}, AWARDED_STATUSES)
     assert 42 in found
@@ -625,22 +790,40 @@ async def test_po_confirmed_scoring(db_session, test_user, test_vendor_card):
     """vendor_score line 190."""
     from app.services.vendor_score import compute_all_vendor_scores
 
-    req = Requisition(name="REQ-SC-001", customer_name="T", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-SC-001",
+        customer_name="T",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(req)
     db_session.flush()
 
     for i in range(5):
-        db_session.add(Offer(requisition_id=req.id, vendor_name="arrow electronics",
-                             mpn="P-%d" % i, qty_available=100, unit_price=0.50,
-                             entered_by_id=test_user.id, status="active",
-                             vendor_card_id=test_vendor_card.id,
-                             created_at=datetime.now(timezone.utc)))
+        db_session.add(
+            Offer(
+                requisition_id=req.id,
+                vendor_name="arrow electronics",
+                mpn="P-%d" % i,
+                qty_available=100,
+                unit_price=0.50,
+                entered_by_id=test_user.id,
+                status="active",
+                vendor_card_id=test_vendor_card.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.flush()
 
     first_offer = db_session.query(Offer).filter_by(requisition_id=req.id).first()
-    plan = _make_plan(db_session, test_user, status="po_confirmed", requisition_id=req.id,
-                      line_items=[{"offer_id": first_offer.id, "mpn": "P-0"}])
+    plan = _make_plan(
+        db_session,
+        test_user,
+        status="po_confirmed",
+        requisition_id=req.id,
+        line_items=[{"offer_id": first_offer.id, "mpn": "P-0"}],
+    )
 
     result = await compute_all_vendor_scores(db_session)
     assert "updated" in result
@@ -651,20 +834,34 @@ async def test_vendor_scoring_flush_failure(db_session, test_user, test_vendor_c
     """vendor_score lines 249-250."""
     from app.services.vendor_score import compute_all_vendor_scores
 
-    req = Requisition(name="REQ-SC-002", customer_name="T", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-SC-002",
+        customer_name="T",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(req)
     db_session.flush()
     for i in range(5):
-        db_session.add(Offer(requisition_id=req.id, vendor_name="arrow electronics",
-                             mpn="FP-%d" % i, qty_available=100, unit_price=0.50,
-                             entered_by_id=test_user.id, status="active",
-                             vendor_card_id=test_vendor_card.id,
-                             created_at=datetime.now(timezone.utc)))
+        db_session.add(
+            Offer(
+                requisition_id=req.id,
+                vendor_name="arrow electronics",
+                mpn="FP-%d" % i,
+                qty_available=100,
+                unit_price=0.50,
+                entered_by_id=test_user.id,
+                status="active",
+                vendor_card_id=test_vendor_card.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.commit()
 
     orig = db_session.flush
     count = [0]
+
     def flaky(*a, **kw):
         count[0] += 1
         if count[0] > 1:
@@ -686,25 +883,35 @@ async def test_vendor_sighting_analysis(db_session, test_user, test_vendor_card)
     """vendor_analysis_service lines 68-69, 71."""
     from app.services.vendor_analysis_service import _analyze_vendor_materials
 
-    req = Requisition(name="REQ-VA", customer_name="T", status="open",
-                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    req = Requisition(
+        name="REQ-VA", customer_name="T", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc)
+    )
     db_session.add(req)
     db_session.flush()
-    requirement = Requirement(requisition_id=req.id, primary_mpn="T",
-                              target_qty=100, created_at=datetime.now(timezone.utc))
+    requirement = Requirement(
+        requisition_id=req.id, primary_mpn="T", target_qty=100, created_at=datetime.now(timezone.utc)
+    )
     db_session.add(requirement)
     db_session.flush()
 
     for i in range(210):
-        db_session.add(Sighting(
-            requirement_id=requirement.id, vendor_name=test_vendor_card.normalized_name,
-            mpn_matched="PART-%04d" % i, manufacturer="TI",
-            qty_available=100, created_at=datetime.now(timezone.utc)))
+        db_session.add(
+            Sighting(
+                requirement_id=requirement.id,
+                vendor_name=test_vendor_card.normalized_name,
+                mpn_matched="PART-%04d" % i,
+                manufacturer="TI",
+                qty_available=100,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.commit()
 
-    with patch("app.utils.claude_client.claude_json",
-               new_callable=AsyncMock,
-               return_value={"brands": ["TI"], "commodities": ["Regulators"]}):
+    with patch(
+        "app.utils.claude_client.claude_json",
+        new_callable=AsyncMock,
+        return_value={"brands": ["TI"], "commodities": ["Regulators"]},
+    ):
         await _analyze_vendor_materials(test_vendor_card.id, db_session)
 
 
@@ -719,6 +926,7 @@ def test_admin_count_query_failure(db_session, test_user):
 
     orig_query = db_session.query
     count = [0]
+
     def side_effect(*a, **kw):
         count[0] += 1
         if count[0] == 4:
@@ -735,6 +943,7 @@ def test_admin_api_source_failure(db_session, test_user):
     from app.services.admin_service import get_system_health
 
     orig_query = db_session.query
+
     def patched(*a, **kw):
         if a and a[0] is ApiSource:
             raise Exception("No table")
@@ -752,7 +961,8 @@ def test_admin_api_source_failure(db_session, test_user):
 
 def test_validate_result_low_confidence():
     """ai_part_normalizer lines 158-159."""
-    from app.services.ai_part_normalizer import _validate_result, CONFIDENCE_THRESHOLD
+    from app.services.ai_part_normalizer import _validate_result
+
     parsed = {"mpn": "ABC123", "manufacturer": "TI", "confidence": 0.1}
     result = _validate_result("ABC-123", parsed)
     assert result["confidence"] == 0.1
@@ -768,8 +978,9 @@ def test_days_inactive_none_becomes_999(db_session, test_user):
     """ownership_service line 185."""
     from app.services.ownership_service import get_accounts_at_risk
 
-    co = Company(name="Dormant Corp", is_active=True, account_owner_id=test_user.id,
-                 created_at=datetime.now(timezone.utc))
+    co = Company(
+        name="Dormant Corp", is_active=True, account_owner_id=test_user.id, created_at=datetime.now(timezone.utc)
+    )
     db_session.add(co)
     db_session.commit()
 
@@ -799,35 +1010,51 @@ async def test_send_digest_no_token(db_session, test_user):
 
 def test_webhook_user_not_found(db_session, test_user):
     """webhook_service line 256."""
-    from app.services.webhook_service import validate_notifications, _seen_notifications
+    from app.services.webhook_service import _seen_notifications, validate_notifications
+
     _seen_notifications.clear()
 
     # Create a temporary user, create subscription
-    tmp_user = User(email="tmp-wh@test.com", name="Tmp", role="buyer",
-                    azure_id="tmp-wh-001", created_at=datetime.now(timezone.utc))
+    tmp_user = User(
+        email="tmp-wh@test.com", name="Tmp", role="buyer", azure_id="tmp-wh-001", created_at=datetime.now(timezone.utc)
+    )
     db_session.add(tmp_user)
     db_session.flush()
     tmp_uid = tmp_user.id
 
-    sub = GraphSubscription(user_id=tmp_uid, subscription_id="sub-miss",
-                            resource="me/messages", change_type="created",
-                            expiration_dt=datetime.now(timezone.utc) + timedelta(hours=1),
-                            client_state="secret")
+    sub = GraphSubscription(
+        user_id=tmp_uid,
+        subscription_id="sub-miss",
+        resource="me/messages",
+        change_type="created",
+        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=1),
+        client_state="secret",
+    )
     db_session.add(sub)
     db_session.commit()
 
     # Mock db.get to return None for User lookups to simulate missing user
     orig_get = db_session.get
+
     def patched_get(model, id_val, *a, **kw):
         if model is User and id_val == tmp_uid:
             return None
         return orig_get(model, id_val, *a, **kw)
 
     with patch.object(db_session, "get", side_effect=patched_get):
-        result = validate_notifications({
-            "value": [{"subscriptionId": "sub-miss", "clientState": "secret",
-                       "resource": "me/messages/abc", "changeType": "created"}]
-        }, db_session)
+        result = validate_notifications(
+            {
+                "value": [
+                    {
+                        "subscriptionId": "sub-miss",
+                        "clientState": "secret",
+                        "resource": "me/messages/abc",
+                        "changeType": "created",
+                    }
+                ]
+            },
+            db_session,
+        )
     assert len(result) == 0
 
 
@@ -838,14 +1065,14 @@ def test_webhook_user_not_found(db_session, test_user):
 
 def test_rfq_prepare_with_substitutes(client, db_session, test_user, test_requisition):
     """rfq.py line 437."""
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     req_item.substitutes = ["LM7805", "LM337"]
     db_session.commit()
 
     resp = client.post(
         "/api/requisitions/%d/rfq-prepare" % test_requisition.id,
-        json={"vendors": [{"vendor_name": "Arrow Electronics"}]})
+        json={"vendors": [{"vendor_name": "Arrow Electronics"}]},
+    )
     assert resp.status_code == 200
 
 
@@ -853,7 +1080,8 @@ def test_rfq_prepare_vendor_lookup_exception(client, db_session, test_user, test
     """rfq.py lines 522-524."""
     resp = client.post(
         "/api/requisitions/%d/rfq-prepare" % test_requisition.id,
-        json={"vendors": [{"vendor_name": "Unknown Vendor XYZ"}]})
+        json={"vendors": [{"vendor_name": "Unknown Vendor XYZ"}]},
+    )
     assert resp.status_code == 200
 
 
@@ -869,16 +1097,15 @@ def test_scan_inbox_invalid_json(client, db_session, test_user):
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "contacts_enriched": [], "sightings": [],
-        "messages_scanned": 0, "offers_found": 0})
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={"contacts_enriched": [], "sightings": [], "messages_scanned": 0, "offers_found": 0}
+    )
 
     with (
         patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="t"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
     ):
-        resp = client.post("/api/email-mining/scan", content=b"{{{",
-                           headers={"content-type": "application/json"})
+        resp = client.post("/api/email-mining/scan", content=b"{{{", headers={"content-type": "application/json"})
     assert resp.status_code == 200
 
 
@@ -889,16 +1116,17 @@ def test_scan_outbound_invalid_json(client, db_session, test_user):
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "vendors_contacted": {}, "messages_scanned": 0,
-        "rfqs_detected": 0, "used_delta": False})
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={"vendors_contacted": {}, "messages_scanned": 0, "rfqs_detected": 0, "used_delta": False}
+    )
 
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="t"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
     ):
-        resp = client.post("/api/email-mining/scan-outbound", content=b"{{{",
-                           headers={"content-type": "application/json"})
+        resp = client.post(
+            "/api/email-mining/scan-outbound", content=b"{{{", headers={"content-type": "application/json"}
+        )
     assert resp.status_code == 200
 
 
@@ -908,15 +1136,26 @@ def test_scan_outbound_commit_failure(client, db_session, test_user):
     test_user.access_token = "fake"
     db_session.commit()
 
-    vc = VendorCard(normalized_name="arrow", display_name="Arrow", domain="arrow.com",
-                    emails=[], phones=[], created_at=datetime.now(timezone.utc))
+    vc = VendorCard(
+        normalized_name="arrow",
+        display_name="Arrow",
+        domain="arrow.com",
+        emails=[],
+        phones=[],
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(vc)
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "vendors_contacted": {"arrow.com": 3}, "messages_scanned": 10,
-        "rfqs_detected": 2, "used_delta": False})
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "vendors_contacted": {"arrow.com": 3},
+            "messages_scanned": 10,
+            "rfqs_detected": 2,
+            "used_delta": False,
+        }
+    )
 
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="t"),
@@ -941,8 +1180,7 @@ def test_vendor_search_long_query(client, db_session, test_vendor_card):
 
 def test_delete_review_card_gone(client, db_session, test_user):
     """vendors.py line 498."""
-    vc = VendorCard(normalized_name="tmpv", display_name="Tmp", sighting_count=0,
-                    created_at=datetime.now(timezone.utc))
+    vc = VendorCard(normalized_name="tmpv", display_name="Tmp", sighting_count=0, created_at=datetime.now(timezone.utc))
     db_session.add(vc)
     db_session.commit()
     cid = vc.id
@@ -953,6 +1191,7 @@ def test_delete_review_card_gone(client, db_session, test_user):
     rid = review.id
 
     orig_get = db_session.get
+
     def patched_get(model, id_val, *a, **kw):
         if model is VendorCard and id_val == cid:
             return None
@@ -966,27 +1205,37 @@ def test_delete_review_card_gone(client, db_session, test_user):
 
 def test_stock_import_existing_card(client, db_session, test_user):
     """vendors.py lines 1456-1458, 1487-1489."""
-    vc = VendorCard(normalized_name="stockvendor", display_name="Stock Vendor",
-                    emails=[], phones=[], created_at=datetime.now(timezone.utc))
+    vc = VendorCard(
+        normalized_name="stockvendor",
+        display_name="Stock Vendor",
+        emails=[],
+        phones=[],
+        created_at=datetime.now(timezone.utc),
+    )
     db_session.add(vc)
-    mc = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T",
-                      manufacturer="TI", created_at=datetime.now(timezone.utc))
+    mc = MaterialCard(
+        normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="TI", created_at=datetime.now(timezone.utc)
+    )
     db_session.add(mc)
     db_session.commit()
 
     csv_bytes = b"MPN,QTY,Price\nLM317T,1000,0.50\n"
-    resp = client.post("/api/materials/import-stock",
-                       data={"vendor_name": "Stock Vendor"},
-                       files={"file": ("s.csv", io.BytesIO(csv_bytes), "text/csv")})
+    resp = client.post(
+        "/api/materials/import-stock",
+        data={"vendor_name": "Stock Vendor"},
+        files={"file": ("s.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
     assert resp.status_code == 200
 
 
 def test_stock_import_empty_mpn(client, db_session, test_user):
     """vendors.py lines 1473-1474."""
     csv_bytes = b"MPN,QTY,Price\n,1000,0.50\nLM317T,500,0.30\n"
-    resp = client.post("/api/materials/import-stock",
-                       data={"vendor_name": "Some Vendor"},
-                       files={"file": ("s.csv", io.BytesIO(csv_bytes), "text/csv")})
+    resp = client.post(
+        "/api/materials/import-stock",
+        data={"vendor_name": "Some Vendor"},
+        files={"file": ("s.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
     assert resp.status_code == 200
 
 
@@ -1006,8 +1255,7 @@ def test_log_email_no_match_fc100(client):
 def test_log_call_no_match_fc100(client):
     """v13_features line 246."""
     with patch("app.services.activity_service.log_call_activity", return_value=None):
-        resp = client.post("/api/activities/call",
-                           json={"phone": "+15555551234", "direction": "outbound"})
+        resp = client.post("/api/activities/call", json={"phone": "+15555551234", "direction": "outbound"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "no_match"
 
@@ -1040,36 +1288,43 @@ def test_company_activity_red_fc100(client, test_company):
 
 def test_crm_company_phone_none():
     from app.schemas.crm import CompanyCreate
+
     assert CompanyCreate(name="T", phone=None).phone is None
 
 
 def test_crm_site_state_none():
     from app.schemas.crm import SiteCreate
+
     assert SiteCreate(site_name="H", country="US", state=None).state is None
 
 
 def test_crm_site_contact_phone_none():
     from app.schemas.crm import SiteCreate
+
     assert SiteCreate(site_name="H", country="US", contact_phone=None).contact_phone is None
 
 
 def test_crm_sitecontact_phone_none():
     from app.schemas.crm import SiteContactCreate
+
     assert SiteContactCreate(full_name="J", phone=None).phone is None
 
 
 def test_crm_sitecontact_email_none():
     from app.schemas.crm import SiteContactCreate
+
     assert SiteContactCreate(full_name="J", email=None).email is None
 
 
 def test_crm_offer_packaging_none():
     from app.schemas.crm import OfferCreate
+
     assert OfferCreate(mpn="LM317T", vendor_name="A", packaging=None).packaging is None
 
 
 def test_crm_offer_datecode_none():
     from app.schemas.crm import OfferCreate
+
     assert OfferCreate(mpn="LM317T", vendor_name="A", date_code=None).date_code is None
 
 
@@ -1080,28 +1335,33 @@ def test_crm_offer_datecode_none():
 
 def test_vendor_update_emails_none():
     from app.schemas.vendors import VendorCardUpdate
+
     assert VendorCardUpdate(emails=None).emails is None
 
 
 def test_vendor_update_phones_none():
     from app.schemas.vendors import VendorCardUpdate
+
     assert VendorCardUpdate(phones=None).phones is None
 
 
 def test_vendor_update_phones_blank():
     from app.schemas.vendors import VendorCardUpdate
+
     obj = VendorCardUpdate(phones=["", "  ", "+1-555-0100"])
     assert obj.phones == ["+1-555-0100"]
 
 
 def test_vendor_contact_no_at():
     from app.schemas.vendors import VendorContactCreate
+
     with pytest.raises(ValueError, match="Invalid email"):
         VendorContactCreate(email="notanemail")
 
 
 def test_vendor_contact_update_empty_email():
     from app.schemas.vendors import VendorContactUpdate
+
     assert VendorContactUpdate(email="   ").email is None
 
 
@@ -1113,6 +1373,7 @@ def test_vendor_contact_update_empty_email():
 def test_substitutes_non_list_non_str():
     """Line 72: substitutes passes through when not str or list."""
     from app.schemas.requisitions import RequirementCreate
+
     # Default is an empty list (default_factory=list).
     obj = RequirementCreate(primary_mpn="LM317T", target_qty=100)
     assert obj.substitutes == []
@@ -1131,7 +1392,8 @@ async def test_claude_text_cache_system():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "content": [{"type": "text", "text": "hello"}],
-        "usage": {"input_tokens": 10, "output_tokens": 5}}
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
 
     with (
         patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
@@ -1152,16 +1414,17 @@ async def test_claude_structured_system_cache():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "content": [{"type": "tool_use", "name": "structured_output", "input": {"k": "v"}}],
-        "usage": {"input_tokens": 10, "output_tokens": 5}}
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    }
 
     with (
         patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
         patch("app.utils.claude_client.http") as mh,
     ):
         mh.post = AsyncMock(return_value=mock_resp)
-        await claude_structured("test",
-            schema={"type": "object", "properties": {"k": {"type": "string"}}},
-            system="sys", cache_system=True)
+        await claude_structured(
+            "test", schema={"type": "object", "properties": {"k": {"type": "string"}}}, system="sys", cache_system=True
+        )
         body = mh.post.call_args[1].get("json", {})
         assert "system" in body
         assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
@@ -1176,15 +1439,15 @@ async def test_claude_structured_cache_read_tokens():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "content": [{"type": "tool_use", "name": "structured_output", "input": {"k": "v"}}],
-        "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 8}}
+        "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 8},
+    }
 
     with (
         patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
         patch("app.utils.claude_client.http") as mh,
     ):
         mh.post = AsyncMock(return_value=mock_resp)
-        result = await claude_structured("test",
-            schema={"type": "object", "properties": {"k": {"type": "string"}}})
+        result = await claude_structured("test", schema={"type": "object", "properties": {"k": {"type": "string"}}})
         assert result == {"k": "v"}
 
 
@@ -1197,8 +1460,8 @@ async def test_claude_text_cache_read_tokens():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "content": [{"type": "text", "text": "cached response"}],
-        "usage": {"input_tokens": 10, "output_tokens": 5,
-                  "cache_read_input_tokens": 8}}
+        "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 8},
+    }
 
     with (
         patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
@@ -1215,8 +1478,10 @@ async def test_batch_blank_line_skipped():
 
     status_resp = MagicMock(status_code=200)
     status_resp.json.return_value = {
-        "id": "b-1", "processing_status": "ended",
-        "results_url": "https://api.anthropic.com/v1/r/b-1"}
+        "id": "b-1",
+        "processing_status": "ended",
+        "results_url": "https://api.anthropic.com/v1/r/b-1",
+    }
 
     line1 = '{"custom_id":"i1","result":{"type":"succeeded","message":{"content":[{"type":"tool_use","name":"structured_output","input":{"v":"1"}}]}}}'
     line2 = '{"custom_id":"i2","result":{"type":"succeeded","message":{"content":[{"type":"tool_use","name":"structured_output","input":{"v":"2"}}]}}}'
@@ -1244,8 +1509,7 @@ def test_validate_file_magic_bytes():
     from app.utils.file_validation import validate_file
 
     with patch("filetype.guess") as mg:
-        mg.return_value = MagicMock(
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        mg.return_value = MagicMock(mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         valid, ft = validate_file(b"x" * 10, "t.xlsx")
         assert valid is True
         assert ft == "xlsx"
@@ -1262,6 +1526,7 @@ def test_validate_file_csv_encoding():
 
 def test_detect_encoding_fallback():
     from app.utils.file_validation import detect_encoding
+
     result = detect_encoding(b"\xff\xfe" + b"Hello")
     assert result is not None
 
@@ -1280,37 +1545,44 @@ def test_is_password_protected_other_error():
 
 def test_normalize_price_range():
     from app.utils.normalization import normalize_price
+
     assert normalize_price("0.38-0.42") == 0.38
 
 
 def test_normalize_quantity_k():
     from app.utils.normalization import normalize_quantity
+
     assert normalize_quantity("50K") == 50000
 
 
 def test_normalize_quantity_m():
     from app.utils.normalization import normalize_quantity
+
     assert normalize_quantity("2M") == 2000000
 
 
 def test_normalize_lead_time_ambiguous():
     from app.utils.normalization import normalize_lead_time
+
     result = normalize_lead_time("60-90")
     assert result == 75
 
 
 def test_normalize_date_code_no_digits():
     from app.utils.normalization import normalize_date_code
+
     assert normalize_date_code("DC: N/A") is None
 
 
 def test_mpn_match_short_suffix():
     from app.utils.normalization import fuzzy_mpn_match
+
     assert fuzzy_mpn_match("LM317TA", "LM317T") is True
 
 
 def test_mpn_match_long_suffix():
     from app.utils.normalization import fuzzy_mpn_match
+
     assert fuzzy_mpn_match("LM317T", "LM317TXYZ") is False
 
 
@@ -1321,9 +1593,11 @@ def test_mpn_match_long_suffix():
 
 def test_phone_10_digit_us():
     from app.utils.normalization_helpers import normalize_phone_e164
+
     assert normalize_phone_e164("5551234567") == "+15551234567"
 
 
 def test_phone_7_digits():
     from app.utils.normalization_helpers import normalize_phone_e164
+
     assert normalize_phone_e164("5551234") == "+15551234"

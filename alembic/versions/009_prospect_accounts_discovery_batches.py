@@ -8,8 +8,9 @@ Create Date: 2026-02-25
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import op
 
 revision: str = "009_prospect_accounts_discovery_batches"
 down_revision: Union[str, None] = "008_add_contact_status"
@@ -85,13 +86,9 @@ def upgrade() -> None:
     # Indexes for prospect_accounts
     op.create_index("ix_prospect_accounts_status", "prospect_accounts", ["status"])
     op.create_index("ix_prospect_accounts_fit_score", "prospect_accounts", ["fit_score"])
-    op.create_index(
-        "ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"]
-    )
+    op.create_index("ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"])
     op.create_index("ix_prospect_accounts_region", "prospect_accounts", ["region"])
-    op.create_index(
-        "ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"]
-    )
+    op.create_index("ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"])
     op.create_index(
         "ix_prospect_accounts_status_fit",
         "prospect_accounts",

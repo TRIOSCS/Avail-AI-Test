@@ -12,12 +12,12 @@ from pydantic import ValidationError
 
 from app.schemas.requisitions import (
     RequirementCreate,
+    RequirementOut,
     RequirementUpdate,
     RequisitionArchiveOut,
     RequisitionCreate,
     RequisitionOut,
     RequisitionUpdate,
-    RequirementOut,
     SearchOptions,
     SightingUnavailableIn,
 )

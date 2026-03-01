@@ -48,7 +48,7 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
     for field in ("emails", "phones", "contacts", "alternate_names", "domain_aliases"):
         existing = set(str(v) for v in (getattr(keep, field) or []))
         merged = list(getattr(keep, field) or [])
-        for v in (getattr(remove, field) or []):
+        for v in getattr(remove, field) or []:
             if str(v) not in existing:
                 merged.append(v)
                 existing.add(str(v))
@@ -84,8 +84,10 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
     reassigned = 0
     for model, col in fk_tables:
         try:
-            count = db.query(model).filter(getattr(model, col) == remove.id).update(
-                {col: keep.id}, synchronize_session="fetch"
+            count = (
+                db.query(model)
+                .filter(getattr(model, col) == remove.id)
+                .update({col: keep.id}, synchronize_session="fetch")
             )
             reassigned += count
         except Exception as e:
@@ -97,6 +99,10 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
 
     logger.info(
         "Vendor merge: kept %d (%s), removed %d (%s), reassigned %d records",
-        keep.id, keep.display_name, remove_id, remove.display_name or "?", reassigned,
+        keep.id,
+        keep.display_name,
+        remove_id,
+        remove.display_name or "?",
+        reassigned,
     )
     return {"ok": True, "kept": keep.id, "removed": remove_id, "reassigned": reassigned}

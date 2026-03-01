@@ -103,10 +103,13 @@ async def _call_llm(
                 return data
 
             if resp.status_code in RETRYABLE_STATUSES and attempt < MAX_RETRIES - 1:
-                delay = BASE_DELAY * (2 ** attempt)
+                delay = BASE_DELAY * (2**attempt)
                 logger.warning(
                     "Gradient {} (attempt {}/{}), retry in {:.1f}s: {}",
-                    resp.status_code, attempt + 1, MAX_RETRIES, delay,
+                    resp.status_code,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
                     resp.text[:200],
                 )
                 await asyncio.sleep(delay)
@@ -117,10 +120,13 @@ async def _call_llm(
 
         except Exception as e:
             if attempt < MAX_RETRIES - 1:
-                delay = BASE_DELAY * (2 ** attempt)
+                delay = BASE_DELAY * (2**attempt)
                 logger.warning(
                     "Gradient call failed (attempt {}/{}), retry in {:.1f}s: {}",
-                    attempt + 1, MAX_RETRIES, delay, e,
+                    attempt + 1,
+                    MAX_RETRIES,
+                    delay,
+                    e,
                 )
                 await asyncio.sleep(delay)
                 continue
@@ -241,7 +247,7 @@ def _safe_json_parse(text: str) -> dict | list | None:
     if cleaned.startswith("```"):
         first_newline = cleaned.find("\n")
         if first_newline != -1:
-            cleaned = cleaned[first_newline + 1:]
+            cleaned = cleaned[first_newline + 1 :]
         if cleaned.rstrip().endswith("```"):
             cleaned = cleaned.rstrip()[:-3].rstrip()
 
@@ -265,6 +271,7 @@ def _safe_json_parse(text: str) -> dict | list | None:
             # escape them and retry
             try:
                 import re
+
                 fixed = re.sub(
                     r'("(?:[^"\\]|\\.)*")',
                     lambda m: m.group(0).replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"),

@@ -99,10 +99,7 @@ def _enable_fk(dbapi_conn, _):
 _PG_ONLY_TABLES = {"buyer_profiles"}
 
 # Create tables once at import time — NOT per test.
-_sqlite_safe = [
-    t for name, t in Base.metadata.tables.items()
-    if name not in _PG_ONLY_TABLES
-]
+_sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG_ONLY_TABLES]
 Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
 
 # Pre-compute delete order (respects FK dependencies via reversed create order).
@@ -439,13 +436,15 @@ def test_proactive_offer(
     po = ProactiveOffer(
         customer_site_id=test_customer_site.id,
         salesperson_id=test_user.id,
-        line_items=[{
-            "mpn": "LM317T",
-            "vendor_name": "Arrow Electronics",
-            "qty": 1000,
-            "cost": 0.50,
-            "sell": 0.75,
-        }],
+        line_items=[
+            {
+                "mpn": "LM317T",
+                "vendor_name": "Arrow Electronics",
+                "qty": 1000,
+                "cost": 0.50,
+                "sell": 0.75,
+            }
+        ],
         recipient_emails=["jane@acme-electronics.com"],
         subject="Proactive Offer: LM317T",
         status="sent",

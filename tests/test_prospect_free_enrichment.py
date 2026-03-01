@@ -9,7 +9,6 @@ Depends on: conftest fixtures, prospect_free_enrichment module
 """
 
 import asyncio
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -22,7 +21,6 @@ from app.services.prospect_free_enrichment import (
     run_free_enrichment,
     run_free_enrichment_batch,
 )
-
 
 # ── _classify_headline ─────────────────────────────────────────────────
 
@@ -76,20 +74,25 @@ class TestEnrichFromSamGov:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "entityData": [{
-                "entityRegistration": {
-                    "ueiSAM": "UEI123", "cageCode": "CAGE1",
-                    "legalBusinessName": "Lockheed Martin", "dbaName": "LM",
-                    "registrationStatus": "Active", "purposeOfRegistrationDesc": "Federal",
-                },
-                "coreData": {
-                    "generalInformation": {"entityTypeDesc": "Business", "organizationTypeDesc": "Corporation"},
-                    "physicalAddress": {"stateOrProvinceCode": "MD", "countryCode": "US"},
-                    "naicsCodeList": [
-                        {"naicsCode": "336411", "naicsDescription": "Aircraft Mfg", "primaryNaicsCode": True},
-                    ],
-                },
-            }],
+            "entityData": [
+                {
+                    "entityRegistration": {
+                        "ueiSAM": "UEI123",
+                        "cageCode": "CAGE1",
+                        "legalBusinessName": "Lockheed Martin",
+                        "dbaName": "LM",
+                        "registrationStatus": "Active",
+                        "purposeOfRegistrationDesc": "Federal",
+                    },
+                    "coreData": {
+                        "generalInformation": {"entityTypeDesc": "Business", "organizationTypeDesc": "Corporation"},
+                        "physicalAddress": {"stateOrProvinceCode": "MD", "countryCode": "US"},
+                        "naicsCodeList": [
+                            {"naicsCode": "336411", "naicsDescription": "Aircraft Mfg", "primaryNaicsCode": True},
+                        ],
+                    },
+                }
+            ],
         }
         mock_http = AsyncMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
@@ -136,14 +139,16 @@ class TestEnrichFromSamGov:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "entityData": [{
-                "entityRegistration": {},
-                "coreData": {
-                    "generalInformation": {},
-                    "physicalAddress": {},
-                    "naicsCodeList": ["not-a-dict", {"naicsCode": "123", "naicsDescription": "Test"}],
-                },
-            }],
+            "entityData": [
+                {
+                    "entityRegistration": {},
+                    "coreData": {
+                        "generalInformation": {},
+                        "physicalAddress": {},
+                        "naicsCodeList": ["not-a-dict", {"naicsCode": "123", "naicsDescription": "Test"}],
+                    },
+                }
+            ],
         }
         mock_http = AsyncMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
@@ -157,10 +162,12 @@ class TestEnrichFromSamGov:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "entityData": [{
-                "entityRegistration": {"ueiSAM": "U1"},
-                "coreData": {"generalInformation": {}, "physicalAddress": {}, "naicsCodeList": None},
-            }],
+            "entityData": [
+                {
+                    "entityRegistration": {"ueiSAM": "U1"},
+                    "coreData": {"generalInformation": {}, "physicalAddress": {}, "naicsCodeList": None},
+                }
+            ],
         }
         mock_http = AsyncMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
@@ -271,21 +278,41 @@ class TestRunFreeEnrichment:
 
     def test_enriches_sam_and_news(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="Lockheed Martin", domain="lockheedmartin.com",
-            discovery_source="manual", status="suggested",
-            enrichment_data={}, readiness_signals={},
+            name="Lockheed Martin",
+            domain="lockheedmartin.com",
+            discovery_source="manual",
+            status="suggested",
+            enrichment_data={},
+            readiness_signals={},
         )
         db_session.add(pa)
         db_session.commit()
 
         sam_data = {"source": "sam_gov", "naics_codes": [{"code": "336411", "primary": True}]}
-        news_data = [{"title": "LM wins contract", "link": "http://x", "pub_date": "", "source": "NYT", "signal_type": "contract"}]
+        news_data = [
+            {
+                "title": "LM wins contract",
+                "link": "http://x",
+                "pub_date": "",
+                "source": "NYT",
+                "signal_type": "contract",
+            }
+        ]
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=sam_data):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=news_data):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=sam_data,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=news_data,
+                    ):
                         result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
 
         assert result["sam_gov"] is True
@@ -297,9 +324,12 @@ class TestRunFreeEnrichment:
 
     def test_skips_existing_sam(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="Existing", domain="existing.com",
-            discovery_source="manual", status="suggested",
+            name="Existing",
+            domain="existing.com",
+            discovery_source="manual",
+            status="suggested",
             enrichment_data={"sam_gov": {"source": "sam_gov"}},
         )
         db_session.add(pa)
@@ -307,17 +337,26 @@ class TestRunFreeEnrichment:
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock) as mock_sam:
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=[]):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock
+                ) as mock_sam:
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
                         result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
         mock_sam.assert_not_called()
         assert result["sam_gov"] is False
 
     def test_sam_returns_none(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="NoSam", domain="nosam.com",
-            discovery_source="manual", status="suggested",
+            name="NoSam",
+            domain="nosam.com",
+            discovery_source="manual",
+            status="suggested",
             enrichment_data={},
         )
         db_session.add(pa)
@@ -325,8 +364,16 @@ class TestRunFreeEnrichment:
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=None):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=[]):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
                         result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
         assert result["sam_gov"] is False
         assert result["news_count"] == 0
@@ -340,23 +387,47 @@ class TestRunFreeEnrichment:
 
     def test_news_signals_merged(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="SignalCo", domain="signal.com",
-            discovery_source="manual", status="suggested",
-            enrichment_data={}, readiness_signals={"events": []},
+            name="SignalCo",
+            domain="signal.com",
+            discovery_source="manual",
+            status="suggested",
+            enrichment_data={},
+            readiness_signals={"events": []},
         )
         db_session.add(pa)
         db_session.commit()
 
         news = [
-            {"title": "SignalCo wins $50M defense contract", "link": "http://x", "pub_date": "2026-01-01", "source": "Reuters", "signal_type": "contract"},
-            {"title": "Quarterly earnings OK", "link": "http://y", "pub_date": "2026-01-02", "source": "WSJ", "signal_type": "general"},
+            {
+                "title": "SignalCo wins $50M defense contract",
+                "link": "http://x",
+                "pub_date": "2026-01-01",
+                "source": "Reuters",
+                "signal_type": "contract",
+            },
+            {
+                "title": "Quarterly earnings OK",
+                "link": "http://y",
+                "pub_date": "2026-01-02",
+                "source": "WSJ",
+                "signal_type": "general",
+            },
         ]
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=None):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=news):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=news,
+                    ):
                         result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
 
         assert result["news_count"] == 2
@@ -370,10 +441,14 @@ class TestRunFreeEnrichment:
 
     def test_naics_not_overwritten_if_exists(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="HasNaics", domain="hasnaics.com",
-            discovery_source="manual", status="suggested",
-            enrichment_data={}, naics_code="999999",
+            name="HasNaics",
+            domain="hasnaics.com",
+            discovery_source="manual",
+            status="suggested",
+            enrichment_data={},
+            naics_code="999999",
         )
         db_session.add(pa)
         db_session.commit()
@@ -381,17 +456,28 @@ class TestRunFreeEnrichment:
         sam_data = {"source": "sam_gov", "naics_codes": [{"code": "111111", "primary": True}]}
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=sam_data):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=[]):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=sam_data,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
                         asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
         db_session.refresh(pa)
         assert pa.naics_code == "999999"
 
     def test_naics_picks_primary(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="PrimaryNaics", domain="primary.com",
-            discovery_source="manual", status="suggested",
+            name="PrimaryNaics",
+            domain="primary.com",
+            discovery_source="manual",
+            status="suggested",
             enrichment_data={},
         )
         db_session.add(pa)
@@ -406,8 +492,16 @@ class TestRunFreeEnrichment:
         }
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=sam_data):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=[]):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=sam_data,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
                         asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
         db_session.refresh(pa)
         assert pa.naics_code == "333333"
@@ -415,9 +509,12 @@ class TestRunFreeEnrichment:
     def test_naics_falls_back_to_first(self, db_session):
         """When no naics_code is primary, falls back to first entry."""
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="FirstNaics", domain="first.com",
-            discovery_source="manual", status="suggested",
+            name="FirstNaics",
+            domain="first.com",
+            discovery_source="manual",
+            status="suggested",
             enrichment_data={},
         )
         db_session.add(pa)
@@ -432,8 +529,16 @@ class TestRunFreeEnrichment:
         }
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.enrich_from_sam_gov", new_callable=AsyncMock, return_value=sam_data):
-                    with patch("app.services.prospect_free_enrichment.enrich_from_google_news", new_callable=AsyncMock, return_value=[]):
+                with patch(
+                    "app.services.prospect_free_enrichment.enrich_from_sam_gov",
+                    new_callable=AsyncMock,
+                    return_value=sam_data,
+                ):
+                    with patch(
+                        "app.services.prospect_free_enrichment.enrich_from_google_news",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
                         asyncio.get_event_loop().run_until_complete(run_free_enrichment(pa.id))
         db_session.refresh(pa)
         assert pa.naics_code == "444444"
@@ -445,16 +550,24 @@ class TestRunFreeEnrichment:
 class TestRunFreeEnrichmentBatch:
     def test_processes_prospects(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="BatchCo", domain="batch.com",
-            discovery_source="manual", status="suggested", fit_score=60,
+            name="BatchCo",
+            domain="batch.com",
+            discovery_source="manual",
+            status="suggested",
+            fit_score=60,
         )
         db_session.add(pa)
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, return_value={"sam_gov": True, "news_count": 2}):
+                with patch(
+                    "app.services.prospect_free_enrichment.run_free_enrichment",
+                    new_callable=AsyncMock,
+                    return_value={"sam_gov": True, "news_count": 2},
+                ):
                     result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch(min_fit_score=40))
 
         assert result["processed"] == 1
@@ -463,16 +576,24 @@ class TestRunFreeEnrichmentBatch:
 
     def test_counts_errors(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="ErrorBatch", domain="errbatch.com",
-            discovery_source="manual", status="suggested", fit_score=50,
+            name="ErrorBatch",
+            domain="errbatch.com",
+            discovery_source="manual",
+            status="suggested",
+            fit_score=50,
         )
         db_session.add(pa)
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, return_value={"error": "not_found"}):
+                with patch(
+                    "app.services.prospect_free_enrichment.run_free_enrichment",
+                    new_callable=AsyncMock,
+                    return_value={"error": "not_found"},
+                ):
                     result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] == 1
@@ -480,16 +601,24 @@ class TestRunFreeEnrichmentBatch:
 
     def test_exception_in_single_enrichment(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="ExcBatch", domain="excbatch.com",
-            discovery_source="manual", status="suggested", fit_score=50,
+            name="ExcBatch",
+            domain="excbatch.com",
+            discovery_source="manual",
+            status="suggested",
+            fit_score=50,
         )
         db_session.add(pa)
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, side_effect=Exception("boom")):
+                with patch(
+                    "app.services.prospect_free_enrichment.run_free_enrichment",
+                    new_callable=AsyncMock,
+                    side_effect=Exception("boom"),
+                ):
                     result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] == 1
@@ -502,16 +631,24 @@ class TestRunFreeEnrichmentBatch:
 
     def test_no_news_hit(self, db_session):
         from app.models.prospect_account import ProspectAccount
+
         pa = ProspectAccount(
-            name="NoNews", domain="nonews.com",
-            discovery_source="manual", status="suggested", fit_score=80,
+            name="NoNews",
+            domain="nonews.com",
+            discovery_source="manual",
+            status="suggested",
+            fit_score=80,
         )
         db_session.add(pa)
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch.object(db_session, "close"):
-                with patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, return_value={"sam_gov": False, "news_count": 0}):
+                with patch(
+                    "app.services.prospect_free_enrichment.run_free_enrichment",
+                    new_callable=AsyncMock,
+                    return_value={"sam_gov": False, "news_count": 0},
+                ):
                     result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch(min_fit_score=40))
 
         assert result["news_hits"] == 0

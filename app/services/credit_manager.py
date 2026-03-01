@@ -34,11 +34,7 @@ def _default_limit(provider: str) -> int:
 
 def _get_or_create_row(db: Session, provider: str, month: str) -> EnrichmentCreditUsage:
     """Get or create a credit usage row for provider/month."""
-    row = (
-        db.query(EnrichmentCreditUsage)
-        .filter_by(provider=provider, month=month)
-        .first()
-    )
+    row = db.query(EnrichmentCreditUsage).filter_by(provider=provider, month=month).first()
     if not row:
         row = EnrichmentCreditUsage(
             provider=provider,

@@ -10,15 +10,10 @@ Called by: pytest
 Depends on: conftest fixtures
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
-from sqlalchemy.orm import Session
+from unittest.mock import patch
 
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  5A: Response Time Metrics
@@ -35,16 +30,18 @@ class TestVendorResponseMetrics:
 
         # Create VendorResponse records for the vendor domain
         for i in range(3):
-            db_session.add(VendorResponse(
-                vendor_name=test_vendor_card.display_name,
-                vendor_email=f"sales@{test_vendor_card.domain}",
-                subject=f"RE: RFQ {i}",
-                received_at=now - timedelta(hours=i * 10),
-                created_at=now - timedelta(hours=i * 10 + 8),  # 8 hours response time
-                classification="offer",
-                confidence=0.9,
-                parsed_data={"quotes": [{"part": "LM317T"}]} if i < 2 else None,
-            ))
+            db_session.add(
+                VendorResponse(
+                    vendor_name=test_vendor_card.display_name,
+                    vendor_email=f"sales@{test_vendor_card.domain}",
+                    subject=f"RE: RFQ {i}",
+                    received_at=now - timedelta(hours=i * 10),
+                    created_at=now - timedelta(hours=i * 10 + 8),  # 8 hours response time
+                    classification="offer",
+                    confidence=0.9,
+                    parsed_data={"quotes": [{"part": "LM317T"}]} if i < 2 else None,
+                )
+            )
 
         # Set outreach count
         test_vendor_card.total_outreach = 5
@@ -116,20 +113,24 @@ class TestEmailHealthScore:
         from app.services.response_analytics import compute_email_health_score
 
         # Add 2 contacts, 1 OOO
-        db_session.add(VendorContact(
-            vendor_card_id=test_vendor_card.id,
-            full_name="Active Rep",
-            email="active@test.com",
-            source="manual",
-            is_ooo=False,
-        ))
-        db_session.add(VendorContact(
-            vendor_card_id=test_vendor_card.id,
-            full_name="OOO Rep",
-            email="ooo@test.com",
-            source="manual",
-            is_ooo=True,
-        ))
+        db_session.add(
+            VendorContact(
+                vendor_card_id=test_vendor_card.id,
+                full_name="Active Rep",
+                email="active@test.com",
+                source="manual",
+                is_ooo=False,
+            )
+        )
+        db_session.add(
+            VendorContact(
+                vendor_card_id=test_vendor_card.id,
+                full_name="OOO Rep",
+                email="ooo@test.com",
+                source="manual",
+                is_ooo=True,
+            )
+        )
         db_session.commit()
 
         result = compute_email_health_score(db_session, test_vendor_card.id)
@@ -235,6 +236,7 @@ class TestVendorCardHealthColumns:
         db_session.commit()
 
         from app.models import VendorCard
+
         fetched = db_session.query(VendorCard).get(test_vendor_card.id)
         assert fetched.email_health_score == 75.5
         assert fetched.response_rate == 0.65
@@ -265,24 +267,41 @@ class TestDashboardEndpoint:
         now = datetime.now(timezone.utc)
 
         # Create test intelligence records
-        db_session.add(EmailIntelligence(
-            message_id="dash-1", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="offer", confidence=0.9,
-            has_pricing=True, created_at=now,
-        ))
-        db_session.add(EmailIntelligence(
-            message_id="dash-2", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="general", confidence=0.7,
-            needs_review=True, created_at=now,
-        ))
-        db_session.add(EmailIntelligence(
-            message_id="dash-3", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="stock_list", confidence=0.85,
-            created_at=now,
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="dash-1",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="offer",
+                confidence=0.9,
+                has_pricing=True,
+                created_at=now,
+            )
+        )
+        db_session.add(
+            EmailIntelligence(
+                message_id="dash-2",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="general",
+                confidence=0.7,
+                needs_review=True,
+                created_at=now,
+            )
+        )
+        db_session.add(
+            EmailIntelligence(
+                message_id="dash-3",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="stock_list",
+                confidence=0.85,
+                created_at=now,
+            )
+        )
         db_session.commit()
 
         resp = client.get("/api/email-intelligence/dashboard")
@@ -299,12 +318,17 @@ class TestDashboardEndpoint:
 
         # Create record 20 days ago
         old_date = datetime.now(timezone.utc) - timedelta(days=20)
-        db_session.add(EmailIntelligence(
-            message_id="dash-old", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="offer", confidence=0.9,
-            created_at=old_date,
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="dash-old",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="offer",
+                confidence=0.9,
+                created_at=old_date,
+            )
+        )
         db_session.commit()
 
         # 7-day window should miss it
@@ -345,15 +369,17 @@ class TestVendorResponseMetricsNoDomain:
 
         # Responses matched by vendor_name (not email domain)
         for i in range(2):
-            db_session.add(VendorResponse(
-                vendor_name="No Domain Vendor",
-                vendor_email=f"rep{i}@unknown.com",
-                subject=f"RE: RFQ {i}",
-                received_at=now - timedelta(hours=i * 5),
-                created_at=now - timedelta(hours=i * 5 + 6),
-                classification="offer",
-                confidence=0.9,
-            ))
+            db_session.add(
+                VendorResponse(
+                    vendor_name="No Domain Vendor",
+                    vendor_email=f"rep{i}@unknown.com",
+                    subject=f"RE: RFQ {i}",
+                    received_at=now - timedelta(hours=i * 5),
+                    created_at=now - timedelta(hours=i * 5 + 6),
+                    classification="offer",
+                    confidence=0.9,
+                )
+            )
         db_session.commit()
 
         result = compute_vendor_response_metrics(db_session, vendor.id)
@@ -393,15 +419,17 @@ class TestMedianEvenCount:
         # Median of even count = (4+6)/2 = 5.0
         response_times = [2, 4, 6, 8]
         for i, hours in enumerate(response_times):
-            db_session.add(VendorResponse(
-                vendor_name="Median Test Vendor",
-                vendor_email=f"rep{i}@mediantest.com",
-                subject=f"RE: RFQ {i}",
-                received_at=now - timedelta(hours=i * 20),
-                created_at=now - timedelta(hours=i * 20 + hours),
-                classification="offer",
-                confidence=0.9,
-            ))
+            db_session.add(
+                VendorResponse(
+                    vendor_name="Median Test Vendor",
+                    vendor_email=f"rep{i}@mediantest.com",
+                    subject=f"RE: RFQ {i}",
+                    received_at=now - timedelta(hours=i * 20),
+                    created_at=now - timedelta(hours=i * 20 + hours),
+                    classification="offer",
+                    confidence=0.9,
+                )
+            )
         db_session.commit()
 
         result = compute_vendor_response_metrics(db_session, vendor.id)
@@ -442,21 +470,25 @@ class TestResponseTimeInterpolation:
         db_session.flush()
 
         # Response with 48h response time (between 4h ideal and 168h max)
-        db_session.add(VendorResponse(
-            vendor_name="Interp Vendor",
-            vendor_email="sales@interp.com",
-            subject="RE: RFQ 1",
-            received_at=now,
-            created_at=now - timedelta(hours=48),
-            classification="offer",
-            confidence=0.9,
-        ))
+        db_session.add(
+            VendorResponse(
+                vendor_name="Interp Vendor",
+                vendor_email="sales@interp.com",
+                subject="RE: RFQ 1",
+                received_at=now,
+                created_at=now - timedelta(hours=48),
+                classification="offer",
+                confidence=0.9,
+            )
+        )
         db_session.commit()
 
         result = compute_email_health_score(db_session, vendor.id)
 
         # Expected: 100 * (1 - (48-4)/(168-4)) = 100 * (1 - 44/164) ≈ 73.2
-        expected_time_score = 100.0 * (1.0 - (48.0 - RESPONSE_IDEAL_HOURS) / (RESPONSE_MAX_HOURS - RESPONSE_IDEAL_HOURS))
+        expected_time_score = 100.0 * (
+            1.0 - (48.0 - RESPONSE_IDEAL_HOURS) / (RESPONSE_MAX_HOURS - RESPONSE_IDEAL_HOURS)
+        )
         assert result["response_time_score"] == round(expected_time_score, 1)
         # Verify it's between 0 and 100 (interpolated, not at boundaries)
         assert 0 < result["response_time_score"] < 100
@@ -482,15 +514,17 @@ class TestResponseTimeInterpolation:
         db_session.flush()
 
         # Response with 2h response time (<= 4h ideal)
-        db_session.add(VendorResponse(
-            vendor_name="Fast Vendor",
-            vendor_email="sales@fast.com",
-            subject="RE: RFQ 1",
-            received_at=now,
-            created_at=now - timedelta(hours=2),
-            classification="offer",
-            confidence=0.9,
-        ))
+        db_session.add(
+            VendorResponse(
+                vendor_name="Fast Vendor",
+                vendor_email="sales@fast.com",
+                subject="RE: RFQ 1",
+                received_at=now,
+                created_at=now - timedelta(hours=2),
+                classification="offer",
+                confidence=0.9,
+            )
+        )
         db_session.commit()
 
         result = compute_email_health_score(db_session, vendor.id)
@@ -517,15 +551,17 @@ class TestResponseTimeInterpolation:
         db_session.flush()
 
         # Response with 200h response time (>= 168h max)
-        db_session.add(VendorResponse(
-            vendor_name="Slow Vendor",
-            vendor_email="sales@slow.com",
-            subject="RE: RFQ 1",
-            received_at=now,
-            created_at=now - timedelta(hours=200),
-            classification="offer",
-            confidence=0.9,
-        ))
+        db_session.add(
+            VendorResponse(
+                vendor_name="Slow Vendor",
+                vendor_email="sales@slow.com",
+                subject="RE: RFQ 1",
+                received_at=now,
+                created_at=now - timedelta(hours=200),
+                classification="offer",
+                confidence=0.9,
+            )
+        )
         db_session.commit()
 
         result = compute_email_health_score(db_session, vendor.id)
@@ -565,16 +601,18 @@ class TestThreadResolutionScoring:
             {"thread_status": "open"},
         ]
         for i, summary in enumerate(thread_statuses):
-            db_session.add(EmailIntelligence(
-                message_id=f"thread-{i}",
-                user_id=test_user.id,
-                sender_email=f"rep@threadvendor.com",
-                sender_domain="threadvendor.com",
-                classification="offer",
-                confidence=0.9,
-                thread_summary=summary,
-                created_at=now,
-            ))
+            db_session.add(
+                EmailIntelligence(
+                    message_id=f"thread-{i}",
+                    user_id=test_user.id,
+                    sender_email="rep@threadvendor.com",
+                    sender_domain="threadvendor.com",
+                    classification="offer",
+                    confidence=0.9,
+                    thread_summary=summary,
+                    created_at=now,
+                )
+            )
         db_session.commit()
 
         result = compute_email_health_score(db_session, vendor.id)
@@ -601,26 +639,30 @@ class TestThreadResolutionScoring:
         db_session.flush()
 
         # 2 threads: 1 with a dict (closed), 1 with a string (not a dict)
-        db_session.add(EmailIntelligence(
-            message_id="nd-1",
-            user_id=test_user.id,
-            sender_email="rep@nondict.com",
-            sender_domain="nondict.com",
-            classification="offer",
-            confidence=0.9,
-            thread_summary={"thread_status": "closed"},
-            created_at=now,
-        ))
-        db_session.add(EmailIntelligence(
-            message_id="nd-2",
-            user_id=test_user.id,
-            sender_email="rep@nondict.com",
-            sender_domain="nondict.com",
-            classification="offer",
-            confidence=0.9,
-            thread_summary="just a string",
-            created_at=now,
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="nd-1",
+                user_id=test_user.id,
+                sender_email="rep@nondict.com",
+                sender_domain="nondict.com",
+                classification="offer",
+                confidence=0.9,
+                thread_summary={"thread_status": "closed"},
+                created_at=now,
+            )
+        )
+        db_session.add(
+            EmailIntelligence(
+                message_id="nd-2",
+                user_id=test_user.id,
+                sender_email="rep@nondict.com",
+                sender_domain="nondict.com",
+                classification="offer",
+                confidence=0.9,
+                thread_summary="just a string",
+                created_at=now,
+            )
+        )
         db_session.commit()
 
         result = compute_email_health_score(db_session, vendor.id)
@@ -656,15 +698,17 @@ class TestUpdateVendorAvgResponseHours:
         db_session.flush()
 
         # Add response with 12h response time
-        db_session.add(VendorResponse(
-            vendor_name="Avg Hrs Vendor",
-            vendor_email="sales@avghrs.com",
-            subject="RE: RFQ 1",
-            received_at=now,
-            created_at=now - timedelta(hours=12),
-            classification="offer",
-            confidence=0.9,
-        ))
+        db_session.add(
+            VendorResponse(
+                vendor_name="Avg Hrs Vendor",
+                vendor_email="sales@avghrs.com",
+                subject="RE: RFQ 1",
+                received_at=now,
+                created_at=now - timedelta(hours=12),
+                classification="offer",
+                confidence=0.9,
+            )
+        )
         db_session.commit()
 
         result = update_vendor_email_health(db_session, vendor.id)

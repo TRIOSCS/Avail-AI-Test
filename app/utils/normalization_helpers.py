@@ -91,9 +91,7 @@ _DEPARTMENT_PATTERNS = [
 _DEPARTMENT_RE = re.compile("|".join(_DEPARTMENT_PATTERNS), re.IGNORECASE)
 
 # Extension pattern: "Kay Jordan - Ext: 1025" or "John Smith ext. 456"
-_EXT_PATTERN = re.compile(
-    r"\s*[-–—]\s*(?:ext\.?|extension)\s*:?\s*\d+\s*$", re.IGNORECASE
-)
+_EXT_PATTERN = re.compile(r"\s*[-–—]\s*(?:ext\.?|extension)\s*:?\s*\d+\s*$", re.IGNORECASE)
 
 # Casing fixes for common patterns
 _CASING_FIXES = {

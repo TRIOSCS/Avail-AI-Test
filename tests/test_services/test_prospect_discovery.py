@@ -11,16 +11,14 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, User, VendorCard
+from app.models import Company, User
 from app.models.prospect_account import ProspectAccount
 from app.schemas.prospect_account import ProspectAccountCreate
-
 
 # ── Explorium Fixtures ───────────────────────────────────────────────
 
@@ -460,9 +458,7 @@ class TestEmailMining:
         user = User(email="u@test.com", name="User", role="buyer", azure_id="az-1")
         db_session.add(user)
         db_session.flush()
-        customer = Company(
-            name="Known Inc", domain="known.com", is_active=True, account_owner_id=user.id
-        )
+        customer = Company(name="Known Inc", domain="known.com", is_active=True, account_owner_id=user.id)
         db_session.add(customer)
         db_session.commit()
 
@@ -532,13 +528,15 @@ class TestEmailEnrichment:
     async def test_enrich_with_explorium(self):
         from app.services.prospect_discovery_email import enrich_email_domains
 
-        mock_enrich = AsyncMock(return_value={
-            "name": "New Corp",
-            "domain": "newcorp.com",
-            "industry": "Electronics",
-            "employee_count_range": "201-500",
-            "region": "US",
-        })
+        mock_enrich = AsyncMock(
+            return_value={
+                "name": "New Corp",
+                "domain": "newcorp.com",
+                "industry": "Electronics",
+                "employee_count_range": "201-500",
+                "region": "US",
+            }
+        )
 
         domains = [{"domain": "newcorp.com", "email_count": 5, "sample_senders": []}]
         results = await enrich_email_domains(domains, enrich_fn=mock_enrich)
@@ -552,16 +550,16 @@ class TestEmailEnrichment:
         from app.services.prospect_discovery_email import enrich_email_domains
 
         mock_explorium = AsyncMock(return_value=None)  # primary fails
-        mock_apollo = AsyncMock(return_value={
-            "name": "Apollo Found",
-            "domain": "apollofound.com",
-            "industry": "Manufacturing",
-        })
+        mock_apollo = AsyncMock(
+            return_value={
+                "name": "Apollo Found",
+                "domain": "apollofound.com",
+                "industry": "Manufacturing",
+            }
+        )
 
         domains = [{"domain": "apollofound.com", "email_count": 3, "sample_senders": []}]
-        results = await enrich_email_domains(
-            domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo
-        )
+        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
 
         assert len(results) == 1
         assert results[0].name == "Apollo Found"
@@ -582,15 +580,15 @@ class TestEmailEnrichment:
         from app.services.prospect_discovery_email import enrich_email_domains
 
         mock_explorium = AsyncMock(side_effect=Exception("API timeout"))
-        mock_apollo = AsyncMock(return_value={
-            "name": "Fallback Corp",
-            "domain": "fallback.com",
-        })
+        mock_apollo = AsyncMock(
+            return_value={
+                "name": "Fallback Corp",
+                "domain": "fallback.com",
+            }
+        )
 
         domains = [{"domain": "fallback.com", "email_count": 4, "sample_senders": []}]
-        results = await enrich_email_domains(
-            domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo
-        )
+        results = await enrich_email_domains(domains, enrich_fn=mock_explorium, apollo_enrich_fn=mock_apollo)
 
         assert len(results) == 1
         assert results[0].name == "Fallback Corp"
@@ -609,11 +607,13 @@ class TestEmailMiningBatch:
             {"from": {"emailAddress": {"address": "b@newbiz.com", "name": "B"}}},
         ]
 
-        mock_enrich = AsyncMock(return_value={
-            "name": "New Biz",
-            "domain": "newbiz.com",
-            "industry": "Electronics",
-        })
+        mock_enrich = AsyncMock(
+            return_value={
+                "name": "New Biz",
+                "domain": "newbiz.com",
+                "industry": "Electronics",
+            }
+        )
 
         results = await run_email_mining_batch(
             "test-email-batch",
@@ -633,9 +633,7 @@ class TestEmailMiningBatch:
         mock_graph = AsyncMock()
         mock_graph.list_messages.return_value = []
 
-        results = await run_email_mining_batch(
-            "empty-batch", mock_graph, db_session
-        )
+        results = await run_email_mining_batch("empty-batch", mock_graph, db_session)
 
         assert results == []
 
@@ -712,9 +710,7 @@ class TestGracefulDegradation:
         mock_graph = AsyncMock()
         mock_graph.list_messages.side_effect = Exception("Graph API 503")
 
-        results = await run_email_mining_batch(
-            "crash-batch", mock_graph, db_session
-        )
+        results = await run_email_mining_batch("crash-batch", mock_graph, db_session)
 
         assert results == []  # empty, not crashed
 
@@ -727,30 +723,37 @@ class TestApolloFullName:
 
     def test_both_names(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"first_name": "Jane", "last_name": "Doe"}) == "Jane Doe"
 
     def test_only_first_name(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"first_name": "Jane"}) == "Jane"
 
     def test_only_last_name(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"last_name": "Doe"}) == "Doe"
 
     def test_only_name_field(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"name": "Jane Doe"}) == "Jane Doe"
 
     def test_all_empty(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({}) == "Unknown"
 
     def test_none_values(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"first_name": None, "last_name": None}) == "Unknown"
 
     def test_whitespace_only(self):
         from app.services.prospect_discovery_apollo import _full_name
+
         assert _full_name({"first_name": "  ", "last_name": "  "}) == "Unknown"
 
 
@@ -759,57 +762,69 @@ class TestApolloFormatSize:
 
     def test_none(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(None) is None
 
     def test_small(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(10) == "1-50"
         assert _format_size(50) == "1-50"
 
     def test_medium_small(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(51) == "51-200"
         assert _format_size(200) == "51-200"
 
     def test_medium(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(201) == "201-500"
         assert _format_size(500) == "201-500"
 
     def test_medium_large(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(501) == "501-1000"
         assert _format_size(1000) == "501-1000"
 
     def test_large(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(1001) == "1001-5000"
         assert _format_size(5000) == "1001-5000"
 
     def test_very_large(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(5001) == "5001-10000"
         assert _format_size(10000) == "5001-10000"
 
     def test_enterprise(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(10001) == "10001+"
         assert _format_size(100000) == "10001+"
 
     def test_string_input(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size("500") == "201-500"
 
     def test_invalid_string(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size("unknown") == "unknown"
 
     def test_empty_string(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size("") is None
 
     def test_zero(self):
         from app.services.prospect_discovery_apollo import _format_size
+
         assert _format_size(0) == "1-50"
 
 
@@ -818,32 +833,49 @@ class TestApolloDetectRegion:
 
     def test_us_variants(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
+
         assert _detect_region_from_country("US") == "US"
         assert _detect_region_from_country("USA") == "US"
         assert _detect_region_from_country("United States") == "US"
 
     def test_eu_countries(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
-        for country in ["Germany", "UK", "United Kingdom", "France", "Netherlands",
-                        "Sweden", "Italy", "Spain", "Switzerland", "Austria", "Belgium"]:
+
+        for country in [
+            "Germany",
+            "UK",
+            "United Kingdom",
+            "France",
+            "Netherlands",
+            "Sweden",
+            "Italy",
+            "Spain",
+            "Switzerland",
+            "Austria",
+            "Belgium",
+        ]:
             assert _detect_region_from_country(country) == "EU", f"{country} should be EU"
 
     def test_asian_countries(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
+
         for country in ["China", "Japan", "South Korea", "Taiwan", "Singapore", "India"]:
             assert _detect_region_from_country(country) == "Asia", f"{country} should be Asia"
 
     def test_unknown_country(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
+
         assert _detect_region_from_country("Brazil") is None
         assert _detect_region_from_country("Australia") is None
 
     def test_none(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
+
         assert _detect_region_from_country(None) is None
 
     def test_case_insensitive(self):
         from app.services.prospect_discovery_apollo import _detect_region_from_country
+
         assert _detect_region_from_country("germany") == "EU"
         assert _detect_region_from_country("JAPAN") == "Asia"
 
@@ -963,8 +995,11 @@ class TestApolloBatchEdgeCases:
         db_session.refresh(pa)
 
         with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
-            with patch("app.services.prospect_discovery_apollo.check_people_signals",
-                       new_callable=AsyncMock, side_effect=Exception("API crashed")):
+            with patch(
+                "app.services.prospect_discovery_apollo.check_people_signals",
+                new_callable=AsyncMock,
+                side_effect=Exception("API crashed"),
+            ):
                 with patch("asyncio.sleep", new_callable=AsyncMock):
                     result = await run_people_check_batch([pa.id], db_session)
 
@@ -1021,7 +1056,6 @@ class TestExploriumCoverageGaps:
                     mock_http.post = AsyncMock(return_value=mock_resp)
                     return await discover_companies_with_signals("aerospace_defense", "US")
 
-        import asyncio
         results = asyncio.get_event_loop().run_until_complete(run())
         assert results == []
 

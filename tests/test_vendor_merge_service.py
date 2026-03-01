@@ -5,7 +5,6 @@ sums sighting counts, and deletes the removed card.
 """
 
 import pytest
-from tests.conftest import engine
 
 from app.models import VendorCard, VendorContact
 from app.services.vendor_merge_service import merge_vendor_cards
@@ -45,12 +44,18 @@ def test_merge_combines_array_fields(db_session):
 def test_merge_sums_sighting_counts(db_session):
     """Sighting counts from both cards are summed."""
     keep = VendorCard(
-        normalized_name="digikey", display_name="DigiKey",
-        emails=[], phones=[], sighting_count=100,
+        normalized_name="digikey",
+        display_name="DigiKey",
+        emails=[],
+        phones=[],
+        sighting_count=100,
     )
     remove = VendorCard(
-        normalized_name="digi-key", display_name="Digi-Key",
-        emails=[], phones=[], sighting_count=50,
+        normalized_name="digi-key",
+        display_name="Digi-Key",
+        emails=[],
+        phones=[],
+        sighting_count=50,
     )
     db_session.add_all([keep, remove])
     db_session.commit()
@@ -65,18 +70,24 @@ def test_merge_sums_sighting_counts(db_session):
 def test_merge_reassigns_contacts(db_session):
     """VendorContacts from removed card are reassigned to kept card."""
     keep = VendorCard(
-        normalized_name="mouser", display_name="Mouser",
-        emails=[], phones=[],
+        normalized_name="mouser",
+        display_name="Mouser",
+        emails=[],
+        phones=[],
     )
     remove = VendorCard(
-        normalized_name="mouser electronics", display_name="Mouser Electronics",
-        emails=[], phones=[],
+        normalized_name="mouser electronics",
+        display_name="Mouser Electronics",
+        emails=[],
+        phones=[],
     )
     db_session.add_all([keep, remove])
     db_session.flush()
 
     contact = VendorContact(
-        vendor_card_id=remove.id, full_name="John", email="john@mouser.com",
+        vendor_card_id=remove.id,
+        full_name="John",
+        email="john@mouser.com",
         source="manual",
     )
     db_session.add(contact)
@@ -93,12 +104,16 @@ def test_merge_reassigns_contacts(db_session):
 def test_merge_deletes_removed_card(db_session):
     """The removed vendor card is deleted after merge."""
     keep = VendorCard(
-        normalized_name="avnet", display_name="Avnet",
-        emails=[], phones=[],
+        normalized_name="avnet",
+        display_name="Avnet",
+        emails=[],
+        phones=[],
     )
     remove = VendorCard(
-        normalized_name="avnet inc", display_name="Avnet Inc",
-        emails=[], phones=[],
+        normalized_name="avnet inc",
+        display_name="Avnet Inc",
+        emails=[],
+        phones=[],
     )
     db_session.add_all([keep, remove])
     db_session.commit()
@@ -113,8 +128,10 @@ def test_merge_deletes_removed_card(db_session):
 def test_merge_same_id_raises(db_session):
     """Merging a vendor with itself raises ValueError."""
     card = VendorCard(
-        normalized_name="test", display_name="Test",
-        emails=[], phones=[],
+        normalized_name="test",
+        display_name="Test",
+        emails=[],
+        phones=[],
     )
     db_session.add(card)
     db_session.commit()
@@ -126,8 +143,10 @@ def test_merge_same_id_raises(db_session):
 def test_merge_missing_card_raises(db_session):
     """Merging with a nonexistent card raises ValueError."""
     card = VendorCard(
-        normalized_name="test", display_name="Test",
-        emails=[], phones=[],
+        normalized_name="test",
+        display_name="Test",
+        emails=[],
+        phones=[],
     )
     db_session.add(card)
     db_session.commit()

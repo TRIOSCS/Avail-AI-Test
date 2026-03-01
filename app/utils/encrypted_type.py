@@ -17,6 +17,7 @@ def _get_fernet():
     if _fernet_instance is not None:
         return _fernet_instance
     from ..config import settings
+
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -30,6 +31,7 @@ def _get_fernet():
 
 class EncryptedText(TypeDecorator):
     """Transparently encrypts/decrypts text values stored in the database."""
+
     impl = Text
     cache_ok = True
 

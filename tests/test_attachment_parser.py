@@ -445,8 +445,16 @@ class TestExtractRow:
             10: "description",
         }
         row = [
-            "LM317T", "TI", "5000", "0.50", "New",
-            "2525", "2 weeks", "Reel", "USD", "100",
+            "LM317T",
+            "TI",
+            "5000",
+            "0.50",
+            "New",
+            "2525",
+            "2 weeks",
+            "Reel",
+            "USD",
+            "100",
             "Voltage regulator",
         ]
 
@@ -532,21 +540,21 @@ class TestParseAttachmentEndToEnd:
     @pytest.mark.asyncio
     async def test_parse_attachment_end_to_end(self):
         """CSV bytes flow through validation, parsing, mapping, and extraction."""
-        csv_bytes = (
-            b"Part Number,Manufacturer,Qty,Price\n"
-            b"LM317T,Texas Instruments,1000,0.50\n"
-            b"SN74HC595N,NXP,500,0.25\n"
-        )
+        csv_bytes = b"Part Number,Manufacturer,Qty,Price\nLM317T,Texas Instruments,1000,0.50\nSN74HC595N,NXP,500,0.25\n"
 
-        with patch(
-            "app.utils.file_validation.validate_file",
-            return_value=(True, "csv"),
-        ), patch(
-            "app.utils.file_validation.file_fingerprint",
-            return_value="test_fp_001",
-        ), patch(
-            "app.utils.file_validation.detect_encoding",
-            return_value="utf-8",
+        with (
+            patch(
+                "app.utils.file_validation.validate_file",
+                return_value=(True, "csv"),
+            ),
+            patch(
+                "app.utils.file_validation.file_fingerprint",
+                return_value="test_fp_001",
+            ),
+            patch(
+                "app.utils.file_validation.detect_encoding",
+                return_value="utf-8",
+            ),
         ):
             results = await parse_attachment(
                 file_bytes=csv_bytes,
@@ -586,19 +594,24 @@ class TestParseAttachmentEndToEnd:
         """File with no detectable MPN column returns empty list."""
         csv_bytes = b"Color,Size,Weight\nRed,Large,5kg\n"
 
-        with patch(
-            "app.utils.file_validation.validate_file",
-            return_value=(True, "csv"),
-        ), patch(
-            "app.utils.file_validation.file_fingerprint",
-            return_value="fp_no_mpn",
-        ), patch(
-            "app.utils.file_validation.detect_encoding",
-            return_value="utf-8",
-        ), patch(
-            "app.services.attachment_parser._get_or_detect_mapping",
-            new_callable=AsyncMock,
-            return_value={0: "description", 1: "condition"},
+        with (
+            patch(
+                "app.utils.file_validation.validate_file",
+                return_value=(True, "csv"),
+            ),
+            patch(
+                "app.utils.file_validation.file_fingerprint",
+                return_value="fp_no_mpn",
+            ),
+            patch(
+                "app.utils.file_validation.detect_encoding",
+                return_value="utf-8",
+            ),
+            patch(
+                "app.services.attachment_parser._get_or_detect_mapping",
+                new_callable=AsyncMock,
+                return_value={0: "description", 1: "condition"},
+            ),
         ):
             results = await parse_attachment(
                 file_bytes=csv_bytes,

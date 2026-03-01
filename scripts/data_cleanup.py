@@ -17,11 +17,9 @@ Writes audit log to cleanup_audit.json.
 """
 
 import argparse
-import asyncio
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 from collections import defaultdict
@@ -30,10 +28,9 @@ from datetime import datetime, timezone
 # Must set up path before app imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal, engine
+from app.database import SessionLocal
 from app.models import (
     ActivityLog,
     BuyerVendorStats,
@@ -53,9 +50,9 @@ from app.models import (
 )
 from app.utils.normalization import (
     normalize_condition,
+    normalize_date_code,
     normalize_mpn,
     normalize_packaging,
-    normalize_date_code,
 )
 from app.utils.normalization_helpers import (
     clean_contact_name,
@@ -103,12 +100,16 @@ def backup_database():
         result = subprocess.run(
             [
                 "pg_dump",
-                "-h", "db",
-                "-U", "availai",
-                "-d", "availai",
+                "-h",
+                "db",
+                "-U",
+                "availai",
+                "-d",
+                "availai",
                 "--no-owner",
                 "--no-acl",
-                "-f", backup_file,
+                "-f",
+                backup_file,
             ],
             env={**os.environ, "PGPASSWORD": "availai"},
             capture_output=True,
@@ -142,12 +143,17 @@ def phase1_vendor_card_dedup(db: Session, dry_run: bool):
     for card in cards:
         new_norm = normalize_vendor_name(card.display_name)
         if new_norm != card.normalized_name:
-            audit(1, "renormalize", "vendor_card", {
-                "id": card.id,
-                "old": card.normalized_name,
-                "new": new_norm,
-                "display": card.display_name,
-            })
+            audit(
+                1,
+                "renormalize",
+                "vendor_card",
+                {
+                    "id": card.id,
+                    "old": card.normalized_name,
+                    "new": new_norm,
+                    "display": card.display_name,
+                },
+            )
             if not dry_run:
                 card.normalized_name = new_norm
             renorm_count += 1
@@ -166,14 +172,18 @@ def phase1_vendor_card_dedup(db: Session, dry_run: bool):
         winner = group[0]
 
         for loser in group[1:]:
-            log.info(f"  Merging '{loser.display_name}' (id={loser.id}) "
-                     f"into '{winner.display_name}' (id={winner.id})")
-            audit(1, "merge", "vendor_card", {
-                "winner_id": winner.id,
-                "loser_id": loser.id,
-                "winner_name": winner.display_name,
-                "loser_name": loser.display_name,
-            })
+            log.info(f"  Merging '{loser.display_name}' (id={loser.id}) into '{winner.display_name}' (id={winner.id})")
+            audit(
+                1,
+                "merge",
+                "vendor_card",
+                {
+                    "winner_id": winner.id,
+                    "loser_id": loser.id,
+                    "winner_name": winner.display_name,
+                    "loser_name": loser.display_name,
+                },
+            )
 
             if not dry_run:
                 _merge_vendor_cards(db, winner, loser)
@@ -192,9 +202,7 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     winner.alternate_names = list(
         set((winner.alternate_names or []) + (loser.alternate_names or []) + [loser.display_name])
     )
-    winner.domain_aliases = list(
-        set((winner.domain_aliases or []) + (loser.domain_aliases or []))
-    )
+    winner.domain_aliases = list(set((winner.domain_aliases or []) + (loser.domain_aliases or [])))
     if loser.domain and not winner.domain:
         winner.domain = loser.domain
 
@@ -207,8 +215,14 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
 
     # Copy enrichment fields if winner is missing them
     for field in [
-        "website", "linkedin_url", "legal_name", "employee_size",
-        "hq_city", "hq_state", "hq_country", "industry",
+        "website",
+        "linkedin_url",
+        "legal_name",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "industry",
     ]:
         if not getattr(winner, field) and getattr(loser, field):
             setattr(winner, field, getattr(loser, field))
@@ -218,16 +232,11 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     winner_id = winner.id
 
     # Offers
-    db.query(Offer).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
+    db.query(Offer).filter_by(vendor_card_id=loser_id).update({"vendor_card_id": winner_id}, synchronize_session=False)
 
     # VendorMetricsSnapshot — check unique on vendor_card_id+snapshot_date
     existing_dates = {
-        r[0]
-        for r in db.query(VendorMetricsSnapshot.snapshot_date)
-        .filter_by(vendor_card_id=winner_id)
-        .all()
+        r[0] for r in db.query(VendorMetricsSnapshot.snapshot_date).filter_by(vendor_card_id=winner_id).all()
     }
     for vms in db.query(VendorMetricsSnapshot).filter_by(vendor_card_id=loser_id).all():
         if vms.snapshot_date in existing_dates:
@@ -241,12 +250,7 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     )
 
     # VendorContacts — check unique on vendor_card_id+email
-    existing_emails = {
-        r[0]
-        for r in db.query(VendorContact.email)
-        .filter_by(vendor_card_id=winner_id)
-        .all()
-    }
+    existing_emails = {r[0] for r in db.query(VendorContact.email).filter_by(vendor_card_id=winner_id).all()}
     for vc in db.query(VendorContact).filter_by(vendor_card_id=loser_id).all():
         if vc.email and vc.email in existing_emails:
             db.delete(vc)
@@ -269,12 +273,7 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     )
 
     # BuyerVendorStats — check unique on user_id+vendor_card_id
-    existing_bvs_users = {
-        r[0]
-        for r in db.query(BuyerVendorStats.user_id)
-        .filter_by(vendor_card_id=winner_id)
-        .all()
-    }
+    existing_bvs_users = {r[0] for r in db.query(BuyerVendorStats.user_id).filter_by(vendor_card_id=winner_id).all()}
     for bvs in db.query(BuyerVendorStats).filter_by(vendor_card_id=loser_id).all():
         if bvs.user_id in existing_bvs_users:
             db.delete(bvs)
@@ -318,23 +317,24 @@ def phase2_company_dedup(db: Session, dry_run: bool):
     for norm_name, group in dups.items():
         # Winner: most fields filled
         group.sort(
-            key=lambda c: sum(
-                1 for f in ["domain", "website", "industry", "hq_country", "phone"]
-                if getattr(c, f)
-            ),
+            key=lambda c: sum(1 for f in ["domain", "website", "industry", "hq_country", "phone"] if getattr(c, f)),
             reverse=True,
         )
         winner = group[0]
 
         for loser in group[1:]:
-            log.info(f"  Merging company '{loser.name}' (id={loser.id}) "
-                     f"into '{winner.name}' (id={winner.id})")
-            audit(2, "merge", "company", {
-                "winner_id": winner.id,
-                "loser_id": loser.id,
-                "winner_name": winner.name,
-                "loser_name": loser.name,
-            })
+            log.info(f"  Merging company '{loser.name}' (id={loser.id}) into '{winner.name}' (id={winner.id})")
+            audit(
+                2,
+                "merge",
+                "company",
+                {
+                    "winner_id": winner.id,
+                    "loser_id": loser.id,
+                    "winner_name": winner.name,
+                    "loser_name": loser.name,
+                },
+            )
 
             if not dry_run:
                 _merge_companies(db, winner, loser)
@@ -349,23 +349,29 @@ def _merge_companies(db: Session, winner: Company, loser: Company):
     """Merge loser company into winner."""
     # Copy missing fields
     for field in [
-        "domain", "website", "industry", "linkedin_url", "legal_name",
-        "employee_size", "hq_city", "hq_state", "hq_country",
-        "account_type", "phone", "credit_terms", "tax_id",
+        "domain",
+        "website",
+        "industry",
+        "linkedin_url",
+        "legal_name",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "account_type",
+        "phone",
+        "credit_terms",
+        "tax_id",
     ]:
         if not getattr(winner, field) and getattr(loser, field):
             setattr(winner, field, getattr(loser, field))
 
     # Update FK tables
-    db.query(CustomerSite).filter_by(company_id=loser.id).update(
-        {"company_id": winner.id}, synchronize_session=False
-    )
+    db.query(CustomerSite).filter_by(company_id=loser.id).update({"company_id": winner.id}, synchronize_session=False)
     db.query(Sighting).filter_by(source_company_id=loser.id).update(
         {"source_company_id": winner.id}, synchronize_session=False
     )
-    db.query(ActivityLog).filter_by(company_id=loser.id).update(
-        {"company_id": winner.id}, synchronize_session=False
-    )
+    db.query(ActivityLog).filter_by(company_id=loser.id).update({"company_id": winner.id}, synchronize_session=False)
     db.query(EnrichmentQueue).filter_by(company_id=loser.id).update(
         {"company_id": winner.id}, synchronize_session=False
     )
@@ -391,9 +397,16 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     for c in contacts:
         new_phone = normalize_phone_e164(c.phone)
         if new_phone and new_phone != c.phone:
-            audit(3, "normalize_phone", "vendor_contact", {
-                "id": c.id, "old": c.phone, "new": new_phone,
-            })
+            audit(
+                3,
+                "normalize_phone",
+                "vendor_contact",
+                {
+                    "id": c.id,
+                    "old": c.phone,
+                    "new": new_phone,
+                },
+            )
             if not dry_run:
                 c.phone = new_phone
             phone_updates += 1
@@ -403,9 +416,16 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     for s in sites:
         new_phone = normalize_phone_e164(s.contact_phone)
         if new_phone and new_phone != s.contact_phone:
-            audit(3, "normalize_phone", "customer_site", {
-                "id": s.id, "old": s.contact_phone, "new": new_phone,
-            })
+            audit(
+                3,
+                "normalize_phone",
+                "customer_site",
+                {
+                    "id": s.id,
+                    "old": s.contact_phone,
+                    "new": new_phone,
+                },
+            )
             if not dry_run:
                 s.contact_phone = new_phone
             phone_updates += 1
@@ -415,9 +435,16 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     for co in cos:
         new_phone = normalize_phone_e164(co.phone)
         if new_phone and new_phone != co.phone:
-            audit(3, "normalize_phone", "company", {
-                "id": co.id, "old": co.phone, "new": new_phone,
-            })
+            audit(
+                3,
+                "normalize_phone",
+                "company",
+                {
+                    "id": co.id,
+                    "old": co.phone,
+                    "new": new_phone,
+                },
+            )
             if not dry_run:
                 co.phone = new_phone
             phone_updates += 1
@@ -437,9 +464,15 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
             else:
                 new_phones.append(p)
         if changed:
-            audit(3, "normalize_phones", "vendor_card", {
-                "id": card.id, "count": len(new_phones),
-            })
+            audit(
+                3,
+                "normalize_phones",
+                "vendor_card",
+                {
+                    "id": card.id,
+                    "count": len(new_phones),
+                },
+            )
             if not dry_run:
                 card.phones = new_phones
             phone_updates += 1
@@ -450,33 +483,45 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     log.info("--- Phase 3b: Contact Name Cleanup ---")
     name_updates = 0
 
-    contacts = db.query(VendorContact).filter(
-        VendorContact.full_name.isnot(None)
-    ).all()
+    contacts = db.query(VendorContact).filter(VendorContact.full_name.isnot(None)).all()
     for c in contacts:
         if not c.full_name:
             continue
         cleaned, is_person = clean_contact_name(c.full_name)
         if cleaned != c.full_name:
-            audit(3, "clean_name", "vendor_contact", {
-                "id": c.id, "old": c.full_name, "new": cleaned, "is_person": is_person,
-            })
+            audit(
+                3,
+                "clean_name",
+                "vendor_contact",
+                {
+                    "id": c.id,
+                    "old": c.full_name,
+                    "new": cleaned,
+                    "is_person": is_person,
+                },
+            )
             if not dry_run:
                 c.full_name = cleaned
             name_updates += 1
 
     # ProspectContacts
-    prospects = db.query(ProspectContact).filter(
-        ProspectContact.full_name.isnot(None)
-    ).all()
+    prospects = db.query(ProspectContact).filter(ProspectContact.full_name.isnot(None)).all()
     for p in prospects:
         if not p.full_name:
             continue
         cleaned, is_person = clean_contact_name(p.full_name)
         if cleaned != p.full_name:
-            audit(3, "clean_name", "prospect_contact", {
-                "id": p.id, "old": p.full_name, "new": cleaned, "is_person": is_person,
-            })
+            audit(
+                3,
+                "clean_name",
+                "prospect_contact",
+                {
+                    "id": p.id,
+                    "old": p.full_name,
+                    "new": cleaned,
+                    "is_person": is_person,
+                },
+            )
             if not dry_run:
                 p.full_name = cleaned
             name_updates += 1
@@ -529,9 +574,15 @@ def phase4_sighting_normalization(db: Session, dry_run: bool):
         log.info(f"  Processed {offset} sightings...")
 
     log.info(f"Phase 4 complete: {mpn_fixes} MPN fixes, {vendor_fixes} vendor name fixes")
-    audit(4, "summary", "sightings", {
-        "mpn_fixes": mpn_fixes, "vendor_fixes": vendor_fixes,
-    })
+    audit(
+        4,
+        "summary",
+        "sightings",
+        {
+            "mpn_fixes": mpn_fixes,
+            "vendor_fixes": vendor_fixes,
+        },
+    )
 
 
 # ── Phase 5: Company/Site Field Standardization ────────────────────
@@ -549,9 +600,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if co.hq_country:
             new_country = normalize_country(co.hq_country)
             if new_country and new_country != co.hq_country:
-                audit(5, "normalize_country", "company", {
-                    "id": co.id, "old": co.hq_country, "new": new_country,
-                })
+                audit(
+                    5,
+                    "normalize_country",
+                    "company",
+                    {
+                        "id": co.id,
+                        "old": co.hq_country,
+                        "new": new_country,
+                    },
+                )
                 if not dry_run:
                     co.hq_country = new_country
                 country_fixes += 1
@@ -559,9 +617,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if co.hq_state:
             new_state = normalize_us_state(co.hq_state)
             if new_state and new_state != co.hq_state:
-                audit(5, "normalize_state", "company", {
-                    "id": co.id, "old": co.hq_state, "new": new_state,
-                })
+                audit(
+                    5,
+                    "normalize_state",
+                    "company",
+                    {
+                        "id": co.id,
+                        "old": co.hq_state,
+                        "new": new_state,
+                    },
+                )
                 if not dry_run:
                     co.hq_state = new_state
                 state_fixes += 1
@@ -572,9 +637,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if country:
             new_country = normalize_country(country)
             if new_country and new_country != country:
-                audit(5, "normalize_country", "customer_site", {
-                    "id": site.id, "old": country, "new": new_country,
-                })
+                audit(
+                    5,
+                    "normalize_country",
+                    "customer_site",
+                    {
+                        "id": site.id,
+                        "old": country,
+                        "new": new_country,
+                    },
+                )
                 if not dry_run:
                     site.country = new_country
                 country_fixes += 1
@@ -583,9 +655,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if state:
             new_state = normalize_us_state(state)
             if new_state and new_state != state:
-                audit(5, "normalize_state", "customer_site", {
-                    "id": site.id, "old": state, "new": new_state,
-                })
+                audit(
+                    5,
+                    "normalize_state",
+                    "customer_site",
+                    {
+                        "id": site.id,
+                        "old": state,
+                        "new": new_state,
+                    },
+                )
                 if not dry_run:
                     site.state = new_state
                 state_fixes += 1
@@ -595,9 +674,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if card.hq_country:
             new_country = normalize_country(card.hq_country)
             if new_country and new_country != card.hq_country:
-                audit(5, "normalize_country", "vendor_card", {
-                    "id": card.id, "old": card.hq_country, "new": new_country,
-                })
+                audit(
+                    5,
+                    "normalize_country",
+                    "vendor_card",
+                    {
+                        "id": card.id,
+                        "old": card.hq_country,
+                        "new": new_country,
+                    },
+                )
                 if not dry_run:
                     card.hq_country = new_country
                 country_fixes += 1
@@ -605,9 +691,16 @@ def phase5_field_standardization(db: Session, dry_run: bool):
         if card.hq_state:
             new_state = normalize_us_state(card.hq_state)
             if new_state and new_state != card.hq_state:
-                audit(5, "normalize_state", "vendor_card", {
-                    "id": card.id, "old": card.hq_state, "new": new_state,
-                })
+                audit(
+                    5,
+                    "normalize_state",
+                    "vendor_card",
+                    {
+                        "id": card.id,
+                        "old": card.hq_state,
+                        "new": new_state,
+                    },
+                )
                 if not dry_run:
                     card.hq_state = new_state
                 state_fixes += 1
@@ -692,11 +785,17 @@ def phase6_requirement_normalization(db: Session, dry_run: bool):
         offset += batch_size
         log.info(f"  Processed {offset} requirements...")
 
-    log.info(f"Phase 6 complete: {mpn_fixes} MPN fixes, {sub_fixes} substitute fixes, "
-             f"{field_fixes} field fixes")
-    audit(6, "summary", "requirements", {
-        "mpn_fixes": mpn_fixes, "sub_fixes": sub_fixes, "field_fixes": field_fixes,
-    })
+    log.info(f"Phase 6 complete: {mpn_fixes} MPN fixes, {sub_fixes} substitute fixes, {field_fixes} field fixes")
+    audit(
+        6,
+        "summary",
+        "requirements",
+        {
+            "mpn_fixes": mpn_fixes,
+            "sub_fixes": sub_fixes,
+            "field_fixes": field_fixes,
+        },
+    )
 
 
 # ── Main ────────────────────────────────────────────────────────────
@@ -737,9 +836,9 @@ def main():
             func(db, args.dry_run)
         else:
             for phase_num, (name, func) in PHASES.items():
-                log.info(f"\n{'='*60}")
+                log.info(f"\n{'=' * 60}")
                 log.info(f"Phase {phase_num}: {name}")
-                log.info(f"{'='*60}")
+                log.info(f"{'=' * 60}")
                 func(db, args.dry_run)
     finally:
         db.close()

@@ -15,16 +15,16 @@ import re
 # Format: compiled regex patterns matching end of string.
 _STRIP_SUFFIXES = re.compile(
     r"("
-    r"/TR|"      # Tape and reel (slash form)
-    r"-TR|"      # Tape and reel (dash form)
-    r"/CT|"      # Cut tape
-    r"-CT|"      # Cut tape (dash form)
-    r"-ND|"      # No datasheet (DigiKey)
-    r"-DKR|"     # DigiKey reel packaging
-    r"#PBF|"     # Lead-free indicator
-    r"-PBF|"     # Lead-free indicator (dash form)
-    r"/NOPB|"    # No-lead (TI convention)
-    r"-NOPB"     # No-lead (dash form)
+    r"/TR|"  # Tape and reel (slash form)
+    r"-TR|"  # Tape and reel (dash form)
+    r"/CT|"  # Cut tape
+    r"-CT|"  # Cut tape (dash form)
+    r"-ND|"  # No datasheet (DigiKey)
+    r"-DKR|"  # DigiKey reel packaging
+    r"#PBF|"  # Lead-free indicator
+    r"-PBF|"  # Lead-free indicator (dash form)
+    r"/NOPB|"  # No-lead (TI convention)
+    r"-NOPB"  # No-lead (dash form)
     r")$",
     re.IGNORECASE,
 )

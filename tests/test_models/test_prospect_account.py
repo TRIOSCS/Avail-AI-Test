@@ -78,12 +78,8 @@ class TestProspectAccountModel:
 
     def test_unique_domain_constraint(self, db_session: Session):
         """Duplicate domain raises IntegrityError."""
-        pa1 = ProspectAccount(
-            name="Corp A", domain="dupe.com", discovery_source="explorium"
-        )
-        pa2 = ProspectAccount(
-            name="Corp B", domain="dupe.com", discovery_source="apollo"
-        )
+        pa1 = ProspectAccount(name="Corp A", domain="dupe.com", discovery_source="explorium")
+        pa2 = ProspectAccount(name="Corp B", domain="dupe.com", discovery_source="apollo")
         db_session.add(pa1)
         db_session.commit()
         db_session.add(pa2)

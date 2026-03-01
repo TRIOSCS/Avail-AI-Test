@@ -151,27 +151,39 @@ def export_error_reports_xlsx(
     ws = wb.active
     ws.title = "Trouble Tickets"
     headers = [
-        "ID", "Title", "Description", "Status", "Reporter",
-        "URL", "View", "Browser", "Screen", "Console Errors",
-        "Admin Notes", "Created", "Resolved",
+        "ID",
+        "Title",
+        "Description",
+        "Status",
+        "Reporter",
+        "URL",
+        "View",
+        "Browser",
+        "Screen",
+        "Console Errors",
+        "Admin Notes",
+        "Created",
+        "Resolved",
     ]
     ws.append(headers)
     for r in reports:
-        ws.append([
-            r.id,
-            r.title,
-            r.description or "",
-            r.status,
-            r.reporter.email if r.reporter else "",
-            r.current_url or "",
-            r.current_view or "",
-            r.browser_info or "",
-            r.screen_size or "",
-            r.console_errors or "",
-            r.admin_notes or "",
-            r.created_at.isoformat() if r.created_at else "",
-            r.resolved_at.isoformat() if r.resolved_at else "",
-        ])
+        ws.append(
+            [
+                r.id,
+                r.title,
+                r.description or "",
+                r.status,
+                r.reporter.email if r.reporter else "",
+                r.current_url or "",
+                r.current_view or "",
+                r.browser_info or "",
+                r.screen_size or "",
+                r.console_errors or "",
+                r.admin_notes or "",
+                r.created_at.isoformat() if r.created_at else "",
+                r.resolved_at.isoformat() if r.resolved_at else "",
+            ]
+        )
 
     buf = io.BytesIO()
     wb.save(buf)

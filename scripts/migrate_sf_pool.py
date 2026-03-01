@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import exists, and_
+from sqlalchemy import and_, exists
 
 # Add project root to path for imports
 sys.path.insert(0, "/root/availai")
@@ -51,13 +51,10 @@ def migrate(dry_run: bool = False) -> dict:
     db = SessionLocal()
     try:
         # Subquery: companies that have at least one site with an owner
-        has_owned_site = (
-            exists()
-            .where(
-                and_(
-                    CustomerSite.company_id == Company.id,
-                    CustomerSite.owner_id.isnot(None),
-                )
+        has_owned_site = exists().where(
+            and_(
+                CustomerSite.company_id == Company.id,
+                CustomerSite.owner_id.isnot(None),
             )
         )
 
@@ -76,10 +73,7 @@ def migrate(dry_run: bool = False) -> dict:
         logger.info(f"Found {total_pool} pool companies to process")
 
         # Get existing prospect domains for dedup
-        existing_domains = set(
-            row[0]
-            for row in db.query(ProspectAccount.domain).all()
-        )
+        existing_domains = set(row[0] for row in db.query(ProspectAccount.domain).all())
 
         # Create a discovery batch for this migration
         batch = None
@@ -112,8 +106,7 @@ def migrate(dry_run: bool = False) -> dict:
 
             if dry_run:
                 logger.info(
-                    f"DRY-RUN would migrate: id={co.id} name={co.name!r} "
-                    f"domain={domain} priority={co.import_priority}"
+                    f"DRY-RUN would migrate: id={co.id} name={co.name!r} domain={domain} priority={co.import_priority}"
                 )
                 migrated += 1
                 existing_domains.add(domain)
@@ -130,10 +123,7 @@ def migrate(dry_run: bool = False) -> dict:
                 company_id=co.id,
                 import_priority=co.import_priority,
                 historical_context={"sf_account_id": co.sf_account_id},
-                hq_location=", ".join(
-                    filter(None, [co.hq_city, co.hq_state, co.hq_country])
-                )
-                or None,
+                hq_location=", ".join(filter(None, [co.hq_city, co.hq_state, co.hq_country])) or None,
                 employee_count_range=co.employee_size,
                 fit_score=0,
                 readiness_score=0,
@@ -141,10 +131,7 @@ def migrate(dry_run: bool = False) -> dict:
             db.add(prospect)
             existing_domains.add(domain)
             migrated += 1
-            logger.info(
-                f"MIGRATED: id={co.id} name={co.name!r} domain={domain} "
-                f"priority={co.import_priority}"
-            )
+            logger.info(f"MIGRATED: id={co.id} name={co.name!r} domain={domain} priority={co.import_priority}")
 
         if not dry_run and batch:
             batch.status = "complete"

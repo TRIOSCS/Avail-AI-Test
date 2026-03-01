@@ -21,9 +21,14 @@ Test Categories:
   N. Outbound Mining (RFQ detection patterns)
   O. Config Defaults (all settings have sane defaults)
 """
-import sys, os, traceback, time, importlib, inspect, ast, re, json
-from datetime import datetime, timezone, timedelta
-from io import StringIO
+
+import inspect
+import os
+import re
+import sys
+import time
+import traceback
+from datetime import datetime, timedelta, timezone
 
 # ── Setup path ──
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,7 +40,13 @@ TOTAL_FAILED = 0
 FAILURES = []
 
 # ── Colors ──
-G = "\033[92m"; R = "\033[91m"; Y = "\033[93m"; C = "\033[96m"; B = "\033[1m"; W = "\033[97m"; RST = "\033[0m"
+G = "\033[92m"
+R = "\033[91m"
+Y = "\033[93m"
+C = "\033[96m"
+B = "\033[1m"
+W = "\033[97m"
+RST = "\033[0m"
 
 
 def test(name, func):
@@ -81,28 +92,48 @@ def assert_true(val, msg=""):
 
 def assert_type(val, expected_type, msg=""):
     if not isinstance(val, expected_type):
-        raise AssertionError(f"Expected type {expected_type.__name__}, got {type(val).__name__}" + (f" — {msg}" if msg else ""))
+        raise AssertionError(
+            f"Expected type {expected_type.__name__}, got {type(val).__name__}" + (f" — {msg}" if msg else "")
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════
 #  A. NORMALIZATION MODULE
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_normalization(pass_num):
     from app.utils.normalization import (
-        normalize_price, normalize_quantity, normalize_lead_time,
-        normalize_condition, normalize_date_code, normalize_moq,
-        normalize_packaging, normalize_mpn, fuzzy_mpn_match,
         detect_currency,
+        fuzzy_mpn_match,
+        normalize_condition,
+        normalize_date_code,
+        normalize_lead_time,
+        normalize_moq,
+        normalize_mpn,
+        normalize_packaging,
+        normalize_price,
+        normalize_quantity,
     )
 
     # ── Prices ──
     price_cases = [
-        ("$1.25", 1.25), ("1,250.50", 1250.50), ("€0.003", 0.003),
-        ("USD 100", 100.0), ("1.5k", 1500.0), ("$0.00", None),
-        ("2,500", 2500.0), ("0.0001", 0.0001), ("$12.345", 12.345),
-        ("£99.99", 99.99), ("¥1000", 1000.0), ("3.50 USD", 3.50),
-        ("", None), ("N/A", None), ("TBD", None), ("abc", None),
+        ("$1.25", 1.25),
+        ("1,250.50", 1250.50),
+        ("€0.003", 0.003),
+        ("USD 100", 100.0),
+        ("1.5k", 1500.0),
+        ("$0.00", None),
+        ("2,500", 2500.0),
+        ("0.0001", 0.0001),
+        ("$12.345", 12.345),
+        ("£99.99", 99.99),
+        ("¥1000", 1000.0),
+        ("3.50 USD", 3.50),
+        ("", None),
+        ("N/A", None),
+        ("TBD", None),
+        ("abc", None),
     ]
     for raw, expected in price_cases:
         result = normalize_price(raw)
@@ -113,9 +144,15 @@ def test_normalization(pass_num):
 
     # ── Quantities ──
     qty_cases = [
-        ("1,000", 1000), ("5000", 5000), ("10k", 10000),
-        ("500", 500), ("1M", 1000000), ("0", 0),
-        ("", None), ("N/A", None), ("TBD", None),
+        ("1,000", 1000),
+        ("5000", 5000),
+        ("10k", 10000),
+        ("500", 500),
+        ("1M", 1000000),
+        ("0", 0),
+        ("", None),
+        ("N/A", None),
+        ("TBD", None),
     ]
     for raw, expected in qty_cases:
         result = normalize_quantity(raw)
@@ -126,9 +163,15 @@ def test_normalization(pass_num):
 
     # ── Lead Times ──
     lt_cases = [
-        ("2 weeks", 14), ("3 days", 3), ("4-6 weeks", 28),
-        ("stock", 0), ("in stock", 0), ("immediate", 0),
-        ("8 wks", 56), ("12 weeks ARO", 84), ("1 week", 7),
+        ("2 weeks", 14),
+        ("3 days", 3),
+        ("4-6 weeks", 28),
+        ("stock", 0),
+        ("in stock", 0),
+        ("immediate", 0),
+        ("8 wks", 56),
+        ("12 weeks ARO", 84),
+        ("1 week", 7),
     ]
     for raw, expected in lt_cases:
         result = normalize_lead_time(raw)
@@ -137,10 +180,15 @@ def test_normalization(pass_num):
 
     # ── Conditions ──
     cond_cases = [
-        ("New", "new"), ("NEW", "new"), ("new", "new"),
-        ("Refurbished", "refurb"), ("REFURB", "refurb"),
-        ("Used", "used"), ("USED", "used"),
-        ("Factory New", "new"), ("OEM", "new"),
+        ("New", "new"),
+        ("NEW", "new"),
+        ("new", "new"),
+        ("Refurbished", "refurb"),
+        ("REFURB", "refurb"),
+        ("Used", "used"),
+        ("USED", "used"),
+        ("Factory New", "new"),
+        ("OEM", "new"),
     ]
     for raw, expected in cond_cases:
         result = normalize_condition(raw)
@@ -149,8 +197,12 @@ def test_normalization(pass_num):
 
     # ── Date Codes ──
     dc_cases = [
-        ("2024", "2024"), ("24+", "24+"), ("2023+", "2023+"),
-        ("2340", "2340"), ("N/A", None), ("", None),
+        ("2024", "2024"),
+        ("24+", "24+"),
+        ("2023+", "2023+"),
+        ("2340", "2340"),
+        ("N/A", None),
+        ("", None),
     ]
     for raw, expected in dc_cases:
         result = normalize_date_code(raw)
@@ -161,8 +213,12 @@ def test_normalization(pass_num):
 
     # ── MOQ ──
     moq_cases = [
-        ("100", 100), ("1,000", 1000), ("1k", 1000),
-        ("0", 0), ("", None), ("N/A", None),
+        ("100", 100),
+        ("1,000", 1000),
+        ("1k", 1000),
+        ("0", 0),
+        ("", None),
+        ("N/A", None),
     ]
     for raw, expected in moq_cases:
         result = normalize_moq(raw)
@@ -173,20 +229,27 @@ def test_normalization(pass_num):
 
     # ── Packaging ──
     pkg_cases = [
-        ("Tape & Reel", "reel"), ("T&R", "reel"),
-        ("Tray", "tray"), ("TRAY", "tray"), ("Tube", "tube"),
-        ("Bulk", "bulk"), ("Cut Tape", "cut_tape"),
+        ("Tape & Reel", "reel"),
+        ("T&R", "reel"),
+        ("Tray", "tray"),
+        ("TRAY", "tray"),
+        ("Tube", "tube"),
+        ("Bulk", "bulk"),
+        ("Cut Tape", "cut_tape"),
     ]
     for raw, expected in pkg_cases:
         result = normalize_packaging(raw)
         if result:
-            assert_eq(result.lower().replace(" ", "_").replace("&", ""), 
-                       expected.replace("&", ""), f"packaging '{raw}'")
+            assert_eq(
+                result.lower().replace(" ", "_").replace("&", ""), expected.replace("&", ""), f"packaging '{raw}'"
+            )
 
     # ── MPN ──
     mpn_cases = [
-        ("LM7805CT", "LM7805CT"), ("  sn74hc595n  ", "SN74HC595N"),
-        ("lm317t", "LM317T"), ("MAX232CPE+", "MAX232CPE+"),
+        ("LM7805CT", "LM7805CT"),
+        ("  sn74hc595n  ", "SN74HC595N"),
+        ("lm317t", "LM317T"),
+        ("MAX232CPE+", "MAX232CPE+"),
     ]
     for raw, expected in mpn_cases:
         result = normalize_mpn(raw)
@@ -194,14 +257,20 @@ def test_normalization(pass_num):
 
     # ── Fuzzy MPN Match ──
     assert_true(fuzzy_mpn_match("LM7805CT", "LM7805CT"), "exact match")
-    assert_true(fuzzy_mpn_match("LM7805", "LM7805CT") or not fuzzy_mpn_match("LM7805", "LM7805CT"),
-                "partial match is implementation-defined")
+    assert_true(
+        fuzzy_mpn_match("LM7805", "LM7805CT") or not fuzzy_mpn_match("LM7805", "LM7805CT"),
+        "partial match is implementation-defined",
+    )
     assert_true(not fuzzy_mpn_match("TOTALLY_DIFFERENT", "LM7805CT"), "no match")
 
     # ── Currency Detection ──
     curr_cases = [
-        ("$100", "USD"), ("€50", "EUR"), ("£25", "GBP"),
-        ("¥1000", "JPY"), ("USD 50", "USD"), ("100 EUR", "USD"),  # defaults to USD — trailing code not parsed
+        ("$100", "USD"),
+        ("€50", "EUR"),
+        ("£25", "GBP"),
+        ("¥1000", "JPY"),
+        ("USD 50", "USD"),
+        ("100 EUR", "USD"),  # defaults to USD — trailing code not parsed
     ]
     for raw, expected in curr_cases:
         result = detect_currency(raw)
@@ -213,6 +282,7 @@ def test_normalization(pass_num):
 #  B. ENGAGEMENT SCORING
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_engagement_scoring(pass_num):
     from app.services.engagement_scorer import compute_engagement_score
 
@@ -220,7 +290,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Perfect vendor ──
     r = compute_engagement_score(
-        total_outreach=10, total_responses=10, total_wins=10,
+        total_outreach=10,
+        total_responses=10,
+        total_wins=10,
         avg_velocity_hours=2.0,
         last_contact_at=now - timedelta(days=1),
         now=now,
@@ -232,7 +304,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Ghost vendor ──
     r = compute_engagement_score(
-        total_outreach=20, total_responses=0, total_wins=0,
+        total_outreach=20,
+        total_responses=0,
+        total_wins=0,
         avg_velocity_hours=None,
         last_contact_at=now - timedelta(days=300),
         now=now,
@@ -243,7 +317,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Below minimum outreach ──
     r = compute_engagement_score(
-        total_outreach=1, total_responses=1, total_wins=0,
+        total_outreach=1,
+        total_responses=1,
+        total_wins=0,
         avg_velocity_hours=1.0,
         last_contact_at=now,
         now=now,
@@ -252,14 +328,20 @@ def test_engagement_scoring(pass_num):
 
     # ── Zero outreach ──
     r = compute_engagement_score(
-        total_outreach=0, total_responses=0, total_wins=0,
-        avg_velocity_hours=None, last_contact_at=None, now=now,
+        total_outreach=0,
+        total_responses=0,
+        total_wins=0,
+        avg_velocity_hours=None,
+        last_contact_at=None,
+        now=now,
     )
     assert_true(r["engagement_score"] is None, "zero outreach → None")
 
     # ── Mediocre vendor ──
     r = compute_engagement_score(
-        total_outreach=10, total_responses=5, total_wins=1,
+        total_outreach=10,
+        total_responses=5,
+        total_wins=1,
         avg_velocity_hours=48.0,
         last_contact_at=now - timedelta(days=60),
         now=now,
@@ -269,7 +351,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Slow but responsive ──
     r = compute_engagement_score(
-        total_outreach=10, total_responses=9, total_wins=3,
+        total_outreach=10,
+        total_responses=9,
+        total_wins=3,
         avg_velocity_hours=150.0,
         last_contact_at=now - timedelta(days=3),
         now=now,
@@ -279,7 +363,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Ancient but perfect when active ──
     r = compute_engagement_score(
-        total_outreach=5, total_responses=5, total_wins=5,
+        total_outreach=5,
+        total_responses=5,
+        total_wins=5,
         avg_velocity_hours=1.0,
         last_contact_at=now - timedelta(days=400),
         now=now,
@@ -289,7 +375,9 @@ def test_engagement_scoring(pass_num):
 
     # ── Weight validation: scores sum to 100 for perfect inputs ──
     r = compute_engagement_score(
-        total_outreach=100, total_responses=100, total_wins=100,
+        total_outreach=100,
+        total_responses=100,
+        total_wins=100,
         avg_velocity_hours=0.5,
         last_contact_at=now - timedelta(hours=1),
         now=now,
@@ -298,15 +386,23 @@ def test_engagement_scoring(pass_num):
 
     # ── Boundary: velocity exactly at ideal ──
     r = compute_engagement_score(
-        total_outreach=10, total_responses=10, total_wins=0,
-        avg_velocity_hours=4.0, last_contact_at=now, now=now,
+        total_outreach=10,
+        total_responses=10,
+        total_wins=0,
+        avg_velocity_hours=4.0,
+        last_contact_at=now,
+        now=now,
     )
     assert_close(r["velocity_score"], 100.0, tol=0.5, msg="velocity at ideal = 100")
 
     # ── Boundary: velocity exactly at max ──
     r = compute_engagement_score(
-        total_outreach=10, total_responses=10, total_wins=0,
-        avg_velocity_hours=168.0, last_contact_at=now, now=now,
+        total_outreach=10,
+        total_responses=10,
+        total_wins=0,
+        avg_velocity_hours=168.0,
+        last_contact_at=now,
+        now=now,
     )
     assert_close(r["velocity_score"], 0.0, tol=0.5, msg="velocity at max = 0")
 
@@ -315,10 +411,14 @@ def test_engagement_scoring(pass_num):
 #  C. RESPONSE PARSER SCHEMA VALIDATION
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_response_parser_schema(pass_num):
     from app.services.response_parser import (
-        RESPONSE_PARSE_SCHEMA, should_auto_apply, should_flag_review,
-        extract_draft_offers, _normalize_parsed_parts,
+        RESPONSE_PARSE_SCHEMA,
+        _normalize_parsed_parts,
+        extract_draft_offers,
+        should_auto_apply,
+        should_flag_review,
     )
 
     # Validate schema structure (raw JSON schema, not Anthropic tool schema)
@@ -340,11 +440,19 @@ def test_response_parser_schema(pass_num):
     assert_true(not should_flag_review({"confidence": 0.3}), "0.3 → below review threshold")
 
     # ── Normalize parsed parts (modifies in-place, takes dict) ──
-    result = {"parts": [
-        {"mpn": "lm7805ct", "qty_available": "1,000", "unit_price": "$2.50",
-         "lead_time": "2 weeks", "condition": "New", "date_code": "2024"},
-        {"mpn": "SN74HC595N", "unit_price": "0.85"},
-    ]}
+    result = {
+        "parts": [
+            {
+                "mpn": "lm7805ct",
+                "qty_available": "1,000",
+                "unit_price": "$2.50",
+                "lead_time": "2 weeks",
+                "condition": "New",
+                "date_code": "2024",
+            },
+            {"mpn": "SN74HC595N", "unit_price": "0.85"},
+        ]
+    }
     _normalize_parsed_parts(result)
     normalized = result["parts"]
     assert_eq(len(normalized), 2)
@@ -355,8 +463,7 @@ def test_response_parser_schema(pass_num):
     result2 = {
         "overall_classification": "quote_provided",
         "parts": [
-            {"mpn": "LM7805CT", "unit_price": 2.50, "qty_available": 1000,
-             "status": "quoted", "currency": "USD"},
+            {"mpn": "LM7805CT", "unit_price": 2.50, "qty_available": 1000, "status": "quoted", "currency": "USD"},
             {"mpn": "SN74HC595N", "unit_price": 0.85, "status": "quoted"},
         ],
     }
@@ -368,6 +475,7 @@ def test_response_parser_schema(pass_num):
 # ══════════════════════════════════════════════════════════════════════
 #  D. AI SERVICE CONTRACT VALIDATION
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_ai_service_contracts(pass_num):
     """Validate AI service function signatures and return contracts."""
@@ -392,8 +500,16 @@ def test_ai_service_contracts(pass_num):
     # Verify INTEL_SCHEMA structure (raw JSON schema)
     assert_true(hasattr(ai_svc, "INTEL_SCHEMA"), "INTEL_SCHEMA exists")
     intel_props = ai_svc.INTEL_SCHEMA["properties"]
-    for field in ["summary", "revenue", "employees", "products",
-                  "components_they_buy", "recent_news", "opportunity_signals", "sources"]:
+    for field in [
+        "summary",
+        "revenue",
+        "employees",
+        "products",
+        "components_they_buy",
+        "recent_news",
+        "opportunity_signals",
+        "sources",
+    ]:
         assert_in(field, intel_props, f"INTEL_SCHEMA missing {field}")
 
 
@@ -401,9 +517,13 @@ def test_ai_service_contracts(pass_num):
 #  E. FILE VALIDATION
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_file_validation(pass_num):
     from app.utils.file_validation import (
-        validate_file, detect_encoding, file_fingerprint, is_password_protected,
+        detect_encoding,
+        file_fingerprint,
+        is_password_protected,
+        validate_file,
     )
 
     # CSV content (plain text — magic byte validation accepts text)
@@ -416,8 +536,11 @@ def test_file_validation(pass_num):
     # Encoding detection
     enc = detect_encoding(csv_bytes)
     assert_type(enc, str, "encoding is string")
-    assert_in(enc.lower(), ["utf-8", "ascii", "utf-8-sig", "windows-1252", "iso-8859-1", "utf8"],
-              f"encoding '{enc}' is reasonable")
+    assert_in(
+        enc.lower(),
+        ["utf-8", "ascii", "utf-8-sig", "windows-1252", "iso-8859-1", "utf8"],
+        f"encoding '{enc}' is reasonable",
+    )
 
     # Fingerprint
     fp = file_fingerprint(csv_bytes)
@@ -443,14 +566,25 @@ def test_file_validation(pass_num):
 #  F. ATTACHMENT PARSER — DETERMINISTIC HEADER MATCHING
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_attachment_parser(pass_num):
     from app.services.attachment_parser import (
-        _match_headers_deterministic, _extract_row, HEADER_PATTERNS,
+        _extract_row,
+        _match_headers_deterministic,
     )
 
     # Standard headers
-    headers = ["Part Number", "Qty", "Unit Price", "Condition", "Date Code",
-               "Lead Time", "Packaging", "Description", "MOQ"]
+    headers = [
+        "Part Number",
+        "Qty",
+        "Unit Price",
+        "Condition",
+        "Date Code",
+        "Lead Time",
+        "Packaging",
+        "Description",
+        "MOQ",
+    ]
     mapping = _match_headers_deterministic(headers)
     assert_in("mpn", mapping.values(), "should detect MPN column")
     assert_in("qty", mapping.values(), "should detect qty column")
@@ -490,10 +624,15 @@ def test_attachment_parser(pass_num):
 #  G. EMAIL MINING — PATTERN MATCHING
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_email_mining_patterns(pass_num):
     from app.connectors.email_mining import (
-        OFFER_PATTERNS, MPN_PATTERN, PHONE_PATTERN, WEBSITE_PATTERN,
-        AVAIL_TOKEN_RE, STOCK_LIST_EXTENSIONS,
+        AVAIL_TOKEN_RE,
+        MPN_PATTERN,
+        OFFER_PATTERNS,
+        PHONE_PATTERN,
+        STOCK_LIST_EXTENSIONS,
+        WEBSITE_PATTERN,
     )
 
     # ── Offer pattern matching ──
@@ -531,7 +670,7 @@ def test_email_mining_patterns(pass_num):
     assert_true(AVAIL_TOKEN_RE.search(subj2) is None, "no token in plain subject")
 
     # ── Stock list extensions ──
-    for ext in ['.xlsx', '.xls', '.csv', '.tsv']:
+    for ext in [".xlsx", ".xls", ".csv", ".tsv"]:
         assert_in(ext, STOCK_LIST_EXTENSIONS, f"missing extension {ext}")
 
 
@@ -539,9 +678,10 @@ def test_email_mining_patterns(pass_num):
 #  H. INTEL CACHE CONTRACT
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_intel_cache_contract(pass_num):
     """Validate intel cache module structure (no DB needed)."""
-    from app.cache.intel_cache import get_cached, set_cached, invalidate, cleanup_expired
+    from app.cache.intel_cache import cleanup_expired, get_cached, invalidate, set_cached
 
     # Verify functions exist and are callable
     assert_true(callable(get_cached), "get_cached is callable")
@@ -560,8 +700,9 @@ def test_intel_cache_contract(pass_num):
 #  I. GRAPH CLIENT CONTRACT
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_graph_client_contract(pass_num):
-    from app.utils.graph_client import GraphClient, MAX_RETRIES, BACKOFF_BASE, IMMUTABLE_ID_HEADER
+    from app.utils.graph_client import BACKOFF_BASE, IMMUTABLE_ID_HEADER, MAX_RETRIES, GraphClient
 
     gc = GraphClient("fake_token_for_test")
     assert_true(hasattr(gc, "get_json"), "has get_json")
@@ -586,6 +727,7 @@ def test_graph_client_contract(pass_num):
 #  J. CLAUDE CLIENT CONTRACT
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_claude_client_contract(pass_num):
     import app.utils.claude_client as cc
 
@@ -602,7 +744,7 @@ def test_claude_client_contract(pass_num):
 
     # safe_json_parse validation
     assert_eq(cc.safe_json_parse('{"a": 1}'), {"a": 1}, "valid JSON")
-    assert_eq(cc.safe_json_parse('not json'), None, "invalid JSON → None")
+    assert_eq(cc.safe_json_parse("not json"), None, "invalid JSON → None")
     assert_eq(cc.safe_json_parse('```json\n{"b": 2}\n```'), {"b": 2}, "fenced JSON")
 
 
@@ -610,29 +752,58 @@ def test_claude_client_contract(pass_num):
 #  K. MODEL FIELD COVERAGE
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_model_field_coverage(pass_num):
     """Verify every model has all expected columns."""
-    from app.models import (
-        User, Requisition, Requirement, Sighting, Contact, VendorResponse,
-        VendorCard, VendorReview, MaterialCard, MaterialVendorHistory,
-        Offer, Quote, Company, CustomerSite, ProcessedMessage, SyncState,
-        ColumnMappingCache, ProspectContact,
-    )
     from sqlalchemy import inspect as sa_inspect
+
+    from app.models import (
+        ColumnMappingCache,
+        Contact,
+        MaterialCard,
+        MaterialVendorHistory,
+        Offer,
+        ProcessedMessage,
+        ProspectContact,
+        Sighting,
+        SyncState,
+        VendorCard,
+        VendorResponse,
+    )
 
     # VendorCard — most critical, verify all engagement fields
     vc_cols = {c.key for c in sa_inspect(VendorCard).mapper.column_attrs}
-    for f in ["total_outreach", "total_responses", "total_wins", "ghost_rate",
-              "response_velocity_hours", "last_contact_at", "relationship_months",
-              "engagement_score", "engagement_computed_at",
-              "cancellation_rate", "rma_rate",
-              "linkedin_url", "employee_size", "hq_city", "industry"]:
+    for f in [
+        "total_outreach",
+        "total_responses",
+        "total_wins",
+        "ghost_rate",
+        "response_velocity_hours",
+        "last_contact_at",
+        "relationship_months",
+        "engagement_score",
+        "engagement_computed_at",
+        "cancellation_rate",
+        "rma_rate",
+        "linkedin_url",
+        "employee_size",
+        "hq_city",
+        "industry",
+    ]:
         assert_in(f, vc_cols, f"VendorCard missing {f}")
 
     # VendorResponse — verify match_method and classification
     vr_cols = {c.key for c in sa_inspect(VendorResponse).mapper.column_attrs}
-    for f in ["match_method", "classification", "needs_action", "action_hint",
-              "parsed_data", "confidence", "message_id", "graph_conversation_id"]:
+    for f in [
+        "match_method",
+        "classification",
+        "needs_action",
+        "action_hint",
+        "parsed_data",
+        "confidence",
+        "message_id",
+        "graph_conversation_id",
+    ]:
         assert_in(f, vr_cols, f"VendorResponse missing {f}")
 
     # Sighting — verify richer fields from Upgrade 2
@@ -642,8 +813,7 @@ def test_model_field_coverage(pass_num):
 
     # Contact — verify parse fields
     co_cols = {c.key for c in sa_inspect(Contact).mapper.column_attrs}
-    for f in ["needs_review", "parse_result_json", "parse_confidence",
-              "graph_message_id", "graph_conversation_id"]:
+    for f in ["needs_review", "parse_result_json", "parse_confidence", "graph_message_id", "graph_conversation_id"]:
         assert_in(f, co_cols, f"Contact missing {f}")
 
     # ProcessedMessage
@@ -663,14 +833,22 @@ def test_model_field_coverage(pass_num):
 
     # ProspectContact
     pc_cols = {c.key for c in sa_inspect(ProspectContact).mapper.column_attrs}
-    for f in ["full_name", "title", "email", "email_status", "phone",
-              "linkedin_url", "source", "confidence", "is_saved"]:
+    for f in [
+        "full_name",
+        "title",
+        "email",
+        "email_status",
+        "phone",
+        "linkedin_url",
+        "source",
+        "confidence",
+        "is_saved",
+    ]:
         assert_in(f, pc_cols, f"ProspectContact missing {f}")
 
     # Offer
     of_cols = {c.key for c in sa_inspect(Offer).mapper.column_attrs}
-    for f in ["mpn", "vendor_name", "unit_price", "currency", "qty_available",
-              "status", "source"]:
+    for f in ["mpn", "vendor_name", "unit_price", "currency", "qty_available", "status", "source"]:
         assert_in(f, of_cols, f"Offer missing {f}")
 
     # MaterialCard and MaterialVendorHistory
@@ -685,6 +863,7 @@ def test_model_field_coverage(pass_num):
 # ══════════════════════════════════════════════════════════════════════
 #  L. API ROUTE COMPLETENESS
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_api_routes(pass_num):
     """Verify all critical API routes are defined in main.py."""
@@ -735,8 +914,9 @@ def test_api_routes(pass_num):
 #  M. EMAIL SERVICE — CLASSIFICATION & NOISE FILTER
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_email_service(pass_num):
-    from app.email_service import _classify_response, _is_noise_email, NOISE_DOMAINS
+    from app.email_service import NOISE_DOMAINS, _classify_response, _is_noise_email
 
     # ── Classification ──
     # Quote provided
@@ -745,21 +925,29 @@ def test_email_service(pass_num):
     assert_true(c["needs_action"])
 
     # No stock
-    c = _classify_response({"parts": [], "sentiment": "negative"}, "Unfortunately we do not have this in stock.", "Re: RFQ")
+    c = _classify_response(
+        {"parts": [], "sentiment": "negative"}, "Unfortunately we do not have this in stock.", "Re: RFQ"
+    )
     assert_eq(c["type"], "no_stock")
     assert_true(not c["needs_action"])
 
     # OOO
-    c = _classify_response({"parts": [], "sentiment": "neutral"}, "I am currently out of office until Monday.", "Automatic Reply: OOO")
+    c = _classify_response(
+        {"parts": [], "sentiment": "neutral"}, "I am currently out of office until Monday.", "Automatic Reply: OOO"
+    )
     assert_eq(c["type"], "ooo_bounce")
 
     # Counter offer
-    c = _classify_response({"parts": [], "sentiment": "positive"}, "We can offer an alternative part instead.", "Re: RFQ")
+    c = _classify_response(
+        {"parts": [], "sentiment": "positive"}, "We can offer an alternative part instead.", "Re: RFQ"
+    )
     assert_eq(c["type"], "counter_offer")
     assert_true(c["needs_action"])
 
     # Clarification
-    c = _classify_response({"parts": [], "sentiment": "neutral"}, "Could you please confirm the quantity you need?", "Re: RFQ")
+    c = _classify_response(
+        {"parts": [], "sentiment": "neutral"}, "Could you please confirm the quantity you need?", "Re: RFQ"
+    )
     assert_eq(c["type"], "clarification_needed")
     assert_true(c["needs_action"])
 
@@ -780,6 +968,7 @@ def test_email_service(pass_num):
 # ══════════════════════════════════════════════════════════════════════
 #  N. OUTBOUND MINING — RFQ DETECTION (via EmailMiner)
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_outbound_mining(pass_num):
     """Validate outbound RFQ detection patterns in EmailMiner."""
@@ -806,6 +995,7 @@ def test_outbound_mining(pass_num):
 #  O. CONFIG DEFAULTS
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_config_defaults(pass_num):
     """Verify all config settings have sane defaults."""
     from app.config import Settings
@@ -826,10 +1016,10 @@ def test_config_defaults(pass_num):
     assert_true(hasattr(s, "anthropic_api_key"), "anthropic_api_key exists")
 
 
-
 # ══════════════════════════════════════════════════════════════════════
 #  Q. EMAILMINER CLASS INTERFACE
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_emailminer_class(pass_num):
     """Validate EmailMiner class structure and H2/H8 helper methods."""
@@ -870,6 +1060,7 @@ def test_emailminer_class(pass_num):
 #  R. ENGAGEMENT SCORER — EDGE CASES
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_engagement_edge_cases(pass_num):
     from app.services.engagement_scorer import compute_engagement_score
 
@@ -901,32 +1092,61 @@ def test_engagement_edge_cases(pass_num):
                         lc = now - timedelta(days=days_ago) if days_ago else None
                         r = compute_engagement_score(outreach, responses, wins, vel, lc, now)
                         if r["engagement_score"] is not None:
-                            assert_true(0 <= r["engagement_score"] <= 100.1,
-                                        f"score {r['engagement_score']} out of range")
+                            assert_true(
+                                0 <= r["engagement_score"] <= 100.1, f"score {r['engagement_score']} out of range"
+                            )
 
 
 # ══════════════════════════════════════════════════════════════════════
 #  S. FULL PRICE PIPELINE SIMULATION
 # ══════════════════════════════════════════════════════════════════════
 
+
 def test_price_pipeline(pass_num):
     """Simulate end-to-end pricing data flow through normalization → parser → offers."""
-    from app.utils.normalization import normalize_price, normalize_quantity, detect_currency
     from app.services.response_parser import _normalize_parsed_parts, extract_draft_offers
+    from app.utils.normalization import normalize_price
 
     # Simulate a multi-part vendor response with various price formats
-    result = {"parts": [
-        {"mpn": "LM7805CT", "qty_available": "10,000", "unit_price": "$2.5000",
-         "currency": "USD", "lead_time": "stock", "condition": "New",
-         "date_code": "2024+", "moq": "1000", "packaging": "Tape & Reel"},
-        {"mpn": "SN74HC595N", "qty_available": "5000", "unit_price": "€0.85",
-         "currency": "EUR", "lead_time": "4-6 weeks", "condition": "Factory New"},
-        {"mpn": "MAX232CPE+", "qty_available": "250", "unit_price": "1.25",
-         "currency": "GBP", "lead_time": "2 weeks", "condition": "Refurb"},
-        {"mpn": "STM32F103C8T6", "qty_available": "100,000", "unit_price": "$0.003",
-         "lead_time": "12 weeks ARO", "condition": "NEW"},
-        {"mpn": "AD620ANZ", "unit_price": ""},  # Missing price
-    ]}
+    result = {
+        "parts": [
+            {
+                "mpn": "LM7805CT",
+                "qty_available": "10,000",
+                "unit_price": "$2.5000",
+                "currency": "USD",
+                "lead_time": "stock",
+                "condition": "New",
+                "date_code": "2024+",
+                "moq": "1000",
+                "packaging": "Tape & Reel",
+            },
+            {
+                "mpn": "SN74HC595N",
+                "qty_available": "5000",
+                "unit_price": "€0.85",
+                "currency": "EUR",
+                "lead_time": "4-6 weeks",
+                "condition": "Factory New",
+            },
+            {
+                "mpn": "MAX232CPE+",
+                "qty_available": "250",
+                "unit_price": "1.25",
+                "currency": "GBP",
+                "lead_time": "2 weeks",
+                "condition": "Refurb",
+            },
+            {
+                "mpn": "STM32F103C8T6",
+                "qty_available": "100,000",
+                "unit_price": "$0.003",
+                "lead_time": "12 weeks ARO",
+                "condition": "NEW",
+            },
+            {"mpn": "AD620ANZ", "unit_price": ""},  # Missing price
+        ]
+    }
 
     _normalize_parsed_parts(result)
     normalized = result["parts"]
@@ -959,8 +1179,10 @@ def test_price_pipeline(pass_num):
 
     # ── Extreme price values ──
     extreme_prices = [
-        ("$0.0001", 0.0001), ("$999,999.99", 999999.99),
-        ("0.01", 0.01), ("$1,234,567", 1234567.0),
+        ("$0.0001", 0.0001),
+        ("$999,999.99", 999999.99),
+        ("0.01", 0.01),
+        ("$1,234,567", 1234567.0),
     ]
     for raw, expected in extreme_prices:
         result = normalize_price(raw)
@@ -970,6 +1192,7 @@ def test_price_pipeline(pass_num):
 # ══════════════════════════════════════════════════════════════════════
 #  T. SCHEDULER WIRING AUDIT
 # ══════════════════════════════════════════════════════════════════════
+
 
 def test_scheduler_wiring(pass_num):
     """Verify scheduler has all jobs properly wired."""
@@ -998,6 +1221,7 @@ def test_scheduler_wiring(pass_num):
 #  MAIN RUNNER
 # ══════════════════════════════════════════════════════════════════════
 
+
 def run_pass(pass_num):
     global TOTAL_TESTS, TOTAL_PASSED, TOTAL_FAILED
 
@@ -1009,62 +1233,99 @@ def run_pass(pass_num):
     print(f"  {B}{C}SIMULATION PASS {pass_num} of {PASS_COUNT}{RST}")
     print(f"{'═' * 72}\n")
 
-    test(f"[A] Normalization — prices, qty, lead time, conditions, date codes, MPN (pass {pass_num})",
-         lambda: test_normalization(pass_num))
+    test(
+        f"[A] Normalization — prices, qty, lead time, conditions, date codes, MPN (pass {pass_num})",
+        lambda: test_normalization(pass_num),
+    )
 
-    test(f"[B] Engagement Scoring — 5 metrics × boundary conditions (pass {pass_num})",
-         lambda: test_engagement_scoring(pass_num))
+    test(
+        f"[B] Engagement Scoring — 5 metrics × boundary conditions (pass {pass_num})",
+        lambda: test_engagement_scoring(pass_num),
+    )
 
-    test(f"[C] Response Parser — schema, thresholds, normalization, draft offers (pass {pass_num})",
-         lambda: test_response_parser_schema(pass_num))
+    test(
+        f"[C] Response Parser — schema, thresholds, normalization, draft offers (pass {pass_num})",
+        lambda: test_response_parser_schema(pass_num),
+    )
 
-    test(f"[D] AI Service — function contracts, INTEL_SCHEMA (pass {pass_num})",
-         lambda: test_ai_service_contracts(pass_num))
+    test(
+        f"[D] AI Service — function contracts, INTEL_SCHEMA (pass {pass_num})",
+        lambda: test_ai_service_contracts(pass_num),
+    )
 
-    test(f"[E] File Validation — magic bytes, encoding, fingerprint, size limits (pass {pass_num})",
-         lambda: test_file_validation(pass_num))
+    test(
+        f"[E] File Validation — magic bytes, encoding, fingerprint, size limits (pass {pass_num})",
+        lambda: test_file_validation(pass_num),
+    )
 
-    test(f"[F] Attachment Parser — header matching, row extraction, edge cases (pass {pass_num})",
-         lambda: test_attachment_parser(pass_num))
+    test(
+        f"[F] Attachment Parser — header matching, row extraction, edge cases (pass {pass_num})",
+        lambda: test_attachment_parser(pass_num),
+    )
 
-    test(f"[G] Email Mining — offer patterns, MPN extraction, signatures (pass {pass_num})",
-         lambda: test_email_mining_patterns(pass_num))
+    test(
+        f"[G] Email Mining — offer patterns, MPN extraction, signatures (pass {pass_num})",
+        lambda: test_email_mining_patterns(pass_num),
+    )
 
-    test(f"[H] Intel Cache — async contract, function signatures (pass {pass_num})",
-         lambda: test_intel_cache_contract(pass_num))
+    test(
+        f"[H] Intel Cache — async contract, function signatures (pass {pass_num})",
+        lambda: test_intel_cache_contract(pass_num),
+    )
 
-    test(f"[I] Graph Client — contract, retry config, immutable IDs (pass {pass_num})",
-         lambda: test_graph_client_contract(pass_num))
+    test(
+        f"[I] Graph Client — contract, retry config, immutable IDs (pass {pass_num})",
+        lambda: test_graph_client_contract(pass_num),
+    )
 
-    test(f"[J] Claude Client — model tiers, safe_json_parse, functions (pass {pass_num})",
-         lambda: test_claude_client_contract(pass_num))
+    test(
+        f"[J] Claude Client — model tiers, safe_json_parse, functions (pass {pass_num})",
+        lambda: test_claude_client_contract(pass_num),
+    )
 
-    test(f"[K] Model Fields — all columns on all 16+ models verified (pass {pass_num})",
-         lambda: test_model_field_coverage(pass_num))
+    test(
+        f"[K] Model Fields — all columns on all 16+ models verified (pass {pass_num})",
+        lambda: test_model_field_coverage(pass_num),
+    )
 
-    test(f"[L] API Routes — all critical endpoints exist in main.py (pass {pass_num})",
-         lambda: test_api_routes(pass_num))
+    test(
+        f"[L] API Routes — all critical endpoints exist in main.py (pass {pass_num})", lambda: test_api_routes(pass_num)
+    )
 
-    test(f"[M] Email Service — classification (6 types), noise filter, domains (pass {pass_num})",
-         lambda: test_email_service(pass_num))
+    test(
+        f"[M] Email Service — classification (6 types), noise filter, domains (pass {pass_num})",
+        lambda: test_email_service(pass_num),
+    )
 
-    test(f"[N] Outbound Mining — AVAIL token detection patterns (pass {pass_num})",
-         lambda: test_outbound_mining(pass_num))
+    test(
+        f"[N] Outbound Mining — AVAIL token detection patterns (pass {pass_num})",
+        lambda: test_outbound_mining(pass_num),
+    )
 
-    test(f"[O] Config Defaults — all settings have sane defaults (pass {pass_num})",
-         lambda: test_config_defaults(pass_num))
+    test(
+        f"[O] Config Defaults — all settings have sane defaults (pass {pass_num})",
+        lambda: test_config_defaults(pass_num),
+    )
 
-    test(f"[Q] EmailMiner Class — H2/H8 helpers, constructor, scan methods (pass {pass_num})",
-         lambda: test_emailminer_class(pass_num))
+    test(
+        f"[Q] EmailMiner Class — H2/H8 helpers, constructor, scan methods (pass {pass_num})",
+        lambda: test_emailminer_class(pass_num),
+    )
 
-    test(f"[R] Engagement Edge Cases — anomalies, boundaries, 216 combos (pass {pass_num})",
-         lambda: test_engagement_edge_cases(pass_num))
+    test(
+        f"[R] Engagement Edge Cases — anomalies, boundaries, 216 combos (pass {pass_num})",
+        lambda: test_engagement_edge_cases(pass_num),
+    )
 
-    test(f"[S] Price Pipeline — end-to-end normalization → parser → offers (pass {pass_num})",
-         lambda: test_price_pipeline(pass_num))
+    test(
+        f"[S] Price Pipeline — end-to-end normalization → parser → offers (pass {pass_num})",
+        lambda: test_price_pipeline(pass_num),
+    )
 
-    test(f"[T] Scheduler Wiring — all jobs connected, db/user_id passed (pass {pass_num})",
-         lambda: test_scheduler_wiring(pass_num))
+    test(
+        f"[T] Scheduler Wiring — all jobs connected, db/user_id passed (pass {pass_num})",
+        lambda: test_scheduler_wiring(pass_num),
+    )
 
     pass_tests = TOTAL_TESTS - before_tests
     pass_passed = TOTAL_PASSED - before_pass
@@ -1075,7 +1336,7 @@ def run_pass(pass_num):
 
 if __name__ == "__main__":
     print(f"\n{B}{W}╔══════════════════════════════════════════════════════════════════════╗")
-    print(f"║     AVAIL v1.2.0 — Full-Codebase Simulation Test Suite            ║")
+    print("║     AVAIL v1.2.0 — Full-Codebase Simulation Test Suite            ║")
     print(f"║     20 Test Categories × {PASS_COUNT} Passes = {20 * PASS_COUNT} Total Tests                    ║")
     print(f"╚══════════════════════════════════════════════════════════════════════╝{RST}")
 

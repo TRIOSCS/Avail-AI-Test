@@ -3,18 +3,17 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
     Company,
     CustomerSite,
+    Offer,
     ProactiveMatch,
     Quote,
-    Requisition,
     Requirement,
-    Offer,
+    Requisition,
     User,
 )
 

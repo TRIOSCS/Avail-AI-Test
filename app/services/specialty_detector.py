@@ -11,38 +11,115 @@ from collections import Counter
 
 BRAND_LIST = [
     # Major semiconductor companies
-    "Intel", "AMD", "Nvidia", "Qualcomm", "Broadcom", "Texas Instruments",
-    "NXP", "STMicroelectronics", "Infineon", "Microchip", "Analog Devices",
-    "ON Semiconductor", "Renesas", "Marvell", "MediaTek", "Xilinx",
-    "Lattice", "Cypress", "Maxim", "Linear Technology",
+    "Intel",
+    "AMD",
+    "Nvidia",
+    "Qualcomm",
+    "Broadcom",
+    "Texas Instruments",
+    "NXP",
+    "STMicroelectronics",
+    "Infineon",
+    "Microchip",
+    "Analog Devices",
+    "ON Semiconductor",
+    "Renesas",
+    "Marvell",
+    "MediaTek",
+    "Xilinx",
+    "Lattice",
+    "Cypress",
+    "Maxim",
+    "Linear Technology",
     # Server/Systems OEMs
-    "IBM", "Dell", "HP", "HPE", "Lenovo", "Cisco", "Juniper",
-    "Arista", "NetApp", "EMC", "Oracle", "Sun",
+    "IBM",
+    "Dell",
+    "HP",
+    "HPE",
+    "Lenovo",
+    "Cisco",
+    "Juniper",
+    "Arista",
+    "NetApp",
+    "EMC",
+    "Oracle",
+    "Sun",
     # Memory
-    "Samsung", "SK Hynix", "Micron", "Kingston", "Crucial",
-    "Western Digital", "Seagate", "SanDisk", "Toshiba", "Kioxia",
+    "Samsung",
+    "SK Hynix",
+    "Micron",
+    "Kingston",
+    "Crucial",
+    "Western Digital",
+    "Seagate",
+    "SanDisk",
+    "Toshiba",
+    "Kioxia",
     # Passive components
-    "Murata", "TDK", "Yageo", "Vishay", "Kemet", "AVX", "Panasonic",
-    "Nichicon", "Rubycon", "Bourns", "Ohmite",
+    "Murata",
+    "TDK",
+    "Yageo",
+    "Vishay",
+    "Kemet",
+    "AVX",
+    "Panasonic",
+    "Nichicon",
+    "Rubycon",
+    "Bourns",
+    "Ohmite",
     # Connectors & electromechanical
-    "TE Connectivity", "Amphenol", "Molex", "JAE", "Hirose",
-    "ITT", "Smiths Interconnect", "3M", "Phoenix Contact",
+    "TE Connectivity",
+    "Amphenol",
+    "Molex",
+    "JAE",
+    "Hirose",
+    "ITT",
+    "Smiths Interconnect",
+    "3M",
+    "Phoenix Contact",
     # Power
-    "Mean Well", "Delta Electronics", "Vicor", "Artesyn",
-    "Lambda", "TDK-Lambda", "Cosel", "Bel Fuse",
+    "Mean Well",
+    "Delta Electronics",
+    "Vicor",
+    "Artesyn",
+    "Lambda",
+    "TDK-Lambda",
+    "Cosel",
+    "Bel Fuse",
     # Optoelectronics
-    "Osram", "Lumileds", "Cree", "Broadcom", "Hamamatsu",
+    "Osram",
+    "Lumileds",
+    "Cree",
+    "Broadcom",
+    "Hamamatsu",
     # RF & wireless
-    "Qorvo", "Skyworks", "MACOM", "Mini-Circuits",
+    "Qorvo",
+    "Skyworks",
+    "MACOM",
+    "Mini-Circuits",
     # Automotive
-    "Bosch", "Continental", "Denso",
+    "Bosch",
+    "Continental",
+    "Denso",
     # Test & measurement
-    "Keysight", "Tektronix", "National Instruments",
+    "Keysight",
+    "Tektronix",
+    "National Instruments",
     # PCB & assembly
-    "JLCPCB", "PCBWay",
+    "JLCPCB",
+    "PCBWay",
     # Other notable brands
-    "Arrow", "Avnet", "Digi-Key", "Mouser", "Future Electronics",
-    "Heilind", "TTI", "Sager", "Newark", "Farnell", "RS Components",
+    "Arrow",
+    "Avnet",
+    "Digi-Key",
+    "Mouser",
+    "Future Electronics",
+    "Heilind",
+    "TTI",
+    "Sager",
+    "Newark",
+    "Farnell",
+    "RS Components",
 ]
 
 # Compile brand patterns (case-insensitive, word-boundary)
@@ -50,9 +127,7 @@ _BRAND_PATTERNS = {}
 for brand in BRAND_LIST:
     # Escape special regex chars and create word-boundary pattern
     escaped = re.escape(brand)
-    _BRAND_PATTERNS[brand] = re.compile(
-        rf"\b{escaped}\b", re.IGNORECASE
-    )
+    _BRAND_PATTERNS[brand] = re.compile(rf"\b{escaped}\b", re.IGNORECASE)
 
 # ── Commodity category mapping ───────────────────────────────────────
 
@@ -158,12 +233,7 @@ def analyze_vendor_specialties(vendor_card_id: int, db) -> dict:
                 commodity_counter[c] += 1
 
     # 2. From offers
-    offers = (
-        db.query(Offer.manufacturer, Offer.mpn)
-        .filter(Offer.vendor_card_id == vendor_card_id)
-        .limit(500)
-        .all()
-    )
+    offers = db.query(Offer.manufacturer, Offer.mpn).filter(Offer.vendor_card_id == vendor_card_id).limit(500).all()
     for o in offers:
         if o.manufacturer:
             brands = detect_brands_from_text(o.manufacturer)

@@ -13,7 +13,6 @@ Covers:
 """
 
 import asyncio
-from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,7 +24,6 @@ from app.enrichment_service import (
     _title_case_preserve_acronyms,
     normalize_company_output,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # _clean_domain
@@ -195,44 +193,39 @@ class TestNormalizeCompanyInput:
 
     def test_cleans_name_and_domain(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.run(
-            normalize_company_input("  Arrow Electronics  ", "https://www.arrow.com/")
-        )
+
+        name, domain = asyncio.run(normalize_company_input("  Arrow Electronics  ", "https://www.arrow.com/"))
         assert name == "Arrow Electronics"
         assert domain == "arrow.com"
 
     def test_empty_name(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.run(
-            normalize_company_input("", "example.com")
-        )
+
+        name, domain = asyncio.run(normalize_company_input("", "example.com"))
         assert name == ""
         assert domain == "example.com"
 
     def test_no_domain(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.run(
-            normalize_company_input("Arrow", "")
-        )
+
+        name, domain = asyncio.run(normalize_company_input("Arrow", ""))
         assert name == "Arrow"
         assert domain == ""
 
     def test_suspicious_name_with_api_key(self):
         """When API key is present and name looks suspicious, Claude is called."""
         from app.enrichment_service import normalize_company_input
+
         with patch("app.enrichment_service.get_credential_cached", return_value="sk-test"):
             with patch("app.enrichment_service.claude_text", new_callable=AsyncMock, return_value="Fixed Name"):
-                name, domain = asyncio.run(
-                    normalize_company_input("Xyzwrk Corp", "example.com")
-                )
+                name, domain = asyncio.run(normalize_company_input("Xyzwrk Corp", "example.com"))
                 assert name == "Fixed Name"
 
     def test_suspicious_name_no_api_key(self):
         """Without API key, suspicious name passes through unchanged."""
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.run(
-            normalize_company_input("Xyzwrk Corp", "example.com")
-        )
+
+        name, domain = asyncio.run(normalize_company_input("Xyzwrk Corp", "example.com"))
         assert name == "Xyzwrk Corp"
 
 
@@ -247,14 +240,14 @@ class TestNormalizeCompanyInput:
 class TestExploriumFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _explorium_find_company
+
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _explorium_find_company("example.com")
-            )
+            result = asyncio.run(_explorium_find_company("example.com"))
             assert result is None
 
     def test_success_strips_firmo_prefix(self):
         from app.enrichment_service import _explorium_find_company
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -269,9 +262,7 @@ class TestExploriumFindCompany:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _explorium_find_company("example.com")
-                )
+                result = asyncio.run(_explorium_find_company("example.com"))
                 assert result["source"] == "explorium"
                 assert result["legal_name"] == "Example Corp"
                 assert result["industry"] == "Semiconductors"
@@ -280,14 +271,14 @@ class TestExploriumFindCompany:
 class TestExploriumFindContacts:
     def test_no_api_key_returns_empty(self):
         from app.enrichment_service import _explorium_find_contacts
+
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _explorium_find_contacts("example.com")
-            )
+            result = asyncio.run(_explorium_find_contacts("example.com"))
             assert result == []
 
     def test_success(self):
         from app.enrichment_service import _explorium_find_contacts
+
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -298,9 +289,7 @@ class TestExploriumFindContacts:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _explorium_find_contacts("example.com")
-                )
+                result = asyncio.run(_explorium_find_contacts("example.com"))
                 assert len(result) == 1
                 assert result[0]["source"] == "explorium"
                 assert result[0]["full_name"] == "Alice"
@@ -314,14 +303,14 @@ class TestExploriumFindContacts:
 class TestGradientFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _gradient_find_company
+
         with patch("app.config.settings", SimpleNamespace(do_gradient_api_key="")):
-            result = asyncio.run(
-                _gradient_find_company("example.com")
-            )
+            result = asyncio.run(_gradient_find_company("example.com"))
             assert result is None
 
     def test_success(self):
         from app.enrichment_service import _gradient_find_company
+
         mock_settings = SimpleNamespace(do_gradient_api_key="grad-key")
         with patch("app.config.settings", mock_settings):
             with patch(
@@ -335,14 +324,13 @@ class TestGradientFindCompany:
                     "hq_country": "US",
                 },
             ):
-                result = asyncio.run(
-                    _gradient_find_company("example.com", "Grad Corp")
-                )
+                result = asyncio.run(_gradient_find_company("example.com", "Grad Corp"))
                 assert result["source"] == "gradient"
                 assert result["legal_name"] == "Grad Corp"
 
     def test_exception_returns_none(self):
         from app.enrichment_service import _gradient_find_company
+
         mock_settings = SimpleNamespace(do_gradient_api_key="grad-key")
         with patch("app.config.settings", mock_settings):
             with patch(
@@ -350,9 +338,7 @@ class TestGradientFindCompany:
                 new_callable=AsyncMock,
                 side_effect=Exception("fail"),
             ):
-                result = asyncio.run(
-                    _gradient_find_company("example.com")
-                )
+                result = asyncio.run(_gradient_find_company("example.com"))
                 assert result is None
 
 
@@ -364,14 +350,14 @@ class TestGradientFindCompany:
 class TestAiFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _ai_find_company
+
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _ai_find_company("example.com")
-            )
+            result = asyncio.run(_ai_find_company("example.com"))
             assert result is None
 
     def test_success(self):
         from app.enrichment_service import _ai_find_company
+
         with patch("app.enrichment_service.get_credential_cached", return_value="sk-key"):
             with patch(
                 "app.enrichment_service.claude_json",
@@ -385,37 +371,34 @@ class TestAiFindCompany:
                     "website": "https://ai.com",
                 },
             ):
-                result = asyncio.run(
-                    _ai_find_company("ai.com", "AI Corp")
-                )
+                result = asyncio.run(_ai_find_company("ai.com", "AI Corp"))
                 assert result["source"] == "ai"
                 assert result["legal_name"] == "AI Corp"
 
     def test_null_response_returns_none(self):
         from app.enrichment_service import _ai_find_company
+
         with patch("app.enrichment_service.get_credential_cached", return_value="sk-key"):
             with patch(
                 "app.enrichment_service.claude_json",
                 new_callable=AsyncMock,
                 return_value=None,
             ):
-                result = asyncio.run(
-                    _ai_find_company("example.com")
-                )
+                result = asyncio.run(_ai_find_company("example.com"))
                 assert result is None
 
 
 class TestAiFindContacts:
     def test_no_api_key_returns_empty(self):
         from app.enrichment_service import _ai_find_contacts
+
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _ai_find_contacts("example.com")
-            )
+            result = asyncio.run(_ai_find_contacts("example.com"))
             assert result == []
 
     def test_success(self):
         from app.enrichment_service import _ai_find_contacts
+
         with patch("app.enrichment_service.get_credential_cached", return_value="sk-key"):
             with patch(
                 "app.enrichment_service.enrich_contacts_websearch",
@@ -424,9 +407,7 @@ class TestAiFindContacts:
                     {"full_name": "Bob", "title": "Sales", "email": "bob@ai.com"},
                 ],
             ):
-                result = asyncio.run(
-                    _ai_find_contacts("ai.com", "AI Corp")
-                )
+                result = asyncio.run(_ai_find_contacts("ai.com", "AI Corp"))
                 assert len(result) == 1
                 assert result[0]["source"] == "ai"
                 assert result[0]["full_name"] == "Bob"
@@ -447,68 +428,77 @@ class TestEnrichEntity:
 
     def test_cache_hit(self):
         from app.enrichment_service import enrich_entity
+
         cached = {"legal_name": "Cached Corp", "domain": "cached.com", "source": "cache"}
         with patch("app.cache.intel_cache.get_cached", return_value=cached):
-            with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Cached", "cached.com")):
-                result = asyncio.run(
-                    enrich_entity("cached.com")
-                )
+            with patch(
+                "app.enrichment_service.normalize_company_input",
+                new_callable=AsyncMock,
+                return_value=("Cached", "cached.com"),
+            ):
+                result = asyncio.run(enrich_entity("cached.com"))
                 assert result["legal_name"] == "Cached Corp"
 
     def test_all_providers_fail_returns_empty_result(self):
         from app.enrichment_service import enrich_entity
-        with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Test", "test.com")):
+
+        with patch(
+            "app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Test", "test.com")
+        ):
             with patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None):
-                result = asyncio.run(
-                    enrich_entity("test.com")
-                )
+                result = asyncio.run(enrich_entity("test.com"))
                 assert result["domain"] == "test.com"
                 assert result["legal_name"] is None
 
     def test_all_providers_no_keys_returns_empty(self):
         from app.enrichment_service import find_suggested_contacts
-        result = asyncio.run(
-            find_suggested_contacts("example.com")
-        )
+
+        result = asyncio.run(find_suggested_contacts("example.com"))
         assert result == []
 
     def test_deduplicates_by_email(self):
         from app.enrichment_service import find_suggested_contacts
+
         contacts = [
             {"full_name": "Jane", "title": "Sales Manager", "email": "jane@example.com", "source": "explorium"},
             {"full_name": "Jane Doe", "title": "Sales Manager", "email": "jane@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
-            with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[1:]):
-                result = asyncio.run(
-                    find_suggested_contacts("example.com")
-                )
+        with patch(
+            "app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]
+        ):
+            with patch(
+                "app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[1:]
+            ):
+                result = asyncio.run(find_suggested_contacts("example.com"))
                 # Should be deduped to 1 contact
                 assert len(result) == 1
 
     def test_filters_irrelevant_titles(self):
         from app.enrichment_service import find_suggested_contacts
+
         contacts = [
             {"full_name": "Sales VP", "title": "VP Sales", "email": "vp@example.com", "source": "explorium"},
-            {"full_name": "Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "explorium"},
+            {
+                "full_name": "Janitor",
+                "title": "Facilities Janitor",
+                "email": "janitor@example.com",
+                "source": "explorium",
+            },
         ]
         with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.run(
-                find_suggested_contacts("example.com")
-            )
+            result = asyncio.run(find_suggested_contacts("example.com"))
             # VP Sales is relevant, Janitor is not
             assert len(result) == 1
             assert result[0]["full_name"] == "Sales VP"
 
     def test_returns_all_if_filter_removes_everything(self):
         from app.enrichment_service import find_suggested_contacts
+
         contacts = [
             {"full_name": "Receptionist", "title": "Receptionist", "email": "front@example.com", "source": "explorium"},
         ]
         with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.run(
-                find_suggested_contacts("example.com")
-            )
+            result = asyncio.run(find_suggested_contacts("example.com"))
             # Should return unfiltered since filter removed everything
             assert len(result) == 1
 
@@ -521,16 +511,24 @@ class TestEnrichEntity:
 class TestApplyEnrichmentToCompany:
     def _make_company(self, **overrides):
         defaults = dict(
-            domain=None, linkedin_url=None, legal_name=None,
-            industry=None, employee_size=None, hq_city=None,
-            hq_state=None, hq_country=None, website=None,
-            last_enriched_at=None, enrichment_source=None,
+            domain=None,
+            linkedin_url=None,
+            legal_name=None,
+            industry=None,
+            employee_size=None,
+            hq_city=None,
+            hq_state=None,
+            hq_country=None,
+            website=None,
+            last_enriched_at=None,
+            enrichment_source=None,
         )
         defaults.update(overrides)
         return SimpleNamespace(**defaults)
 
     def test_fills_empty_fields(self):
         from app.enrichment_service import apply_enrichment_to_company
+
         company = self._make_company()
         data = {
             "domain": "example.com",
@@ -551,6 +549,7 @@ class TestApplyEnrichmentToCompany:
 
     def test_does_not_overwrite_existing(self):
         from app.enrichment_service import apply_enrichment_to_company
+
         company = self._make_company(domain="existing.com", industry="Existing")
         data = {"domain": "new.com", "industry": "New"}
         updated = apply_enrichment_to_company(company, data)
@@ -560,6 +559,7 @@ class TestApplyEnrichmentToCompany:
 
     def test_website_only_if_empty(self):
         from app.enrichment_service import apply_enrichment_to_company
+
         company = self._make_company()
         data = {"website": "https://example.com", "source": "explorium"}
         updated = apply_enrichment_to_company(company, data)
@@ -568,14 +568,23 @@ class TestApplyEnrichmentToCompany:
 
     def test_no_update_returns_empty_list(self):
         from app.enrichment_service import apply_enrichment_to_company
+
         company = self._make_company(
-            domain="ex.com", legal_name="Ex", industry="Tech",
-            hq_city="NYC", hq_state="NY", hq_country="US",
-            employee_size="100", linkedin_url="https://li.com", website="https://ex.com",
+            domain="ex.com",
+            legal_name="Ex",
+            industry="Tech",
+            hq_city="NYC",
+            hq_state="NY",
+            hq_country="US",
+            employee_size="100",
+            linkedin_url="https://li.com",
+            website="https://ex.com",
         )
         data = {
-            "domain": "other.com", "legal_name": "Other",
-            "industry": "Other", "website": "https://other.com",
+            "domain": "other.com",
+            "legal_name": "Other",
+            "industry": "Other",
+            "website": "https://other.com",
         }
         updated = apply_enrichment_to_company(company, data)
         assert updated == []
@@ -590,16 +599,24 @@ class TestApplyEnrichmentToCompany:
 class TestApplyEnrichmentToVendor:
     def _make_vendor(self, **overrides):
         defaults = dict(
-            domain=None, linkedin_url=None, legal_name=None,
-            industry=None, employee_size=None, hq_city=None,
-            hq_state=None, hq_country=None, website=None,
-            last_enriched_at=None, enrichment_source=None,
+            domain=None,
+            linkedin_url=None,
+            legal_name=None,
+            industry=None,
+            employee_size=None,
+            hq_city=None,
+            hq_state=None,
+            hq_country=None,
+            website=None,
+            last_enriched_at=None,
+            enrichment_source=None,
         )
         defaults.update(overrides)
         return SimpleNamespace(**defaults)
 
     def test_fills_empty_fields(self):
         from app.enrichment_service import apply_enrichment_to_vendor
+
         card = self._make_vendor()
         data = {
             "domain": "vendor.com",
@@ -617,6 +634,7 @@ class TestApplyEnrichmentToVendor:
 
     def test_does_not_overwrite_existing(self):
         from app.enrichment_service import apply_enrichment_to_vendor
+
         card = self._make_vendor(domain="existing.com", website="https://existing.com")
         data = {"domain": "new.com", "website": "https://new.com"}
         updated = apply_enrichment_to_vendor(card, data)
@@ -625,10 +643,17 @@ class TestApplyEnrichmentToVendor:
 
     def test_no_changes_returns_empty(self):
         from app.enrichment_service import apply_enrichment_to_vendor
+
         card = self._make_vendor(
-            domain="v.com", linkedin_url="https://li.com", legal_name="V",
-            industry="Tech", employee_size="50", hq_city="LA",
-            hq_state="CA", hq_country="US", website="https://v.com",
+            domain="v.com",
+            linkedin_url="https://li.com",
+            legal_name="V",
+            industry="Tech",
+            employee_size="50",
+            hq_city="LA",
+            hq_state="CA",
+            hq_country="US",
+            website="https://v.com",
         )
         updated = apply_enrichment_to_vendor(card, {"domain": "other.com"})
         assert updated == []
@@ -652,9 +677,7 @@ class TestNormalizeCompanyInputExceptionPath:
                 new_callable=AsyncMock,
                 side_effect=Exception("API timeout"),
             ):
-                name, domain = asyncio.run(
-                    normalize_company_input("Xyzwrk Corp", "example.com")
-                )
+                name, domain = asyncio.run(normalize_company_input("Xyzwrk Corp", "example.com"))
                 # Exception is caught; original suspicious name is returned unchanged
                 assert name == "Xyzwrk Corp"
                 assert domain == "example.com"
@@ -690,9 +713,6 @@ class TestNormalizeCompanyOutputEmployeeEdgeCases:
         assert result["employee_size"] == "5,000+"
 
 
-
-
-
 class TestExploriumFindCompanyNon200:
     """Lines 373-374: _explorium_find_company returns None on non-200."""
 
@@ -704,9 +724,7 @@ class TestExploriumFindCompanyNon200:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _explorium_find_company("example.com")
-                )
+                result = asyncio.run(_explorium_find_company("example.com"))
                 assert result is None
 
 
@@ -719,9 +737,7 @@ class TestExploriumFindCompanyException:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("timeout"))
-                result = asyncio.run(
-                    _explorium_find_company("example.com")
-                )
+                result = asyncio.run(_explorium_find_company("example.com"))
                 assert result is None
 
 
@@ -741,9 +757,7 @@ class TestExploriumFindContactsTitleFilter:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _explorium_find_contacts("example.com", title_filter="Director")
-                )
+                result = asyncio.run(_explorium_find_contacts("example.com", title_filter="Director"))
                 assert len(result) == 1
                 call_kwargs = mock_http.post.call_args
                 assert call_kwargs.kwargs["json"]["job_title_keywords"] == ["Director"]
@@ -760,9 +774,7 @@ class TestExploriumFindContactsNon200:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _explorium_find_contacts("example.com")
-                )
+                result = asyncio.run(_explorium_find_contacts("example.com"))
                 assert result == []
 
 
@@ -775,9 +787,7 @@ class TestExploriumFindContactsException:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("connection refused"))
-                result = asyncio.run(
-                    _explorium_find_contacts("example.com")
-                )
+                result = asyncio.run(_explorium_find_contacts("example.com"))
                 assert result == []
 
 
@@ -794,9 +804,7 @@ class TestGradientFindCompanyNullData:
                 new_callable=AsyncMock,
                 return_value=None,
             ):
-                result = asyncio.run(
-                    _gradient_find_company("example.com")
-                )
+                result = asyncio.run(_gradient_find_company("example.com"))
                 assert result is None
 
     def test_returns_none_when_data_is_list(self):
@@ -809,9 +817,7 @@ class TestGradientFindCompanyNullData:
                 new_callable=AsyncMock,
                 return_value=["not", "a", "dict"],
             ):
-                result = asyncio.run(
-                    _gradient_find_company("example.com")
-                )
+                result = asyncio.run(_gradient_find_company("example.com"))
                 assert result is None
 
 
@@ -827,9 +833,7 @@ class TestAiFindCompanyException:
                 new_callable=AsyncMock,
                 side_effect=Exception("rate limited"),
             ):
-                result = asyncio.run(
-                    _ai_find_company("example.com")
-                )
+                result = asyncio.run(_ai_find_company("example.com"))
                 assert result is None
 
 
@@ -845,9 +849,7 @@ class TestAiFindContactsException:
                 new_callable=AsyncMock,
                 side_effect=Exception("websearch failed"),
             ):
-                result = asyncio.run(
-                    _ai_find_contacts("example.com", "Example Corp")
-                )
+                result = asyncio.run(_ai_find_contacts("example.com", "Example Corp"))
                 assert result == []
 
 
@@ -859,7 +861,6 @@ class TestEnrichEntityAIFillsGaps:
         with patch("app.cache.intel_cache.get_cached", return_value=None):
             with patch("app.cache.intel_cache.set_cached"):
                 yield
-
 
     def test_ai_only_source_when_no_other_providers(self):
         """When no other providers return data, AI is the sole source (line 684).
@@ -908,17 +909,18 @@ class TestEnrichEntityAIFillsGaps:
                         ):
                             # Patch inner safe wrappers to ensure no other source
                             import builtins
+
                             original_import = builtins.__import__
+
                             def mock_import(name, *args, **kwargs):
                                 if "apollo_client" in name:
                                     raise ImportError("no apollo")
                                 if "clearbit_client" in name:
                                     raise ImportError("no clearbit")
                                 return original_import(name, *args, **kwargs)
+
                             with patch("builtins.__import__", side_effect=mock_import):
-                                result = asyncio.run(
-                                    enrich_entity("onlyai.com")
-                                )
+                                result = asyncio.run(enrich_entity("onlyai.com"))
                                 assert result["source"] == "ai"
                                 assert result["legal_name"] == "Only Ai CORP"
 
@@ -957,9 +959,7 @@ class TestEnrichEntitySafeProviderExceptions:
                             new_callable=AsyncMock,
                             return_value=None,
                         ):
-                            result = asyncio.run(
-                                enrich_entity("test.com")
-                            )
+                            result = asyncio.run(enrich_entity("test.com"))
                             # Should still return a result even if Apollo/Clearbit fail
                             assert result["domain"] == "test.com"
 
@@ -988,9 +988,7 @@ class TestEnrichEntitySafeProviderExceptions:
                             new_callable=AsyncMock,
                             return_value=None,
                         ):
-                            result = asyncio.run(
-                                enrich_entity("test.com")
-                            )
+                            result = asyncio.run(enrich_entity("test.com"))
                             assert result["domain"] == "test.com"
 
 
@@ -1010,9 +1008,7 @@ class TestFindSuggestedContactsProviderExceptions:
 
         # All providers return empty except we simulate hunter raising an exception
         # via return_exceptions=True in gather. The _safe_hunter wrapper catches it.
-        result = asyncio.run(
-            find_suggested_contacts("example.com")
-        )
+        result = asyncio.run(find_suggested_contacts("example.com"))
         assert result == []
 
     def test_contact_with_email_but_no_title_is_kept(self):
@@ -1021,12 +1017,15 @@ class TestFindSuggestedContactsProviderExceptions:
 
         contacts = [
             {"full_name": "No Title Person", "title": None, "email": "notitle@example.com", "source": "explorium"},
-            {"full_name": "Irrelevant Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "explorium"},
+            {
+                "full_name": "Irrelevant Janitor",
+                "title": "Facilities Janitor",
+                "email": "janitor@example.com",
+                "source": "explorium",
+            },
         ]
         with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.run(
-                find_suggested_contacts("example.com")
-            )
+            result = asyncio.run(find_suggested_contacts("example.com"))
             # No Title Person has email → relevant; Janitor has irrelevant title → filtered out
             assert len(result) == 1
             assert result[0]["full_name"] == "No Title Person"
@@ -1039,9 +1038,7 @@ class TestFindSuggestedContactsProviderExceptions:
             {"full_name": "Ghost Person", "title": "", "email": None, "source": "explorium"},
         ]
         with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.run(
-                find_suggested_contacts("example.com")
-            )
+            result = asyncio.run(find_suggested_contacts("example.com"))
             # Filter removes Ghost Person (no title, no email → not relevant)
             # But since filter removed everything, returns unfiltered
             assert len(result) == 1
@@ -1064,9 +1061,7 @@ class TestFindSuggestedContactsProviderExceptions:
                 new_callable=AsyncMock,
                 side_effect=Exception("explorium timeout"),
             ):
-                result = asyncio.run(
-                    find_suggested_contacts("example.com")
-                )
+                result = asyncio.run(find_suggested_contacts("example.com"))
                 # Should still return the good contact despite explorium failing
                 assert len(result) == 1
                 assert result[0]["full_name"] == "Good Contact"
@@ -1084,8 +1079,9 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
 
     def test_apollo_connector_import_raises(self):
         """Force apollo import to raise inside _safe_apollo_company."""
-        from app.enrichment_service import enrich_entity
         import builtins
+
+        from app.enrichment_service import enrich_entity
 
         original_import = builtins.__import__
 
@@ -1118,9 +1114,7 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                             return_value=None,
                         ):
                             with patch("builtins.__import__", side_effect=mock_import):
-                                result = asyncio.run(
-                                    enrich_entity("test.com")
-                                )
+                                result = asyncio.run(enrich_entity("test.com"))
                                 assert result["domain"] == "test.com"
 
 
@@ -1135,8 +1129,9 @@ class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:
 
     def test_all_safe_wrappers_handle_import_errors(self):
         """Force hunter, rocketreach, apollo, and lusha imports to fail inside find_suggested_contacts."""
-        from app.enrichment_service import find_suggested_contacts
         import builtins
+
+        from app.enrichment_service import find_suggested_contacts
 
         original_import = builtins.__import__
 
@@ -1152,9 +1147,7 @@ class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            result = asyncio.run(
-                find_suggested_contacts("example.com")
-            )
+            result = asyncio.run(find_suggested_contacts("example.com"))
             assert result == []
 
     def test_lusha_returns_contact_in_gather(self):
@@ -1169,22 +1162,27 @@ class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:
             "linkedin_url": None,
             "location": "Boston",
         }
-        with patch(
-            "app.enrichment_service._explorium_find_contacts",
-            new_callable=AsyncMock, return_value=[],
-        ), patch(
-            "app.enrichment_service._explorium_find_contacts",
-            new_callable=AsyncMock, return_value=[],
-        ), patch(
-            "app.enrichment_service._ai_find_contacts",
-            new_callable=AsyncMock, return_value=[],
+        with (
+            patch(
+                "app.enrichment_service._explorium_find_contacts",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "app.enrichment_service._explorium_find_contacts",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch(
+                "app.enrichment_service._ai_find_contacts",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
         ):
             # Mock the lazy import inside _safe_lusha
             mock_find_person = AsyncMock(return_value=lusha_result)
             with patch.dict("sys.modules", {"app.connectors.lusha_client": MagicMock(find_person=mock_find_person)}):
-                result = asyncio.run(
-                    find_suggested_contacts("acme.com", name="Acme Corp")
-                )
+                result = asyncio.run(find_suggested_contacts("acme.com", name="Acme Corp"))
                 lusha_contacts = [c for c in result if c.get("source") == "lusha"]
                 assert len(lusha_contacts) == 1
                 assert lusha_contacts[0]["full_name"] == "Lusha Contact"

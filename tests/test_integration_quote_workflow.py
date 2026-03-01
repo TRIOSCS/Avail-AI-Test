@@ -22,10 +22,13 @@ def _setup_req_with_offers(client):
     ).json()
 
     # Create requisition and link to site
-    req = client.post("/api/requisitions", json={
-        "name": "Quote Workflow Test",
-        "customer_site_id": site["id"],
-    }).json()
+    req = client.post(
+        "/api/requisitions",
+        json={
+            "name": "Quote Workflow Test",
+            "customer_site_id": site["id"],
+        },
+    ).json()
     req_id = req["id"]
 
     items = client.post(
@@ -109,9 +112,7 @@ class TestQuoteUpdate:
         # Update with sell prices
         line_items = quote.get("line_items", [])
         for item in line_items:
-            item["sell_price"] = round(
-                (item.get("cost_price") or 0.50) * 1.3, 4
-            )
+            item["sell_price"] = round((item.get("cost_price") or 0.50) * 1.3, 4)
 
         resp = client.put(
             f"/api/quotes/{quote['id']}",

@@ -109,9 +109,7 @@ def _activity_to_dict(a) -> dict:
 
 
 @router.get("/api/companies/{company_id}/activities")
-async def get_company_activities(
-    company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def get_company_activities(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get activity log for a company."""
     from app.services.activity_service import get_company_activities as _get
 
@@ -173,9 +171,7 @@ async def log_company_note_endpoint(
 
 
 @router.get("/api/vendors/{vendor_id}/activities")
-async def get_vendor_activities(
-    vendor_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def get_vendor_activities(vendor_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get activity log for a vendor."""
     from app.services.activity_service import get_vendor_activities as _get
 
@@ -418,9 +414,7 @@ async def vendor_activity_status(
 
 
 @router.get("/api/companies/{company_id}/activity-status")
-async def company_activity_status(
-    company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def company_activity_status(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get activity health status for a company (for dashboard indicators)."""
     from app.config import settings as cfg
     from app.services.activity_service import days_since_last_activity
@@ -430,11 +424,7 @@ async def company_activity_status(
         raise HTTPException(404, "Company not found")
 
     days = days_since_last_activity(company_id, db)
-    inactivity_limit = (
-        cfg.strategic_inactivity_days
-        if company.is_strategic
-        else cfg.customer_inactivity_days
-    )
+    inactivity_limit = cfg.strategic_inactivity_days if company.is_strategic else cfg.customer_inactivity_days
 
     if days is None:
         status = "no_activity"
@@ -461,9 +451,7 @@ async def company_activity_status(
 
 
 @router.get("/api/sales/my-accounts")
-async def my_accounts(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def my_accounts(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get all accounts owned by the current user with activity health."""
     from app.services.ownership_service import get_my_accounts
 
@@ -471,9 +459,7 @@ async def my_accounts(
 
 
 @router.get("/api/sales/at-risk")
-async def at_risk_accounts(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def at_risk_accounts(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get all accounts approaching the inactivity warning zone."""
     from app.services.ownership_service import get_accounts_at_risk
 
@@ -481,9 +467,7 @@ async def at_risk_accounts(
 
 
 @router.get("/api/sales/open-pool")
-async def open_pool_accounts(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def open_pool_accounts(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get all unowned accounts available for claiming."""
     from app.services.ownership_service import get_open_pool_accounts
 
@@ -491,9 +475,7 @@ async def open_pool_accounts(
 
 
 @router.post("/api/sales/claim/{company_id}")
-async def claim_account(
-    company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def claim_account(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Manually claim an open pool account."""
     if user.role not in ("sales", "trader"):
         raise HTTPException(403, "Only sales users can claim accounts")
@@ -527,18 +509,10 @@ async def toggle_strategic(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    company.is_strategic = (
-        payload.is_strategic
-        if payload.is_strategic is not None
-        else not company.is_strategic
-    )
+    company.is_strategic = payload.is_strategic if payload.is_strategic is not None else not company.is_strategic
     db.commit()
 
-    inactivity_limit = (
-        settings.strategic_inactivity_days
-        if company.is_strategic
-        else settings.customer_inactivity_days
-    )
+    inactivity_limit = settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
     return {
         "company_id": company_id,
         "is_strategic": company.is_strategic,
@@ -547,9 +521,7 @@ async def toggle_strategic(
 
 
 @router.get("/api/sales/manager-digest")
-async def manager_digest(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def manager_digest(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get the manager digest data (admin only)."""
     if not _is_admin(user):
         raise HTTPException(403, "Admin only")
@@ -574,9 +546,7 @@ _NOTIFICATION_TYPES = (
 
 
 @router.get("/api/sales/notifications")
-async def sales_notifications(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def sales_notifications(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get dashboard notifications for the current user."""
     notifications = (
         db.query(ActivityLog)
@@ -644,18 +614,20 @@ async def mark_all_notifications_read(
 
 
 @router.get("/api/sales/notifications/count")
-async def notification_count(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def notification_count(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Lightweight unread notification count for badge display."""
     from sqlalchemy import func
 
-    count = db.query(func.count(ActivityLog.id)).filter(
-        ActivityLog.user_id == user.id,
-        ActivityLog.activity_type.in_(_NOTIFICATION_TYPES),
-        ActivityLog.dismissed_at.is_(None),
-        ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=14),
-    ).scalar()
+    count = (
+        db.query(func.count(ActivityLog.id))
+        .filter(
+            ActivityLog.user_id == user.id,
+            ActivityLog.activity_type.in_(_NOTIFICATION_TYPES),
+            ActivityLog.dismissed_at.is_(None),
+            ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=14),
+        )
+        .scalar()
+    )
     return {"count": count}
 
 
@@ -665,9 +637,7 @@ async def notification_count(
 
 
 @router.get("/api/prospecting/pool")
-async def prospecting_pool(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_pool(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get all unowned active sites available for claiming."""
     from app.services.ownership_service import get_open_pool_sites
 
@@ -675,9 +645,7 @@ async def prospecting_pool(
 
 
 @router.post("/api/prospecting/claim/{site_id}")
-async def prospecting_claim(
-    site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_claim(site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Claim an unowned site for the current user.
 
     Enforces 200-site cap — users at cap must release sites first.
@@ -723,9 +691,7 @@ async def prospecting_claim(
 
 
 @router.post("/api/prospecting/release/{site_id}")
-async def prospecting_release(
-    site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_release(site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Release ownership of a site back to the open pool."""
     site = db.get(CustomerSite, site_id)
     if not site:
@@ -743,9 +709,7 @@ async def prospecting_release(
 
 
 @router.get("/api/prospecting/my-sites")
-async def prospecting_my_sites(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_my_sites(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get sites owned by the current user with health status."""
     from app.services.ownership_service import get_my_sites
 
@@ -753,9 +717,7 @@ async def prospecting_my_sites(
 
 
 @router.get("/api/prospecting/at-risk")
-async def prospecting_at_risk(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_at_risk(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get owned sites approaching inactivity limit."""
     from app.services.ownership_service import get_sites_at_risk
 
@@ -804,9 +766,7 @@ SITE_CAP_PER_USER = 200
 
 
 @router.get("/api/prospecting/my-accounts")
-async def prospecting_my_accounts(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def prospecting_my_accounts(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get accounts grouped from the user's owned sites.
 
     Returns accounts (companies) with site counts and health status.
@@ -838,8 +798,7 @@ async def prospecting_my_accounts(
             func.count(
                 case(
                     (
-                        (CustomerSite.last_activity_at < thirty_days)
-                        | (CustomerSite.last_activity_at.is_(None)),
+                        (CustomerSite.last_activity_at < thirty_days) | (CustomerSite.last_activity_at.is_(None)),
                         CustomerSite.id,
                     ),
                     else_=None,
@@ -869,20 +828,22 @@ async def prospecting_my_accounts(
         else:
             health = "red"
 
-        accounts.append({
-            "company_id": r.id,
-            "name": r.name,
-            "domain": r.domain,
-            "industry": r.industry,
-            "location": ", ".join(filter(None, [r.hq_city, r.hq_state])) or None,
-            "employee_size": r.employee_size,
-            "is_strategic": r.is_strategic or False,
-            "site_count": r.site_count,
-            "active_sites": r.active_sites,
-            "inactive_sites": r.inactive_sites,
-            "health": health,
-            "last_activity": r.last_activity.isoformat() if r.last_activity else None,
-        })
+        accounts.append(
+            {
+                "company_id": r.id,
+                "name": r.name,
+                "domain": r.domain,
+                "industry": r.industry,
+                "location": ", ".join(filter(None, [r.hq_city, r.hq_state])) or None,
+                "employee_size": r.employee_size,
+                "is_strategic": r.is_strategic or False,
+                "site_count": r.site_count,
+                "active_sites": r.active_sites,
+                "inactive_sites": r.inactive_sites,
+                "health": health,
+                "last_activity": r.last_activity.isoformat() if r.last_activity else None,
+            }
+        )
 
     return accounts
 
@@ -925,18 +886,20 @@ async def prospecting_account_sites(
         else:
             status = "grey"
 
-        result.append({
-            "site_id": s.id,
-            "site_name": s.site_name,
-            "site_type": s.site_type,
-            "contact_name": s.contact_name,
-            "contact_email": s.contact_email,
-            "city": s.city,
-            "state": s.state,
-            "status": status,
-            "last_activity_at": last.isoformat() if last else None,
-            "days_inactive": (now - last).days if last else None,
-        })
+        result.append(
+            {
+                "site_id": s.id,
+                "site_name": s.site_name,
+                "site_type": s.site_type,
+                "contact_name": s.contact_name,
+                "contact_email": s.contact_email,
+                "city": s.city,
+                "state": s.state,
+                "status": status,
+                "last_activity_at": last.isoformat() if last else None,
+                "days_inactive": (now - last).days if last else None,
+            }
+        )
 
     return {
         "company": {
@@ -987,8 +950,7 @@ async def prospecting_capacity(
         .filter(
             CustomerSite.owner_id == target_id,
             CustomerSite.is_active.is_(True),
-            (CustomerSite.last_activity_at < ninety_days)
-            | (CustomerSite.last_activity_at.is_(None)),
+            (CustomerSite.last_activity_at < ninety_days) | (CustomerSite.last_activity_at.is_(None)),
         )
         .order_by(CustomerSite.last_activity_at.asc().nullsfirst())
         .limit(10)
@@ -1012,5 +974,3 @@ async def prospecting_capacity(
         "at_cap": used >= SITE_CAP_PER_USER,
         "stale_accounts": stale,
     }
-
-

@@ -9,6 +9,7 @@ class TestGetFernet:
     @patch("app.config.settings", MagicMock(secret_key="test-secret-key-12345"))
     def test_returns_fernet_instance(self):
         from cryptography.fernet import Fernet
+
         f = _get_fernet()
         assert isinstance(f, Fernet)
 
@@ -24,6 +25,7 @@ class TestGetFernet:
 class TestEncryptedText:
     def test_impl_is_text(self):
         from sqlalchemy import Text
+
         et = EncryptedText()
         assert et.impl is Text or et.impl_instance.__class__.__name__ == "Text"
 
@@ -77,6 +79,7 @@ class TestEncryptedText:
     @patch("app.utils.encrypted_type._get_fernet")
     def test_process_result_value_invalid_token_returns_raw(self, mock_fernet):
         from cryptography.fernet import InvalidToken
+
         mock_f = MagicMock()
         mock_f.decrypt.side_effect = InvalidToken()
         mock_fernet.return_value = mock_f

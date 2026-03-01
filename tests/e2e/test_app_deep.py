@@ -18,6 +18,7 @@ from playwright.sync_api import Page, expect
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def wait_for_app(page: Page, base_url: str):
     """Navigate and wait for the app shell to be fully loaded."""
     page.goto(base_url, wait_until="domcontentloaded")
@@ -58,7 +59,6 @@ def nav_click(page: Page, nav_id: str):
 
 
 class TestPageLoad:
-
     def test_login_page_shows_for_unauthenticated(self, page, base_url):
         """Unauthenticated users see the login screen."""
         page.goto(base_url, wait_until="networkidle")
@@ -89,7 +89,6 @@ class TestPageLoad:
 
 
 class TestMainNavigation:
-
     def test_navigate_to_vendors(self, authed_page, base_url):
         wait_for_app(authed_page, base_url)
         nav_click(authed_page, "navVendors")
@@ -162,7 +161,6 @@ class TestMainNavigation:
 
 
 class TestRequisitionList:
-
     def test_requisitions_load(self, authed_page, base_url):
         """The requisition list should show table rows after loading."""
         goto_rfqs(authed_page, base_url)
@@ -196,7 +194,6 @@ class TestRequisitionList:
 
 
 class TestRequisitionSubTabs:
-
     def _open_first_req(self, page: Page, base_url: str):
         """Expand the first requisition's drill-down."""
         goto_rfqs(page, base_url)
@@ -253,15 +250,13 @@ class TestDOMIsolation:
                         fn.includes('querySelectorAll(".tab")');
             return { hasBug: bad, fnSource: fn.substring(0, 200) };
         }""")
-        assert not result["hasBug"], \
-            f"switchTab still uses unscoped '.tab' selector: {result['fnSource']}"
+        assert not result["hasBug"], f"switchTab still uses unscoped '.tab' selector: {result['fnSource']}"
 
 
 # ── 6. CONSOLE ERROR DETECTION ──────────────────────────────────────
 
 
 class TestConsoleErrors:
-
     def test_no_js_errors_on_load(self, authed_page, base_url):
         """No JavaScript errors should appear on initial page load."""
         errors = []
@@ -308,13 +303,14 @@ class TestConsoleErrors:
 
 
 class TestAPIHealth:
-
     def test_no_failed_api_calls_on_load(self, authed_page, base_url):
         """All API calls on initial load should return 2xx."""
         failed = []
+
         def on_response(response):
             if "/api/" in response.url and response.status >= 400:
                 failed.append(f"{response.status} {response.url}")
+
         authed_page.on("response", on_response)
         wait_for_app(authed_page, base_url)
         authed_page.wait_for_timeout(3000)
@@ -323,9 +319,11 @@ class TestAPIHealth:
     def test_no_failed_api_on_rfq_view(self, authed_page, base_url):
         """Opening the RFQ list should not produce API errors."""
         failed = []
+
         def on_response(response):
             if "/api/" in response.url and response.status >= 400:
                 failed.append(f"{response.status} {response.url}")
+
         authed_page.on("response", on_response)
         goto_rfqs(authed_page, base_url)
         authed_page.wait_for_timeout(2000)
@@ -341,7 +339,6 @@ class TestAPIHealth:
 
 
 class TestVendorView:
-
     def test_vendor_list_loads(self, authed_page, base_url):
         """Vendor view should load without errors."""
         wait_for_app(authed_page, base_url)
@@ -361,7 +358,6 @@ class TestVendorView:
 
 
 class TestMaterialView:
-
     def test_material_list_loads(self, authed_page, base_url):
         """Material view should load without errors."""
         wait_for_app(authed_page, base_url)
@@ -374,7 +370,6 @@ class TestMaterialView:
 
 
 class TestRapidInteraction:
-
     def test_rapid_tab_switching(self, authed_page, base_url):
         """Rapidly clicking through drill-down tabs should not break the UI."""
         errors = []
@@ -439,7 +434,6 @@ class TestRapidInteraction:
 
 
 class TestCSSIntegrity:
-
     def test_drilldown_tabs_use_scoped_selectors(self, authed_page, base_url):
         """Drill-down tabs should be scoped to their parent container."""
         goto_rfqs(authed_page, base_url)
@@ -467,15 +461,13 @@ class TestCSSIntegrity:
         authed_page.wait_for_timeout(500)
 
         active_tabs = authed_page.locator("tr.drow.open .dd-tabs .dd-tab.on")
-        assert active_tabs.count() == 1, \
-            f"Expected exactly 1 active dd-tab, found {active_tabs.count()}"
+        assert active_tabs.count() == 1, f"Expected exactly 1 active dd-tab, found {active_tabs.count()}"
 
 
 # ── 12. STATUS BUCKET SWITCHING ──────────────────────────────────────
 
 
 class TestBucketSwitching:
-
     def test_bucket_pills_work(self, authed_page, base_url):
         """Clicking bucket pills switches the displayed requisitions."""
         goto_rfqs(authed_page, base_url)

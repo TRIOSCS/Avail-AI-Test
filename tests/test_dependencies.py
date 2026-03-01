@@ -8,7 +8,6 @@ Called by: pytest
 Depends on: app/dependencies.py, conftest.py
 """
 
-from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from app.dependencies import (
@@ -17,7 +16,6 @@ from app.dependencies import (
     is_admin,
     user_reqs_query,
 )
-from app.models import User
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -75,6 +73,7 @@ class TestUserReqsQuery:
         results = query.all()
         # sales_user didn't create test_requisition, so should see 0
         assert len(results) == 0
+
 
 class TestGetReqForUser:
     def test_buyer_can_get_any(self, db_session, test_user, test_requisition):

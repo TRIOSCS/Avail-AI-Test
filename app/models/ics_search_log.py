@@ -18,9 +18,7 @@ class IcsSearchLog(Base):
     __tablename__ = "ics_search_log"
 
     id = Column(Integer, primary_key=True)
-    queue_id = Column(
-        Integer, ForeignKey("ics_search_queue.id", ondelete="CASCADE"), nullable=False
-    )
+    queue_id = Column(Integer, ForeignKey("ics_search_queue.id", ondelete="CASCADE"), nullable=False)
     searched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     duration_ms = Column(Integer)
     results_found = Column(Integer)

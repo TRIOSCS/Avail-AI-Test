@@ -13,7 +13,6 @@ Design rules:
   - AVAIL still works if all AI fails
 """
 
-
 from app.cache.intel_cache import get_cached, set_cached
 from app.utils.claude_client import claude_json
 from app.utils.llm_router import routed_text

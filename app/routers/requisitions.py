@@ -99,13 +99,9 @@ async def requisition_counts(
     """Lightweight counts for dashboard widgets — avoids the heavy list query."""
     total = db.scalar(select(sqlfunc.count(Requisition.id)))
     open_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(
-            Requisition.status.in_(["open", "active", "sourcing"])
-        )
+        select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["open", "active", "sourcing"]))
     )
-    archive_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(Requisition.status == "archive")
-    )
+    archive_cnt = db.scalar(select(sqlfunc.count(Requisition.id)).where(Requisition.status == "archive"))
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
 
 
@@ -220,11 +216,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
     )
     # Sum of target_price * target_qty across requirements (for high-value filter)
     total_target_value_sq = (
-        select(
-            sqlfunc.coalesce(
-                sqlfunc.sum(Requirement.target_price * Requirement.target_qty), 0
-            )
-        )
+        select(sqlfunc.coalesce(sqlfunc.sum(Requirement.target_price * Requirement.target_qty), 0))
         .where(Requirement.requisition_id == Requisition.id)
         .correlate(Requisition)
         .scalar_subquery()
@@ -366,6 +358,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
     if q.strip():
         safe_q = escape_like(q.strip())
         from sqlalchemy import exists, or_
+
         # Search by req name, customer name, primary MPN, or substitutes
         # Split into separate EXISTS so PostgreSQL can use trigram indexes
         mpn_match = exists(
@@ -400,11 +393,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
     creator_names = {}
     creator_ids = {r.created_by for r, *_ in rows if r.created_by}
     if creator_ids:
-        creators = (
-            db.query(User.id, User.name, User.email)
-            .filter(User.id.in_(creator_ids))
-            .all()
-        )
+        creators = db.query(User.id, User.name, User.email).filter(User.id.in_(creator_ids)).all()
         creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
     return {
         "requisitions": [
@@ -413,11 +402,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
                 "name": r.name,
                 "status": r.status,
                 "customer_site_id": r.customer_site_id,
-                "company_id": (
-                    r.customer_site.company_id
-                    if r.customer_site
-                    else None
-                ),
+                "company_id": (r.customer_site.company_id if r.customer_site else None),
                 "customer_display": (
                     f"{r.customer_site.company.name} — {r.customer_site.site_name}"
                     if r.customer_site and r.customer_site.company
@@ -432,9 +417,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
                 "created_by": r.created_by,
                 "created_by_name": creator_names.get(r.created_by, ""),
                 "created_at": r.created_at.isoformat() if r.created_at else None,
-                "last_searched_at": r.last_searched_at.isoformat()
-                if r.last_searched_at
-                else None,
+                "last_searched_at": r.last_searched_at.isoformat() if r.last_searched_at else None,
                 "sourced_count": sourced_cnt or 0,
                 "rfq_sent_count": rfq_sent or 0,
                 "cloned_from_id": r.cloned_from_id,
@@ -454,7 +437,9 @@ def _build_requisition_list(q, status, limit, offset, user, db):
                 "sourcing_signals": _sc_signals,
             }
             for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt in rows
-            for _sc, _sc_color, _sc_signals in [_compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)]
+            for _sc, _sc_color, _sc_signals in [
+                _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)
+            ]
         ],
         "total": total,
         "limit": limit,
@@ -498,9 +483,7 @@ async def create_requisition(
 
 
 @router.put("/api/requisitions/{req_id}/archive")
-async def toggle_archive(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
@@ -514,9 +497,7 @@ async def toggle_archive(
 
 
 @router.put("/api/requisitions/bulk-archive")
-async def bulk_archive(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def bulk_archive(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Archive all active requisitions NOT created by the current user."""
 
     q = db.query(Requisition).filter(
@@ -530,9 +511,7 @@ async def bulk_archive(
 
 
 @router.post("/api/requisitions/{req_id}/dismiss-new-offers")
-async def dismiss_new_offers(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def dismiss_new_offers(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Mark offers as viewed so the flash alert stops."""
     req = get_req_for_user(db, user, req_id)
     if not req:
@@ -566,9 +545,7 @@ async def update_requisition(
 
 # ── Requirements ─────────────────────────────────────────────────────────
 @router.get("/api/requisitions/{req_id}/requirements")
-async def list_requirements(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_requirements(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """List requirements for a requisition with sighting counts."""
     req = get_req_for_user(db, user, req_id)
     if not req:
@@ -582,9 +559,7 @@ async def list_requirements(
         rows = (
             db.query(
                 Sighting.requirement_id,
-                sqlfunc.count(
-                    sqlfunc.distinct(Sighting.vendor_name_normalized)
-                ),
+                sqlfunc.count(sqlfunc.distinct(Sighting.vendor_name_normalized)),
             )
             .filter(
                 Sighting.requirement_id.in_(req_ids),
@@ -610,16 +585,8 @@ async def list_requirements(
             offer_counts[rid] = cnt
 
     # Requisition-level contact count and last activity timestamp
-    contact_count = (
-        db.query(sqlfunc.count(Contact.id))
-        .filter(Contact.requisition_id == req_id)
-        .scalar()
-    ) or 0
-    last_activity_row = (
-        db.query(sqlfunc.max(Contact.created_at))
-        .filter(Contact.requisition_id == req_id)
-        .scalar()
-    )
+    contact_count = (db.query(sqlfunc.count(Contact.id)).filter(Contact.requisition_id == req_id).scalar()) or 0
+    last_activity_row = db.query(sqlfunc.max(Contact.created_at)).filter(Contact.requisition_id == req_id).scalar()
     hours_since = None
     if last_activity_row:
         from datetime import datetime, timezone
@@ -702,6 +669,7 @@ async def add_requirements(
     def _nc_enqueue_batch(requirement_ids: list[int]):
         from ..database import SessionLocal
         from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+
         bg_db = SessionLocal()
         try:
             for rid in requirement_ids:
@@ -716,6 +684,7 @@ async def add_requirements(
     def _ics_enqueue_batch(requirement_ids: list[int]):
         from ..database import SessionLocal
         from ..services.ics_worker.queue_manager import enqueue_for_ics_search
+
         bg_db = SessionLocal()
         try:
             for rid in requirement_ids:
@@ -734,19 +703,26 @@ async def add_requirements(
     try:
         from ..config import settings as cfg
         from ..services.teams import send_hot_requirement_alert
+
         for r in created:
             price = float(r.target_price or 0)
             qty = r.target_qty or 0
             if qty * price >= cfg.teams_hot_threshold:
-                customer = req.customer_site.company.name if req.customer_site and req.customer_site.company else (req.customer_name or "")
-                asyncio.create_task(send_hot_requirement_alert(
-                    requirement_id=r.id,
-                    mpn=r.primary_mpn,
-                    target_qty=qty,
-                    target_price=price,
-                    customer_name=customer,
-                    requisition_id=req_id,
-                ))
+                customer = (
+                    req.customer_site.company.name
+                    if req.customer_site and req.customer_site.company
+                    else (req.customer_name or "")
+                )
+                asyncio.create_task(
+                    send_hot_requirement_alert(
+                        requirement_id=r.id,
+                        mpn=r.primary_mpn,
+                        target_qty=qty,
+                        target_price=price,
+                        customer_name=customer,
+                        requisition_id=req_id,
+                    )
+                )
     except (AttributeError, ValueError, RuntimeError):
         logger.debug("Teams hot-requirement alert failed", exc_info=True)
 
@@ -754,6 +730,7 @@ async def add_requirements(
     duplicates = []
     if req.customer_site_id and created:
         from datetime import timedelta
+
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
         card_ids = [r.material_card_id for r in created if r.material_card_id]
         if card_ids:
@@ -825,9 +802,7 @@ async def upload_requirements(
         subs = []
         sub_str = row.get("substitutes") or row.get("subs") or ""
         if sub_str:
-            subs = [
-                s.strip() for s in sub_str.replace("\n", ",").split(",") if s.strip()
-            ]
+            subs = [s.strip() for s in sub_str.replace("\n", ",").split(",") if s.strip()]
         for i in range(1, 21):
             s = row.get(f"sub_{i}") or row.get(f"sub{i}") or ""
             if s:
@@ -845,18 +820,10 @@ async def upload_requirements(
                 deduped_subs.append(ns)
 
         # Parse optional columns
-        condition = normalize_condition(
-            row.get("condition") or row.get("cond") or ""
-        )
-        packaging = normalize_packaging(
-            row.get("packaging") or row.get("package") or row.get("pkg") or ""
-        )
-        date_codes = (
-            row.get("date_codes") or row.get("date_code") or row.get("dc") or ""
-        ).strip() or None
-        manufacturer = (
-            row.get("manufacturer") or row.get("brand") or row.get("mfr") or ""
-        ).strip() or None
+        condition = normalize_condition(row.get("condition") or row.get("cond") or "")
+        packaging = normalize_packaging(row.get("packaging") or row.get("package") or row.get("pkg") or "")
+        date_codes = (row.get("date_codes") or row.get("date_code") or row.get("dc") or "").strip() or None
+        manufacturer = (row.get("manufacturer") or row.get("brand") or row.get("mfr") or "").strip() or None
         notes = (row.get("notes") or row.get("note") or "").strip() or None
         target_price_raw = row.get("target_price") or row.get("price") or ""
         target_price = normalize_price(target_price_raw)
@@ -888,11 +855,18 @@ async def upload_requirements(
     def _nc_enqueue_uploaded(requisition_id: int, count: int):
         from ..database import SessionLocal
         from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+
         bg_db = SessionLocal()
         try:
-            for r_item in bg_db.query(Requirement).filter(
-                Requirement.requisition_id == requisition_id,
-            ).order_by(Requirement.id.desc()).limit(count).all():
+            for r_item in (
+                bg_db.query(Requirement)
+                .filter(
+                    Requirement.requisition_id == requisition_id,
+                )
+                .order_by(Requirement.id.desc())
+                .limit(count)
+                .all()
+            ):
                 try:
                     enqueue_for_nc_search(r_item.id, bg_db)
                 except Exception:
@@ -907,9 +881,7 @@ async def upload_requirements(
 
 
 @router.delete("/api/requirements/{item_id}")
-async def delete_requirement(
-    item_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def delete_requirement(item_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     r = db.get(Requirement, item_id)
     if not r:
         raise HTTPException(404, "Requirement not found")
@@ -936,8 +908,16 @@ async def update_requirement(
         raise HTTPException(403, "Not authorized for this requisition")
     # Snapshot old values for changelog
     _req_track_fields = [
-        "primary_mpn", "target_qty", "target_price", "firmware",
-        "date_codes", "hardware_codes", "packaging", "condition", "notes", "sale_notes",
+        "primary_mpn",
+        "target_qty",
+        "target_price",
+        "firmware",
+        "date_codes",
+        "hardware_codes",
+        "packaging",
+        "condition",
+        "notes",
+        "sale_notes",
     ]
     old_vals = {f: getattr(r, f) for f in _req_track_fields}
     if data.primary_mpn is not None:
@@ -983,14 +963,16 @@ async def update_requirement(
         old_v = str(old_vals.get(f) or "")
         new_v = str(new_vals.get(f) or "")
         if old_v != new_v:
-            db.add(ChangeLog(
-                entity_type="requirement",
-                entity_id=item_id,
-                user_id=user.id,
-                field_name=f,
-                old_value=old_v,
-                new_value=new_v,
-            ))
+            db.add(
+                ChangeLog(
+                    entity_type="requirement",
+                    entity_id=item_id,
+                    user_id=user.id,
+                    field_name=f,
+                    old_value=old_v,
+                    new_value=new_v,
+                )
+            )
     db.commit()
     return {"ok": True}
 
@@ -1003,6 +985,7 @@ def _enqueue_ics_nc_batch(requirement_ids: list[int]):
     from ..database import SessionLocal
     from ..services.ics_worker.queue_manager import enqueue_for_ics_search
     from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+
     bg_db = SessionLocal()
     try:
         for rid in requirement_ids:
@@ -1036,10 +1019,7 @@ async def search_all(
     requirement_ids = body.requirement_ids if body else None
 
     # Filter requirements to search
-    reqs_to_search = [
-        r for r in req.requirements
-        if not requirement_ids or r.id in requirement_ids
-    ]
+    reqs_to_search = [r for r in req.requirements if not requirement_ids or r.id in requirement_ids]
 
     # Search all requirements in parallel
     search_tasks = [search_requirement(r, db) for r in reqs_to_search]
@@ -1091,8 +1071,11 @@ async def search_all(
 @router.post("/api/requirements/{item_id}/search")
 @limiter.limit("20/minute")
 async def search_one(
-    item_id: int, request: Request, background_tasks: BackgroundTasks,
-    user: User = Depends(require_user), db: Session = Depends(get_db),
+    item_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     r = db.get(Requirement, item_id)
     if not r:
@@ -1105,9 +1088,7 @@ async def search_one(
     sightings = search_result["sightings"]
     source_stats = search_result["source_stats"]
     # Wrap in same structure as search_all so enrichment works
-    results = {
-        str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}
-    }
+    results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
     _enrich_with_vendor_cards(results, db)
 
     # Queue ICS/NC browser searches for this requirement
@@ -1132,11 +1113,10 @@ async def get_saved_sightings(
     # Batch-fetch all sightings for this requisition's requirements in one query
     req_ids = [r.id for r in req.requirements]
     all_sightings = (
-        db.query(Sighting)
-        .filter(Sighting.requirement_id.in_(req_ids))
-        .order_by(Sighting.score.desc())
-        .all()
-    ) if req_ids else []
+        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.score.desc()).all())
+        if req_ids
+        else []
+    )
     sightings_by_req: dict[int, list] = {}
     for s in all_sightings:
         sightings_by_req.setdefault(s.requirement_id, []).append(s)
@@ -1266,12 +1246,7 @@ async def mark_unavailable(
     if not s:
         raise HTTPException(404, "Sighting not found")
     # Resolve parent requisition and verify user access
-    req = (
-        db.query(Requisition)
-        .join(Requirement)
-        .filter(Requirement.id == s.requirement_id)
-        .first()
-    )
+    req = db.query(Requisition).join(Requirement).filter(Requirement.id == s.requirement_id).first()
     if not req or not get_req_for_user(db, user, req.id):
         raise HTTPException(403, "Not authorized for this sighting")
     s.is_unavailable = data.unavailable

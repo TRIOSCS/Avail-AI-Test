@@ -72,14 +72,11 @@ def api_list_queue(
     if vendor_ids:
         vendor_map = {
             v.id: v.display_name
-            for v in db.query(VendorCard.id, VendorCard.display_name)
-            .filter(VendorCard.id.in_(vendor_ids)).all()
+            for v in db.query(VendorCard.id, VendorCard.display_name).filter(VendorCard.id.in_(vendor_ids)).all()
         }
     if company_ids:
         company_map = {
-            c.id: c.name
-            for c in db.query(Company.id, Company.name)
-            .filter(Company.id.in_(company_ids)).all()
+            c.id: c.name for c in db.query(Company.id, Company.name).filter(Company.id.in_(company_ids)).all()
         }
 
     results = []
@@ -95,19 +92,21 @@ def api_list_queue(
         elif item.vendor_contact_id:
             entity_type_str = "contact"
 
-        results.append({
-            "id": item.id,
-            "entity_type": entity_type_str,
-            "entity_name": entity_name,
-            "enrichment_type": item.enrichment_type,
-            "field_name": item.field_name,
-            "current_value": item.current_value,
-            "proposed_value": item.proposed_value,
-            "confidence": item.confidence,
-            "source": item.source,
-            "status": item.status,
-            "created_at": item.created_at.isoformat() if item.created_at else None,
-        })
+        results.append(
+            {
+                "id": item.id,
+                "entity_type": entity_type_str,
+                "entity_name": entity_name,
+                "enrichment_type": item.enrichment_type,
+                "field_name": item.field_name,
+                "current_value": item.current_value,
+                "proposed_value": item.proposed_value,
+                "confidence": item.confidence,
+                "source": item.source,
+                "status": item.status,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+        )
 
     return {"items": results, "total": total, "limit": limit, "offset": offset}
 
@@ -196,14 +195,13 @@ async def api_start_backfill(
     from ..services.deep_enrichment_service import run_backfill_job
 
     # Check for already-running jobs
-    running = db.query(EnrichmentJob).filter(
-        EnrichmentJob.status == "running"
-    ).first()
+    running = db.query(EnrichmentJob).filter(EnrichmentJob.status == "running").first()
     if running:
         raise HTTPException(409, f"A backfill job is already running (job #{running.id})")
 
     job_id = await run_backfill_job(
-        db, user.id,
+        db,
+        user.id,
         scope={
             "entity_types": body.entity_types,
             "max_items": body.max_items,
@@ -258,12 +256,7 @@ def api_list_jobs(
     db: Session = Depends(get_db),
 ):
     """List all enrichment jobs."""
-    jobs = (
-        db.query(EnrichmentJob)
-        .order_by(EnrichmentJob.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    jobs = db.query(EnrichmentJob).order_by(EnrichmentJob.created_at.desc()).limit(limit).all()
     results = []
     for job in jobs:
         progress = 0.0
@@ -275,19 +268,21 @@ def api_list_jobs(
             starter = db.get(User, job.started_by_id)
             started_by_name = starter.name or starter.email if starter else None
 
-        results.append({
-            "id": job.id,
-            "job_type": job.job_type,
-            "status": job.status,
-            "total_items": job.total_items,
-            "processed_items": job.processed_items,
-            "enriched_items": job.enriched_items,
-            "error_count": job.error_count,
-            "progress_pct": progress,
-            "started_by": started_by_name,
-            "started_at": job.started_at.isoformat() if job.started_at else None,
-            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-        })
+        results.append(
+            {
+                "id": job.id,
+                "job_type": job.job_type,
+                "status": job.status,
+                "total_items": job.total_items,
+                "processed_items": job.processed_items,
+                "enriched_items": job.enriched_items,
+                "error_count": job.error_count,
+                "progress_pct": progress,
+                "started_by": started_by_name,
+                "started_at": job.started_at.isoformat() if job.started_at else None,
+                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+            }
+        )
     return {"jobs": results}
 
 
@@ -365,9 +360,7 @@ def api_enrichment_stats(
 
     # Consolidate queue stats + counts into fewer queries
     queue_stats = (
-        db.query(EnrichmentQueue.status, func.count(EnrichmentQueue.id))
-        .group_by(EnrichmentQueue.status)
-        .all()
+        db.query(EnrichmentQueue.status, func.count(EnrichmentQueue.id)).group_by(EnrichmentQueue.status).all()
     )
     status_counts = {s: c for s, c in queue_stats}
 
@@ -387,9 +380,7 @@ def api_enrichment_stats(
     companies_total = company_stats[0] or 0
     companies_enriched = company_stats[1] or 0
 
-    active_jobs = db.query(func.count(EnrichmentJob.id)).filter(
-        EnrichmentJob.status == "running"
-    ).scalar() or 0
+    active_jobs = db.query(func.count(EnrichmentJob.id)).filter(EnrichmentJob.status == "running").scalar() or 0
 
     return {
         "queue_pending": status_counts.get("pending", 0),
@@ -401,9 +392,7 @@ def api_enrichment_stats(
         "companies_enriched": companies_enriched,
         "companies_total": companies_total,
         "active_jobs": active_jobs,
-        "vendor_emails": db.query(func.count(VendorContact.id)).filter(
-            VendorContact.email.isnot(None)
-        ).scalar() or 0,
+        "vendor_emails": db.query(func.count(VendorContact.id)).filter(VendorContact.email.isnot(None)).scalar() or 0,
     }
 
 
@@ -436,11 +425,7 @@ def api_backfill_emails(
         email = row.contact_email.strip().lower()
         if not email or "@" not in email:
             continue
-        existing = (
-            db.query(VendorContact)
-            .filter_by(vendor_card_id=row.vendor_card_id, email=email)
-            .first()
-        )
+        existing = db.query(VendorContact).filter_by(vendor_card_id=row.vendor_card_id, email=email).first()
         if existing:
             continue
         vc = VendorContact(
@@ -455,11 +440,7 @@ def api_backfill_emails(
         activity_log_created += 1
 
     # 2. VendorCard.emails consolidation
-    cards_with_emails = (
-        db.query(VendorCard)
-        .filter(VendorCard.emails.isnot(None))
-        .all()
-    )
+    cards_with_emails = db.query(VendorCard).filter(VendorCard.emails.isnot(None)).all()
     for card in cards_with_emails:
         emails = card.emails or []
         if not isinstance(emails, list):
@@ -468,11 +449,7 @@ def api_backfill_emails(
             email = (email or "").strip().lower()
             if not email or "@" not in email:
                 continue
-            existing = (
-                db.query(VendorContact)
-                .filter_by(vendor_card_id=card.id, email=email)
-                .first()
-            )
+            existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email).first()
             if existing:
                 continue
             vc = VendorContact(
@@ -508,11 +485,7 @@ def api_backfill_emails(
         card = db.query(VendorCard).filter_by(normalized_name=norm).first()
         if not card:
             continue
-        existing = (
-            db.query(VendorContact)
-            .filter_by(vendor_card_id=card.id, email=email)
-            .first()
-        )
+        existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email).first()
         if existing:
             continue
         vc = VendorContact(
@@ -535,7 +508,10 @@ def api_backfill_emails(
     total = activity_log_created + vendor_card_created + brokerbin_created
     logger.info(
         "Email backfill complete: %d total (%d activity_log, %d vendor_card, %d brokerbin)",
-        total, activity_log_created, vendor_card_created, brokerbin_created,
+        total,
+        activity_log_created,
+        vendor_card_created,
+        brokerbin_created,
     )
     return {
         "activity_log_created": activity_log_created,
@@ -603,10 +579,11 @@ async def api_deep_email_scan(
             continue
 
         # Try to find a vendor card matching this domain
-        card = db.query(VendorCard).filter(
-            (VendorCard.domain == domain) |
-            (VendorCard.website.ilike(f"%{escape_like(domain)}%"))
-        ).first()
+        card = (
+            db.query(VendorCard)
+            .filter((VendorCard.domain == domain) | (VendorCard.website.ilike(f"%{escape_like(domain)}%")))
+            .first()
+        )
 
         if not card:
             # Try matching by normalized name from domain
@@ -624,11 +601,7 @@ async def api_deep_email_scan(
             email_lower = email.strip().lower()
             if not email_lower or "@" not in email_lower:
                 continue
-            existing = (
-                db.query(VendorContact)
-                .filter_by(vendor_card_id=card.id, email=email_lower)
-                .first()
-            )
+            existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email_lower).first()
             if existing:
                 continue
             vc = VendorContact(

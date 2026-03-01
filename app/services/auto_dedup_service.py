@@ -57,8 +57,7 @@ def _dedup_vendors(db: Session) -> int:
 
     # Load vendor cards
     cards = (
-        db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name,
-                 VendorCard.sighting_count)
+        db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name, VendorCard.sighting_count)
         .filter(VendorCard.is_blacklisted.is_(False))
         .order_by(VendorCard.id)
         .limit(500)
@@ -72,7 +71,7 @@ def _dedup_vendors(db: Session) -> int:
     for i, a in enumerate(cards):
         if a.id in merged_ids:
             continue
-        for b in cards[i + 1:]:
+        for b in cards[i + 1 :]:
             if b.id in merged_ids:
                 continue
             pair_key = (min(a.id, b.id), max(a.id, b.id))
@@ -95,13 +94,12 @@ def _dedup_vendors(db: Session) -> int:
                 should_merge = True
                 logger.info(
                     "Auto-merging vendors (score=%d): '%s' into '%s'",
-                    score, b.display_name if remove_id == b.id else a.display_name,
+                    score,
+                    b.display_name if remove_id == b.id else a.display_name,
                     a.display_name if keep_id == a.id else b.display_name,
                 )
             elif score >= 92:
-                should_merge = _ai_confirm_vendor_merge(
-                    a.display_name, b.display_name, score
-                )
+                should_merge = _ai_confirm_vendor_merge(a.display_name, b.display_name, score)
 
             if should_merge:
                 try:
@@ -145,8 +143,7 @@ def _dedup_companies(db: Session) -> int:
         remove = db.get(Company, remove_id)
         if not keep or not remove:
             continue
-        if (keep.account_owner_id and remove.account_owner_id
-                and keep.account_owner_id != remove.account_owner_id):
+        if keep.account_owner_id and remove.account_owner_id and keep.account_owner_id != remove.account_owner_id:
             continue  # Different owners — allowed duplicate
 
         should_merge = False
@@ -154,12 +151,12 @@ def _dedup_companies(db: Session) -> int:
             should_merge = True
             logger.info(
                 "Auto-merging companies (score=%d): '%s' into '%s'",
-                score, remove.name, keep.name,
+                score,
+                remove.name,
+                keep.name,
             )
         elif score >= 92:
-            should_merge = _ai_confirm_company_merge(
-                keep.name, remove.name, keep.domain, remove.domain, score
-            )
+            should_merge = _ai_confirm_company_merge(keep.name, remove.name, keep.domain, remove.domain, score)
 
         if should_merge:
             try:
@@ -183,17 +180,14 @@ def _ai_confirm_vendor_merge(name_a: str, name_b: str, score: int) -> bool:
     try:
         return asyncio.get_event_loop().run_until_complete(
             _ask_claude_merge(
-                f"Are these two vendor names the same company?\n"
-                f"A: {name_a}\nB: {name_b}\nFuzzy score: {score}%",
+                f"Are these two vendor names the same company?\nA: {name_a}\nB: {name_b}\nFuzzy score: {score}%",
             )
         )
     except Exception:
         return False
 
 
-def _ai_confirm_company_merge(
-    name_a: str, name_b: str, domain_a: str | None, domain_b: str | None, score: int
-) -> bool:
+def _ai_confirm_company_merge(name_a: str, name_b: str, domain_a: str | None, domain_b: str | None, score: int) -> bool:
     """Ask Claude if two company names are the same entity."""
     import asyncio
 

@@ -19,8 +19,8 @@ import pytest
 
 from app.services.email_intelligence_service import store_email_intelligence
 
-
 # ── Fix 1: EmailMiner stores all classified emails ─────────────────────
+
 
 # Helper: a single fake message dict matching Graph API shape
 def _fake_msg(msg_id="msg-1", body="Test body", subject="Test subject"):
@@ -64,8 +64,10 @@ class TestScanInboxStoresRegexEmails:
             patch.object(EmailMiner, "_mark_processed"),
             patch.object(EmailMiner, "_get_delta_token", return_value=None),
             patch.object(
-                EmailMiner, "_search_messages",
-                new_callable=AsyncMock, return_value=[msg],
+                EmailMiner,
+                "_search_messages",
+                new_callable=AsyncMock,
+                return_value=[msg],
             ),
             patch(
                 "app.services.email_intelligence_service.process_email_intelligence",
@@ -94,8 +96,10 @@ class TestScanInboxStoresRegexEmails:
             patch.object(EmailMiner, "_mark_processed"),
             patch.object(EmailMiner, "_get_delta_token", return_value=None),
             patch.object(
-                EmailMiner, "_search_messages",
-                new_callable=AsyncMock, return_value=[msg],
+                EmailMiner,
+                "_search_messages",
+                new_callable=AsyncMock,
+                return_value=[msg],
             ),
             patch(
                 "app.services.email_intelligence_service.process_email_intelligence",
@@ -121,8 +125,10 @@ class TestScanInboxStoresRegexEmails:
             patch.object(EmailMiner, "_mark_processed"),
             patch.object(EmailMiner, "_get_delta_token", return_value=None),
             patch.object(
-                EmailMiner, "_search_messages",
-                new_callable=AsyncMock, return_value=[msg],
+                EmailMiner,
+                "_search_messages",
+                new_callable=AsyncMock,
+                return_value=[msg],
             ),
             patch(
                 "app.services.email_intelligence_service.process_email_intelligence",
@@ -184,7 +190,9 @@ class TestNeedsReviewLogic:
     def test_offer_high_with_quotes_auto_applied(self, db_session, test_user):
         """offer at 0.85 + parsed_quotes → auto_applied=True, needs_review=False."""
         rec = self._store(
-            db_session, "offer", 0.85,
+            db_session,
+            "offer",
+            0.85,
             parsed_quotes={"lines": [{"mpn": "LM358", "price": 1.5}]},
         )
         assert rec.auto_applied is True
@@ -256,29 +264,30 @@ class TestJobEmailHealthUpdate:
 
     def test_registered_in_scheduler(self):
         """email_health_update job is registered in configure_scheduler."""
-        from app.scheduler import configure_scheduler, scheduler as real_scheduler
+        from app.scheduler import configure_scheduler
 
         mock_scheduler = MagicMock()
         with (
             patch("app.scheduler.scheduler", mock_scheduler),
-            patch("app.config.settings", MagicMock(
-                inbox_scan_interval_min=30,
-                contacts_sync_enabled=False,
-                activity_tracking_enabled=False,
-                po_verify_interval_min=15,
-                buyplan_auto_complete_hour=18,
-                buyplan_auto_complete_tz="UTC",
-                proactive_matching_enabled=False,
-                deep_email_mining_enabled=False,
-                deep_enrichment_enabled=False,
-                contact_scoring_enabled=False,
-            )),
+            patch(
+                "app.config.settings",
+                MagicMock(
+                    inbox_scan_interval_min=30,
+                    contacts_sync_enabled=False,
+                    activity_tracking_enabled=False,
+                    po_verify_interval_min=15,
+                    buyplan_auto_complete_hour=18,
+                    buyplan_auto_complete_tz="UTC",
+                    proactive_matching_enabled=False,
+                    deep_email_mining_enabled=False,
+                    deep_enrichment_enabled=False,
+                    contact_scoring_enabled=False,
+                ),
+            ),
         ):
             configure_scheduler()
 
-            job_ids = [
-                c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list
-            ]
+            job_ids = [c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list]
             assert "email_health_update" in job_ids
 
 
@@ -393,22 +402,23 @@ class TestJobCalendarScan:
         mock_scheduler = MagicMock()
         with (
             patch("app.scheduler.scheduler", mock_scheduler),
-            patch("app.config.settings", MagicMock(
-                inbox_scan_interval_min=30,
-                contacts_sync_enabled=False,
-                activity_tracking_enabled=False,
-                po_verify_interval_min=15,
-                buyplan_auto_complete_hour=18,
-                buyplan_auto_complete_tz="UTC",
-                proactive_matching_enabled=False,
-                deep_email_mining_enabled=False,
-                deep_enrichment_enabled=False,
-                contact_scoring_enabled=False,
-            )),
+            patch(
+                "app.config.settings",
+                MagicMock(
+                    inbox_scan_interval_min=30,
+                    contacts_sync_enabled=False,
+                    activity_tracking_enabled=False,
+                    po_verify_interval_min=15,
+                    buyplan_auto_complete_hour=18,
+                    buyplan_auto_complete_tz="UTC",
+                    proactive_matching_enabled=False,
+                    deep_email_mining_enabled=False,
+                    deep_enrichment_enabled=False,
+                    contact_scoring_enabled=False,
+                ),
+            ),
         ):
             configure_scheduler()
 
-            job_ids = [
-                c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list
-            ]
+            job_ids = [c.kwargs.get("id") for c in mock_scheduler.add_job.call_args_list]
             assert "calendar_scan" in job_ids

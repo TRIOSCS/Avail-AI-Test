@@ -74,9 +74,7 @@ async def list_suggested(
 
     if employee_size:
         safe = escape_like(employee_size.strip())
-        query = query.filter(
-            ProspectAccount.employee_count_range.ilike(f"%{safe}%")
-        )
+        query = query.filter(ProspectAccount.employee_count_range.ilike(f"%{safe}%"))
 
     if min_fit_score > 0:
         query = query.filter(ProspectAccount.fit_score >= min_fit_score)
@@ -104,9 +102,7 @@ async def list_suggested(
         query = query.order_by(ProspectAccount.name)
     elif sort == "composite_desc":
         # 60% fit + 40% readiness
-        query = query.order_by(
-            (ProspectAccount.fit_score * 0.6 + ProspectAccount.readiness_score * 0.4).desc()
-        )
+        query = query.order_by((ProspectAccount.fit_score * 0.6 + ProspectAccount.readiness_score * 0.4).desc())
     else:  # readiness_desc (default)
         query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
 
@@ -209,8 +205,7 @@ async def claim_suggested(
     if site_count >= SITE_CAP:
         raise HTTPException(
             409,
-            f"You have {site_count} sites (cap is {SITE_CAP}). "
-            "Release inactive sites before claiming new ones.",
+            f"You have {site_count} sites (cap is {SITE_CAP}). Release inactive sites before claiming new ones.",
         )
 
     try:

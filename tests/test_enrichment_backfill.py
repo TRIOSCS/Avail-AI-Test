@@ -99,9 +99,7 @@ def vendor_mouser(db_session: Session) -> VendorCard:
 class TestEmailBackfill:
     """POST /api/enrichment/backfill-emails"""
 
-    def test_backfill_from_activity_log(
-        self, admin_client, db_session, vendor_arrow, admin_user
-    ):
+    def test_backfill_from_activity_log(self, admin_client, db_session, vendor_arrow, admin_user):
         """Activity log emails get promoted to VendorContact records."""
         # Create an activity log entry with an email not yet in vendor_contacts
         activity = ActivityLog(
@@ -123,18 +121,12 @@ class TestEmailBackfill:
         assert data["total_created"] >= 1
 
         # Verify VendorContact was created
-        vc = (
-            db_session.query(VendorContact)
-            .filter_by(vendor_card_id=vendor_arrow.id, email="john@arrow.com")
-            .first()
-        )
+        vc = db_session.query(VendorContact).filter_by(vendor_card_id=vendor_arrow.id, email="john@arrow.com").first()
         assert vc is not None
         assert vc.source == "activity_log"
         assert vc.full_name == "John Smith"
 
-    def test_backfill_from_vendor_card_emails(
-        self, admin_client, db_session, vendor_arrow
-    ):
+    def test_backfill_from_vendor_card_emails(self, admin_client, db_session, vendor_arrow):
         """VendorCard.emails list entries get promoted to VendorContact records."""
         resp = admin_client.post("/api/enrichment/backfill-emails")
         assert resp.status_code == 200
@@ -143,16 +135,12 @@ class TestEmailBackfill:
 
         # Both emails from vendor_arrow should be in vendor_contacts now
         contacts = (
-            db_session.query(VendorContact)
-            .filter_by(vendor_card_id=vendor_arrow.id, source="vendor_card_import")
-            .all()
+            db_session.query(VendorContact).filter_by(vendor_card_id=vendor_arrow.id, source="vendor_card_import").all()
         )
         emails = {c.email for c in contacts}
         assert "sales@arrow.com" in emails
 
-    def test_backfill_from_brokerbin_sightings(
-        self, admin_client, db_session, vendor_arrow
-    ):
+    def test_backfill_from_brokerbin_sightings(self, admin_client, db_session, vendor_arrow):
         """BrokerBin sighting emails get promoted to VendorContact records."""
         # Need a requisition + requirement to create a sighting
         req = Requisition(
@@ -205,9 +193,7 @@ class TestEmailBackfill:
         count2 = resp2.json()["total_created"]
         assert count2 == 0  # No new records on second run
 
-    def test_backfill_skips_invalid_emails(
-        self, admin_client, db_session, vendor_arrow, admin_user
-    ):
+    def test_backfill_skips_invalid_emails(self, admin_client, db_session, vendor_arrow, admin_user):
         """Activity log entries with invalid emails are skipped."""
         for bad_email in ["", "not-an-email", None]:
             activity = ActivityLog(
@@ -249,9 +235,7 @@ class TestM365Status:
         db_session.commit()
 
         resp = admin_client.get("/api/enrichment/m365-status")
-        user_data = next(
-            u for u in resp.json()["users"] if u["email"] == admin_user.email
-        )
+        user_data = next(u for u in resp.json()["users"] if u["email"] == admin_user.email)
         assert user_data["m365_connected"] is True
 
 
@@ -269,9 +253,7 @@ class TestDeepEmailScan:
         admin_user.m365_connected = False
         db_session.commit()
 
-        resp = admin_client.post(
-            f"/api/enrichment/deep-email-scan/{admin_user.id}"
-        )
+        resp = admin_client.post(f"/api/enrichment/deep-email-scan/{admin_user.id}")
         assert resp.status_code == 400
         assert "M365" in resp.json()["error"]
 
@@ -315,9 +297,7 @@ class TestWebsiteScraping:
 class TestSearchPropagation:
     """_propagate_vendor_emails() in search_service.py"""
 
-    def test_sighting_email_creates_vendor_contact(
-        self, db_session, vendor_arrow
-    ):
+    def test_sighting_email_creates_vendor_contact(self, db_session, vendor_arrow):
         from app.search_service import _propagate_vendor_emails
 
         req = Requisition(
@@ -442,11 +422,7 @@ class TestSearchPropagation:
 
         _propagate_vendor_emails([sighting], db_session)
 
-        contacts = (
-            db_session.query(VendorContact)
-            .filter_by(vendor_card_id=vendor_arrow.id)
-            .all()
-        )
+        contacts = db_session.query(VendorContact).filter_by(vendor_card_id=vendor_arrow.id).all()
         assert len(contacts) == 0
 
     def test_propagation_with_phone(self, db_session, vendor_arrow):
@@ -497,9 +473,7 @@ class TestSearchPropagation:
 class TestEnrichmentStatsVendorEmails:
     """Stats endpoint now includes vendor_emails count."""
 
-    def test_stats_includes_vendor_emails(
-        self, admin_client, db_session, vendor_arrow
-    ):
+    def test_stats_includes_vendor_emails(self, admin_client, db_session, vendor_arrow):
         # Create a vendor contact with email
         vc = VendorContact(
             vendor_card_id=vendor_arrow.id,

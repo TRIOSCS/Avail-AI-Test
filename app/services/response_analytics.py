@@ -32,9 +32,7 @@ RESPONSE_IDEAL_HOURS = 4.0
 RESPONSE_MAX_HOURS = 168.0
 
 
-def compute_vendor_response_metrics(
-    db: Session, vendor_card_id: int, lookback_days: int = 90
-) -> dict:
+def compute_vendor_response_metrics(db: Session, vendor_card_id: int, lookback_days: int = 90) -> dict:
     """Compute response time metrics for a single vendor.
 
     Pairs outbound RFQ activity with inbound VendorResponse records
@@ -80,13 +78,9 @@ def compute_vendor_response_metrics(
     )
 
     if domain:
-        response_query = response_query.filter(
-            VendorResponse.vendor_email.ilike(f"%@{domain}")
-        )
+        response_query = response_query.filter(VendorResponse.vendor_email.ilike(f"%@{domain}"))
     else:
-        response_query = response_query.filter(
-            VendorResponse.vendor_name == vendor.display_name
-        )
+        response_query = response_query.filter(VendorResponse.vendor_name == vendor.display_name)
 
     responses = response_query.all()
     response_count = len(responses)
@@ -147,9 +141,7 @@ def _empty_metrics() -> dict:
     }
 
 
-def compute_email_health_score(
-    db: Session, vendor_card_id: int, lookback_days: int = 90
-) -> dict:
+def compute_email_health_score(db: Session, vendor_card_id: int, lookback_days: int = 90) -> dict:
     """Compute composite 0-100 email health score for a vendor.
 
     Components:
@@ -197,9 +189,7 @@ def compute_email_health_score(
 
     # OOO frequency score (0-100): fewer OOO contacts = better
     total_contacts = (
-        db.query(func.count(VendorContact.id))
-        .filter(VendorContact.vendor_card_id == vendor_card_id)
-        .scalar()
+        db.query(func.count(VendorContact.id)).filter(VendorContact.vendor_card_id == vendor_card_id).scalar()
     ) or 0
 
     ooo_contacts = 0
@@ -273,9 +263,7 @@ def compute_email_health_score(
     }
 
 
-def update_vendor_email_health(
-    db: Session, vendor_card_id: int, lookback_days: int = 90
-) -> dict | None:
+def update_vendor_email_health(db: Session, vendor_card_id: int, lookback_days: int = 90) -> dict | None:
     """Compute and persist email health score on VendorCard.
 
     Returns the health dict or None if vendor not found.
@@ -301,9 +289,7 @@ def update_vendor_email_health(
     return health
 
 
-def batch_update_email_health(
-    db: Session, lookback_days: int = 90, limit: int = 500
-) -> dict:
+def batch_update_email_health(db: Session, lookback_days: int = 90, limit: int = 500) -> dict:
     """Batch recompute email health scores for active vendors.
 
     Prioritizes vendors with recent activity or stale scores.
@@ -344,9 +330,7 @@ def batch_update_email_health(
     return {"updated": updated, "errors": errors}
 
 
-def get_email_intelligence_dashboard(
-    db: Session, user_id: int, days: int = 7
-) -> dict:
+def get_email_intelligence_dashboard(db: Session, user_id: int, days: int = 7) -> dict:
     """Aggregated email intelligence dashboard data.
 
     Returns:
@@ -399,25 +383,15 @@ def get_email_intelligence_dashboard(
     ) or 0
 
     # OOO vendors
-    ooo_vendors = (
-        db.query(func.count(VendorContact.id))
-        .filter(VendorContact.is_ooo.is_(True))
-        .scalar()
-    ) or 0
+    ooo_vendors = (db.query(func.count(VendorContact.id)).filter(VendorContact.is_ooo.is_(True)).scalar()) or 0
 
     # Average response hours across all vendors with health scores
     avg_resp = (
-        db.query(func.avg(VendorCard.avg_response_hours))
-        .filter(VendorCard.avg_response_hours.isnot(None))
-        .scalar()
+        db.query(func.avg(VendorCard.avg_response_hours)).filter(VendorCard.avg_response_hours.isnot(None)).scalar()
     )
 
     # Average response rate
-    avg_rate = (
-        db.query(func.avg(VendorCard.response_rate))
-        .filter(VendorCard.response_rate.isnot(None))
-        .scalar()
-    )
+    avg_rate = db.query(func.avg(VendorCard.response_rate)).filter(VendorCard.response_rate.isnot(None)).scalar()
 
     # Top vendors by email health
     top_vendors_q = (

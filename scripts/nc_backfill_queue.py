@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func, text
+from sqlalchemy import func
 
 from app.database import SessionLocal
 from app.models import NcSearchQueue, Requirement
@@ -30,11 +30,7 @@ def backfill(dry_run: bool = False, limit: int = 0):
     db = SessionLocal()
     try:
         # Get MPNs already in the queue (any status)
-        existing_mpns = set(
-            row[0]
-            for row in db.query(NcSearchQueue.normalized_mpn).distinct().all()
-            if row[0]
-        )
+        existing_mpns = set(row[0] for row in db.query(NcSearchQueue.normalized_mpn).distinct().all() if row[0])
         logger.info("Already in queue: {} unique MPNs", len(existing_mpns))
 
         # Get all requirements with MPNs, pick the most recent per MPN
@@ -49,10 +45,7 @@ def backfill(dry_run: bool = False, limit: int = 0):
         )
 
         requirements = (
-            db.query(Requirement)
-            .join(subq, Requirement.id == subq.c.id)
-            .order_by(Requirement.id.desc())
-            .all()
+            db.query(Requirement).join(subq, Requirement.id == subq.c.id).order_by(Requirement.id.desc()).all()
         )
         logger.info("Unique MPNs in requirements: {}", len(requirements))
 
@@ -87,7 +80,8 @@ def backfill(dry_run: bool = False, limit: int = 0):
 
         logger.info(
             "Backfill: {} to insert, {} skipped (already queued or empty MPN)",
-            len(to_insert), skipped,
+            len(to_insert),
+            skipped,
         )
 
         if dry_run:

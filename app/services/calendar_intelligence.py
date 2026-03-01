@@ -14,15 +14,21 @@ from sqlalchemy.orm import Session
 
 # Trade shows commonly attended in electronic components industry
 TRADE_SHOW_KEYWORDS = [
-    "electronica", "apec", "eds summit", "semicon",
-    "ipc apex", "distributech", "arrow show", "avnet show",
-    "embedded world", "ces ", "productronica",
+    "electronica",
+    "apec",
+    "eds summit",
+    "semicon",
+    "ipc apex",
+    "distributech",
+    "arrow show",
+    "avnet show",
+    "embedded world",
+    "ces ",
+    "productronica",
 ]
 
 
-async def scan_calendar_events(
-    token: str, user_id: int, db: Session, lookback_days: int = 30
-) -> dict:
+async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_days: int = 30) -> dict:
     """Scan user's calendar for vendor meetings and trade shows.
 
     Args:
@@ -77,9 +83,7 @@ async def scan_calendar_events(
         attendees = event.get("attendees", [])
 
         # Check for trade show keywords
-        is_trade_show = any(
-            kw in subject.lower() for kw in TRADE_SHOW_KEYWORDS
-        )
+        is_trade_show = any(kw in subject.lower() for kw in TRADE_SHOW_KEYWORDS)
 
         # Find external (vendor) attendees
         vendor_attendees = []
@@ -90,23 +94,21 @@ async def scan_calendar_events(
                 continue
             domain = email.split("@")[-1]
             if domain not in own_domains:
-                vendor_attendees.append({
-                    "email": email,
-                    "name": email_data.get("name", ""),
-                    "domain": domain,
-                })
+                vendor_attendees.append(
+                    {
+                        "email": email,
+                        "name": email_data.get("name", ""),
+                        "domain": domain,
+                    }
+                )
 
         if is_trade_show:
             trade_shows += 1
-            if _log_calendar_activity(
-                db, user_id, "trade_show", subject, event, vendor_attendees
-            ):
+            if _log_calendar_activity(db, user_id, "trade_show", subject, event, vendor_attendees):
                 activities_logged += 1
         elif vendor_attendees:
             vendor_meetings += 1
-            if _log_calendar_activity(
-                db, user_id, "vendor_meeting", subject, event, vendor_attendees
-            ):
+            if _log_calendar_activity(db, user_id, "vendor_meeting", subject, event, vendor_attendees):
                 activities_logged += 1
 
     if activities_logged:
@@ -159,21 +161,25 @@ def _log_calendar_activity(
 
     import json
 
-    notes_data = json.dumps({
-        "attendees": contact_emails,
-        "location": (event.get("location", {}) or {}).get("displayName"),
-        "start": start_str,
-    })
+    notes_data = json.dumps(
+        {
+            "attendees": contact_emails,
+            "location": (event.get("location", {}) or {}).get("displayName"),
+            "start": start_str,
+        }
+    )
 
-    db.add(ActivityLog(
-        user_id=user_id,
-        activity_type=activity_type,
-        channel="calendar",
-        subject=subject[:500],
-        contact_email=contact_emails[0] if contact_emails else None,
-        contact_name=contact_names[0] if contact_names else None,
-        external_id=event_key,
-        notes=notes_data,
-        created_at=datetime.now(timezone.utc),
-    ))
+    db.add(
+        ActivityLog(
+            user_id=user_id,
+            activity_type=activity_type,
+            channel="calendar",
+            subject=subject[:500],
+            contact_email=contact_emails[0] if contact_emails else None,
+            contact_name=contact_names[0] if contact_names else None,
+            external_id=event_key,
+            notes=notes_data,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
     return True

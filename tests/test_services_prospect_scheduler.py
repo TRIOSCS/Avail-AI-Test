@@ -4,14 +4,12 @@ Covers: rotation logic, kill switch, expire/resurface logic,
         score refresh, health report, and job isolation.
 """
 
-import sys
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, User
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scheduler import (
@@ -24,7 +22,6 @@ from app.services.prospect_scheduler import (
     job_pool_health_report,
     job_refresh_scores,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -70,7 +67,6 @@ def _make_batch(db: Session, **overrides) -> DiscoveryBatch:
 
 
 class TestDiscoveryRotation:
-
     def test_first_run_picks_aerospace_us(self, db_session):
         """No previous batches → start with Aerospace US."""
         result = get_next_discovery_slice(db_session)
@@ -203,7 +199,6 @@ class TestDiscoveryRotation:
 
 
 class TestKillSwitch:
-
     @pytest.mark.asyncio
     async def test_discover_skips_when_disabled(self):
         with patch("app.services.prospect_scheduler.settings") as mock_s:
@@ -244,17 +239,17 @@ class TestKillSwitch:
 
 
 class TestExpireLogic:
-
     @pytest.mark.asyncio
     async def test_expires_old_low_readiness(self, db_session):
         p = _make_prospect(
-            db_session, name="Old Low", domain="oldlow.com",
+            db_session,
+            name="Old Low",
+            domain="oldlow.com",
             readiness_score=30,
             created_at=datetime.now(timezone.utc) - timedelta(days=100),
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "expired"
@@ -262,13 +257,14 @@ class TestExpireLogic:
     @pytest.mark.asyncio
     async def test_does_not_expire_high_readiness(self, db_session):
         p = _make_prospect(
-            db_session, name="Old High", domain="oldhigh.com",
+            db_session,
+            name="Old High",
+            domain="oldhigh.com",
             readiness_score=70,
             created_at=datetime.now(timezone.utc) - timedelta(days=100),
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -276,13 +272,14 @@ class TestExpireLogic:
     @pytest.mark.asyncio
     async def test_does_not_expire_recently_enriched(self, db_session):
         p = _make_prospect(
-            db_session, name="Recent", domain="recent.com",
+            db_session,
+            name="Recent",
+            domain="recent.com",
             readiness_score=30,
             created_at=datetime.now(timezone.utc) - timedelta(days=100),
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=10),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -290,14 +287,15 @@ class TestExpireLogic:
     @pytest.mark.asyncio
     async def test_does_not_expire_strong_intent(self, db_session):
         p = _make_prospect(
-            db_session, name="Intent", domain="intent.com",
+            db_session,
+            name="Intent",
+            domain="intent.com",
             readiness_score=30,
             readiness_signals={"intent": {"strength": "strong"}},
             created_at=datetime.now(timezone.utc) - timedelta(days=100),
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -305,12 +303,13 @@ class TestExpireLogic:
     @pytest.mark.asyncio
     async def test_does_not_expire_young_prospect(self, db_session):
         p = _make_prospect(
-            db_session, name="Young", domain="young.com",
+            db_session,
+            name="Young",
+            domain="young.com",
             readiness_score=20,
             created_at=datetime.now(timezone.utc) - timedelta(days=30),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -319,13 +318,14 @@ class TestExpireLogic:
     async def test_within_90_day_boundary(self, db_session):
         """Prospect created 89 days ago should NOT be expired (cutoff is 90)."""
         p = _make_prospect(
-            db_session, name="Boundary", domain="boundary.com",
+            db_session,
+            name="Boundary",
+            domain="boundary.com",
             readiness_score=20,
             created_at=datetime.now(timezone.utc) - timedelta(days=89),
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -335,19 +335,19 @@ class TestExpireLogic:
 
 
 class TestResurfaceLogic:
-
     @pytest.mark.asyncio
     async def test_resurfaces_dismissed_with_fresh_signals(self, db_session):
         p = _make_prospect(
-            db_session, name="Dismissed", domain="dismissed.com",
+            db_session,
+            name="Dismissed",
+            domain="dismissed.com",
             status="dismissed",
             readiness_score=50,
             readiness_signals={"intent": {"strength": "strong"}},
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
             dismissed_at=datetime.now(timezone.utc) - timedelta(days=60),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -357,14 +357,15 @@ class TestResurfaceLogic:
     @pytest.mark.asyncio
     async def test_resurfaces_expired_with_hiring_signals(self, db_session):
         p = _make_prospect(
-            db_session, name="Expired", domain="expired.com",
+            db_session,
+            name="Expired",
+            domain="expired.com",
             status="expired",
             readiness_score=45,
             readiness_signals={"hiring": {"type": "procurement"}},
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=10),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "suggested"
@@ -372,14 +373,15 @@ class TestResurfaceLogic:
     @pytest.mark.asyncio
     async def test_does_not_resurface_without_signals(self, db_session):
         p = _make_prospect(
-            db_session, name="NoSignals", domain="nosignals.com",
+            db_session,
+            name="NoSignals",
+            domain="nosignals.com",
             status="dismissed",
             readiness_score=50,
             readiness_signals={},
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "dismissed"
@@ -388,14 +390,15 @@ class TestResurfaceLogic:
     async def test_does_not_resurface_low_readiness(self, db_session):
         """Even with signals, readiness < 40 shouldn't resurface."""
         p = _make_prospect(
-            db_session, name="LowRead", domain="lowread.com",
+            db_session,
+            name="LowRead",
+            domain="lowread.com",
             status="dismissed",
             readiness_score=20,
             readiness_signals={"intent": {"strength": "strong"}},
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "dismissed"
@@ -404,14 +407,15 @@ class TestResurfaceLogic:
     async def test_does_not_resurface_old_enrichment(self, db_session):
         """Enrichment older than 30 days shouldn't trigger resurface."""
         p = _make_prospect(
-            db_session, name="OldEnrich", domain="oldenrich.com",
+            db_session,
+            name="OldEnrich",
+            domain="oldenrich.com",
             status="dismissed",
             readiness_score=60,
             readiness_signals={"intent": {"strength": "strong"}},
             last_enriched_at=datetime.now(timezone.utc) - timedelta(days=45),
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
         assert p.status == "dismissed"
@@ -421,15 +425,13 @@ class TestResurfaceLogic:
 
 
 class TestScoreRefresh:
-
     @pytest.mark.asyncio
     async def test_refreshes_all_suggested(self, db_session):
         _make_prospect(db_session, name="A", domain="a.com", industry="Aerospace", fit_score=10)
         _make_prospect(db_session, name="B", domain="b.com", industry="Automotive", fit_score=10)
         _make_prospect(db_session, name="C", domain="c.com", status="claimed", fit_score=10)
 
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             result = await job_refresh_scores()
 
         assert result["refreshed"] == 2  # Only suggested, not claimed
@@ -438,11 +440,14 @@ class TestScoreRefresh:
     async def test_tracks_upgrades_and_downgrades(self, db_session):
         # High initial score but no industry → will score lower
         _make_prospect(
-            db_session, name="Down", domain="down.com",
-            industry=None, fit_score=90, readiness_score=90,
+            db_session,
+            name="Down",
+            domain="down.com",
+            industry=None,
+            fit_score=90,
+            readiness_score=90,
         )
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             result = await job_refresh_scores()
         # Should detect a downgrade since fit_score will drop without industry match
         assert result["refreshed"] == 1
@@ -452,11 +457,9 @@ class TestScoreRefresh:
 
 
 class TestHealthReport:
-
     @pytest.mark.asyncio
     async def test_empty_pool_report(self, db_session):
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             result = await job_pool_health_report()
         assert result["claimed_this_month"] == 0
         assert result["dismissed_this_month"] == 0
@@ -467,17 +470,22 @@ class TestHealthReport:
         _make_prospect(db_session, name="S1", domain="s1.com", status="suggested")
         _make_prospect(db_session, name="S2", domain="s2.com", status="suggested", region="EU")
         _make_prospect(
-            db_session, name="C1", domain="c1.com", status="claimed",
+            db_session,
+            name="C1",
+            domain="c1.com",
+            status="claimed",
             claimed_at=datetime.now(timezone.utc),
         )
         _make_prospect(
-            db_session, name="D1", domain="d1.com", status="dismissed",
+            db_session,
+            name="D1",
+            domain="d1.com",
+            status="dismissed",
             dismissed_at=datetime.now(timezone.utc),
         )
         _make_batch(db_session, batch_id="b-report", credits_used=42)
 
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             result = await job_pool_health_report()
 
         assert result["by_status"]["suggested"] == 2
@@ -493,12 +501,9 @@ class TestHealthReport:
 
 
 class TestJobErrorHandling:
-
     @pytest.mark.asyncio
     async def test_enrich_handles_service_error(self):
-        with patch(
-            "app.services.prospect_scheduler.settings"
-        ) as mock_s:
+        with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = True
             with patch(
                 "app.services.prospect_signals.run_signal_enrichment_batch",
@@ -510,9 +515,7 @@ class TestJobErrorHandling:
 
     @pytest.mark.asyncio
     async def test_contacts_handles_service_error(self):
-        with patch(
-            "app.services.prospect_scheduler.settings"
-        ) as mock_s:
+        with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = True
             mock_s.prospecting_min_fit_for_contacts = 60
             with patch(
@@ -564,19 +567,24 @@ class TestDiscoverProspectsJob:
         mock_run_explorium = AsyncMock(return_value=[mock_explorium_result])
         mock_run_email = AsyncMock(return_value=[mock_email_result])
 
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"), \
-             patch.dict("sys.modules", {
-                 "app.services.prospect_discovery_explorium": MagicMock(
-                     run_explorium_discovery_batch=mock_run_explorium,
-                 ),
-                 "app.services.prospect_discovery_email": MagicMock(
-                     run_email_mining_batch=mock_run_email,
-                 ),
-                 "app.utils.graph_client": MagicMock(
-                     get_graph_client=MagicMock(return_value=mock_graph),
-                 ),
-             }):
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch.dict(
+                "sys.modules",
+                {
+                    "app.services.prospect_discovery_explorium": MagicMock(
+                        run_explorium_discovery_batch=mock_run_explorium,
+                    ),
+                    "app.services.prospect_discovery_email": MagicMock(
+                        run_email_mining_batch=mock_run_email,
+                    ),
+                    "app.utils.graph_client": MagicMock(
+                        get_graph_client=MagicMock(return_value=mock_graph),
+                    ),
+                },
+            ),
+        ):
             result = await job_discover_prospects()
 
         assert result["explorium_count"] == 1
@@ -598,19 +606,24 @@ class TestDiscoverProspectsJob:
         mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
         mock_run_email = AsyncMock(return_value=[mock_email_result])
 
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"), \
-             patch.dict("sys.modules", {
-                 "app.services.prospect_discovery_explorium": MagicMock(
-                     run_explorium_discovery_batch=mock_run_explorium,
-                 ),
-                 "app.services.prospect_discovery_email": MagicMock(
-                     run_email_mining_batch=mock_run_email,
-                 ),
-                 "app.utils.graph_client": MagicMock(
-                     get_graph_client=MagicMock(return_value=mock_graph),
-                 ),
-             }):
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch.dict(
+                "sys.modules",
+                {
+                    "app.services.prospect_discovery_explorium": MagicMock(
+                        run_explorium_discovery_batch=mock_run_explorium,
+                    ),
+                    "app.services.prospect_discovery_email": MagicMock(
+                        run_email_mining_batch=mock_run_email,
+                    ),
+                    "app.utils.graph_client": MagicMock(
+                        get_graph_client=MagicMock(return_value=mock_graph),
+                    ),
+                },
+            ),
+        ):
             result = await job_discover_prospects()
 
         assert result["explorium_count"] == 0
@@ -621,16 +634,21 @@ class TestDiscoverProspectsJob:
         """Both sources fail — batch still completes with 0 results."""
         mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
 
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"), \
-             patch.dict("sys.modules", {
-                 "app.services.prospect_discovery_explorium": MagicMock(
-                     run_explorium_discovery_batch=mock_run_explorium,
-                 ),
-                 "app.utils.graph_client": MagicMock(
-                     get_graph_client=MagicMock(side_effect=Exception("No graph token")),
-                 ),
-             }):
+        with (
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch.dict(
+                "sys.modules",
+                {
+                    "app.services.prospect_discovery_explorium": MagicMock(
+                        run_explorium_discovery_batch=mock_run_explorium,
+                    ),
+                    "app.utils.graph_client": MagicMock(
+                        get_graph_client=MagicMock(side_effect=Exception("No graph token")),
+                    ),
+                },
+            ),
+        ):
             result = await job_discover_prospects()
 
         assert result["explorium_count"] == 0
@@ -691,8 +709,10 @@ class TestSchedulerCoverageGaps:
         """Inner try blocks catch errors; function returns summary with 0 counts."""
         with (
             patch("app.database.SessionLocal") as mock_sl,
-            patch("app.services.prospect_scheduler.get_next_discovery_slice",
-                   return_value={"segment": "Test", "regions": ["US"]}),
+            patch(
+                "app.services.prospect_scheduler.get_next_discovery_slice",
+                return_value={"segment": "Test", "regions": ["US"]},
+            ),
         ):
             mock_db = MagicMock()
             mock_sl.return_value = mock_db

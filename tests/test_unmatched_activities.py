@@ -45,6 +45,7 @@ def _make_client(db_session, user):
     def _override_admin():
         if user.role != "admin":
             from fastapi import HTTPException
+
             raise HTTPException(403, "Admin access required")
         return user
 
@@ -166,9 +167,7 @@ class TestUnmatchedQueueService:
         db_session.flush()
         return a
 
-    def test_get_unmatched_returns_only_null_entities(
-        self, db_session, test_user, test_company
-    ):
+    def test_get_unmatched_returns_only_null_entities(self, db_session, test_user, test_company):
         from app.services.activity_service import get_unmatched_activities
 
         # One unmatched
@@ -233,9 +232,7 @@ class TestUnmatchedQueueService:
         a = self._create_unmatched(db_session, test_user.id, "v@x.com", "v1")
         db_session.commit()
 
-        result = attribute_activity(
-            a.id, "vendor", test_vendor_card.id, db_session
-        )
+        result = attribute_activity(a.id, "vendor", test_vendor_card.id, db_session)
         db_session.commit()
 
         assert result is not None
@@ -284,16 +281,18 @@ class TestUnmatchedEndpoints:
 
     def _seed_unmatched(self, db_session, user_id, count=3):
         for i in range(count):
-            db_session.add(ActivityLog(
-                user_id=user_id,
-                activity_type="email_received",
-                channel="email",
-                company_id=None,
-                vendor_card_id=None,
-                contact_email=f"unknown{i}@test.com",
-                external_id=f"api-test-{i}",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=user_id,
+                    activity_type="email_received",
+                    channel="email",
+                    company_id=None,
+                    vendor_card_id=None,
+                    contact_email=f"unknown{i}@test.com",
+                    external_id=f"api-test-{i}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         db_session.commit()
 
     def test_list_unmatched_admin(self, admin_client, db_session, admin_user):
@@ -311,9 +310,7 @@ class TestUnmatchedEndpoints:
         resp = buyer_client.get("/api/activities/unmatched")
         assert resp.status_code == 403
 
-    def test_attribute_endpoint(
-        self, admin_client, db_session, admin_user, test_company
-    ):
+    def test_attribute_endpoint(self, admin_client, db_session, admin_user, test_company):
         a = ActivityLog(
             user_id=admin_user.id,
             activity_type="email_received",
@@ -394,9 +391,7 @@ class TestUnmatchedEndpoints:
         resp = buyer_client.post(f"/api/activities/{a.id}/dismiss")
         assert resp.status_code == 403
 
-    def test_activity_to_dict_includes_dismissed_at(
-        self, admin_client, db_session, admin_user
-    ):
+    def test_activity_to_dict_includes_dismissed_at(self, admin_client, db_session, admin_user):
         a = ActivityLog(
             user_id=admin_user.id,
             activity_type="email_received",

@@ -61,8 +61,11 @@ def test_get_vendor_activities_empty(client, test_vendor_card):
 
 def test_get_vendor_activities_returns_records(client, db_session, test_user, test_vendor_card):
     _seed_activity(
-        db_session, test_user.id, company_id=None,
-        vendor_card_id=test_vendor_card.id, subject="Vendor RFQ",
+        db_session,
+        test_user.id,
+        company_id=None,
+        vendor_card_id=test_vendor_card.id,
+        subject="Vendor RFQ",
     )
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
@@ -78,11 +81,14 @@ def test_get_user_activities(client, db_session, test_user, test_company):
 
 def test_log_phone_call_no_match(client):
     """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
-    resp = client.post("/api/activities/call", json={
-        "direction": "outbound",
-        "phone": "+1-555-9999",
-        "duration_seconds": 120,
-    })
+    resp = client.post(
+        "/api/activities/call",
+        json={
+            "direction": "outbound",
+            "phone": "+1-555-9999",
+            "duration_seconds": 120,
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "logged"
 
@@ -140,8 +146,10 @@ def test_claim_account_success(client, db_session, test_company):
     from app.main import app
 
     sales = User(
-        email="sales@trioscs.com", name="Sales Guy",
-        role="sales", azure_id="az-sales-01",
+        email="sales@trioscs.com",
+        name="Sales Guy",
+        role="sales",
+        azure_id="az-sales-01",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(sales)
@@ -153,8 +161,9 @@ def test_claim_account_success(client, db_session, test_company):
 
     app.dependency_overrides[require_user] = lambda: sales
     resp = client.post(f"/api/sales/claim/{test_company.id}")
-    app.dependency_overrides[require_user] = lambda: db_session.query(User).filter_by(
-        email="testbuyer@trioscs.com").first()
+    app.dependency_overrides[require_user] = lambda: (
+        db_session.query(User).filter_by(email="testbuyer@trioscs.com").first()
+    )
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "claimed"
@@ -167,9 +176,12 @@ def test_claim_already_owned(client, db_session, test_company, test_user):
 
     from app.dependencies import require_user
     from app.main import app
+
     sales = User(
-        email="sales2@trioscs.com", name="Sales Two",
-        role="sales", azure_id="az-sales-02",
+        email="sales2@trioscs.com",
+        name="Sales Two",
+        role="sales",
+        azure_id="az-sales-02",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(sales)
@@ -178,8 +190,9 @@ def test_claim_already_owned(client, db_session, test_company, test_user):
 
     app.dependency_overrides[require_user] = lambda: sales
     resp = client.post(f"/api/sales/claim/{test_company.id}")
-    app.dependency_overrides[require_user] = lambda: db_session.query(User).filter_by(
-        email="testbuyer@trioscs.com").first()
+    app.dependency_overrides[require_user] = lambda: (
+        db_session.query(User).filter_by(email="testbuyer@trioscs.com").first()
+    )
 
     assert resp.status_code == 409
 

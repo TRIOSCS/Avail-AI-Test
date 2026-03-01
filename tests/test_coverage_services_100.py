@@ -8,19 +8,17 @@ Called by: pytest
 Depends on: conftest.py, all service modules
 """
 
-import asyncio
 import os
 
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine, text as sqltext
+from sqlalchemy import create_engine
+from sqlalchemy import text as sqltext
 from sqlalchemy.pool import StaticPool
 
 from app.models import (
@@ -31,14 +29,12 @@ from app.models import (
     ProactiveDoNotOffer,
     ProactiveMatch,
     ProactiveOffer,
-    ProactiveThrottle,
     Requirement,
     Requisition,
     SiteContact,
     User,
     VendorCard,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # HELPERS
@@ -47,8 +43,11 @@ from app.models import (
 
 def _make_user(db, email="test@trioscs.com", name="Test User", role="sales"):
     u = User(
-        email=email, name=name, role=role,
-        azure_id=f"az-{email}", m365_connected=True,
+        email=email,
+        name=name,
+        role=role,
+        azure_id=f"az-{email}",
+        m365_connected=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add(u)
@@ -58,7 +57,9 @@ def _make_user(db, email="test@trioscs.com", name="Test User", role="sales"):
 
 def _make_company(db, name="Acme Corp", domain=None, owner_id=None, last_activity_at=None):
     co = Company(
-        name=name, is_active=True, domain=domain,
+        name=name,
+        is_active=True,
+        domain=domain,
         account_owner_id=owner_id,
         last_activity_at=last_activity_at,
         created_at=datetime.now(timezone.utc),
@@ -70,7 +71,8 @@ def _make_company(db, name="Acme Corp", domain=None, owner_id=None, last_activit
 
 def _make_site(db, company_id, site_name="HQ", email=None):
     site = CustomerSite(
-        company_id=company_id, site_name=site_name,
+        company_id=company_id,
+        site_name=site_name,
         contact_email=email,
     )
     db.add(site)
@@ -91,6 +93,7 @@ def _make_contact(db, site_id, email="contact@example.com", full_name="Contact")
 
 def _make_requisition(db, user_id, site_id=None, status="archived", mpn="LM317T"):
     from app.models import MaterialCard
+
     norm = mpn.strip().lower()
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
     if not card:
@@ -98,16 +101,20 @@ def _make_requisition(db, user_id, site_id=None, status="archived", mpn="LM317T"
         db.add(card)
         db.flush()
     req = Requisition(
-        name=f"Req-{mpn}", customer_name="Test Co",
-        status=status, created_by=user_id,
+        name=f"Req-{mpn}",
+        customer_name="Test Co",
+        status=status,
+        created_by=user_id,
         customer_site_id=site_id,
         created_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
     db.add(req)
     db.flush()
     item = Requirement(
-        requisition_id=req.id, primary_mpn=mpn,
-        normalized_mpn=norm, material_card_id=card.id,
+        requisition_id=req.id,
+        primary_mpn=mpn,
+        normalized_mpn=norm,
+        material_card_id=card.id,
         target_qty=500,
         created_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
@@ -118,6 +125,7 @@ def _make_requisition(db, user_id, site_id=None, status="archived", mpn="LM317T"
 
 def _make_offer(db, req, user_id, mpn="LM317T", qty=1000, price=0.50):
     from app.models import MaterialCard
+
     norm = mpn.strip().lower()
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
     if not card:
@@ -125,9 +133,13 @@ def _make_offer(db, req, user_id, mpn="LM317T", qty=1000, price=0.50):
         db.add(card)
         db.flush()
     o = Offer(
-        requisition_id=req.id, vendor_name="SupplierCo",
-        mpn=mpn, qty_available=qty, unit_price=price,
-        entered_by_id=user_id, material_card_id=card.id,
+        requisition_id=req.id,
+        vendor_name="SupplierCo",
+        mpn=mpn,
+        qty_available=qty,
+        unit_price=price,
+        entered_by_id=user_id,
+        material_card_id=card.id,
         status="active",
         created_at=datetime.now(timezone.utc),
     )
@@ -153,6 +165,7 @@ class TestProspectDiscoveryApolloApiKey:
     def test_get_api_key_returns_setting(self):
         """_get_api_key returns the apollo_api_key setting value."""
         from app.services.prospect_discovery_apollo import _get_api_key
+
         with patch("app.services.prospect_discovery_apollo.settings") as mock_settings:
             mock_settings.apollo_api_key = "test-key-123"
             assert _get_api_key() == "test-key-123"
@@ -160,6 +173,7 @@ class TestProspectDiscoveryApolloApiKey:
     def test_get_api_key_returns_empty_when_missing(self):
         """_get_api_key returns '' when setting is not present."""
         from app.services.prospect_discovery_apollo import _get_api_key
+
         with patch("app.services.prospect_discovery_apollo.settings") as mock_settings:
             del mock_settings.apollo_api_key
             assert _get_api_key() == ""
@@ -189,7 +203,6 @@ class TestBuyplanV3NotificationsCustomerSiteNoCompany:
         mock_plan.quote_id = 1
 
         # db.get returns None for User (no submitter), mock_quote for Quote
-        from app.models import Quote
         def mock_get(model, id):
             if model is User:
                 return None
@@ -238,7 +251,9 @@ class TestRequisitionStateLogFailure:
         from app.services.requisition_state import transition
 
         req = Requisition(
-            name="Log-Fail", status="active", created_by=test_user.id,
+            name="Log-Fail",
+            status="active",
+            created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -384,9 +399,7 @@ class TestCalendarIntelligenceEdgeCases:
             patch("app.config.settings") as mock_settings,
         ):
             mock_settings.own_domains = ["trioscs.com"]
-            result = await scan_calendar_events(
-                "fake-token", user.id, db_session, lookback_days=30
-            )
+            result = await scan_calendar_events("fake-token", user.id, db_session, lookback_days=30)
 
         assert result["vendor_meetings"] == 1
         assert result["events_scanned"] == 1
@@ -427,9 +440,7 @@ class TestCalendarIntelligenceEdgeCases:
             mock_settings.own_domains = ["trioscs.com"]
             # Patch commit to fail on the second call (activities commit)
             db_session.commit = failing_commit
-            result = await scan_calendar_events(
-                "fake-token", user.id, db_session, lookback_days=30
-            )
+            result = await scan_calendar_events("fake-token", user.id, db_session, lookback_days=30)
 
         assert result["activities_logged"] >= 1
 
@@ -465,9 +476,7 @@ class TestCalendarIntelligenceEdgeCases:
             mock_settings.own_domains = ["trioscs.com"]
             db_session.commit = always_fail_commit
             db_session.rollback = MagicMock(side_effect=original_rollback)
-            result = await scan_calendar_events(
-                "fake-token", user.id, db_session, lookback_days=30
-            )
+            result = await scan_calendar_events("fake-token", user.id, db_session, lookback_days=30)
 
         # The result should still be returned (commit failed but was handled)
         assert result["events_scanned"] == 1
@@ -529,6 +538,7 @@ class TestProactiveServiceDNOAndMargin:
     def test_scan_skips_dno_matches(self, db_session):
         """Scanning skips matches suppressed by do-not-offer."""
         import app.services.proactive_service as mod
+
         mod._last_proactive_scan = datetime.min.replace(tzinfo=timezone.utc)
 
         raw_conn = db_session.get_bind().raw_connection()
@@ -542,8 +552,10 @@ class TestProactiveServiceDNOAndMargin:
         req, item = _make_requisition(db_session, user.id, site.id, "archived", "DNO_PART")
 
         source_req = Requisition(
-            name="Source-DNO", customer_name="OtherCo",
-            status="open", created_by=user.id,
+            name="Source-DNO",
+            customer_name="OtherCo",
+            status="open",
+            created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(source_req)
@@ -551,13 +563,15 @@ class TestProactiveServiceDNOAndMargin:
         _make_offer(db_session, source_req, user.id, "DNO_PART")
 
         dno = ProactiveDoNotOffer(
-            mpn="DNO_PART", company_id=co.id,
+            mpn="DNO_PART",
+            company_id=co.id,
             created_by_id=user.id,
         )
         db_session.add(dno)
         db_session.commit()
 
         from app.services.proactive_service import scan_new_offers_for_matches
+
         result = scan_new_offers_for_matches(db_session)
 
         assert result["scanned"] >= 1
@@ -575,15 +589,20 @@ class TestProactiveServiceDNOAndMargin:
         offer = _make_offer(db_session, req, user.id, "DNO2PART")
 
         m = ProactiveMatch(
-            offer_id=offer.id, requirement_id=item.id,
-            requisition_id=req.id, customer_site_id=site.id,
-            company_id=co.id, salesperson_id=user.id,
-            mpn="DNO2PART", status="new",
+            offer_id=offer.id,
+            requirement_id=item.id,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            company_id=co.id,
+            salesperson_id=user.id,
+            mpn="DNO2PART",
+            status="new",
         )
         db_session.add(m)
 
         dno = ProactiveDoNotOffer(
-            mpn="DNO2PART", company_id=co.id,
+            mpn="DNO2PART",
+            company_id=co.id,
             created_by_id=user.id,
         )
         db_session.add(dno)
@@ -603,10 +622,14 @@ class TestProactiveServiceDNOAndMargin:
         offer = _make_offer(db_session, req, user.id, "HIGHMPN")
 
         m = ProactiveMatch(
-            offer_id=offer.id, requirement_id=item.id,
-            requisition_id=req.id, customer_site_id=site.id,
-            salesperson_id=user.id, mpn="HIGHMPN",
-            status="new", margin_pct=45.0,
+            offer_id=offer.id,
+            requirement_id=item.id,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            mpn="HIGHMPN",
+            status="new",
+            margin_pct=45.0,
         )
         db_session.add(m)
         db_session.commit()
@@ -627,9 +650,12 @@ class TestProactiveServiceDNOAndMargin:
         offer = _make_offer(db_session, req, user.id, "HTMLMPN")
 
         m = ProactiveMatch(
-            offer_id=offer.id, requirement_id=item.id,
-            requisition_id=req.id, customer_site_id=site.id,
-            salesperson_id=user.id, mpn="HTMLMPN",
+            offer_id=offer.id,
+            requirement_id=item.id,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            mpn="HTMLMPN",
         )
         db_session.add(m)
         db_session.commit()
@@ -639,9 +665,13 @@ class TestProactiveServiceDNOAndMargin:
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
-                db=db_session, user=user, token="fake-token",
-                match_ids=[m.id], contact_ids=[contact.id],
-                sell_prices={}, subject="Custom Subject",
+                db=db_session,
+                user=user,
+                token="fake-token",
+                match_ids=[m.id],
+                contact_ids=[contact.id],
+                sell_prices={},
+                subject="Custom Subject",
                 email_html="<p>Custom HTML body</p>",
             )
 
@@ -664,11 +694,14 @@ class TestStartupDefaultUser:
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "admin@test.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-                "DEFAULT_USER_ROLE": "admin",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "admin@test.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                    "DEFAULT_USER_ROLE": "admin",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_db),
         ):
             _create_default_user_if_env_set()
@@ -685,10 +718,13 @@ class TestStartupDefaultUser:
         mock_db.query.return_value.filter_by.return_value.first.return_value = MagicMock()
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "admin@test.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "admin@test.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_db),
         ):
             _create_default_user_if_env_set()
@@ -712,10 +748,13 @@ class TestStartupDefaultUser:
         mock_db.query.return_value.filter_by.return_value.first.side_effect = Exception("boom")
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "admin@test.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "admin@test.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_db),
         ):
             _create_default_user_if_env_set()  # should not raise
@@ -730,23 +769,15 @@ class TestStartupBackfillNormKey:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
-            ))
+            conn.execute(
+                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
+            )
             # Row with empty mpn_matched triggers _key('') -> return ""
-            conn.execute(sqltext(
-                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '', NULL)"
-            ))
+            conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '', NULL)"))
             # Row with actual MPN
-            conn.execute(sqltext(
-                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (2, 'LM317T', NULL)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '', NULL)"
-            ))
+            conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (2, 'LM317T', NULL)"))
+            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext("INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '', NULL)"))
             conn.commit()
 
         with patch("app.startup.engine", eng):
@@ -785,14 +816,20 @@ class TestContactQualityDedup:
 
         # Primary contact (created first)
         c1 = SiteContact(
-            customer_site_id=site.id, full_name="Jane",
-            email="jane@merge.com", phone=None, linkedin_url=None, contact_role=None,
+            customer_site_id=site.id,
+            full_name="Jane",
+            email="jane@merge.com",
+            phone=None,
+            linkedin_url=None,
+            contact_role=None,
             created_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         # Duplicate with extra fields
         c2 = SiteContact(
-            customer_site_id=site.id, full_name="Jane Doe",
-            email="jane@merge.com", phone="+1234567890",
+            customer_site_id=site.id,
+            full_name="Jane Doe",
+            email="jane@merge.com",
+            phone="+1234567890",
             phone_verified=True,
             linkedin_url="https://linkedin.com/in/jane",
             contact_role="procurement",
@@ -894,9 +931,7 @@ class TestEmailIntelligenceGaps:
             new_callable=AsyncMock,
             return_value=mock_parsed,
         ):
-            result = await extract_pricing_intelligence(
-                "Quote", "Price: $1.50", "vendor@test.com", "Vendor"
-            )
+            result = await extract_pricing_intelligence("Quote", "Price: $1.50", "vendor@test.com", "Vendor")
 
         assert result == mock_parsed
 
@@ -986,14 +1021,18 @@ class TestIntegrityServiceGaps:
         # Create a requirement with no material card
         user = _make_user(db_session, "integrity-user@trioscs.com")
         req = Requisition(
-            name="IntReq", status="active", created_by=user.id,
+            name="IntReq",
+            status="active",
+            created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         item = Requirement(
-            requisition_id=req.id, primary_mpn="ORPHAN1",
-            target_qty=100, material_card_id=None,
+            requisition_id=req.id,
+            primary_mpn="ORPHAN1",
+            target_qty=100,
+            material_card_id=None,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(item)
@@ -1015,17 +1054,32 @@ class TestIntegrityServiceGaps:
             patch("app.services.integrity_service.check_orphaned_requirements", return_value=100),
             patch("app.services.integrity_service.check_orphaned_sightings", return_value=100),
             patch("app.services.integrity_service.check_orphaned_offers", return_value=100),
-            patch("app.services.integrity_service.check_dangling_fks", return_value={
-                "requirements": 0, "sightings": 0, "offers": 0,
-            }),
+            patch(
+                "app.services.integrity_service.check_dangling_fks",
+                return_value={
+                    "requirements": 0,
+                    "sightings": 0,
+                    "offers": 0,
+                },
+            ),
             patch("app.services.integrity_service.check_duplicate_cards", return_value=5),
             patch("app.services.integrity_service.check_vendor_history_duplicates", return_value=0),
-            patch("app.services.integrity_service.heal_orphaned_records", return_value={
-                "requirements": 0, "sightings": 0, "offers": 0,
-            }),
-            patch("app.services.integrity_service.clear_dangling_fks", return_value={
-                "requirements": 0, "sightings": 0, "offers": 0,
-            }),
+            patch(
+                "app.services.integrity_service.heal_orphaned_records",
+                return_value={
+                    "requirements": 0,
+                    "sightings": 0,
+                    "offers": 0,
+                },
+            ),
+            patch(
+                "app.services.integrity_service.clear_dangling_fks",
+                return_value={
+                    "requirements": 0,
+                    "sightings": 0,
+                    "offers": 0,
+                },
+            ),
             patch("app.services.integrity_service._compute_linkage_coverage", return_value={}),
         ):
             result = run_integrity_check(db_session)
@@ -1087,7 +1141,6 @@ class TestCustomerEnrichmentBatchGaps:
     async def test_batch_stops_when_credits_exhausted(self, db_session):
         """Batch enrichment stops early when all credit budgets exhausted."""
         from app.services.customer_enrichment_batch import run_customer_enrichment_batch
-        from app.models.enrichment import EnrichmentJob
 
         with (
             patch("app.services.customer_enrichment_batch.settings") as mock_settings,
@@ -1180,11 +1233,12 @@ class TestMaterialEnrichmentGaps:
     @pytest.mark.asyncio
     async def test_enrich_batch_ai_failure(self, db_session):
         """Exception during AI enrichment is caught per-card."""
-        from app.services.material_enrichment_service import _enrich_batch
         from app.models import MaterialCard
+        from app.services.material_enrichment_service import _enrich_batch
 
         card = MaterialCard(
-            normalized_mpn="fail-mpn", display_mpn="FAIL-MPN",
+            normalized_mpn="fail-mpn",
+            display_mpn="FAIL-MPN",
             search_count=1,
         )
         db_session.add(card)
@@ -1204,12 +1258,13 @@ class TestMaterialEnrichmentGaps:
     @pytest.mark.asyncio
     async def test_enrich_batch_commit_failure(self, db_session):
         """Commit failure after batch enrichment is caught."""
-        from app.services.material_enrichment_service import _enrich_batch
         from app.models import MaterialCard
+        from app.services.material_enrichment_service import _enrich_batch
 
         db_session.rollback()  # Clear any pending state from prior tests
         card = MaterialCard(
-            normalized_mpn="commit-fail-mpn", display_mpn="COMMIT-FAIL",
+            normalized_mpn="commit-fail-mpn",
+            display_mpn="COMMIT-FAIL",
             search_count=1,
         )
         db_session.add(card)

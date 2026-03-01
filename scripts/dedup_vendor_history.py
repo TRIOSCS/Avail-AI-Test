@@ -53,9 +53,11 @@ def dedup_vendor_history(dry_run: bool = True):
             keeper = records[0]
             dupes = records[1:]
 
-            print(f"  Card {card_id} vendor '{norm_name}': keeping id={keeper.id} "
-                  f"({keeper.vendor_name}, seen={keeper.times_seen}), "
-                  f"merging {len(dupes)} duplicate(s)")
+            print(
+                f"  Card {card_id} vendor '{norm_name}': keeping id={keeper.id} "
+                f"({keeper.vendor_name}, seen={keeper.times_seen}), "
+                f"merging {len(dupes)} duplicate(s)"
+            )
 
             for dupe in dupes:
                 # Merge counts

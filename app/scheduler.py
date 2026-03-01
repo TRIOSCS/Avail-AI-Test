@@ -35,6 +35,7 @@ from loguru import logger
 
 def _traced_job(func):
     """Wrap scheduler jobs with a unique trace_id for log correlation."""
+
     @wraps(func)
     async def wrapper(*args, **kwargs):
         trace_id = str(uuid.uuid4())[:8]
@@ -47,7 +48,9 @@ def _traced_job(func):
                 raise
             finally:
                 logger.debug("Job finished")
+
     return wrapper
+
 
 # Global scheduler instance
 scheduler = AsyncIOScheduler(
@@ -70,127 +73,200 @@ def configure_scheduler():
     from .config import settings
 
     # Core jobs (always run)
-    scheduler.add_job(_job_auto_archive, IntervalTrigger(minutes=5),
-                      id="auto_archive", name="Auto-archive stale requisitions")
-    scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5),
-                      id="token_refresh", name="Token refresh")
-    scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min),
-                      id="inbox_scan", name="Inbox scan")
-    scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5),
-                      id="batch_results", name="Process batch results")
-    scheduler.add_job(_job_engagement_scoring, IntervalTrigger(hours=12),
-                      id="engagement_scoring", name="Engagement scoring")
+    scheduler.add_job(
+        _job_auto_archive, IntervalTrigger(minutes=5), id="auto_archive", name="Auto-archive stale requisitions"
+    )
+    scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
+    scheduler.add_job(
+        _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
+    )
+    scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
+    scheduler.add_job(
+        _job_engagement_scoring, IntervalTrigger(hours=12), id="engagement_scoring", name="Engagement scoring"
+    )
 
     # Contacts sync (configurable)
     if settings.contacts_sync_enabled:
-        scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24),
-                          id="contacts_sync", name="Contacts sync")
+        scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24), id="contacts_sync", name="Contacts sync")
 
     # Activity tracking jobs
     if settings.activity_tracking_enabled:
-        scheduler.add_job(_job_webhook_subscriptions, IntervalTrigger(minutes=5),
-                          id="webhook_subs", name="Webhook subscriptions")
-        scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12),
-                          id="ownership_sweep", name="Ownership sweep")
-        scheduler.add_job(_job_site_ownership_sweep, CronTrigger(hour=3, minute=0),
-                          id="site_ownership_sweep", name="Site ownership sweep")
+        scheduler.add_job(
+            _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
+        )
+        scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12), id="ownership_sweep", name="Ownership sweep")
+        scheduler.add_job(
+            _job_site_ownership_sweep,
+            CronTrigger(hour=3, minute=0),
+            id="site_ownership_sweep",
+            name="Site ownership sweep",
+        )
 
     # Buy plan jobs
-    scheduler.add_job(_job_po_verification, IntervalTrigger(minutes=settings.po_verify_interval_min),
-                      id="po_verification", name="PO verification")
-    scheduler.add_job(_job_stock_autocomplete,
-                      CronTrigger(hour=settings.buyplan_auto_complete_hour,
-                                  timezone=settings.buyplan_auto_complete_tz),
-                      id="stock_autocomplete", name="Stock sale auto-complete")
+    scheduler.add_job(
+        _job_po_verification,
+        IntervalTrigger(minutes=settings.po_verify_interval_min),
+        id="po_verification",
+        name="PO verification",
+    )
+    scheduler.add_job(
+        _job_stock_autocomplete,
+        CronTrigger(hour=settings.buyplan_auto_complete_hour, timezone=settings.buyplan_auto_complete_tz),
+        id="stock_autocomplete",
+        name="Stock sale auto-complete",
+    )
 
     # Proactive matching
     if settings.proactive_matching_enabled:
         interval_h = max(1, settings.proactive_scan_interval_hours)
-        scheduler.add_job(_job_proactive_matching, IntervalTrigger(hours=interval_h),
-                          id="proactive_matching", name="Proactive matching")
+        scheduler.add_job(
+            _job_proactive_matching,
+            IntervalTrigger(hours=interval_h),
+            id="proactive_matching",
+            name="Proactive matching",
+        )
 
     # Performance tracking
-    scheduler.add_job(_job_performance_tracking, IntervalTrigger(hours=12),
-                      id="performance_tracking", name="Performance tracking")
+    scheduler.add_job(
+        _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Performance tracking"
+    )
 
     # Deep enrichment (conditional)
     if settings.deep_email_mining_enabled:
-        scheduler.add_job(_job_deep_email_mining, IntervalTrigger(hours=4),
-                          id="deep_email_mining", name="Deep email mining")
+        scheduler.add_job(
+            _job_deep_email_mining, IntervalTrigger(hours=4), id="deep_email_mining", name="Deep email mining"
+        )
     if settings.deep_enrichment_enabled:
-        scheduler.add_job(_job_deep_enrichment, IntervalTrigger(hours=12),
-                          id="deep_enrichment", name="Deep enrichment sweep")
+        scheduler.add_job(
+            _job_deep_enrichment, IntervalTrigger(hours=12), id="deep_enrichment", name="Deep enrichment sweep"
+        )
 
     # Contact scoring (nightly at 2am UTC)
     if settings.contact_scoring_enabled:
-        scheduler.add_job(_job_contact_scoring, CronTrigger(hour=2, minute=0),
-                          id="contact_scoring", name="Contact relationship scoring")
+        scheduler.add_job(
+            _job_contact_scoring,
+            CronTrigger(hour=2, minute=0),
+            id="contact_scoring",
+            name="Contact relationship scoring",
+        )
 
     # Contact status auto-compute (nightly at 3am UTC)
-    scheduler.add_job(_job_contact_status_compute, CronTrigger(hour=3, minute=0),
-                      id="contact_status_compute", name="Contact status auto-compute")
+    scheduler.add_job(
+        _job_contact_status_compute,
+        CronTrigger(hour=3, minute=0),
+        id="contact_status_compute",
+        name="Contact status auto-compute",
+    )
 
     # Cache cleanup
-    scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
-                      id="cache_cleanup", name="Cache cleanup")
+    scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24), id="cache_cleanup", name="Cache cleanup")
 
     # Email health scoring (nightly at 1am UTC)
-    scheduler.add_job(_job_email_health_update, CronTrigger(hour=1, minute=0),
-                      id="email_health_update", name="Vendor email health scores")
+    scheduler.add_job(
+        _job_email_health_update,
+        CronTrigger(hour=1, minute=0),
+        id="email_health_update",
+        name="Vendor email health scores",
+    )
 
     # Calendar vendor meeting scan (daily at 6am UTC)
-    scheduler.add_job(_job_calendar_scan, CronTrigger(hour=6, minute=0),
-                      id="calendar_scan", name="Calendar vendor meeting scan")
+    scheduler.add_job(
+        _job_calendar_scan, CronTrigger(hour=6, minute=0), id="calendar_scan", name="Calendar vendor meeting scan"
+    )
 
     # Monthly full enrichment refresh — runs on 1st when API credits reset
     # Uses all available providers (Apollo, Gradient, Hunter, AI)
     if settings.deep_enrichment_enabled:
-        scheduler.add_job(_job_monthly_enrichment_refresh, CronTrigger(day=1, hour=4, minute=0),
-                          id="monthly_enrichment_refresh", name="Monthly enrichment refresh (credit reset)")
+        scheduler.add_job(
+            _job_monthly_enrichment_refresh,
+            CronTrigger(day=1, hour=4, minute=0),
+            id="monthly_enrichment_refresh",
+            name="Monthly enrichment refresh (credit reset)",
+        )
 
     # Prospecting module (Phase 8) — monthly cycle
     if settings.prospecting_enabled:
-        scheduler.add_job(_job_pool_health_report, CronTrigger(day=1, hour=8, minute=0),
-                          id="pool_health_report", name="Pool health report")
-        scheduler.add_job(_job_discover_prospects, CronTrigger(day=1, hour=21, minute=0),
-                          id="discover_prospects", name="Prospect discovery")
-        scheduler.add_job(_job_enrich_pool, CronTrigger(day=2, hour=2, minute=0),
-                          id="enrich_pool", name="Pool enrichment")
-        scheduler.add_job(_job_find_contacts, CronTrigger(day=3, hour=2, minute=0),
-                          id="find_contacts", name="Prospect contact enrichment")
-        scheduler.add_job(_job_refresh_scores, CronTrigger(day=15, hour=2, minute=0),
-                          id="refresh_scores", name="Prospect score refresh")
-        scheduler.add_job(_job_expire_and_resurface, CronTrigger(day="last", hour=21, minute=0),
-                          id="expire_and_resurface", name="Expire and resurface prospects")
+        scheduler.add_job(
+            _job_pool_health_report,
+            CronTrigger(day=1, hour=8, minute=0),
+            id="pool_health_report",
+            name="Pool health report",
+        )
+        scheduler.add_job(
+            _job_discover_prospects,
+            CronTrigger(day=1, hour=21, minute=0),
+            id="discover_prospects",
+            name="Prospect discovery",
+        )
+        scheduler.add_job(
+            _job_enrich_pool, CronTrigger(day=2, hour=2, minute=0), id="enrich_pool", name="Pool enrichment"
+        )
+        scheduler.add_job(
+            _job_find_contacts,
+            CronTrigger(day=3, hour=2, minute=0),
+            id="find_contacts",
+            name="Prospect contact enrichment",
+        )
+        scheduler.add_job(
+            _job_refresh_scores,
+            CronTrigger(day=15, hour=2, minute=0),
+            id="refresh_scores",
+            name="Prospect score refresh",
+        )
+        scheduler.add_job(
+            _job_expire_and_resurface,
+            CronTrigger(day="last", hour=21, minute=0),
+            id="expire_and_resurface",
+            name="Expire and resurface prospects",
+        )
 
     # Proactive offer expiry (daily at 4am UTC)
-    scheduler.add_job(_job_proactive_offer_expiry, CronTrigger(hour=4, minute=30),
-                      id="proactive_offer_expiry", name="Expire stale proactive offers")
+    scheduler.add_job(
+        _job_proactive_offer_expiry,
+        CronTrigger(hour=4, minute=30),
+        id="proactive_offer_expiry",
+        name="Expire stale proactive offers",
+    )
 
     # Offer stale flagging (daily at 5am UTC) — display-only, never hides offers
-    scheduler.add_job(_job_flag_stale_offers, CronTrigger(hour=5, minute=0),
-                      id="flag_stale_offers", name="Flag stale offers (14d+)")
+    scheduler.add_job(
+        _job_flag_stale_offers, CronTrigger(hour=5, minute=0), id="flag_stale_offers", name="Flag stale offers (14d+)"
+    )
 
     # Material card integrity check + self-healing (every 6 hours)
-    scheduler.add_job(_job_integrity_check, IntervalTrigger(hours=6),
-                      id="integrity_check", name="Material card integrity check")
+    scheduler.add_job(
+        _job_integrity_check, IntervalTrigger(hours=6), id="integrity_check", name="Material card integrity check"
+    )
 
     # Material card AI enrichment (descriptions + commodity classification)
     if settings.material_enrichment_enabled:
-        scheduler.add_job(_job_material_enrichment, IntervalTrigger(hours=6),
-                          id="material_enrichment", name="Material card AI enrichment")
+        scheduler.add_job(
+            _job_material_enrichment,
+            IntervalTrigger(hours=6),
+            id="material_enrichment",
+            name="Material card AI enrichment",
+        )
 
     # Auto-attribute unmatched activities (every 2 hours)
-    scheduler.add_job(_job_auto_attribute_activities, IntervalTrigger(hours=2),
-                      id="auto_attribute_activities", name="Auto-attribute unmatched activities")
+    scheduler.add_job(
+        _job_auto_attribute_activities,
+        IntervalTrigger(hours=2),
+        id="auto_attribute_activities",
+        name="Auto-attribute unmatched activities",
+    )
 
     # Auto-dedup companies and vendors (daily)
-    scheduler.add_job(_job_auto_dedup, IntervalTrigger(hours=24),
-                      id="auto_dedup", name="Auto-dedup companies and vendors")
+    scheduler.add_job(
+        _job_auto_dedup, IntervalTrigger(hours=24), id="auto_dedup", name="Auto-dedup companies and vendors"
+    )
 
     # Reset connector error counters (daily at midnight UTC)
-    scheduler.add_job(_job_reset_connector_errors, CronTrigger(hour=0, minute=0),
-                      id="reset_connector_errors", name="Reset connector 24h error counts")
+    scheduler.add_job(
+        _job_reset_connector_errors,
+        CronTrigger(hour=0, minute=0),
+        id="reset_connector_errors",
+        name="Reset connector 24h error counts",
+    )
 
     # Customer enrichment quarterly sweep (1st of Jan/Apr/Jul/Oct at 5 AM UTC)
     if settings.customer_enrichment_enabled:
@@ -209,14 +285,17 @@ def configure_scheduler():
         )
 
     # API Health Monitoring
-    scheduler.add_job(_job_health_ping, IntervalTrigger(minutes=15),
-                      id="health_ping", name="API health ping")
-    scheduler.add_job(_job_health_deep, IntervalTrigger(hours=2),
-                      id="health_deep", name="API deep health test")
-    scheduler.add_job(_job_cleanup_usage_log, CronTrigger(day=1, hour=1),
-                      id="cleanup_usage_log", name="Cleanup old usage logs")
-    scheduler.add_job(_job_reset_monthly_usage, CronTrigger(day=1, hour=0, minute=5),
-                      id="reset_monthly_usage", name="Reset monthly API usage")
+    scheduler.add_job(_job_health_ping, IntervalTrigger(minutes=15), id="health_ping", name="API health ping")
+    scheduler.add_job(_job_health_deep, IntervalTrigger(hours=2), id="health_deep", name="API deep health test")
+    scheduler.add_job(
+        _job_cleanup_usage_log, CronTrigger(day=1, hour=1), id="cleanup_usage_log", name="Cleanup old usage logs"
+    )
+    scheduler.add_job(
+        _job_reset_monthly_usage,
+        CronTrigger(day=1, hour=0, minute=5),
+        id="reset_monthly_usage",
+        name="Reset monthly API usage",
+    )
 
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
@@ -279,6 +358,7 @@ async def _job_token_refresh():
         # Refresh all users in parallel
         async def _safe_refresh(user):
             from .cache.intel_cache import _get_redis
+
             lock_key = f"lock:token_refresh:{user.id}"
             r = _get_redis()
             if r:
@@ -376,6 +456,7 @@ async def _job_batch_results():
     db = SessionLocal()
     try:
         from .email_service import process_batch_results
+
         batch_applied = await asyncio.wait_for(process_batch_results(db), timeout=120)
         if batch_applied:
             logger.info(f"Batch processing: {batch_applied} results applied")
@@ -479,6 +560,7 @@ async def _job_webhook_subscriptions():
             ensure_all_users_subscribed,
             renew_expiring_subscriptions,
         )
+
         await renew_expiring_subscriptions(db)
         await ensure_all_users_subscribed(db)
     except Exception as e:
@@ -496,6 +578,7 @@ async def _job_ownership_sweep():
     db = SessionLocal()
     try:
         from .services.ownership_service import run_ownership_sweep
+
         await run_ownership_sweep(db)
     except Exception as e:
         logger.error(f"Ownership sweep error: {e}")
@@ -512,6 +595,7 @@ async def _job_site_ownership_sweep():
     db = SessionLocal()
     try:
         from .services.ownership_service import run_site_ownership_sweep
+
         run_site_ownership_sweep(db)
     except Exception as e:
         logger.error(f"Site ownership sweep error: {e}")
@@ -530,9 +614,7 @@ async def _job_po_verification():
     try:
         from .services.buyplan_service import verify_po_sent
 
-        unverified_plans = (
-            db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
-        )
+        unverified_plans = db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
 
         async def _safe_verify(plan):
             try:
@@ -557,6 +639,7 @@ async def _job_stock_autocomplete():
     db = SessionLocal()
     try:
         from .services.buyplan_service import auto_complete_stock_sales
+
         loop = asyncio.get_running_loop()
         completed = await asyncio.wait_for(
             loop.run_in_executor(None, auto_complete_stock_sales, db),
@@ -615,12 +698,8 @@ async def _job_proactive_matching():
 
         # Summary log with total pending
         new_matches = result.get("matches_created", 0) + cph_result.get("matches_created", 0)
-        total_pending = db.query(ProactiveMatch).filter(
-            ProactiveMatch.status == "new"
-        ).count()
-        logger.info(
-            f"Proactive scan complete: {new_matches} new matches, {total_pending} pending"
-        )
+        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == "new").count()
+        logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
@@ -650,18 +729,13 @@ async def _job_performance_tracking():
             loop.run_in_executor(None, compute_all_vendor_scorecards, db),
             timeout=600,
         )
-        logger.info(
-            f"Vendor scorecards: {vs_result['updated']} updated, "
-            f"{vs_result['skipped_cold_start']} cold-start"
-        )
+        logger.info(f"Vendor scorecards: {vs_result['updated']} updated, {vs_result['skipped_cold_start']} cold-start")
         current_month = now.date().replace(day=1)
         bl_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month),
             timeout=300,
         )
-        logger.info(
-            f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
-        )
+        logger.info(f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}")
         # Avail Scores
         as_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_all_avail_scores, db, current_month),
@@ -673,6 +747,7 @@ async def _job_performance_tracking():
         )
         # Multiplier Scores
         from .services.multiplier_score_service import compute_all_multiplier_scores
+
         ms_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_all_multiplier_scores, db, current_month),
             timeout=300,
@@ -683,14 +758,12 @@ async def _job_performance_tracking():
         )
         # Unified Scores (cross-role leaderboard)
         from .services.unified_score_service import compute_all_unified_scores
+
         us_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_all_unified_scores, db, current_month),
             timeout=300,
         )
-        logger.info(
-            f"Unified Scores: {us_result['computed']} computed, "
-            f"{us_result['saved']} saved for {current_month}"
-        )
+        logger.info(f"Unified Scores: {us_result['computed']} computed, {us_result['saved']} saved for {current_month}")
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
@@ -760,10 +833,16 @@ async def _job_deep_email_mining():
                     for domain, domain_data in scan_result.get("per_domain", {}).items():
                         for email_addr in domain_data.get("emails", [])[:10]:
                             try:
-                                link_contact_to_entities(db, email_addr, {
-                                    "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
-                                    "confidence": 0.6,
-                                })
+                                link_contact_to_entities(
+                                    db,
+                                    email_addr,
+                                    {
+                                        "full_name": domain_data.get("sender_names", [""])[0]
+                                        if domain_data.get("sender_names")
+                                        else None,
+                                        "confidence": 0.6,
+                                    },
+                                )
                             except Exception:
                                 pass
 
@@ -822,8 +901,8 @@ async def _job_deep_enrichment():
         stale_companies = (
             db.query(Company.id)
             .filter(
-                (Company.deep_enrichment_at.is_(None)) |
-                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+                (Company.deep_enrichment_at.is_(None))
+                | (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
             )
             .order_by(Company.last_activity_at.desc().nullslast())
             .limit(50)
@@ -832,7 +911,7 @@ async def _job_deep_enrichment():
 
         if stale_companies:
             for i in range(0, len(stale_companies), 10):
-                batch = [cid for (cid,) in stale_companies[i:i + 10]]
+                batch = [cid for (cid,) in stale_companies[i : i + 10]]
                 await asyncio.wait_for(
                     asyncio.gather(*[_safe_enrich_company(cid) for cid in batch], return_exceptions=True),
                     timeout=300,
@@ -842,8 +921,8 @@ async def _job_deep_enrichment():
         stale_vendors = (
             db.query(VendorCard.id)
             .filter(
-                (VendorCard.deep_enrichment_at.is_(None)) |
-                (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+                (VendorCard.deep_enrichment_at.is_(None))
+                | (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
             )
             .order_by(
                 VendorCard.last_activity_at.desc().nullslast(),
@@ -866,7 +945,7 @@ async def _job_deep_enrichment():
 
         all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
         for i in range(0, len(all_vendor_ids), 10):
-            batch = all_vendor_ids[i:i + 10]
+            batch = all_vendor_ids[i : i + 10]
             await asyncio.wait_for(
                 asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True),
                 timeout=300,
@@ -899,15 +978,14 @@ async def _job_monthly_enrichment_refresh():
     db = SessionLocal()
     try:
         # Skip if there's already a running job
-        running = db.query(EnrichmentJob).filter(
-            EnrichmentJob.status == "running"
-        ).first()
+        running = db.query(EnrichmentJob).filter(EnrichmentJob.status == "running").first()
         if running:
             logger.info(f"Monthly enrichment skipped — job #{running.id} already running")
             return
 
         # Flush enrichment cache so providers are re-queried with fresh credits
         from .cache.intel_cache import flush_enrichment_cache
+
         cleared = flush_enrichment_cache()
         logger.info(f"Monthly enrichment: cleared {cleared} expired cache entries")
 
@@ -940,7 +1018,8 @@ async def _job_customer_enrichment_sweep():
         db.commit()
         logger.info(
             "Customer enrichment sweep: %d processed, %d enriched",
-            result.get("processed", 0), result.get("enriched", 0),
+            result.get("processed", 0),
+            result.get("enriched", 0),
         )
     except Exception as e:
         logger.error(f"Customer enrichment sweep error: {e}")
@@ -961,7 +1040,8 @@ async def _job_email_reverification():
         db.commit()
         logger.info(
             "Email re-verification: %d processed, %d invalidated",
-            result.get("processed", 0), result.get("invalidated", 0),
+            result.get("processed", 0),
+            result.get("invalidated", 0),
         )
     except Exception as e:
         logger.error(f"Email re-verification error: {e}")
@@ -984,9 +1064,7 @@ async def _job_contact_scoring():
             loop.run_in_executor(None, compute_all_contact_scores, db),
             timeout=300,
         )
-        logger.info(
-            f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped"
-        )
+        logger.info(f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped")
     except asyncio.TimeoutError:
         logger.error("Contact scoring timed out after 300s")
         db.rollback()
@@ -1002,6 +1080,7 @@ async def _job_cache_cleanup():
     """Clean up expired cache entries."""
     try:
         from .cache.intel_cache import cleanup_expired
+
         cleanup_expired()
     except Exception as e:
         logger.error(f"Cache cleanup error: {e}")
@@ -1019,14 +1098,10 @@ async def _job_email_health_update():
     db = SessionLocal()
     try:
         result = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(
-                None, batch_update_email_health, db
-            ),
+            asyncio.get_event_loop().run_in_executor(None, batch_update_email_health, db),
             timeout=300,
         )
-        logger.info(
-            f"Email health update: {result.get('updated', 0)} vendors scored"
-        )
+        logger.info(f"Email health update: {result.get('updated', 0)} vendors scored")
     except asyncio.TimeoutError:
         logger.error("Email health update timed out after 300s")
         db.rollback()
@@ -1047,9 +1122,7 @@ async def _job_calendar_scan():
     db = SessionLocal()
     try:
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        users_to_scan = [
-            u for u in users if u.access_token and u.m365_connected
-        ]
+        users_to_scan = [u for u in users if u.access_token and u.m365_connected]
     except Exception as e:
         logger.error(f"Calendar scan user query error: {e}")
         return
@@ -1073,9 +1146,7 @@ async def _job_calendar_scan():
                     scan_calendar_events(token, user.id, scan_db, lookback_days=30),
                     timeout=60,
                 )
-                logger.info(
-                    f"Calendar scan [{user.email}]: {result.get('events_found', 0)} events"
-                )
+                logger.info(f"Calendar scan [{user.email}]: {result.get('events_found', 0)} events")
             except asyncio.TimeoutError:
                 logger.warning(f"Calendar scan TIMEOUT for user {user_id}")
                 scan_db.rollback()
@@ -1099,9 +1170,7 @@ async def _scan_user_inbox(user, db):
 
     is_backfill = user.last_inbox_scan is None
     if is_backfill:
-        logger.info(
-            f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)"
-        )
+        logger.info(f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)")
 
     # Poll inbox for replies (poll_inbox handles dedup via message_id)
     try:
@@ -1162,9 +1231,7 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
     if not stock_emails:
         return
 
-    logger.info(
-        f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments"
-    )
+    logger.info(f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments")
 
     for email_info in stock_emails:
         for att_info in email_info.get("stock_files", []):
@@ -1206,9 +1273,7 @@ async def _download_and_import_stock_list(
     dl_token = await get_valid_token(user, db) or user.access_token
     gc = GraphClient(dl_token)
     try:
-        att_data = await gc.get_json(
-            f"/me/messages/{message_id}/attachments/{attachment_id}"
-        )
+        att_data = await gc.get_json(f"/me/messages/{message_id}/attachments/{attachment_id}")
     except Exception as e:
         logger.warning(f"Attachment download failed: {e}")
         return
@@ -1235,9 +1300,7 @@ async def _download_and_import_stock_list(
     try:
         from app.services.attachment_parser import parse_attachment
 
-        rows = await parse_attachment(
-            file_bytes, filename, vendor_domain=vendor_domain, db=db
-        )
+        rows = await parse_attachment(file_bytes, filename, vendor_domain=vendor_domain, db=db)
     except Exception as e:
         logger.warning(f"AI attachment parser failed, using legacy parser: {e}")
         rows = _parse_stock_file(file_bytes, filename)
@@ -1257,34 +1320,45 @@ async def _download_and_import_stock_list(
         if sender_match and sender_match["type"] == "company":
             is_excess_list = True
             source_company_id = sender_match["id"]  # noqa: F841
-            logger.info(
-                f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}"
-            )
+            logger.info(f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}")
 
     # Import into material cards — batch pre-load for performance
     imported = 0
     norm_vendor = normalize_vendor_name(vendor_name)
 
     # Pre-load existing MaterialCards in one query instead of per-row
-    valid_mpns = list({(row.get("mpn") or "").strip().upper() for row in rows
-                       if (row.get("mpn") or "").strip() and len((row.get("mpn") or "").strip()) >= 3})
+    valid_mpns = list(
+        {
+            (row.get("mpn") or "").strip().upper()
+            for row in rows
+            if (row.get("mpn") or "").strip() and len((row.get("mpn") or "").strip()) >= 3
+        }
+    )
     card_map = {}
     mvh_map = {}
     if valid_mpns:
         # Batch in chunks of 500 to keep IN clause manageable
         for i in range(0, len(valid_mpns), 500):
-            chunk = valid_mpns[i:i + 500]
-            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk), MaterialCard.deleted_at.is_(None)).all():
+            chunk = valid_mpns[i : i + 500]
+            for c in (
+                db.query(MaterialCard)
+                .filter(MaterialCard.normalized_mpn.in_(chunk), MaterialCard.deleted_at.is_(None))
+                .all()
+            ):
                 card_map[c.normalized_mpn] = c
         # Pre-load existing MVH entries for this vendor
         existing_card_ids = [c.id for c in card_map.values()]
         if existing_card_ids:
             for i in range(0, len(existing_card_ids), 500):
-                chunk = existing_card_ids[i:i + 500]
-                for m in db.query(MaterialVendorHistory).filter(
-                    MaterialVendorHistory.material_card_id.in_(chunk),
-                    MaterialVendorHistory.vendor_name == norm_vendor,
-                ).all():
+                chunk = existing_card_ids[i : i + 500]
+                for m in (
+                    db.query(MaterialVendorHistory)
+                    .filter(
+                        MaterialVendorHistory.material_card_id.in_(chunk),
+                        MaterialVendorHistory.vendor_name == norm_vendor,
+                    )
+                    .all()
+                ):
                     mvh_map[m.material_card_id] = m
 
     for row in rows:
@@ -1365,8 +1439,7 @@ async def _download_and_import_stock_list(
             )
             if matches:
                 match_list = [
-                    {"mpn": m.primary_mpn, "requirement_id": m.id, "requisition_id": m.requisition_id}
-                    for m in matches
+                    {"mpn": m.primary_mpn, "requirement_id": m.id, "requisition_id": m.requisition_id} for m in matches
                 ]
                 await send_stock_match_alert(
                     matches=match_list,
@@ -1491,14 +1564,11 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
         for vc in db.query(VendorCard).filter(VendorCard.domain.in_(all_domains)).all():
             domain_card_map[vc.domain] = vc
         # Also pre-load by normalized name prefix for fallback
-        unmatched_prefixes = {
-            d.split(".")[0].lower(): d for d in all_domains
-            if d not in domain_card_map and "." in d
-        }
+        unmatched_prefixes = {d.split(".")[0].lower(): d for d in all_domains if d not in domain_card_map and "." in d}
         if unmatched_prefixes:
-            for vc in db.query(VendorCard).filter(
-                VendorCard.normalized_name.in_(list(unmatched_prefixes.keys()))
-            ).all():
+            for vc in (
+                db.query(VendorCard).filter(VendorCard.normalized_name.in_(list(unmatched_prefixes.keys()))).all()
+            ):
                 original_domain = unmatched_prefixes.get(vc.normalized_name)
                 if original_domain:
                     domain_card_map[original_domain] = vc
@@ -1516,9 +1586,7 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     try:
         db.commit()
         if updated:
-            logger.info(
-                f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated"
-            )
+            logger.info(f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated")
     except Exception as e:
         logger.error(f"Outbound scan commit failed for {user.email}: {e}")
         db.rollback()
@@ -1536,9 +1604,7 @@ async def _compute_vendor_scores_job(db):
 
     try:
         result = await compute_all_vendor_scores(db)
-        logger.info(
-            f"Vendor scoring complete: {result['updated']} updated, {result['skipped']} skipped"
-        )
+        logger.info(f"Vendor scoring complete: {result['updated']} updated, {result['skipped']} skipped")
     except Exception as e:
         logger.error(f"Vendor scoring failed: {e}")
 
@@ -1561,11 +1627,7 @@ async def _sync_user_contacts(user, db):
 
     # Load delta token for incremental sync
     folder_key = "contacts_sync"
-    sync_state = (
-        db.query(SyncState)
-        .filter(SyncState.user_id == user.id, SyncState.folder == folder_key)
-        .first()
-    )
+    sync_state = db.query(SyncState).filter(SyncState.user_id == user.id, SyncState.folder == folder_key).first()
     delta_token = sync_state.delta_token if sync_state else None
 
     try:
@@ -1584,12 +1646,14 @@ async def _sync_user_contacts(user, db):
                 sync_state.delta_token = new_token
                 sync_state.last_sync_at = datetime.now(timezone.utc)
             else:
-                db.add(SyncState(
-                    user_id=user.id,
-                    folder=folder_key,
-                    delta_token=new_token,
-                    last_sync_at=datetime.now(timezone.utc),
-                ))
+                db.add(
+                    SyncState(
+                        user_id=user.id,
+                        folder=folder_key,
+                        delta_token=new_token,
+                        last_sync_at=datetime.now(timezone.utc),
+                    )
+                )
             db.flush()
     except GraphSyncStateExpired:
         logger.warning(f"Contacts delta token expired for {user.email} — full resync")
@@ -1651,9 +1715,7 @@ async def _sync_user_contacts(user, db):
                 continue
 
         # Merge emails from Outlook contact
-        outlook_emails = [
-            (addr.get("address") or "").strip() for addr in c.get("emailAddresses", [])
-        ]
+        outlook_emails = [(addr.get("address") or "").strip() for addr in c.get("emailAddresses", [])]
         enriched += merge_emails_into_card(card, outlook_emails)
 
         # Merge phones from Outlook contact
@@ -1666,9 +1728,7 @@ async def _sync_user_contacts(user, db):
     try:
         user.last_contacts_sync = datetime.now(timezone.utc)
         db.commit()
-        logger.info(
-            f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails"
-        )
+        logger.info(f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails")
     except Exception as e:
         logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
@@ -1762,6 +1822,7 @@ async def _job_contact_status_compute():
 async def _job_pool_health_report():
     """1st of month 8AM — log pool statistics."""
     from .services.prospect_scheduler import job_pool_health_report
+
     await job_pool_health_report()
 
 
@@ -1769,6 +1830,7 @@ async def _job_pool_health_report():
 async def _job_discover_prospects():
     """1st of month 9PM — run discovery for next segment slice."""
     from .services.prospect_scheduler import job_discover_prospects
+
     await job_discover_prospects()
 
 
@@ -1776,6 +1838,7 @@ async def _job_discover_prospects():
 async def _job_enrich_pool():
     """2nd of month 2AM — enrich signals, similar customers, AI writeups."""
     from .services.prospect_scheduler import job_enrich_pool
+
     await job_enrich_pool()
 
 
@@ -1783,6 +1846,7 @@ async def _job_enrich_pool():
 async def _job_find_contacts():
     """3rd of month 2AM — find procurement contacts."""
     from .services.prospect_scheduler import job_find_contacts
+
     await job_find_contacts()
 
 
@@ -1790,6 +1854,7 @@ async def _job_find_contacts():
 async def _job_refresh_scores():
     """15th of month 2AM — re-score all suggested prospects."""
     from .services.prospect_scheduler import job_refresh_scores
+
     await job_refresh_scores()
 
 
@@ -1797,6 +1862,7 @@ async def _job_refresh_scores():
 async def _job_expire_and_resurface():
     """Last day of month 9PM — expire stale, resurface refreshed."""
     from .services.prospect_scheduler import job_expire_and_resurface
+
     await job_expire_and_resurface()
 
 
@@ -1881,6 +1947,7 @@ async def _job_integrity_check():
     db = SessionLocal()
     try:
         from .services.integrity_service import run_integrity_check
+
         report = run_integrity_check(db)
         logger.info(
             "Integrity check complete: status=%s cards=%d healed=(%d/%d/%d)",
@@ -1904,12 +1971,13 @@ async def _job_material_enrichment():
     db = SessionLocal()
     try:
         from .services.material_enrichment_service import enrich_pending_cards
-        result = await enrich_pending_cards(
-            db, limit=settings.material_enrichment_batch_size
-        )
+
+        result = await enrich_pending_cards(db, limit=settings.material_enrichment_batch_size)
         logger.info(
             "Material enrichment: enriched=%d errors=%d pending=%d",
-            result["enriched"], result["errors"], result.get("pending", 0),
+            result["enriched"],
+            result["errors"],
+            result.get("pending", 0),
         )
     except Exception:
         logger.exception("Material enrichment job failed")
@@ -1930,7 +1998,9 @@ async def _job_auto_attribute_activities():
         if total:
             logger.info(
                 "Auto-attribution: %d rule-matched, %d AI-matched, %d dismissed",
-                stats["rule_matched"], stats["ai_matched"], stats["auto_dismissed"],
+                stats["rule_matched"],
+                stats["ai_matched"],
+                stats["auto_dismissed"],
             )
     except Exception:
         logger.exception("Auto-attribution job failed")
@@ -1952,7 +2022,8 @@ async def _job_auto_dedup():
         if total:
             logger.info(
                 "Auto-dedup: %d vendors merged, %d companies merged",
-                stats["vendors_merged"], stats["companies_merged"],
+                stats["vendors_merged"],
+                stats["companies_merged"],
             )
     except Exception:
         logger.exception("Auto-dedup job failed")
@@ -1984,6 +2055,7 @@ async def _job_reset_connector_errors():
 async def _job_health_ping():
     """Lightweight health check on all active API sources."""
     from .services.health_monitor import run_health_checks
+
     await run_health_checks("ping")
 
 
@@ -1991,6 +2063,7 @@ async def _job_health_ping():
 async def _job_health_deep():
     """Full functional test on all active API sources."""
     from .services.health_monitor import run_health_checks
+
     await run_health_checks("deep")
 
 

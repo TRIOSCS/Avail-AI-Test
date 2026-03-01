@@ -11,12 +11,9 @@ import sys
 from unittest.mock import MagicMock, patch
 
 from app.file_utils import (
-    MPN_HEADERS,
-    QTY_HEADERS,
     normalize_stock_row,
     parse_tabular_file,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  parse_tabular_file
@@ -46,7 +43,6 @@ class TestParseTabularFile:
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_parsed(self):
-        import sys
         mock_openpyxl = sys.modules["openpyxl"]
         mock_wb = MagicMock()
         mock_ws = MagicMock()
@@ -65,7 +61,6 @@ class TestParseTabularFile:
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_xls_extension(self):
-        import sys
         mock_openpyxl = sys.modules["openpyxl"]
         mock_wb = MagicMock()
         mock_ws = MagicMock()
@@ -78,7 +73,6 @@ class TestParseTabularFile:
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_empty_rows_skipped(self):
-        import sys
         mock_openpyxl = sys.modules["openpyxl"]
         mock_wb = MagicMock()
         mock_ws = MagicMock()

@@ -5,15 +5,14 @@ Depends on: conftest.py (db_session, test SQLite engine)
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import engine  # noqa: F401
-
 from app.models import ActivityLog, Company, CustomerSite, Requirement, Requisition, SiteContact, User
 from app.services.account_summary_service import generate_account_summary
+from tests.conftest import engine  # noqa: F401
 
 
 def _run(coro):
@@ -201,25 +200,15 @@ class TestAccountSummaryService:
         _make_contact(db_session, site.id, "Alice VP", title="VP Procurement", is_primary=True)
         _make_contact(db_session, site.id, "Bob Buyer", title="Buyer")
 
-        req1 = _make_requisition(
-            db_session, site.id, "REQ-100", "open", _NOW_NAIVE - timedelta(days=5)
-        )
-        req2 = _make_requisition(
-            db_session, site.id, "REQ-101", "closed", _NOW_NAIVE - timedelta(days=30)
-        )
+        req1 = _make_requisition(db_session, site.id, "REQ-100", "open", _NOW_NAIVE - timedelta(days=5))
+        req2 = _make_requisition(db_session, site.id, "REQ-101", "closed", _NOW_NAIVE - timedelta(days=30))
         _make_requirement(db_session, req1.id, "LM317T")
         _make_requirement(db_session, req1.id, "LM7805")
         _make_requirement(db_session, req2.id, "NE555")
 
-        _make_activity(
-            db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=1)
-        )
-        _make_activity(
-            db_session, co.id, owner.id, "call", _NOW_NAIVE - timedelta(days=3)
-        )
-        _make_activity(
-            db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=7)
-        )
+        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=1))
+        _make_activity(db_session, co.id, owner.id, "call", _NOW_NAIVE - timedelta(days=3))
+        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=7))
         db_session.commit()
 
         result = _run(generate_account_summary(co.id, db_session))

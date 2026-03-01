@@ -12,9 +12,13 @@ Depends on: conftest.py (client, db_session, test_user fixtures)
 
 
 def test_create_company(client):
-    resp = client.post("/api/companies", json={
-        "name": "Acme Electronics", "industry": "Semiconductors",
-    })
+    resp = client.post(
+        "/api/companies",
+        json={
+            "name": "Acme Electronics",
+            "industry": "Semiconductors",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "Acme Electronics"
@@ -38,9 +42,13 @@ def test_list_companies(client):
 
 def test_update_company(client):
     created = client.post("/api/companies", json={"name": "OldName"}).json()
-    resp = client.put(f"/api/companies/{created['id']}", json={
-        "name": "NewName", "industry": "Connectors",
-    })
+    resp = client.put(
+        f"/api/companies/{created['id']}",
+        json={
+            "name": "NewName",
+            "industry": "Connectors",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -55,9 +63,14 @@ def test_update_nonexistent_company(client):
 
 def test_add_site(client):
     co = client.post("/api/companies", json={"name": "SiteCo"}).json()
-    resp = client.post(f"/api/companies/{co['id']}/sites", json={
-        "site_name": "Austin HQ", "city": "Austin", "state": "TX",
-    })
+    resp = client.post(
+        f"/api/companies/{co['id']}/sites",
+        json={
+            "site_name": "Austin HQ",
+            "city": "Austin",
+            "state": "TX",
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["site_name"] == "Austin HQ"
@@ -66,16 +79,22 @@ def test_add_site(client):
 
 def test_add_site_missing_name(client):
     co = client.post("/api/companies", json={"name": "SiteCo2"}).json()
-    resp = client.post(f"/api/companies/{co['id']}/sites", json={
-        "city": "Dallas",
-    })
+    resp = client.post(
+        f"/api/companies/{co['id']}/sites",
+        json={
+            "city": "Dallas",
+        },
+    )
     assert resp.status_code == 422  # Pydantic validation rejects missing required field
 
 
 def test_add_site_nonexistent_company(client):
-    resp = client.post("/api/companies/99999/sites", json={
-        "site_name": "Nowhere",
-    })
+    resp = client.post(
+        "/api/companies/99999/sites",
+        json={
+            "site_name": "Nowhere",
+        },
+    )
     assert resp.status_code == 404
 
 
@@ -85,19 +104,27 @@ def test_add_site_nonexistent_company(client):
 def _create_req_with_requirement(client):
     """Helper: create requisition + requirement, return (req_id, requirement_id)."""
     req = client.post("/api/requisitions", json={"name": "OfferReq"}).json()
-    items = client.post(f"/api/requisitions/{req['id']}/requirements", json=[
-        {"primary_mpn": "LM317T", "target_qty": 100},
-    ]).json()
+    items = client.post(
+        f"/api/requisitions/{req['id']}/requirements",
+        json=[
+            {"primary_mpn": "LM317T", "target_qty": 100},
+        ],
+    ).json()
     return req["id"], items["created"][0]["id"]
 
 
 def test_create_offer(client):
     req_id, req_item_id = _create_req_with_requirement(client)
-    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T", "vendor_name": "Arrow Electronics",
-        "unit_price": 1.25, "qty_available": 500,
-        "requirement_id": req_item_id,
-    })
+    resp = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Arrow Electronics",
+            "unit_price": 1.25,
+            "qty_available": 500,
+            "requirement_id": req_item_id,
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["mpn"] == "LM317T"
@@ -106,22 +133,35 @@ def test_create_offer(client):
 
 def test_create_offer_missing_fields(client):
     req_id, _ = _create_req_with_requirement(client)
-    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T",  # missing vendor_name
-    })
+    resp = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",  # missing vendor_name
+        },
+    )
     assert resp.status_code == 422  # Pydantic validation rejects missing required field
 
 
 def test_list_offers(client):
     req_id, req_item_id = _create_req_with_requirement(client)
-    client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T", "vendor_name": "Vendor A", "unit_price": 1.00,
-        "requirement_id": req_item_id,
-    })
-    client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T", "vendor_name": "Vendor B", "unit_price": 1.50,
-        "requirement_id": req_item_id,
-    })
+    client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Vendor A",
+            "unit_price": 1.00,
+            "requirement_id": req_item_id,
+        },
+    )
+    client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Vendor B",
+            "unit_price": 1.50,
+            "requirement_id": req_item_id,
+        },
+    )
     resp = client.get(f"/api/requisitions/{req_id}/offers")
     assert resp.status_code == 200
     data = resp.json()
@@ -135,23 +175,37 @@ def test_list_offers(client):
 
 def test_update_offer(client):
     req_id, req_item_id = _create_req_with_requirement(client)
-    offer = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T", "vendor_name": "UpdateVendor", "unit_price": 1.00,
-        "requirement_id": req_item_id,
-    }).json()
-    resp = client.put(f"/api/offers/{offer['id']}", json={
-        "unit_price": 0.95, "lead_time": "2 weeks",
-    })
+    offer = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "UpdateVendor",
+            "unit_price": 1.00,
+            "requirement_id": req_item_id,
+        },
+    ).json()
+    resp = client.put(
+        f"/api/offers/{offer['id']}",
+        json={
+            "unit_price": 0.95,
+            "lead_time": "2 weeks",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
 
 def test_delete_offer(client):
     req_id, req_item_id = _create_req_with_requirement(client)
-    offer = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T", "vendor_name": "DeleteVendor", "unit_price": 2.00,
-        "requirement_id": req_item_id,
-    }).json()
+    offer = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "DeleteVendor",
+            "unit_price": 2.00,
+            "requirement_id": req_item_id,
+        },
+    ).json()
     resp = client.delete(f"/api/offers/{offer['id']}")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -182,11 +236,14 @@ def test_offer_fuzzy_match_reuses_existing_card(client, db_session):
 
     req_id, req_item_id = _create_req_with_requirement(client)
     # "Arrow Electronic" (missing trailing 's') — close enough for fuzzy ≥88
-    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T",
-        "vendor_name": "Arrow Electronic",
-        "requirement_id": req_item_id,
-    })
+    resp = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Arrow Electronic",
+            "requirement_id": req_item_id,
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["vendor_card_id"] == card.id
@@ -210,12 +267,15 @@ def test_offer_vendor_card_id_skips_name_matching(client, db_session):
     db_session.refresh(card)
 
     req_id, req_item_id = _create_req_with_requirement(client)
-    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T",
-        "vendor_name": "Whatever Name",
-        "vendor_card_id": card.id,
-        "requirement_id": req_item_id,
-    })
+    resp = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Whatever Name",
+            "vendor_card_id": card.id,
+            "requirement_id": req_item_id,
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["vendor_card_id"] == card.id
@@ -236,11 +296,14 @@ def test_offer_exact_match_before_fuzzy(client, db_session):
     db_session.refresh(card)
 
     req_id, req_item_id = _create_req_with_requirement(client)
-    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
-        "mpn": "LM317T",
-        "vendor_name": "Mouser Electronics Inc.",
-        "requirement_id": req_item_id,
-    })
+    resp = client.post(
+        f"/api/requisitions/{req_id}/offers",
+        json={
+            "mpn": "LM317T",
+            "vendor_name": "Mouser Electronics Inc.",
+            "requirement_id": req_item_id,
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["vendor_card_id"] == card.id

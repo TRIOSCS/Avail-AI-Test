@@ -34,9 +34,7 @@ class EmailIntelligence(Base):
     sender_domain = Column(String(255), nullable=False, index=True)
 
     # AI classification
-    classification = Column(
-        String(20), nullable=False
-    )  # offer, stock_list, quote_reply, general, ooo, spam
+    classification = Column(String(20), nullable=False)  # offer, stock_list, quote_reply, general, ooo, spam
     confidence = Column(Float, nullable=False, default=0.0)
     has_pricing = Column(Boolean, default=False)
 

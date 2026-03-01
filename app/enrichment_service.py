@@ -282,11 +282,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             logger.warning("Explorium company lookup failed: %s", resp.status_code)
             return None
         data = resp.json()
-        firmo = {
-            k.replace("firmo_", ""): v
-            for k, v in data.items()
-            if k.startswith("firmo_")
-        }
+        firmo = {k.replace("firmo_", ""): v for k, v in data.items() if k.startswith("firmo_")}
         return {
             "source": "explorium",
             "legal_name": firmo.get("name"),
@@ -361,6 +357,7 @@ GRADIENT_COMPANY_SYSTEM = (
 async def _gradient_find_company(domain: str, name: str = "") -> Optional[dict]:
     """Look up a company using Gradient AI (LLM knowledge). Returns normalized company data."""
     from .config import settings
+
     if not getattr(settings, "do_gradient_api_key", ""):
         return None
     try:
@@ -435,9 +432,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             system=COMPANY_SEARCH_SYSTEM,
             model_tier="smart",
             max_tokens=1024,
-            tools=[
-                {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
-            ],
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
             timeout=60,
         )
         if not data or not isinstance(data, dict):
@@ -460,9 +455,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
         return None
 
 
-async def _ai_find_contacts(
-    domain: str, name: str = "", title_filter: str = ""
-) -> list[dict]:
+async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find contacts at a company using Claude + web search.
 
     Delegates to ai_service.enrich_contacts_websearch() and normalizes
@@ -533,14 +526,21 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     }
 
     _enrichable = [
-        "legal_name", "industry", "employee_size",
-        "hq_city", "hq_state", "hq_country", "website", "linkedin_url",
+        "legal_name",
+        "industry",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "website",
+        "linkedin_url",
     ]
 
     # ── Phase 1: Apollo + Explorium + Clearbit + Gradient concurrently ──
     async def _safe_apollo_company(domain: str):
         try:
             from .connectors.apollo_client import enrich_company as apollo_enrich
+
             return await apollo_enrich(domain)
         except Exception as e:
             logger.debug("Apollo company enrichment skipped: %s", e)
@@ -549,6 +549,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     async def _safe_clearbit(domain: str):
         try:
             from .connectors.clearbit_client import enrich_company as clearbit_enrich
+
             return await clearbit_enrich(domain)
         except Exception as e:
             logger.debug("Clearbit enrichment skipped: %s", e)
@@ -602,9 +603,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     return normalized
 
 
-async def find_suggested_contacts(
-    domain: str, name: str = "", title_filter: str = ""
-) -> list[dict]:
+async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
     All 7 sources run concurrently via asyncio.gather.
@@ -615,6 +614,7 @@ async def find_suggested_contacts(
     async def _safe_hunter(domain: str) -> list[dict]:
         try:
             from .connectors.hunter_client import find_domain_emails
+
             raw = await find_domain_emails(domain, limit=10)
             return [
                 {
@@ -637,9 +637,12 @@ async def find_suggested_contacts(
     async def _safe_rocketreach(domain: str) -> list[dict]:
         try:
             from .connectors.rocketreach_client import search_company_contacts
+
             raw = await search_company_contacts(
-                company=name or domain, domain=domain,
-                title_filter=title_filter, limit=5,
+                company=name or domain,
+                domain=domain,
+                title_filter=title_filter,
+                limit=5,
             )
             return [
                 {
@@ -662,6 +665,7 @@ async def find_suggested_contacts(
     async def _safe_apollo_contacts(domain: str) -> list[dict]:
         try:
             from .connectors.apollo_client import search_contacts as apollo_search
+
             raw = await apollo_search(
                 company_name=name or domain,
                 domain=domain,
@@ -689,19 +693,22 @@ async def find_suggested_contacts(
     async def _safe_lusha(domain: str) -> list[dict]:
         try:
             from .connectors.lusha_client import find_person
+
             result = await find_person(company_domain=domain)
             if not result or not result.get("full_name"):
                 return []
-            return [{
-                "source": "lusha",
-                "full_name": result["full_name"],
-                "title": result.get("title"),
-                "email": result.get("email"),
-                "phone": result.get("phone"),
-                "linkedin_url": result.get("linkedin_url"),
-                "location": result.get("location"),
-                "company": name or domain,
-            }]
+            return [
+                {
+                    "source": "lusha",
+                    "full_name": result["full_name"],
+                    "title": result.get("title"),
+                    "email": result.get("email"),
+                    "phone": result.get("phone"),
+                    "linkedin_url": result.get("linkedin_url"),
+                    "location": result.get("location"),
+                    "company": name or domain,
+                }
+            ]
         except Exception as e:
             logger.debug("Lusha contacts skipped: %s", e)
             return []
@@ -730,11 +737,7 @@ async def find_suggested_contacts(
     unique = []
     lusha_phones = {}  # email → phone from Lusha for post-dedup merge
     for c in all_contacts:
-        key = (
-            (c.get("email") or "").lower()
-            or c.get("linkedin_url")
-            or (c.get("full_name") or "").lower()
-        )
+        key = (c.get("email") or "").lower() or c.get("linkedin_url") or (c.get("full_name") or "").lower()
         if not key or key in seen:
             # Collect Lusha phone data from duplicates for later merge
             if c.get("source") == "lusha" and c.get("phone"):
@@ -759,11 +762,29 @@ async def find_suggested_contacts(
 
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
     _RELEVANT_KEYWORDS = {
-        "procurement", "purchasing", "buyer", "sourcing", "supply chain",
-        "component", "commodity", "materials", "vendor", "supplier",
-        "sales", "account", "business development", "director",
-        "president", "vp", "manager", "engineer", "operations",
-        "logistics", "inventory", "planning", "quality",
+        "procurement",
+        "purchasing",
+        "buyer",
+        "sourcing",
+        "supply chain",
+        "component",
+        "commodity",
+        "materials",
+        "vendor",
+        "supplier",
+        "sales",
+        "account",
+        "business development",
+        "director",
+        "president",
+        "vp",
+        "manager",
+        "engineer",
+        "operations",
+        "logistics",
+        "inventory",
+        "planning",
+        "quality",
     }
 
     def _is_relevant(contact: dict) -> bool:

@@ -10,11 +10,11 @@ Called by: pytest
 Depends on: conftest (client, test_company, test_user, sales_user)
 """
 
-
 import pytest
 from fastapi.testclient import TestClient
 
 # ── Helper: client authenticated as sales user ──────────────────────
+
 
 @pytest.fixture()
 def sales_client(db_session, sales_user):
@@ -24,6 +24,7 @@ def sales_client(db_session, sales_user):
     from app.main import app
 
     app.dependency_overrides[get_db] = lambda: (yield db_session).__next__() or None
+
     # Simpler override:
     def _override_db():
         yield db_session
@@ -60,6 +61,7 @@ def admin_client(db_session, admin_user):
 #  My Accounts / At-Risk / Open Pool
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_my_accounts_empty(client):
     resp = client.get("/api/sales/my-accounts")
     assert resp.status_code == 200
@@ -94,6 +96,7 @@ def test_open_pool_shows_unowned(client, test_company):
 #  Claim Account
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_claim_account_success(sales_client, test_company):
     resp = sales_client.post(f"/api/sales/claim/{test_company.id}")
     assert resp.status_code == 200
@@ -123,27 +126,23 @@ def test_claim_account_not_found(sales_client):
 #  Strategic Toggle (admin only)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_toggle_strategic_non_admin_forbidden(client, test_company):
-    resp = client.put(f"/api/companies/{test_company.id}/strategic",
-                      json={"is_strategic": True})
+    resp = client.put(f"/api/companies/{test_company.id}/strategic", json={"is_strategic": True})
     assert resp.status_code == 403
 
 
 def test_toggle_strategic_set_true(admin_client, test_company, monkeypatch):
-    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails",
-                        ["admin@trioscs.com"])
-    resp = admin_client.put(f"/api/companies/{test_company.id}/strategic",
-                            json={"is_strategic": True})
+    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails", ["admin@trioscs.com"])
+    resp = admin_client.put(f"/api/companies/{test_company.id}/strategic", json={"is_strategic": True})
     assert resp.status_code == 200
     assert resp.json()["is_strategic"] is True
 
 
 def test_toggle_strategic_flip(admin_client, test_company, monkeypatch):
     """Sending null flips the current value."""
-    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails",
-                        ["admin@trioscs.com"])
-    resp = admin_client.put(f"/api/companies/{test_company.id}/strategic",
-                            json={})
+    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails", ["admin@trioscs.com"])
+    resp = admin_client.put(f"/api/companies/{test_company.id}/strategic", json={})
     assert resp.status_code == 200
     assert resp.json()["is_strategic"] is True  # was False, flipped
 
@@ -152,14 +151,14 @@ def test_toggle_strategic_flip(admin_client, test_company, monkeypatch):
 #  Manager Digest & Notifications
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def test_manager_digest_non_admin_forbidden(client):
     resp = client.get("/api/sales/manager-digest")
     assert resp.status_code == 403
 
 
 def test_manager_digest_admin_success(admin_client, monkeypatch):
-    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails",
-                        ["admin@trioscs.com"])
+    monkeypatch.setattr("app.routers.v13_features.settings.admin_emails", ["admin@trioscs.com"])
     resp = admin_client.get("/api/sales/manager-digest")
     assert resp.status_code == 200
     assert isinstance(resp.json(), dict)

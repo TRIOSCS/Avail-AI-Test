@@ -16,7 +16,6 @@ from app.utils.normalization_helpers import (
     normalize_us_state,
 )
 
-
 # ── normalize_phone_e164 edge cases ─────────────────────────────────
 
 

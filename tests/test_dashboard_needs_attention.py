@@ -2,9 +2,6 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import (
     ActivityLog,
     Company,
@@ -12,7 +9,6 @@ from app.models import (
     Offer,
     Quote,
     Requisition,
-    User,
 )
 
 
@@ -271,11 +267,11 @@ class TestNeedsAttention:
 
         mock_db = MagicMock()
         mock_db.query.side_effect = [
-            make_chain([]),               # CustomerSite subquery (owned_company_ids)
-            make_chain([company]),        # Company query
-            make_chain([]),               # Subquery (latest_sub) — returns subquery obj
-            make_chain([combined_row]),   # Join query (latest_rows) — last_at + channel
-            make_chain([]),               # Site query (empty)
+            make_chain([]),  # CustomerSite subquery (owned_company_ids)
+            make_chain([company]),  # Company query
+            make_chain([]),  # Subquery (latest_sub) — returns subquery obj
+            make_chain([combined_row]),  # Join query (latest_rows) — last_at + channel
+            make_chain([]),  # Site query (empty)
         ]
 
         result = needs_attention(days=30, db=mock_db, user=SimpleNamespace(id=1))
@@ -297,15 +293,23 @@ class TestHotOffers:
     def test_recent_offer_returned(self, client, db_session, test_user):
         """An active offer within the window appears in results."""
         req = Requisition(
-            name="REQ-HOT-1", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-HOT-1",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
-            qty_available=1000, unit_price=0.50, entered_by_id=test_user.id,
-            status="active", created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+            requisition_id=req.id,
+            vendor_name="Arrow",
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc) - timedelta(hours=2),
         )
         db_session.add(offer)
         db_session.commit()
@@ -320,15 +324,23 @@ class TestHotOffers:
     def test_old_offer_excluded(self, client, db_session, test_user):
         """Offer older than the window is excluded."""
         req = Requisition(
-            name="REQ-HOT-2", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-HOT-2",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, vendor_name="Mouser", mpn="NE555",
-            qty_available=500, unit_price=0.25, entered_by_id=test_user.id,
-            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=10),
+            requisition_id=req.id,
+            vendor_name="Mouser",
+            mpn="NE555",
+            qty_available=500,
+            unit_price=0.25,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc) - timedelta(days=10),
         )
         db_session.add(offer)
         db_session.commit()
@@ -339,15 +351,23 @@ class TestHotOffers:
     def test_age_label_just_now(self, client, db_session, test_user):
         """Offer created < 1 hour ago shows 'just now'."""
         req = Requisition(
-            name="REQ-HOT-3", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-HOT-3",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, vendor_name="DigiKey", mpn="ATmega328P",
-            qty_available=100, unit_price=2.50, entered_by_id=test_user.id,
-            status="active", created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+            requisition_id=req.id,
+            vendor_name="DigiKey",
+            mpn="ATmega328P",
+            qty_available=100,
+            unit_price=2.50,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
         )
         db_session.add(offer)
         db_session.commit()
@@ -360,15 +380,23 @@ class TestHotOffers:
     def test_age_label_days_ago(self, client, db_session, test_user):
         """Offer created 3 days ago shows '3d ago'."""
         req = Requisition(
-            name="REQ-HOT-4", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-HOT-4",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, vendor_name="Arrow", mpn="LM7805",
-            qty_available=200, unit_price=None, entered_by_id=test_user.id,
-            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=3),
+            requisition_id=req.id,
+            vendor_name="Arrow",
+            mpn="LM7805",
+            qty_available=200,
+            unit_price=None,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add(offer)
         db_session.commit()
@@ -382,15 +410,23 @@ class TestHotOffers:
     def test_days_filter(self, client, db_session, test_user):
         """The days parameter controls the window."""
         req = Requisition(
-            name="REQ-HOT-5", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-HOT-5",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
-            qty_available=1000, unit_price=0.50, entered_by_id=test_user.id,
-            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=20),
+            requisition_id=req.id,
+            vendor_name="Arrow",
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc) - timedelta(days=20),
         )
         db_session.add(offer)
         db_session.commit()

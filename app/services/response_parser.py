@@ -134,19 +134,12 @@ async def parse_vendor_response(
     context_str = ""
     if rfq_context:
         if isinstance(rfq_context, list):
-            parts_str = ", ".join(
-                f"{p.get('mpn', '?')} x{p.get('qty', '?')}" for p in rfq_context[:10]
-            )
+            parts_str = ", ".join(f"{p.get('mpn', '?')} x{p.get('qty', '?')}" for p in rfq_context[:10])
             context_str = f"\nParts we asked about: {parts_str}"
         elif isinstance(rfq_context, dict):
             context_str = f"\nParts we asked about: {rfq_context.get('mpn', '?')} x{rfq_context.get('qty', '?')}"
 
-    prompt = (
-        f"Vendor: {vendor_name}\n"
-        f"Subject: {email_subject}\n"
-        f"{context_str}\n\n"
-        f"Vendor reply:\n{body_truncated}"
-    )
+    prompt = f"Vendor: {vendor_name}\nSubject: {email_subject}\n{context_str}\n\nVendor reply:\n{body_truncated}"
 
     result = await routed_structured(
         prompt=prompt,
@@ -163,9 +156,7 @@ async def parse_vendor_response(
     # retry with Sonnet + thinking to attempt higher-confidence extraction
     confidence = result.get("confidence", 0)
     if CONFIDENCE_REVIEW <= confidence < CONFIDENCE_AUTO:
-        logger.info(
-            f"Ambiguous confidence {confidence:.2f} — retrying with extended thinking"
-        )
+        logger.info(f"Ambiguous confidence {confidence:.2f} — retrying with extended thinking")
         retry = await claude_structured(
             prompt=prompt,
             schema=RESPONSE_PARSE_SCHEMA,
@@ -176,9 +167,7 @@ async def parse_vendor_response(
             timeout=60,
         )
         if retry and retry.get("confidence", 0) > confidence:
-            logger.info(
-                f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}"
-            )
+            logger.info(f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}")
             result = retry
 
     # Post-process: normalize extracted values
@@ -238,9 +227,7 @@ def _cross_validate(result: dict, rfq_context: dict | list) -> None:
 
     for part in result.get("parts", []):
         mpn = part.get("mpn", "")
-        part["mpn_matches_rfq"] = any(
-            fuzzy_mpn_match(mpn, rfq_mpn) for rfq_mpn in rfq_mpns
-        )
+        part["mpn_matches_rfq"] = any(fuzzy_mpn_match(mpn, rfq_mpn) for rfq_mpn in rfq_mpns)
 
 
 def _clean_email_body(body: str) -> str:

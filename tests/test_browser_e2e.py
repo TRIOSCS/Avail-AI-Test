@@ -28,9 +28,9 @@ SESSION_COOKIE = None
 def _get_app_ip():
     """Get the app container's IP address on the Docker network."""
     result = subprocess.run(
-        ["docker", "inspect", "availai-app-1", "--format",
-         "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
-        capture_output=True, text=True,
+        ["docker", "inspect", "availai-app-1", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+        capture_output=True,
+        text=True,
     )
     return result.stdout.strip()
 
@@ -38,9 +38,19 @@ def _get_app_ip():
 def _get_secret_key():
     """Get the session secret from the running app container."""
     result = subprocess.run(
-        ["docker", "compose", "exec", "-T", "app", "python3", "-c",
-         "from app.config import settings; print(settings.secret_key)"],
-        capture_output=True, text=True, cwd="/root/availai",
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "app",
+            "python3",
+            "-c",
+            "from app.config import settings; print(settings.secret_key)",
+        ],
+        capture_output=True,
+        text=True,
+        cwd="/root/availai",
     )
     return result.stdout.strip()
 
@@ -69,12 +79,16 @@ def setup_app_connection():
 @pytest.fixture()
 def auth_page(page: Page):
     """Page with session cookie injected for authenticated access."""
-    page.context.add_cookies([{
-        "name": "session",
-        "value": SESSION_COOKIE,
-        "domain": APP_CONTAINER_IP,
-        "path": "/",
-    }])
+    page.context.add_cookies(
+        [
+            {
+                "name": "session",
+                "value": SESSION_COOKIE,
+                "domain": APP_CONTAINER_IP,
+                "path": "/",
+            }
+        ]
+    )
     return page
 
 
@@ -121,9 +135,7 @@ class TestLoginAndLanding:
         auth_page.wait_for_load_state("networkidle")
         for nav_id in ["navReqs", "navMaterials", "navCustomers", "navVendors"]:
             # Check DOM presence (sidebar buttons may be outside viewport)
-            count = auth_page.evaluate(
-                f"document.getElementById('{nav_id}') !== null"
-            )
+            count = auth_page.evaluate(f"document.getElementById('{nav_id}') !== null")
             assert count, f"#{nav_id} not found in DOM"
 
 
@@ -170,9 +182,7 @@ class TestRequisitionsList:
         if new_btn.first.is_visible():
             new_btn.first.click()
             auth_page.wait_for_timeout(500)
-            expect(auth_page.locator("#newReqModal")).to_have_class(
-                __import__("re").compile(r"\bopen\b")
-            )
+            expect(auth_page.locator("#newReqModal")).to_have_class(__import__("re").compile(r"\bopen\b"))
             # Close modal
             auth_page.keyboard.press("Escape")
 
@@ -383,11 +393,13 @@ class TestFullWorkflow:
         # Add a requirement
         resp = auth_page.request.post(
             f"{APP_BASE_URL}/api/requisitions/{req_id}/requirements",
-            data=json.dumps({
-                "requirements": [
-                    {"primary_mpn": "LM317T", "target_qty": 100, "target_price": 2.50},
-                ],
-            }),
+            data=json.dumps(
+                {
+                    "requirements": [
+                        {"primary_mpn": "LM317T", "target_qty": 100, "target_price": 2.50},
+                    ],
+                }
+            ),
             headers={"Content-Type": "application/json"},
         )
         assert resp.status == 200

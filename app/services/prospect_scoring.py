@@ -15,8 +15,17 @@ ICP_SEGMENTS = {
         "naics_codes": ["336412", "336413"],
         "naics_prefixes": ["3364"],
         "keywords": [
-            "aerospace", "defense", "avionics", "avionic", "mil-spec", "military",
-            "satellite", "space", "airframe", "missile", "radar",
+            "aerospace",
+            "defense",
+            "avionics",
+            "avionic",
+            "mil-spec",
+            "military",
+            "satellite",
+            "space",
+            "airframe",
+            "missile",
+            "radar",
         ],
     },
     "service_supply_chain": {
@@ -25,9 +34,15 @@ ICP_SEGMENTS = {
         "naics_codes": ["334513", "333314", "334510"],
         "naics_prefixes": ["3345", "3333"],
         "keywords": [
-            "medical", "industrial", "instrument",
-            "control instrument", "measuring", "installed base",
-            "capital equipment", "field service", "mro",
+            "medical",
+            "industrial",
+            "instrument",
+            "control instrument",
+            "measuring",
+            "installed base",
+            "capital equipment",
+            "field service",
+            "mro",
             "repair house",
         ],
     },
@@ -37,11 +52,24 @@ ICP_SEGMENTS = {
         "naics_codes": ["334418", "334417", "334112"],
         "naics_prefixes": ["3344", "3341"],
         "keywords": [
-            "ems", "electronics manufacturing", "pcb", "printed circuit",
-            "semiconductor", "contract manufacturer", "pcba", "smt",
-            "electronic component", "circuit board",
-            "passive", "active", "server", "datacenter", "data center",
-            "monitor", "desktop", "notebook",
+            "ems",
+            "electronics manufacturing",
+            "pcb",
+            "printed circuit",
+            "semiconductor",
+            "contract manufacturer",
+            "pcba",
+            "smt",
+            "electronic component",
+            "circuit board",
+            "passive",
+            "active",
+            "server",
+            "datacenter",
+            "data center",
+            "monitor",
+            "desktop",
+            "notebook",
         ],
     },
     "automotive": {
@@ -50,8 +78,15 @@ ICP_SEGMENTS = {
         "naics_codes": ["336310", "336360"],
         "naics_prefixes": ["3363"],
         "keywords": [
-            "automotive", "vehicle", "oem", "tier 1", "tier1",
-            "powertrain", "adas", "electrification", "ev",
+            "automotive",
+            "vehicle",
+            "oem",
+            "tier 1",
+            "tier1",
+            "powertrain",
+            "adas",
+            "electrification",
+            "ev",
         ],
     },
 }
@@ -136,9 +171,7 @@ def _parse_employee_range(emp_range: str | None) -> int | None:
 # ── Public API ───────────────────────────────────────────────────────
 
 
-def match_industry_segment(
-    industry: str | None, naics: str | None
-) -> tuple[str | None, int]:
+def match_industry_segment(industry: str | None, naics: str | None) -> tuple[str | None, int]:
     """Match against ICP segments. Returns (segment_name, score 0-30)."""
     if not industry and not naics:
         return None, FIT_WEIGHT_INDUSTRY // 3  # neutral: 10
@@ -155,9 +188,7 @@ def match_industry_segment(
         if naics_clean and naics_clean in seg["naics_codes"]:
             score = FIT_WEIGHT_INDUSTRY  # 30
         # 4-digit NAICS prefix match
-        elif naics_clean and len(naics_clean) >= 4 and naics_clean[:4] in {
-            p[:4] for p in seg["naics_prefixes"]
-        }:
+        elif naics_clean and len(naics_clean) >= 4 and naics_clean[:4] in {p[:4] for p in seg["naics_prefixes"]}:
             score = 20
         # Industry keyword match
         elif industry:
@@ -232,9 +263,7 @@ def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
         reasons.append(f"Procurement staff: no (0/{FIT_WEIGHT_PROCUREMENT_STAFF})")
     else:
         staff_score = FIT_WEIGHT_PROCUREMENT_STAFF // 2  # neutral: 8 (truncated from 7.5)
-        reasons.append(
-            f"Procurement staff: unknown ({staff_score}/{FIT_WEIGHT_PROCUREMENT_STAFF})"
-        )
+        reasons.append(f"Procurement staff: unknown ({staff_score}/{FIT_WEIGHT_PROCUREMENT_STAFF})")
     total += staff_score
 
     # 4. NAICS code match (0-15) — separate from industry keyword match
@@ -291,9 +320,7 @@ def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:
     return score, reasoning
 
 
-def calculate_readiness_score(
-    prospect_data: dict, signals: dict
-) -> tuple[int, dict]:
+def calculate_readiness_score(prospect_data: dict, signals: dict) -> tuple[int, dict]:
     """Calculate buy-now readiness (0-100).
 
     Args:
@@ -429,14 +456,10 @@ def classify_readiness(score: int) -> str:
 
 def calculate_composite_score(fit: int, readiness: int) -> float:
     """Weighted composite for sort order. 60% fit, 40% readiness."""
-    return round(
-        fit * COMPOSITE_FIT_WEIGHT + readiness * COMPOSITE_READINESS_WEIGHT, 2
-    )
+    return round(fit * COMPOSITE_FIT_WEIGHT + readiness * COMPOSITE_READINESS_WEIGHT, 2)
 
 
-def apply_historical_bonus(
-    fit: int, readiness: int, historical_context: dict
-) -> tuple[int, int]:
+def apply_historical_bonus(fit: int, readiness: int, historical_context: dict) -> tuple[int, int]:
     """Apply bonus for Salesforce-imported prospects with Trio interaction history.
 
     Args:
@@ -491,8 +514,12 @@ def apply_historical_bonus(
     if fit_bonus or readiness_bonus:
         logger.debug(
             "Historical bonus applied: fit +{} ({}->{}), readiness +{} ({}->{}), context={}",
-            fit_bonus, fit, adjusted_fit,
-            readiness_bonus, readiness, adjusted_readiness,
+            fit_bonus,
+            fit,
+            adjusted_fit,
+            readiness_bonus,
+            readiness,
+            adjusted_readiness,
             historical_context,
         )
 

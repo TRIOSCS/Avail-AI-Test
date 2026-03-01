@@ -59,7 +59,7 @@ def _register_btrim(db_session: Session):
     raw_conn.close()
 
 
-def _get_or_create_card(db: Session, mpn: str) -> "MaterialCard":
+def _get_or_create_card(db: Session, mpn: str) -> "MaterialCard":  # noqa: F821
     """Find-or-create a MaterialCard for test MPN."""
     from app.models import MaterialCard
 
@@ -156,9 +156,7 @@ class TestScanNewOffersForMatches:
         assert result["scanned"] == 0
         assert result["matches_created"] == 0
 
-    def test_scan_creates_match(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_creates_match(self, db_session, test_user, test_company, test_customer_site):
         """Offer with MPN matching an archived requirement creates ProactiveMatch."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -173,9 +171,7 @@ class TestScanNewOffersForMatches:
         db_session.add(sales)
         db_session.flush()
 
-        archived_req, _ = _make_archived_requisition(
-            db_session, sales, test_customer_site, mpn="LM317T"
-        )
+        archived_req, _ = _make_archived_requisition(db_session, sales, test_customer_site, mpn="LM317T")
 
         # Offer entered by test_user on a DIFFERENT requisition
         source_req = Requisition(
@@ -201,9 +197,7 @@ class TestScanNewOffersForMatches:
         assert match.salesperson_id == sales.id
         assert match.customer_site_id == test_customer_site.id
 
-    def test_scan_skips_no_card(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_skips_no_card(self, db_session, test_user, test_company, test_customer_site):
         """Offer without material_card_id is skipped."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -247,9 +241,7 @@ class TestScanNewOffersForMatches:
         assert result["scanned"] == 1
         assert result["matches_created"] == 0
 
-    def test_scan_respects_throttle(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_respects_throttle(self, db_session, test_user, test_company, test_customer_site):
         """Throttle entry for same MPN+site prevents new match."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -263,9 +255,7 @@ class TestScanNewOffersForMatches:
         db_session.add(sales)
         db_session.flush()
 
-        _make_archived_requisition(
-            db_session, sales, test_customer_site, mpn="THROTTLED1"
-        )
+        _make_archived_requisition(db_session, sales, test_customer_site, mpn="THROTTLED1")
 
         # Add a recent throttle entry
         db_session.add(
@@ -291,9 +281,7 @@ class TestScanNewOffersForMatches:
         result = scan_new_offers_for_matches(db_session)
         assert result["matches_created"] == 0
 
-    def test_scan_deduplicates(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_deduplicates(self, db_session, test_user, test_company, test_customer_site):
         """Same offer+requirement already matched -> no duplicate ProactiveMatch."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -307,9 +295,7 @@ class TestScanNewOffersForMatches:
         db_session.add(sales)
         db_session.flush()
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, sales, test_customer_site, mpn="DEDUP123"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, sales, test_customer_site, mpn="DEDUP123")
 
         source_req = Requisition(
             name="Src-Dup",
@@ -342,17 +328,13 @@ class TestScanNewOffersForMatches:
         count = db_session.query(ProactiveMatch).count()
         assert count == 1
 
-    def test_scan_skips_self_match(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_skips_self_match(self, db_session, test_user, test_company, test_customer_site):
         """Offer on the same requisition as the archived requirement is skipped."""
         _reset_last_scan()
         _register_btrim(db_session)
 
         # The archived req and the offer are on the SAME requisition
-        archived_req, _ = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="SELFMATCH"
-        )
+        archived_req, _ = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="SELFMATCH")
 
         # Add offer to the same requisition
         _make_offer(db_session, archived_req, test_user, mpn="SELFMATCH")
@@ -361,9 +343,7 @@ class TestScanNewOffersForMatches:
         result = scan_new_offers_for_matches(db_session)
         assert result["matches_created"] == 0
 
-    def test_scan_multiple_matches(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scan_multiple_matches(self, db_session, test_user, test_company, test_customer_site):
         """One offer matches multiple requirements -> multiple ProactiveMatch rows."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -387,9 +367,7 @@ class TestScanNewOffersForMatches:
         db_session.add(site2)
         db_session.flush()
 
-        _make_archived_requisition(
-            db_session, sales, test_customer_site, mpn="MULTI001"
-        )
+        _make_archived_requisition(db_session, sales, test_customer_site, mpn="MULTI001")
         _make_archived_requisition(db_session, sales, site2, mpn="MULTI001")
 
         source_req = Requisition(
@@ -433,14 +411,10 @@ class TestSendProactiveOffer:
                 )
             )
 
-    def test_send_no_contacts(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    def test_send_no_contacts(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """Valid matches but empty contact_ids raises ValueError."""
         # Create a match for the test_offer
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -465,13 +439,9 @@ class TestSendProactiveOffer:
             )
 
     @pytest.mark.asyncio
-    async def test_send_success(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    async def test_send_success(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """Mocked GraphClient.post_json -> creates ProactiveOffer and returns data."""
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -487,9 +457,7 @@ class TestSendProactiveOffer:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -514,9 +482,7 @@ class TestSendProactiveOffer:
         assert throttle.mpn == "LM317T"
 
     @pytest.mark.asyncio
-    async def test_send_calculates_totals(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    async def test_send_calculates_totals(self, db_session, test_user, test_company, test_customer_site):
         """Verify total_sell and total_cost are computed from line items."""
         # Create an offer with known price and qty
         source_req = Requisition(
@@ -542,9 +508,7 @@ class TestSendProactiveOffer:
         db_session.add(offer)
         db_session.flush()
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="TOTAL100"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="TOTAL100")
         match = ProactiveMatch(
             offer_id=offer.id,
             requirement_id=req_item.id,
@@ -560,9 +524,7 @@ class TestSendProactiveOffer:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -582,9 +544,7 @@ class TestSendProactiveOffer:
         self, db_session, test_user, test_company, test_customer_site, test_offer
     ):
         """GraphClient raises exception -> ProactiveOffer is still saved."""
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -600,9 +560,7 @@ class TestSendProactiveOffer:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(side_effect=Exception("Graph API down"))
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -632,9 +590,7 @@ class TestConvertProactiveToWin:
         with pytest.raises(ValueError, match="not found"):
             convert_proactive_to_win(db_session, 99999, test_user)
 
-    def test_convert_not_yours(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_convert_not_yours(self, db_session, test_user, test_company, test_customer_site):
         """Offer belongs to different user raises ValueError."""
         other_user = User(
             email="other@trioscs.com",
@@ -661,9 +617,7 @@ class TestConvertProactiveToWin:
         with pytest.raises(ValueError, match="Not your"):
             convert_proactive_to_win(db_session, po.id, test_user)
 
-    def test_convert_already_converted(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_convert_already_converted(self, db_session, test_user, test_company, test_customer_site):
         """Offer already converted raises ValueError."""
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
@@ -732,20 +686,12 @@ class TestConvertProactiveToWin:
         assert "Proactive" in req.name
 
         # Verify requirement created
-        reqs = (
-            db_session.query(Requirement)
-            .filter(Requirement.requisition_id == req.id)
-            .all()
-        )
+        reqs = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).all()
         assert len(reqs) == 1
         assert reqs[0].primary_mpn == "LM317T"
 
         # Verify new offer created on the new requisition
-        new_offers = (
-            db_session.query(Offer)
-            .filter(Offer.requisition_id == req.id)
-            .all()
-        )
+        new_offers = db_session.query(Offer).filter(Offer.requisition_id == req.id).all()
         assert len(new_offers) == 1
         assert new_offers[0].source == "proactive"
 
@@ -778,9 +724,7 @@ class TestConvertProactiveToWin:
     ):
         """ProactiveMatch.status is updated to 'converted' after conversion."""
         # Create a match first
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -840,9 +784,7 @@ class TestScorecardAndSentOffers:
         assert result["gross_profit"] == 0
         assert result["conversion_rate"] == 0
 
-    def test_scorecard_with_data(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scorecard_with_data(self, db_session, test_user, test_company, test_customer_site):
         """ProactiveOffers with mixed statuses are correctly aggregated."""
         # Sent offer
         po1 = ProactiveOffer(
@@ -879,9 +821,7 @@ class TestScorecardAndSentOffers:
         assert result["anticipated_revenue"] == 1000.0
         assert result["conversion_rate"] == 50.0
 
-    def test_scorecard_admin_breakdown(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scorecard_admin_breakdown(self, db_session, test_user, test_company, test_customer_site):
         """No salesperson_id filter -> includes per-user breakdown."""
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
@@ -903,9 +843,7 @@ class TestScorecardAndSentOffers:
         assert result["breakdown"][0]["salesperson_id"] == test_user.id
         assert result["breakdown"][0]["sent"] == 1
 
-    def test_scorecard_filtered(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_scorecard_filtered(self, db_session, test_user, test_company, test_customer_site):
         """With salesperson_id filter -> only that user's data, no breakdown."""
         other_user = User(
             email="other2@trioscs.com",
@@ -950,9 +888,7 @@ class TestScorecardAndSentOffers:
         # No breakdown when filtered by salesperson
         assert "breakdown" not in result
 
-    def test_get_sent_offers(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_get_sent_offers(self, db_session, test_user, test_company, test_customer_site):
         """Returns list of sent offers for the user."""
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
@@ -989,14 +925,10 @@ class TestGetMatchesForUser:
         assert result["groups"] == []
         assert result["stats"]["total"] == 0
 
-    def test_matches_grouped_by_site(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    def test_matches_grouped_by_site(self, db_session, test_user, test_company, test_customer_site, test_offer):
         from app.services.proactive_service import get_matches_for_user
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         m1 = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1017,15 +949,11 @@ class TestGetMatchesForUser:
         assert groups[0]["matches"][0]["mpn"] == "LM317T"
         assert result["stats"]["total"] == 1
 
-    def test_matches_all_statuses(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    def test_matches_all_statuses(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """status='' returns matches of any status."""
         from app.services.proactive_service import get_matches_for_user
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         m = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1047,9 +975,7 @@ class TestGetMatchesForUser:
         """Match with a valid offer includes offer details and CPH fields in the response."""
         from app.services.proactive_service import get_matches_for_user
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="DETAILS"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="DETAILS")
         m = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1083,9 +1009,7 @@ class TestGetMatchesForUser:
 
 
 class TestScanCommitError:
-    def test_commit_error_rolls_back(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    def test_commit_error_rolls_back(self, db_session, test_user, test_company, test_customer_site):
         """If commit fails, matches_created returns 0."""
         _reset_last_scan()
         _register_btrim(db_session)
@@ -1099,9 +1023,7 @@ class TestScanCommitError:
         db_session.add(sales)
         db_session.flush()
 
-        _make_archived_requisition(
-            db_session, sales, test_customer_site, mpn="COMMIT1"
-        )
+        _make_archived_requisition(db_session, sales, test_customer_site, mpn="COMMIT1")
 
         source_req = Requisition(
             name="Src-Commit",
@@ -1115,8 +1037,10 @@ class TestScanCommitError:
         _make_offer(db_session, source_req, test_user, mpn="COMMIT1")
         db_session.commit()
 
-        with patch.object(db_session, "commit", side_effect=Exception("DB error")), \
-             patch.object(db_session, "rollback"):
+        with (
+            patch.object(db_session, "commit", side_effect=Exception("DB error")),
+            patch.object(db_session, "rollback"),
+        ):
             result = scan_new_offers_for_matches(db_session)
 
         assert result["scanned"] == 1
@@ -1134,9 +1058,7 @@ class TestSendProactiveOfferGreetings:
         self, db_session, test_user, test_company, test_customer_site, test_offer
     ):
         """Single named contact gets 'Hi {name},' greeting."""
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1152,9 +1074,7 @@ class TestSendProactiveOfferGreetings:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -1173,9 +1093,7 @@ class TestSendProactiveOfferGreetings:
         self, db_session, test_user, test_company, test_customer_site, test_offer
     ):
         """Multiple named contacts get comma-separated names greeting."""
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1201,9 +1119,7 @@ class TestSendProactiveOfferGreetings:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -1218,13 +1134,9 @@ class TestSendProactiveOfferGreetings:
         assert "Bob" in po.email_body_html
 
     @pytest.mark.asyncio
-    async def test_greeting_no_name_contact(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    async def test_greeting_no_name_contact(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """Contact with no full_name gets 'Hello,' greeting."""
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="LM317T"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
         match = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1245,9 +1157,7 @@ class TestSendProactiveOfferGreetings:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
 
-        with patch(
-            "app.utils.graph_client.GraphClient", return_value=mock_gc
-        ):
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -1330,9 +1240,7 @@ class TestScorecardPOCounts:
         result = get_scorecard(db_session, salesperson_id=None)
         assert "breakdown" in result
         assert len(result["breakdown"]) >= 1
-        user_entry = next(
-            (b for b in result["breakdown"] if b["salesperson_id"] == test_user.id), None
-        )
+        user_entry = next((b for b in result["breakdown"] if b["salesperson_id"] == test_user.id), None)
         assert user_entry is not None
         assert user_entry["po"] >= 1
         assert user_entry["quoted"] >= 1
@@ -1342,14 +1250,10 @@ class TestScorecardPOCounts:
 
 
 class TestGetMatchCount:
-    def test_count_new_matches(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    def test_count_new_matches(self, db_session, test_user, test_company, test_customer_site, test_offer):
         from app.services.proactive_service import get_match_count
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="COUNT1"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="COUNT1")
         m = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,
@@ -1365,14 +1269,10 @@ class TestGetMatchCount:
         count = get_match_count(db_session, test_user.id)
         assert count >= 1
 
-    def test_count_excludes_sent(
-        self, db_session, test_user, test_company, test_customer_site, test_offer
-    ):
+    def test_count_excludes_sent(self, db_session, test_user, test_company, test_customer_site, test_offer):
         from app.services.proactive_service import get_match_count
 
-        archived_req, req_item = _make_archived_requisition(
-            db_session, test_user, test_customer_site, mpn="COUNT2"
-        )
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="COUNT2")
         m = ProactiveMatch(
             offer_id=test_offer.id,
             requirement_id=req_item.id,

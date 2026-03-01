@@ -22,7 +22,6 @@ from app.utils.claude_client import (
     safe_json_parse,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════
 #  safe_json_parse — pure, no mock
 # ═══════════════════════════════════════════════════════════════════════
@@ -33,7 +32,7 @@ class TestSafeJsonParse:
         assert safe_json_parse('{"key": "value"}') == {"key": "value"}
 
     def test_plain_json_array(self):
-        assert safe_json_parse('[1, 2, 3]') == [1, 2, 3]
+        assert safe_json_parse("[1, 2, 3]") == [1, 2, 3]
 
     def test_markdown_fenced_json(self):
         text = '```json\n{"a": 1}\n```'
@@ -99,11 +98,11 @@ class TestClaudeStructured:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_success_extracts_tool_input(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [
-                {"type": "tool_use", "name": "structured_output", "input": {"parsed": True}}
-            ]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {"parsed": True}}]}
+            )
+        )
 
         result = await claude_structured("test prompt", {"type": "object"})
         assert result == {"parsed": True}
@@ -127,9 +126,9 @@ class TestClaudeStructured:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_no_tool_use_block_returns_none(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "text", "text": "No tool use here"}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(200, {"content": [{"type": "text", "text": "No tool use here"}]})
+        )
 
         result = await claude_structured("test", {"type": "object"})
         assert result is None
@@ -138,9 +137,11 @@ class TestClaudeStructured:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_fast_tier_uses_haiku(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
+            )
+        )
 
         await claude_structured("test", {"type": "object"}, model_tier="fast")
         body = mock_http.post.call_args.kwargs["json"]
@@ -150,9 +151,11 @@ class TestClaudeStructured:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_smart_tier_uses_sonnet(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
+            )
+        )
 
         await claude_structured("test", {"type": "object"}, model_tier="smart")
         body = mock_http.post.call_args.kwargs["json"]
@@ -178,12 +181,17 @@ class TestClaudeText:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_joins_text_blocks(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [
-                {"type": "text", "text": "Hello"},
-                {"type": "text", "text": "World"},
-            ]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "content": [
+                        {"type": "text", "text": "Hello"},
+                        {"type": "text", "text": "World"},
+                    ]
+                },
+            )
+        )
 
         result = await claude_text("test")
         assert result == "Hello\nWorld"
@@ -192,9 +200,9 @@ class TestClaudeText:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_no_text_blocks_returns_none(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "web_search", "input": {}}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(200, {"content": [{"type": "tool_use", "name": "web_search", "input": {}}]})
+        )
 
         result = await claude_text("test")
         assert result is None
@@ -314,23 +322,32 @@ class TestClaudeBatchSubmit:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_success_returns_batch_id(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "id": "batch_abc123",
-            "request_counts": {"processing": 2},
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "id": "batch_abc123",
+                    "request_counts": {"processing": 2},
+                },
+            )
+        )
 
-        result = await claude_batch_submit([
-            {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-            {"custom_id": "r2", "prompt": "p2", "schema": {"type": "object"}},
-        ])
+        result = await claude_batch_submit(
+            [
+                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+                {"custom_id": "r2", "prompt": "p2", "schema": {"type": "object"}},
+            ]
+        )
         assert result == "batch_abc123"
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
     async def test_no_api_key_returns_none(self, mock_cred):
-        result = await claude_batch_submit([
-            {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-        ])
+        result = await claude_batch_submit(
+            [
+                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+            ]
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -345,9 +362,11 @@ class TestClaudeBatchSubmit:
     async def test_http_500_returns_none(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(return_value=_mock_response(500, text="Internal Server Error"))
 
-        result = await claude_batch_submit([
-            {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-        ])
+        result = await claude_batch_submit(
+            [
+                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+            ]
+        )
         assert result is None
 
     @pytest.mark.asyncio
@@ -356,9 +375,11 @@ class TestClaudeBatchSubmit:
     async def test_connection_error_returns_none(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(side_effect=ConnectionError("timeout"))
 
-        result = await claude_batch_submit([
-            {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-        ])
+        result = await claude_batch_submit(
+            [
+                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+            ]
+        )
         assert result is None
 
 
@@ -371,6 +392,7 @@ class TestClaudeBatchResults:
     def _make_jsonl(self, entries):
         """Build JSONL string from list of (custom_id, result_dict) tuples."""
         import json
+
         lines = []
         for cid, result in entries:
             lines.append(json.dumps({"custom_id": cid, "result": result}))
@@ -380,31 +402,38 @@ class TestClaudeBatchResults:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_completed_batch_parses_jsonl(self, mock_http, mock_cred):
-        jsonl = self._make_jsonl([
-            ("r1", {
-                "type": "succeeded",
-                "message": {
-                    "content": [
-                        {"type": "tool_use", "name": "structured_output", "input": {"name": "Acme"}}
-                    ]
-                },
-            }),
-            ("r2", {
-                "type": "succeeded",
-                "message": {
-                    "content": [
-                        {"type": "tool_use", "name": "structured_output", "input": {"name": "Beta"}}
-                    ]
-                },
-            }),
-        ])
+        jsonl = self._make_jsonl(
+            [
+                (
+                    "r1",
+                    {
+                        "type": "succeeded",
+                        "message": {
+                            "content": [{"type": "tool_use", "name": "structured_output", "input": {"name": "Acme"}}]
+                        },
+                    },
+                ),
+                (
+                    "r2",
+                    {
+                        "type": "succeeded",
+                        "message": {
+                            "content": [{"type": "tool_use", "name": "structured_output", "input": {"name": "Beta"}}]
+                        },
+                    },
+                ),
+            ]
+        )
 
         # First call: status check
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_abc123",
-            "request_counts": {"succeeded": 2, "errored": 0},
-        })
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_abc123",
+                "request_counts": {"succeeded": 2, "errored": 0},
+            },
+        )
         # Second call: results fetch
         results_resp = _mock_response(200, text=jsonl)
 
@@ -417,9 +446,14 @@ class TestClaudeBatchResults:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_still_processing_returns_none(self, mock_http, mock_cred):
-        mock_http.get = AsyncMock(return_value=_mock_response(200, {
-            "processing_status": "in_progress",
-        }))
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "processing_status": "in_progress",
+                },
+            )
+        )
 
         result = await claude_batch_results("batch_abc123")
         assert result is None
@@ -428,10 +462,15 @@ class TestClaudeBatchResults:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_no_results_url_returns_none(self, mock_http, mock_cred):
-        mock_http.get = AsyncMock(return_value=_mock_response(200, {
-            "processing_status": "ended",
-            # No results_url
-        }))
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "processing_status": "ended",
+                    # No results_url
+                },
+            )
+        )
 
         result = await claude_batch_results("batch_abc123")
         assert result is None
@@ -440,18 +479,26 @@ class TestClaudeBatchResults:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_failed_entry_has_none_value(self, mock_http, mock_cred):
-        jsonl = self._make_jsonl([
-            ("r1", {
-                "type": "errored",
-                "error": {"type": "server_error", "message": "Internal error"},
-            }),
-        ])
+        jsonl = self._make_jsonl(
+            [
+                (
+                    "r1",
+                    {
+                        "type": "errored",
+                        "error": {"type": "server_error", "message": "Internal error"},
+                    },
+                ),
+            ]
+        )
 
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_fail",
-            "request_counts": {"succeeded": 0, "errored": 1},
-        })
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_fail",
+                "request_counts": {"succeeded": 0, "errored": 1},
+            },
+        )
         results_resp = _mock_response(200, text=jsonl)
         mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
 
@@ -484,11 +531,14 @@ class TestClaudeBatchResults:
     @patch("app.utils.claude_client.http")
     async def test_results_fetch_error_returns_none(self, mock_http, mock_cred):
         """When results_url returns non-200, returns None."""
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_err",
-            "request_counts": {"succeeded": 0},
-        })
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_err",
+                "request_counts": {"succeeded": 0},
+            },
+        )
         results_resp = _mock_response(500, text="Error")
         mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
 
@@ -511,20 +561,24 @@ class TestClaudeBatchResults:
     async def test_succeeded_no_tool_use_returns_none_value(self, mock_http, mock_cred):
         """Succeeded result without tool_use block has None value."""
         import json
-        jsonl = json.dumps({
-            "custom_id": "r1",
-            "result": {
-                "type": "succeeded",
-                "message": {
-                    "content": [{"type": "text", "text": "No structured output"}]
+
+        jsonl = json.dumps(
+            {
+                "custom_id": "r1",
+                "result": {
+                    "type": "succeeded",
+                    "message": {"content": [{"type": "text", "text": "No structured output"}]},
                 },
+            }
+        )
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_no_tool",
+                "request_counts": {"succeeded": 1},
             },
-        })
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_no_tool",
-            "request_counts": {"succeeded": 1},
-        })
+        )
         results_resp = _mock_response(200, text=jsonl)
         mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
 
@@ -537,11 +591,14 @@ class TestClaudeBatchResults:
     async def test_jsonl_parse_error_skipped(self, mock_http, mock_cred):
         """Malformed JSONL lines are skipped."""
         jsonl = "not valid json\n{malformed"
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_bad",
-            "request_counts": {"succeeded": 0},
-        })
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_bad",
+                "request_counts": {"succeeded": 0},
+            },
+        )
         results_resp = _mock_response(200, text=jsonl)
         mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
 
@@ -554,21 +611,25 @@ class TestClaudeBatchResults:
     async def test_empty_lines_in_jsonl_skipped(self, mock_http, mock_cred):
         """Empty lines in JSONL are skipped."""
         import json
-        line = json.dumps({
-            "custom_id": "r1",
-            "result": {
-                "type": "succeeded",
-                "message": {
-                    "content": [{"type": "tool_use", "name": "structured_output", "input": {"ok": True}}]
+
+        line = json.dumps(
+            {
+                "custom_id": "r1",
+                "result": {
+                    "type": "succeeded",
+                    "message": {"content": [{"type": "tool_use", "name": "structured_output", "input": {"ok": True}}]},
                 },
-            },
-        })
+            }
+        )
         jsonl = f"\n{line}\n\n"
-        status_resp = _mock_response(200, {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_x",
-            "request_counts": {"succeeded": 1},
-        })
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_x",
+                "request_counts": {"succeeded": 1},
+            },
+        )
         results_resp = _mock_response(200, text=jsonl)
         mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
 
@@ -587,13 +648,13 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_thinking_budget_forces_smart_model(self, mock_http, mock_cred):
         """When thinking_budget is set, uses SMART model regardless of model_tier."""
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {"x": 1}}]
-        }))
-
-        await claude_structured(
-            "test", {"type": "object"}, model_tier="fast", thinking_budget=5000
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {"x": 1}}]}
+            )
         )
+
+        await claude_structured("test", {"type": "object"}, model_tier="fast", thinking_budget=5000)
         body = mock_http.post.call_args.kwargs["json"]
         assert body["model"] == MODELS["smart"]
         assert "thinking" in body
@@ -605,9 +666,11 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_no_system_prompt_excluded(self, mock_http, mock_cred):
         """When system is empty, no system key in body."""
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
+            )
+        )
 
         await claude_structured("test", {"type": "object"}, system="")
         body = mock_http.post.call_args.kwargs["json"]
@@ -618,13 +681,13 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_cache_system_false_no_cache_control(self, mock_http, mock_cred):
         """When cache_system=False, system block has no cache_control."""
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
-        }))
-
-        await claude_structured(
-            "test", {"type": "object"}, system="system prompt", cache_system=False
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
+            )
         )
+
+        await claude_structured("test", {"type": "object"}, system="system prompt", cache_system=False)
         body = mock_http.post.call_args.kwargs["json"]
         assert "system" in body
         assert "cache_control" not in body["system"][0]
@@ -634,9 +697,11 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_unknown_model_tier_defaults_fast(self, mock_http, mock_cred):
         """Unknown model_tier falls back to 'fast'."""
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
-        }))
+        mock_http.post = AsyncMock(
+            return_value=_mock_response(
+                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
+            )
+        )
 
         await claude_structured("test", {"type": "object"}, model_tier="nonexistent")
         body = mock_http.post.call_args.kwargs["json"]
@@ -654,9 +719,7 @@ class TestClaudeTextAdditional:
     @patch("app.utils.claude_client.http")
     async def test_tools_included_in_body(self, mock_http, mock_cred):
         """Tools parameter is passed to API body."""
-        mock_http.post = AsyncMock(return_value=_mock_response(200, {
-            "content": [{"type": "text", "text": "result"}]
-        }))
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {"content": [{"type": "text", "text": "result"}]}))
 
         tools = [{"type": "web_search_20250305"}]
         await claude_text("test", tools=tools)

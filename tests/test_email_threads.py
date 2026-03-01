@@ -179,6 +179,7 @@ class TestCache:
 
         # Patch the stored timestamp to be old
         from app.services import email_threads
+
         ts, stored = email_threads._thread_cache["key1"]
         email_threads._thread_cache["key1"] = (ts - 301, stored)
 
@@ -387,9 +388,7 @@ class TestFetchThreadsForRequirement:
     @pytest.mark.asyncio
     async def test_nonexistent_requirement(self, db_session, test_user):
         """Nonexistent requirement returns empty list."""
-        threads = await fetch_threads_for_requirement(
-            99999, "fake-token", db_session, user_id=test_user.id
-        )
+        threads = await fetch_threads_for_requirement(99999, "fake-token", db_session, user_id=test_user.id)
         assert threads == []
 
     @pytest.mark.asyncio
@@ -402,9 +401,7 @@ class TestFetchThreadsForRequirement:
             instance.get_all_pages = AsyncMock(return_value=[])
 
             # First call
-            await fetch_threads_for_requirement(
-                requirement.id, "fake-token", db_session, user_id=test_user.id
-            )
+            await fetch_threads_for_requirement(requirement.id, "fake-token", db_session, user_id=test_user.id)
             # Second call should use cache
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
@@ -546,17 +543,13 @@ class TestFetchThreadsForVendor:
         test_vendor_card.emails = ["someone@gmail.com"]
         db_session.commit()
 
-        threads = await fetch_threads_for_vendor(
-            test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
-        )
+        threads = await fetch_threads_for_vendor(test_vendor_card.id, "fake-token", db_session, user_id=test_user.id)
         assert threads == []
 
     @pytest.mark.asyncio
     async def test_nonexistent_vendor(self, db_session, test_user):
         """Nonexistent vendor returns empty list."""
-        threads = await fetch_threads_for_vendor(
-            99999, "fake-token", db_session, user_id=test_user.id
-        )
+        threads = await fetch_threads_for_vendor(99999, "fake-token", db_session, user_id=test_user.id)
         assert threads == []
 
     @pytest.mark.asyncio
@@ -653,15 +646,11 @@ class TestFetchThreadsForVendor:
             instance.get_all_pages = AsyncMock(return_value=mock_messages)
 
             # First call populates cache
-            await fetch_threads_for_vendor(
-                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            await fetch_threads_for_vendor(test_vendor_card.id, "fake-token", db_session, user_id=test_user.id)
             first_call_count = MockGC.call_count
 
             # Second call should use cache
-            await fetch_threads_for_vendor(
-                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            await fetch_threads_for_vendor(test_vendor_card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert MockGC.call_count == first_call_count  # No additional GraphClient creation
 
@@ -672,9 +661,7 @@ class TestFetchThreadsForVendor:
         test_vendor_card.emails = ["vendor@gmail.com", "vendor@yahoo.com"]
         db_session.commit()
 
-        threads = await fetch_threads_for_vendor(
-            test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
-        )
+        threads = await fetch_threads_for_vendor(test_vendor_card.id, "fake-token", db_session, user_id=test_user.id)
         # Should return empty since only generic domains
         assert threads == []
 
@@ -801,9 +788,7 @@ class TestFetchThreadsForRequirementTiers:
         assert len(domain_threads) >= 1
 
     @pytest.mark.asyncio
-    async def test_combined_tiers_dedup_by_conversation_id(
-        self, db_session, test_user, test_requisition
-    ):
+    async def test_combined_tiers_dedup_by_conversation_id(self, db_session, test_user, test_requisition):
         """Same conversation_id found by multiple tiers only appears once."""
         requirement = test_requisition.requirements[0]
         req_id = test_requisition.id
@@ -837,9 +822,7 @@ class TestFetchThreadsForRequirementTiers:
         assert len(matching) == 1
 
     @pytest.mark.asyncio
-    async def test_graph_error_graceful_fallthrough(
-        self, db_session, test_user, test_requisition
-    ):
+    async def test_graph_error_graceful_fallthrough(self, db_session, test_user, test_requisition):
         """Graph API error at one tier doesn't break other tiers."""
         requirement = test_requisition.requirements[0]
 
@@ -1012,9 +995,7 @@ class TestFetchThreadsForVendorEdgeCases:
     async def test_vendor_not_found(self, db_session, test_user):
         """Non-existent vendor returns empty list."""
         clear_cache()
-        result = await fetch_threads_for_vendor(
-            99999, "fake-token", db_session, user_id=test_user.id
-        )
+        result = await fetch_threads_for_vendor(99999, "fake-token", db_session, user_id=test_user.id)
         assert result == []
 
     @pytest.mark.asyncio
@@ -1031,9 +1012,7 @@ class TestFetchThreadsForVendorEdgeCases:
         db_session.add(card)
         db_session.commit()
 
-        result = await fetch_threads_for_vendor(
-            card.id, "fake-token", db_session, user_id=test_user.id
-        )
+        result = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
         assert result == []
 
     @pytest.mark.asyncio
@@ -1064,9 +1043,7 @@ class TestFetchThreadsForVendorEdgeCases:
             instance = MockGC.return_value
             instance.get_all_pages = AsyncMock(return_value=mock_msgs)
 
-            result = await fetch_threads_for_vendor(
-                card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            result = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert len(result) == 1
         assert result[0]["conversation_id"] == "conv-vendor-1"
@@ -1100,13 +1077,9 @@ class TestFetchThreadsForVendorEdgeCases:
             instance = MockGC.return_value
             instance.get_all_pages = AsyncMock(return_value=mock_msgs)
 
-            result1 = await fetch_threads_for_vendor(
-                card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            result1 = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
             # Second call should use cache
-            result2 = await fetch_threads_for_vendor(
-                card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            result2 = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert result1 == result2
         # Graph API should only be called once (second call is cached)
@@ -1138,9 +1111,7 @@ class TestFetchThreadsForVendorEdgeCases:
             instance = MockGC.return_value
             instance.get_all_pages = AsyncMock(return_value=[])
 
-            result = await fetch_threads_for_vendor(
-                card.id, "fake-token", db_session, user_id=test_user.id
-            )
+            result = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert result == []
         # At least 3 domain searches should have been made (domainA, domainB, domainC)

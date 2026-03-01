@@ -93,28 +93,37 @@ class TestCreateErrorReport:
             "title": "Search broken on sourcing view",
             "prompt": "Investigate search in app/static/app.js...",
         }
-        resp = client.post("/api/error-reports", json={
-            "message": "Search is broken when I look for LM317T",
-            "current_url": "https://app.example.com/",
-            "current_view": "sourcing",
-            "browser_info": "Chrome 120",
-            "screen_size": "1920x1080",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Search is broken when I look for LM317T",
+                "current_url": "https://app.example.com/",
+                "current_view": "sourcing",
+                "browser_info": "Chrome 120",
+                "screen_size": "1920x1080",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] > 0
         assert data["status"] == "created"
 
     def test_submit_without_message_returns_422(self, client):
-        resp = client.post("/api/error-reports", json={
-            "title": "Old style title only",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "title": "Old style title only",
+            },
+        )
         assert resp.status_code == 422
 
     def test_submit_empty_message_rejected(self, client):
-        resp = client.post("/api/error-reports", json={
-            "message": "",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "",
+            },
+        )
         assert resp.status_code == 422
 
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
@@ -123,10 +132,13 @@ class TestCreateErrorReport:
             "title": "Button unresponsive in RFQ",
             "prompt": "Check the submit handler in app/static/app.js...",
         }
-        resp = client.post("/api/error-reports", json={
-            "message": "Submit button doesn't work",
-            "current_view": "rfq",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Submit button doesn't work",
+                "current_view": "rfq",
+            },
+        )
         assert resp.status_code == 200
         report_id = resp.json()["id"]
         report = db_session.get(ErrorReport, report_id)
@@ -137,9 +149,12 @@ class TestCreateErrorReport:
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_ai_failure_doesnt_break_submission(self, mock_gen, client, db_session):
         mock_gen.side_effect = Exception("Gradient API down")
-        resp = client.post("/api/error-reports", json={
-            "message": "Something is wrong with the page",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Something is wrong with the page",
+            },
+        )
         assert resp.status_code == 200
         report_id = resp.json()["id"]
         report = db_session.get(ErrorReport, report_id)
@@ -150,9 +165,12 @@ class TestCreateErrorReport:
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_ai_returns_none_still_saves(self, mock_gen, client, db_session):
         mock_gen.return_value = None
-        resp = client.post("/api/error-reports", json={
-            "message": "Minor issue with display",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Minor issue with display",
+            },
+        )
         assert resp.status_code == 200
         report_id = resp.json()["id"]
         report = db_session.get(ErrorReport, report_id)
@@ -162,38 +180,50 @@ class TestCreateErrorReport:
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_submit_with_screenshot(self, mock_gen, client):
         mock_gen.return_value = None
-        resp = client.post("/api/error-reports", json={
-            "message": "Visual glitch on screen",
-            "screenshot_b64": "data:image/png;base64,iVBORw0KGgo=",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Visual glitch on screen",
+                "screenshot_b64": "data:image/png;base64,iVBORw0KGgo=",
+            },
+        )
         assert resp.status_code == 200
 
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_screenshot_too_large(self, mock_gen, client):
         mock_gen.return_value = None
-        resp = client.post("/api/error-reports", json={
-            "message": "Big screenshot test",
-            "screenshot_b64": "x" * (2 * 1024 * 1024 + 1),
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "Big screenshot test",
+                "screenshot_b64": "x" * (2 * 1024 * 1024 + 1),
+            },
+        )
         assert resp.status_code == 400
         assert "too large" in resp.json()["error"].lower()
 
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_submit_with_console_errors(self, mock_gen, client):
         mock_gen.return_value = None
-        resp = client.post("/api/error-reports", json={
-            "message": "JS error happening on page",
-            "console_errors": '[{"msg":"ReferenceError","ts":123}]',
-            "page_state": '{"activeView":"rfq","reqCount":5}',
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "JS error happening on page",
+                "console_errors": '[{"msg":"ReferenceError","ts":123}]',
+                "page_state": '{"activeView":"rfq","reqCount":5}',
+            },
+        )
         assert resp.status_code == 200
 
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
     def test_message_used_as_description(self, mock_gen, client, db_session):
         mock_gen.return_value = None
-        resp = client.post("/api/error-reports", json={
-            "message": "The search results are not showing up correctly",
-        })
+        resp = client.post(
+            "/api/error-reports",
+            json={
+                "message": "The search results are not showing up correctly",
+            },
+        )
         report_id = resp.json()["id"]
         report = db_session.get(ErrorReport, report_id)
         assert report.description == "The search results are not showing up correctly"

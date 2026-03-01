@@ -5,10 +5,8 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-import pytest
 
 from app.services.prospect_scoring import (
-    ALL_NAICS_CODES,
     ICP_SEGMENTS,
     apply_historical_bonus,
     calculate_composite_score,
@@ -176,9 +174,7 @@ class TestReadinessScore:
 
     def test_high_readiness(self):
         """All signals firing: should score near maximum."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "Hot Prospect"}, HIGH_READINESS_SIGNALS
-        )
+        score, breakdown = calculate_readiness_score({"name": "Hot Prospect"}, HIGH_READINESS_SIGNALS)
         assert score >= 80
         assert breakdown["intent"]["score"] == 35
         assert breakdown["events"]["score"] >= 20
@@ -187,17 +183,13 @@ class TestReadinessScore:
 
     def test_low_readiness(self):
         """No signals at all: low scores, mostly neutral."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "Cold Prospect"}, LOW_READINESS_SIGNALS
-        )
+        score, breakdown = calculate_readiness_score({"name": "Cold Prospect"}, LOW_READINESS_SIGNALS)
         assert score <= 30
         assert breakdown["events"]["score"] == 0
 
     def test_moderate_readiness(self):
         """Mixed signals."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "Warm Prospect"}, MODERATE_READINESS_SIGNALS
-        )
+        score, breakdown = calculate_readiness_score({"name": "Warm Prospect"}, MODERATE_READINESS_SIGNALS)
         assert 30 <= score <= 65
         assert breakdown["intent"]["score"] == 20
         assert breakdown["hiring"]["score"] == 15
@@ -210,9 +202,7 @@ class TestReadinessScore:
 
     def test_breakdown_structure(self):
         """Breakdown dict has expected keys and sub-keys."""
-        _, breakdown = calculate_readiness_score(
-            {"name": "Test"}, HIGH_READINESS_SIGNALS
-        )
+        _, breakdown = calculate_readiness_score({"name": "Test"}, HIGH_READINESS_SIGNALS)
         for key in ["intent", "events", "hiring", "new_procurement_hire", "contacts"]:
             assert key in breakdown
             assert "score" in breakdown[key]
@@ -259,9 +249,7 @@ class TestReadinessScore:
         assert b["contacts"]["score"] == 7
 
         # Unverified only = 3
-        _, b = calculate_readiness_score(
-            {"name": "T"}, {"contacts_verified_count": 0, "contacts_unverified_count": 2}
-        )
+        _, b = calculate_readiness_score({"name": "T"}, {"contacts_verified_count": 0, "contacts_unverified_count": 2})
         assert b["contacts"]["score"] == 3
 
         # None = 0
@@ -488,16 +476,12 @@ class TestEdgeCases:
 
     def test_readiness_malformed_intent(self):
         """Intent as a string instead of dict."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "Test"}, {"intent": "strong"}
-        )
+        score, breakdown = calculate_readiness_score({"name": "Test"}, {"intent": "strong"})
         assert 0 <= score <= 100
 
     def test_readiness_malformed_events(self):
         """Events as a string instead of list."""
-        score, _ = calculate_readiness_score(
-            {"name": "Test"}, {"events": "some event"}
-        )
+        score, _ = calculate_readiness_score({"name": "Test"}, {"events": "some event"})
         assert 0 <= score <= 100
 
     def test_historical_malformed_quote_count(self):
@@ -516,16 +500,19 @@ class TestParseEmployeeRangeEdgeCases:
     def test_plus_invalid(self):
         """Lines 121-122: ValueError on '+' format."""
         from app.services.prospect_scoring import _parse_employee_range
+
         assert _parse_employee_range("abc+") is None
 
     def test_dash_invalid(self):
         """Lines 128-129: ValueError on '-' format."""
         from app.services.prospect_scoring import _parse_employee_range
+
         assert _parse_employee_range("abc-def") is None
 
     def test_plain_invalid(self):
         """Lines 132-133: ValueError on plain string."""
         from app.services.prospect_scoring import _parse_employee_range
+
         assert _parse_employee_range("unknown") is None
 
 
@@ -545,6 +532,7 @@ class TestFitScoreCoverageGaps:
     def test_naics_3digit_partial_match(self):
         """Lines 249-250: NAICS 3-digit prefix match."""
         from app.services.prospect_scoring import ALL_NAICS_3DIGIT
+
         # Pick a 3-digit prefix that's in ALL_NAICS_3DIGIT but full code is not in CODES or 4DIGIT
         test_code = list(ALL_NAICS_3DIGIT)[0] + "99999"
         data = {
@@ -569,23 +557,17 @@ class TestReadinessScoreCoverageGaps:
 
     def test_hiring_not_dict(self):
         """Line 360: hiring signal is not a dict."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "T"}, {"hiring": "procurement"}
-        )
+        score, breakdown = calculate_readiness_score({"name": "T"}, {"hiring": "procurement"})
         assert breakdown["hiring"]["detail"] == "none"
 
     def test_verified_not_int(self):
         """Line 390: contacts_verified_count is not an int."""
-        score, breakdown = calculate_readiness_score(
-            {"name": "T"}, {"contacts_verified_count": "many"}
-        )
+        score, breakdown = calculate_readiness_score({"name": "T"}, {"contacts_verified_count": "many"})
         assert breakdown["contacts"]["score"] == 0
 
     def test_last_activity_malformed(self):
         """Lines 482-483: last_activity that can't be parsed as year."""
-        fit, readiness = apply_historical_bonus(
-            60, 40, {"last_activity": "invalid-date"}
-        )
+        fit, readiness = apply_historical_bonus(60, 40, {"last_activity": "invalid-date"})
         # Should not crash, no bonus applied
         assert readiness == 40
 

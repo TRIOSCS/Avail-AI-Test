@@ -62,9 +62,9 @@ class TestRefreshEndpoints:
 # ── Additional coverage tests ─────────────────────────────────────────
 
 
+from unittest.mock import patch
+
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -93,8 +93,10 @@ def admin_perf_client(db_session: Session, admin_user: User) -> TestClient:
 
 
 class TestVendorScorecardDetail:
-    @patch("app.services.performance_service.get_vendor_scorecard_detail",
-           return_value={"vendor_card_id": 1, "name": "Test", "composite_score": 85.0})
+    @patch(
+        "app.services.performance_service.get_vendor_scorecard_detail",
+        return_value={"vendor_card_id": 1, "name": "Test", "composite_score": 85.0},
+    )
     def test_single_vendor_success(self, mock_fn, client, test_vendor_card):
         """Returns vendor scorecard detail."""
         resp = client.get(f"/api/performance/vendors/{test_vendor_card.id}")
@@ -110,8 +112,7 @@ class TestVendorScorecardDetail:
 
 
 class TestRefreshWithAdmin:
-    @patch("app.services.performance_service.compute_all_vendor_scorecards",
-           return_value={"computed": 10})
+    @patch("app.services.performance_service.compute_all_vendor_scorecards", return_value={"computed": 10})
     def test_refresh_vendors_admin_success(self, mock_compute, admin_perf_client):
         """Admin can refresh vendor scorecards."""
         resp = admin_perf_client.post("/api/performance/vendors/refresh")
@@ -119,8 +120,7 @@ class TestRefreshWithAdmin:
         assert resp.json()["status"] == "ok"
         assert resp.json()["computed"] == 10
 
-    @patch("app.services.performance_service.compute_buyer_leaderboard",
-           return_value={"computed": 5})
+    @patch("app.services.performance_service.compute_buyer_leaderboard", return_value={"computed": 5})
     def test_refresh_buyers_admin_success(self, mock_compute, admin_perf_client):
         """Admin can refresh buyer leaderboard."""
         resp = admin_perf_client.post("/api/performance/buyers/refresh")
@@ -131,15 +131,13 @@ class TestRefreshWithAdmin:
 class TestSalespersonScorecard:
     def test_salesperson_scorecard_default_month(self, client):
         """GET /api/performance/salespeople with no month defaults to current."""
-        with patch("app.services.performance_service.get_salesperson_scorecard",
-                   return_value={"entries": []}):
+        with patch("app.services.performance_service.get_salesperson_scorecard", return_value={"entries": []}):
             resp = client.get("/api/performance/salespeople")
         assert resp.status_code == 200
 
     def test_salesperson_scorecard_with_month(self, client):
         """GET /api/performance/salespeople with month param."""
-        with patch("app.services.performance_service.get_salesperson_scorecard",
-                   return_value={"entries": []}):
+        with patch("app.services.performance_service.get_salesperson_scorecard", return_value={"entries": []}):
             resp = client.get("/api/performance/salespeople?month=2026-01")
         assert resp.status_code == 200
 
@@ -164,8 +162,7 @@ class TestUnifiedScoresRefresh:
         resp = client.post("/api/performance/unified-scores/refresh")
         assert resp.status_code == 403
 
-    @patch("app.services.unified_score_service.compute_all_unified_scores",
-           return_value={"computed": 3})
+    @patch("app.services.unified_score_service.compute_all_unified_scores", return_value={"computed": 3})
     def test_unified_scores_admin_success(self, mock_compute, admin_perf_client):
         """Admin can refresh unified scores with valid month."""
         resp = admin_perf_client.post("/api/performance/unified-scores/refresh?month=2026-01")
@@ -178,8 +175,7 @@ class TestUnifiedScoresRefresh:
         resp = admin_perf_client.post("/api/performance/unified-scores/refresh?month=bad-date")
         assert resp.status_code == 400
 
-    @patch("app.services.unified_score_service.compute_all_unified_scores",
-           return_value={"computed": 5})
+    @patch("app.services.unified_score_service.compute_all_unified_scores", return_value={"computed": 5})
     def test_unified_scores_admin_no_month(self, mock_compute, admin_perf_client):
         """No month defaults to current month."""
         resp = admin_perf_client.post("/api/performance/unified-scores/refresh")

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, User
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -20,7 +19,7 @@ from app.models import Company, CustomerSite, User
 def sales_client(db_session: Session, sales_user: User) -> TestClient:
     """TestClient authenticated as a sales user."""
     from app.database import get_db
-    from app.dependencies import require_admin, require_user
+    from app.dependencies import require_user
     from app.main import app
 
     def _db():

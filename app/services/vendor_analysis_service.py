@@ -33,9 +33,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         # 1. MaterialVendorHistory (long-term tracked)
         mvh_rows = (
             db.query(MaterialVendorHistory, MaterialCard)
-            .join(
-                MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id
-            )
+            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
             .filter(
                 MaterialVendorHistory.vendor_name == card.normalized_name,
                 MaterialCard.deleted_at.is_(None),
@@ -48,16 +46,12 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             key = (mc.display_mpn or "").lower()
             if key and key not in seen_mpns:
                 seen_mpns.add(key)
-                parts_list.append(
-                    f"{mc.display_mpn} — {mvh.last_manufacturer or mc.manufacturer or 'unknown'}"
-                )
+                parts_list.append(f"{mc.display_mpn} — {mvh.last_manufacturer or mc.manufacturer or 'unknown'}")
 
         # 2. Sightings (search results) — fill remaining slots
         sighting_rows = (
             db.query(Sighting.mpn_matched, Sighting.manufacturer)
-            .filter(
-                Sighting.vendor_name_normalized == card.normalized_name
-            )
+            .filter(Sighting.vendor_name_normalized == card.normalized_name)
             .filter(Sighting.mpn_matched.isnot(None), Sighting.mpn_matched != "")
             .order_by(Sighting.created_at.desc())
             .limit(200)
@@ -77,9 +71,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         prompt = (
             f"Analyze this vendor's part inventory to identify their specialties.\n\n"
             f"Vendor: {card.display_name}\n"
-            f"Parts they carry ({len(parts_list)} samples):\n"
-            + "\n".join(parts_list[:200])
-            + "\n\n"
+            f"Parts they carry ({len(parts_list)} samples):\n" + "\n".join(parts_list[:200]) + "\n\n"
             "Return JSON with two arrays — ONLY include items that appear multiple times "
             "or show a clear concentration/specialty. Do NOT list everything, only genuine focus areas.\n"
             '- "brands": brands/manufacturers this vendor clearly specializes in '

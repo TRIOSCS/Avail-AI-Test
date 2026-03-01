@@ -14,9 +14,7 @@ from app.connectors.apollo_client import APOLLO_BASE
 from app.http_client import http
 from app.models.prospect_account import ProspectAccount
 
-APOLLO_RATE_LIMIT_PER_MIN = int(
-    getattr(settings, "apollo_rate_limit_per_min", 5)
-)
+APOLLO_RATE_LIMIT_PER_MIN = int(getattr(settings, "apollo_rate_limit_per_min", 5))
 
 # Procurement-relevant title keywords
 PROCUREMENT_TITLES = [
@@ -72,13 +70,15 @@ async def check_people_signals(domain: str) -> dict:
 
         sample = []
         for p in people[:5]:
-            sample.append({
-                "name": _full_name(p),
-                "title": p.get("title") or p.get("headline"),
-                "email": p.get("email"),
-                "linkedin_url": p.get("linkedin_url"),
-                "seniority": p.get("seniority"),
-            })
+            sample.append(
+                {
+                    "name": _full_name(p),
+                    "title": p.get("title") or p.get("headline"),
+                    "email": p.get("email"),
+                    "linkedin_url": p.get("linkedin_url"),
+                    "seniority": p.get("seniority"),
+                }
+            )
 
         return {
             "has_procurement_staff": len(people) > 0,
@@ -91,9 +91,7 @@ async def check_people_signals(domain: str) -> dict:
         return {"has_procurement_staff": None, "contact_count": 0, "sample_contacts": []}
 
 
-async def run_people_check_batch(
-    prospect_ids: list[int], db: Session
-) -> dict:
+async def run_people_check_batch(prospect_ids: list[int], db: Session) -> dict:
     """Check procurement staff for a batch of prospects.
 
     Rate-limited to APOLLO_RATE_LIMIT_PER_MIN requests/minute.
@@ -145,7 +143,10 @@ async def run_people_check_batch(
 
     logger.info(
         "Apollo people check: checked={}, has_staff={}, no_staff={}, errors={}",
-        checked, has_staff, no_staff, errors,
+        checked,
+        has_staff,
+        no_staff,
+        errors,
     )
 
     return {
@@ -188,9 +189,17 @@ async def enrich_company_apollo(domain: str) -> dict | None:
             "website": org.get("website_url"),
             "industry": org.get("industry"),
             "employee_count_range": _format_size(org.get("estimated_num_employees")),
-            "hq_location": ", ".join(filter(None, [
-                org.get("city"), org.get("state"), org.get("country"),
-            ])) or None,
+            "hq_location": ", ".join(
+                filter(
+                    None,
+                    [
+                        org.get("city"),
+                        org.get("state"),
+                        org.get("country"),
+                    ],
+                )
+            )
+            or None,
             "region": _detect_region_from_country(org.get("country")),
             "description": org.get("short_description"),
             "discovery_source": "apollo",
@@ -237,8 +246,19 @@ def _detect_region_from_country(country: str | None) -> str | None:
     c = country.upper()
     if c in ("US", "USA", "UNITED STATES"):
         return "US"
-    if c in ("GERMANY", "UK", "UNITED KINGDOM", "FRANCE", "NETHERLANDS", "SWEDEN",
-             "ITALY", "SPAIN", "SWITZERLAND", "AUSTRIA", "BELGIUM"):
+    if c in (
+        "GERMANY",
+        "UK",
+        "UNITED KINGDOM",
+        "FRANCE",
+        "NETHERLANDS",
+        "SWEDEN",
+        "ITALY",
+        "SPAIN",
+        "SWITZERLAND",
+        "AUSTRIA",
+        "BELGIUM",
+    ):
         return "EU"
     if c in ("CHINA", "JAPAN", "SOUTH KOREA", "TAIWAN", "SINGAPORE", "INDIA"):
         return "Asia"

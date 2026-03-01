@@ -45,11 +45,7 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
 
     # 2. Check vendor_contacts table (exact match)
-    vc = (
-        db.query(VendorContact)
-        .filter(func.lower(VendorContact.email) == email_lower)
-        .first()
-    )
+    vc = db.query(VendorContact).filter(func.lower(VendorContact.email) == email_lower).first()
     if vc:
         card = db.get(VendorCard, vc.vendor_card_id)
         if card:
@@ -57,11 +53,7 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
 
     # 3. Domain match against companies
     if domain and domain not in _GENERIC_DOMAINS:
-        company = (
-            db.query(Company)
-            .filter(func.lower(Company.domain) == domain, Company.is_active.is_(True))
-            .first()
-        )
+        company = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).first()
         if company:
             return {"type": "company", "id": company.id, "name": company.name}
 
@@ -132,10 +124,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).all()
     if vcs:
         card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
-        card_map = (
-            {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()}
-            if card_ids else {}
-        )
+        card_map = {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()} if card_ids else {}
         for vc in vcs:
             vc_digits = "".join(c for c in (vc.phone or "") if c.isdigit())
             if vc_digits and vc_digits[-10:] == suffix:
@@ -166,9 +155,7 @@ def log_email_activity(
     """
     # Dedup by external_id
     if external_id:
-        existing = (
-            db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
-        )
+        existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
         if existing:
             return None
 
@@ -196,13 +183,9 @@ def log_email_activity(
         # Update last_activity_at on the matched entity
         _update_last_activity(match, db, user_id)
         _update_vendor_contact_stats(match, db)
-        logger.info(
-            f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
-        )
+        logger.info(f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}")
     else:
-        logger.info(
-            f"Activity logged (unmatched): {activity_type} for {email_addr} by user {user_id}"
-        )
+        logger.info(f"Activity logged (unmatched): {activity_type} for {email_addr} by user {user_id}")
 
     return record
 
@@ -218,9 +201,7 @@ def log_call_activity(
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     if external_id:
-        existing = (
-            db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
-        )
+        existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
         if existing:
             return None
 
@@ -247,13 +228,9 @@ def log_call_activity(
     if match:
         _update_last_activity(match, db, user_id)
         _update_vendor_contact_stats(match, db)
-        logger.info(
-            f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
-        )
+        logger.info(f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}")
     else:
-        logger.info(
-            f"Activity logged (unmatched): {activity_type} for {phone} by user {user_id}"
-        )
+        logger.info(f"Activity logged (unmatched): {activity_type} for {phone} by user {user_id}")
 
     return record
 
@@ -263,9 +240,7 @@ def log_call_activity(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def get_company_activities(
-    company_id: int, db: Session, limit: int = 50
-) -> list[ActivityLog]:
+def get_company_activities(company_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
     """Get recent activity for a company."""
     return (
         db.query(ActivityLog)
@@ -276,9 +251,7 @@ def get_company_activities(
     )
 
 
-def get_vendor_activities(
-    vendor_card_id: int, db: Session, limit: int = 50
-) -> list[ActivityLog]:
+def get_vendor_activities(vendor_card_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
     """Get recent activity for a vendor."""
     return (
         db.query(ActivityLog)
@@ -289,9 +262,7 @@ def get_vendor_activities(
     )
 
 
-def get_user_activities(
-    user_id: int, db: Session, limit: int = 50
-) -> list[ActivityLog]:
+def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
     """Get recent activity for a user."""
     return (
         db.query(ActivityLog)
@@ -304,11 +275,7 @@ def get_user_activities(
 
 def days_since_last_activity(company_id: int, db: Session) -> int | None:
     """Days since last activity on a company. None if no activity ever."""
-    latest = (
-        db.query(func.max(ActivityLog.created_at))
-        .filter(ActivityLog.company_id == company_id)
-        .scalar()
-    )
+    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
     if not latest:
         return None
     delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
@@ -327,9 +294,7 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
     """
     now = datetime.now(timezone.utc)
     if match["type"] == "company":
-        db.query(Company).filter(Company.id == match["id"]).update(
-            {"last_activity_at": now}, synchronize_session=False
-        )
+        db.query(Company).filter(Company.id == match["id"]).update({"last_activity_at": now}, synchronize_session=False)
         # Also update the matched site's last_activity_at
         site_id = match.get("site_id")
         if site_id:
@@ -378,9 +343,7 @@ def log_company_call(
     db.flush()
 
     now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
     logger.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
     return record
 
@@ -405,9 +368,7 @@ def log_company_note(
     db.flush()
 
     now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
     logger.info(f"Activity logged: note -> company {company_id} by user {user_id}")
     return record
 
@@ -441,9 +402,7 @@ def log_site_contact_note(
     db.flush()
 
     now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
     db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
@@ -451,9 +410,7 @@ def log_site_contact_note(
     return record
 
 
-def get_site_contact_notes(
-    site_contact_id: int, db: Session, limit: int = 50
-) -> list[ActivityLog]:
+def get_site_contact_notes(site_contact_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
     """Get recent notes for a site contact."""
     return (
         db.query(ActivityLog)
@@ -548,11 +505,7 @@ def log_vendor_note(
 
 def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | None:
     """Days since last activity on a vendor card. None if no activity ever."""
-    latest = (
-        db.query(func.max(ActivityLog.created_at))
-        .filter(ActivityLog.vendor_card_id == vendor_card_id)
-        .scalar()
-    )
+    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
     if not latest:
         return None
     delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
@@ -583,9 +536,7 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def get_unmatched_activities(
-    db: Session, limit: int = 100, offset: int = 0
-) -> list[ActivityLog]:
+def get_unmatched_activities(db: Session, limit: int = 100, offset: int = 0) -> list[ActivityLog]:
     """Get activities with no company or vendor match and not dismissed."""
     return (
         db.query(ActivityLog)
@@ -645,9 +596,7 @@ def attribute_activity(
     match = {"type": entity_type, "id": entity_id}
     _update_last_activity(match, db, user_id)
 
-    logger.info(
-        f"Activity {activity_id} attributed to {entity_type} {entity_id}"
-    )
+    logger.info(f"Activity {activity_id} attributed to {entity_type} {entity_id}")
     return activity
 
 

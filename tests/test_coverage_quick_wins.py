@@ -23,11 +23,8 @@ Called by: pytest
 Depends on: conftest.py fixtures
 """
 
-import asyncio
-import json
-import os
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,12 +39,9 @@ from app.models import (
     Requirement,
     Requisition,
     Sighting,
-    SiteContact,
     User,
     VendorCard,
-    VendorContact,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Fixtures
@@ -128,6 +122,7 @@ class TestAdminVendorMergeFKException:
 
         class BrokenDescriptor:
             """Descriptor that raises on == comparison (used in filter())."""
+
             def __eq__(self, other):
                 raise RuntimeError("Simulated FK table error")
 
@@ -218,9 +213,7 @@ class TestBuyPlanMissingOffer:
 
 
 class TestSiteUnassignGuard:
-    def test_non_admin_cannot_set_null_owner_on_unowned_site(
-        self, sales_client, db_session, test_company
-    ):
+    def test_non_admin_cannot_set_null_owner_on_unowned_site(self, sales_client, db_session, test_company):
         """Non-admin setting owner_id=None on site with no current owner (line 56).
 
         The site has owner_id=None already, the update includes owner_id=None,
@@ -304,6 +297,7 @@ class TestDashboardTimezoneAware:
 
             class PatchedQuery:
                 """Wrapper that replaces naive datetimes with tz-aware ones."""
+
                 def __getattr__(self, name):
                     return getattr(result, name)
 
@@ -311,11 +305,13 @@ class TestDashboardTimezoneAware:
                     rows = original_all()
                     patched = []
                     for row in rows:
-                        if hasattr(row, 'last_at') and row.last_at and row.last_at.tzinfo is None:
-                            patched.append(SimpleNamespace(
-                                company_id=row.company_id,
-                                last_at=row.last_at.replace(tzinfo=timezone.utc),
-                            ))
+                        if hasattr(row, "last_at") and row.last_at and row.last_at.tzinfo is None:
+                            patched.append(
+                                SimpleNamespace(
+                                    company_id=row.company_id,
+                                    last_at=row.last_at.replace(tzinfo=timezone.utc),
+                                )
+                            )
                         else:
                             patched.append(row)
                     return patched
@@ -421,6 +417,7 @@ class TestRequisitionSubstitutesEdge:
         code on line 72 is still exercised.
         """
         from pydantic import ValidationError
+
         from app.schemas.requisitions import RequirementCreate
 
         # Integer triggers the fallback `return v` path on line 72
@@ -445,16 +442,18 @@ class TestSearchCacheHit:
 
         # Need connectors to be populated (not empty) for cache check to happen.
         # Provide credentials so connectors are built, then have cache return early.
-        with patch("app.services.credential_service.get_credential", return_value="fake-key"), \
-             patch("app.search_service.NexarConnector"), \
-             patch("app.search_service.BrokerBinConnector"), \
-             patch("app.search_service.EbayConnector"), \
-             patch("app.search_service.DigiKeyConnector"), \
-             patch("app.search_service.MouserConnector"), \
-             patch("app.search_service.OEMSecretsConnector"), \
-             patch("app.search_service.SourcengineConnector"), \
-             patch("app.search_service.Element14Connector"), \
-             patch("app.search_service._get_search_cache", return_value=(cached_results, cached_stats)):
+        with (
+            patch("app.services.credential_service.get_credential", return_value="fake-key"),
+            patch("app.search_service.NexarConnector"),
+            patch("app.search_service.BrokerBinConnector"),
+            patch("app.search_service.EbayConnector"),
+            patch("app.search_service.DigiKeyConnector"),
+            patch("app.search_service.MouserConnector"),
+            patch("app.search_service.OEMSecretsConnector"),
+            patch("app.search_service.SourcengineConnector"),
+            patch("app.search_service.Element14Connector"),
+            patch("app.search_service._get_search_cache", return_value=(cached_results, cached_stats)),
+        ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
             # Verify cached results were returned
             assert len(results) == 1
@@ -472,9 +471,7 @@ class TestSearchCacheHit:
 class TestCustomerAnalysisDuplicateAndLimit:
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     @pytest.mark.asyncio
-    async def test_duplicate_sighting_skipped_and_limit_200(
-        self, mock_claude, db_session
-    ):
+    async def test_duplicate_sighting_skipped_and_limit_200(self, mock_claude, db_session):
         """Duplicate sighting MPNs are skipped; parts_list capped at 200 (lines 73-74, 76)."""
         from app.services.customer_analysis_service import analyze_customer_materials
 
@@ -571,7 +568,9 @@ class TestApplyContactCreation:
         from app.services.deep_enrichment_service import _apply_contact_creation
 
         _apply_contact_creation(
-            db_session, "vendor_card", 99999,
+            db_session,
+            "vendor_card",
+            99999,
             {"email": "test@example.com", "full_name": "Test"},
         )
         # Should not raise; returns early
@@ -585,7 +584,9 @@ class TestApplyContactCreation:
         db_session.commit()
 
         _apply_contact_creation(
-            db_session, "company", co.id,
+            db_session,
+            "company",
+            co.id,
             {"email": "test@nosite.com", "full_name": "No Site Person"},
         )
         # Should not raise; returns early because no site
@@ -644,8 +645,8 @@ class TestDeepEnrichCompanyContactConfidence:
                                 confidences.append(conf)
                         # Should have calls with 0.85 (apollo), 0.8 (hunter), 0.7 (unknown)
                         assert 0.85 in confidences  # apollo source
-                        assert 0.8 in confidences   # hunter source
-                        assert 0.7 in confidences   # unknown source
+                        assert 0.8 in confidences  # hunter source
+                        assert 0.7 in confidences  # unknown source
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -663,8 +664,10 @@ class TestOwnershipSweepNoCreatedAt:
         db_session.flush()
 
         sales = User(
-            email="sweep-sales@test.com", name="Sweep Sales",
-            role="sales", azure_id="sweep-sales-az",
+            email="sweep-sales@test.com",
+            name="Sweep Sales",
+            role="sales",
+            azure_id="sweep-sales-az",
         )
         db_session.add(sales)
         db_session.flush()
@@ -705,8 +708,10 @@ class TestGetMySitesRedStatus:
         db_session.flush()
 
         sales = User(
-            email="red-sales@test.com", name="Red Sales",
-            role="sales", azure_id="red-sales-az",
+            email="red-sales@test.com",
+            name="Red Sales",
+            role="sales",
+            azure_id="red-sales-az",
         )
         db_session.add(sales)
         db_session.flush()
@@ -741,8 +746,10 @@ class TestGetSitesAtRiskNoActivity:
         db_session.flush()
 
         sales = User(
-            email="risk-sales@test.com", name="Risk Sales",
-            role="sales", azure_id="risk-sales-az",
+            email="risk-sales@test.com",
+            name="Risk Sales",
+            role="sales",
+            azure_id="risk-sales-az",
         )
         db_session.add(sales)
         db_session.flush()
@@ -772,6 +779,7 @@ class TestViteAppAndCrmUrls:
     def test_vite_app_url_fallback_with_version(self):
         """vite_app_url without manifest returns raw path with cache bust (lines 76-77)."""
         import app.vite as vite_mod
+
         vite_mod._load_manifest.cache_clear()
 
         with patch.object(vite_mod, "_load_manifest", return_value=None):
@@ -781,6 +789,7 @@ class TestViteAppAndCrmUrls:
     def test_vite_app_url_fallback_no_version(self):
         """vite_app_url without manifest and no version has no bust param."""
         import app.vite as vite_mod
+
         vite_mod._load_manifest.cache_clear()
 
         with patch.object(vite_mod, "_load_manifest", return_value=None):
@@ -790,6 +799,7 @@ class TestViteAppAndCrmUrls:
     def test_vite_crm_url_fallback_with_version(self):
         """vite_crm_url without manifest returns raw path with cache bust (lines 85-86)."""
         import app.vite as vite_mod
+
         vite_mod._load_manifest.cache_clear()
 
         with patch.object(vite_mod, "_load_manifest", return_value=None):
@@ -799,6 +809,7 @@ class TestViteAppAndCrmUrls:
     def test_vite_crm_url_fallback_no_version(self):
         """vite_crm_url without manifest and no version has no bust param."""
         import app.vite as vite_mod
+
         vite_mod._load_manifest.cache_clear()
 
         with patch.object(vite_mod, "_load_manifest", return_value=None):

@@ -141,11 +141,7 @@ def _build_html(
     notes: str | None,
 ) -> str:
     """Build the full HTML email from body text + parts table."""
-    greeting = (
-        f"Hi {html_mod.escape(str(contact_name))},"
-        if contact_name
-        else "Hello,"
-    )
+    greeting = f"Hi {html_mod.escape(str(contact_name))}," if contact_name else "Hello,"
 
     rows_html = ""
     for item in parts:
@@ -159,11 +155,7 @@ def _build_html(
         </tr>"""
 
     body_html = html_mod.escape(body).replace("\n", "<br>")
-    notes_html = (
-        f'<p style="margin-top:12px">{html_mod.escape(str(notes))}</p>'
-        if notes
-        else ""
-    )
+    notes_html = f'<p style="margin-top:12px">{html_mod.escape(str(notes))}</p>' if notes else ""
     safe_name = html_mod.escape(str(salesperson_name)) if salesperson_name else "Trio Supply Chain Solutions"
 
     return f"""

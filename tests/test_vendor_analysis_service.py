@@ -24,7 +24,6 @@ from app.models import (
 )
 from app.services.vendor_analysis_service import _analyze_vendor_materials
 
-
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
@@ -71,8 +70,10 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
     user = db.query(User).first()
     if not user:
         user = User(
-            email="sighting-user@test.com", name="Sighting User",
-            role="buyer", azure_id="az-sighting",
+            email="sighting-user@test.com",
+            name="Sighting User",
+            role="buyer",
+            azure_id="az-sighting",
             created_at=datetime.now(timezone.utc),
         )
         db.add(user)
@@ -81,8 +82,10 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
     req = db.query(Requisition).first()
     if not req:
         req = Requisition(
-            name="REQ-SIGHTING", customer_name="Test",
-            status="open", created_by=user.id,
+            name="REQ-SIGHTING",
+            customer_name="Test",
+            status="open",
+            created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
         db.add(req)
@@ -91,8 +94,10 @@ def _make_sighting(db, vendor_name, mpn, manufacturer=None):
     requirement = db.query(Requirement).first()
     if not requirement:
         requirement = Requirement(
-            requisition_id=req.id, primary_mpn=mpn,
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db.add(requirement)
         db.flush()
@@ -312,20 +317,37 @@ class TestAnalyzeVendorMaterials:
         """Exception during own_session path triggers rollback and close."""
         mock_claude.side_effect = Exception("API failure")
 
-        mock_card = type('MockCard', (), {
-            'id': 1, 'normalized_name': 'test', 'display_name': 'Test',
-            'brand_tags': [], 'commodity_tags': [],
-        })()
+        mock_card = type(
+            "MockCard",
+            (),
+            {
+                "id": 1,
+                "normalized_name": "test",
+                "display_name": "Test",
+                "brand_tags": [],
+                "commodity_tags": [],
+            },
+        )()
 
         mock_db = AsyncMock()
         mock_db.get = lambda model, id: mock_card
-        mock_db.query = lambda *args: type('Q', (), {
-            'join': lambda self, *a, **kw: self,
-            'filter': lambda self, *a, **kw: self,
-            'order_by': lambda self, *a, **kw: self,
-            'limit': lambda self, *a, **kw: self,
-            'all': lambda self: [type('Row', (), {'display_mpn': 'LM317T', 'manufacturer': 'TI', 'last_manufacturer': 'TI', 'times_seen': 1})()],
-        })()
+        mock_db.query = lambda *args: type(
+            "Q",
+            (),
+            {
+                "join": lambda self, *a, **kw: self,
+                "filter": lambda self, *a, **kw: self,
+                "order_by": lambda self, *a, **kw: self,
+                "limit": lambda self, *a, **kw: self,
+                "all": lambda self: [
+                    type(
+                        "Row",
+                        (),
+                        {"display_mpn": "LM317T", "manufacturer": "TI", "last_manufacturer": "TI", "times_seen": 1},
+                    )()
+                ],
+            },
+        )()
 
         with patch("app.database.SessionLocal", return_value=mock_db):
             await _analyze_vendor_materials(1, db_session=None)

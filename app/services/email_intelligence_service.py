@@ -13,10 +13,16 @@ Called by: connectors/email_mining.py (scan_inbox), scheduler.py
 Depends on: gradient_service, ai_email_parser, models/email_intelligence
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from ..models.intelligence import EmailIntelligence
 
 CLASSIFICATION_SYSTEM = """\
 You are an email classifier for an electronic component brokerage.
@@ -222,9 +228,7 @@ async def process_email_intelligence(
     # Extract pricing for offer emails with pricing
     parsed_quotes = None
     if classification.get("classification") in ("offer", "quote_reply") and classification.get("has_pricing"):
-        parsed_quotes = await extract_pricing_intelligence(
-            subject, body, sender_email, sender_name
-        )
+        parsed_quotes = await extract_pricing_intelligence(subject, body, sender_email, sender_name)
 
     # Store result
     try:
@@ -259,17 +263,11 @@ def get_recent_intelligence(
     """Fetch recent email intelligence records for dashboard display."""
     from app.models import EmailIntelligence
 
-    query = db.query(EmailIntelligence).filter(
-        EmailIntelligence.user_id == user_id
-    )
+    query = db.query(EmailIntelligence).filter(EmailIntelligence.user_id == user_id)
     if classification:
         query = query.filter(EmailIntelligence.classification == classification)
 
-    records = (
-        query.order_by(EmailIntelligence.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    records = query.order_by(EmailIntelligence.created_at.desc()).limit(limit).all()
 
     return [
         {
@@ -343,11 +341,13 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
         if not r or not isinstance(r, dict):
             normalized.append(None)
             continue
-        normalized.append({
-            "brands": r.get("brands", []) if isinstance(r.get("brands"), list) else [],
-            "commodities": r.get("commodities", []) if isinstance(r.get("commodities"), list) else [],
-            "sender_type": r.get("sender_type", "unknown"),
-        })
+        normalized.append(
+            {
+                "brands": r.get("brands", []) if isinstance(r.get("brands"), list) else [],
+                "commodities": r.get("commodities", []) if isinstance(r.get("commodities"), list) else [],
+                "sender_type": r.get("sender_type", "unknown"),
+            }
+        )
 
     return normalized
 
@@ -370,9 +370,7 @@ Return ONLY valid JSON:
 }"""
 
 
-async def summarize_thread(
-    token: str, conversation_id: str, db: Session, user_id: int
-) -> dict | None:
+async def summarize_thread(token: str, conversation_id: str, db: Session, user_id: int) -> dict | None:
     """Summarize an email thread by conversation_id using AI.
 
     Fetches all messages via Graph API, then summarizes with Gradient Opus.

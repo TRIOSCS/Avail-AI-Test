@@ -55,11 +55,7 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
         path = "existing_company"
     else:
         # PATH B: New discovery — check for domain collision first
-        existing = (
-            db.query(Company)
-            .filter(Company.domain == prospect.domain)
-            .first()
-        ) if prospect.domain else None
+        existing = (db.query(Company).filter(Company.domain == prospect.domain).first()) if prospect.domain else None
 
         if existing:
             # Domain collision: link to existing Company instead of creating
@@ -69,7 +65,9 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             warning = f"Linked to existing company '{existing.name}' (same domain)"
             logger.warning(
                 "Domain collision on claim: prospect {} matched company {} ({})",
-                prospect.id, existing.id, existing.domain,
+                prospect.id,
+                existing.id,
+                existing.domain,
             )
         else:
             # Create new Company from prospect data
@@ -112,7 +110,10 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
 
     logger.info(
         "User {} claimed prospect {} ({}) via {}",
-        user.name if user else user_id, prospect.name, prospect.id, path,
+        user.name if user else user_id,
+        prospect.name,
+        prospect.id,
+        path,
     )
 
     result = {
@@ -149,11 +150,7 @@ def reveal_contacts(prospect: ProspectAccount, db: Session) -> list[dict]:
         return []
 
     # Create or find a CustomerSite for this company (HQ site)
-    site = (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id == prospect.company_id)
-        .first()
-    )
+    site = db.query(CustomerSite).filter(CustomerSite.company_id == prospect.company_id).first()
     if not site:
         site = CustomerSite(
             company_id=prospect.company_id,
@@ -165,9 +162,7 @@ def reveal_contacts(prospect: ProspectAccount, db: Session) -> list[dict]:
             ),
             state=(
                 prospect.hq_location.split(",")[1].strip()
-                if prospect.hq_location
-                and "," in prospect.hq_location
-                and len(prospect.hq_location.split(",")) > 1
+                if prospect.hq_location and "," in prospect.hq_location and len(prospect.hq_location.split(",")) > 1
                 else None
             ),
             is_active=True,
@@ -177,11 +172,7 @@ def reveal_contacts(prospect: ProspectAccount, db: Session) -> list[dict]:
 
     created = []
     existing_emails = {
-        c.email.lower()
-        for c in db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site.id)
-        .all()
-        if c.email
+        c.email.lower() for c in db.query(SiteContact).filter(SiteContact.customer_site_id == site.id).all() if c.email
     }
 
     for i, contact in enumerate(full_contacts):
@@ -200,19 +191,23 @@ def reveal_contacts(prospect: ProspectAccount, db: Session) -> list[dict]:
         )
         db.add(sc)
         existing_emails.add(email)
-        created.append({
-            "name": contact.get("name"),
-            "title": contact.get("title"),
-            "email": email,
-            "verified": contact.get("verified", False),
-            "seniority": contact.get("seniority", "other"),
-        })
+        created.append(
+            {
+                "name": contact.get("name"),
+                "title": contact.get("title"),
+                "email": email,
+                "verified": contact.get("verified", False),
+                "seniority": contact.get("seniority", "other"),
+            }
+        )
 
     if created:
         db.commit()
         logger.info(
             "Revealed {} contacts for prospect {} (company {})",
-            len(created), prospect.id, prospect.company_id,
+            len(created),
+            prospect.id,
+            prospect.company_id,
         )
 
     return created
@@ -238,29 +233,26 @@ async def generate_account_briefing(prospect_id: int, db: Session) -> str | None
     similar = prospect.similar_customers or []
 
     # Build context for the AI
-    similar_names = ", ".join(
-        s.get("name", s) if isinstance(s, dict) else str(s)
-        for s in similar[:5]
-    )
+    similar_names = ", ".join(s.get("name", s) if isinstance(s, dict) else str(s) for s in similar[:5])
 
     prompt = f"""Generate a concise account briefing for a salesperson about to contact this prospect.
 
 Company: {prospect.name}
 Domain: {prospect.domain}
-Industry: {prospect.industry or 'Unknown'}
-Size: {prospect.employee_count_range or 'Unknown'}
-Revenue: {prospect.revenue_range or 'Unknown'}
-Location: {prospect.hq_location or 'Unknown'}
+Industry: {prospect.industry or "Unknown"}
+Size: {prospect.employee_count_range or "Unknown"}
+Revenue: {prospect.revenue_range or "Unknown"}
+Location: {prospect.hq_location or "Unknown"}
 Fit Score: {prospect.fit_score}/100
 Readiness Score: {prospect.readiness_score}/100
 
-Intent Signals: {signals.get('intent', 'None detected')}
-Hiring Signals: {signals.get('hiring', 'None detected')}
-Recent Events: {signals.get('events', 'None detected')}
+Intent Signals: {signals.get("intent", "None detected")}
+Hiring Signals: {signals.get("hiring", "None detected")}
+Recent Events: {signals.get("events", "None detected")}
 
-Similar Existing Customers: {similar_names or 'None identified'}
+Similar Existing Customers: {similar_names or "None identified"}
 
-AI Writeup: {prospect.ai_writeup or 'Not available'}
+AI Writeup: {prospect.ai_writeup or "Not available"}
 
 Write 300-500 words covering:
 1. **Company Overview** — what they do and why they're a fit
@@ -308,10 +300,7 @@ def _template_briefing(prospect: ProspectAccount, signals: dict, similar: list) 
         parts.append(f"**Hiring Signal:** Recruiting {hiring['type']} — indicates growth/expansion.")
 
     if similar:
-        names = ", ".join(
-            s.get("name", s) if isinstance(s, dict) else str(s)
-            for s in similar[:3]
-        )
+        names = ", ".join(s.get("name", s) if isinstance(s, dict) else str(s) for s in similar[:3])
         parts.append(f"\n**Similar Customers:** {names}")
         parts.append("Reference these relationships to build credibility on the first call.")
 
@@ -378,7 +367,9 @@ async def trigger_deep_enrichment_bg(prospect_id: int) -> None:
 
         logger.info(
             "Deep enrichment complete for prospect {}: {} contacts, briefing={}",
-            prospect_id, len(contacts_created), bool(briefing),
+            prospect_id,
+            len(contacts_created),
+            bool(briefing),
         )
 
     except Exception as e:
@@ -436,11 +427,7 @@ def add_prospect_manually(domain: str, user_id: int, db: Session) -> dict:
         raise ValueError("Domain is required")
 
     # Deduplicate
-    existing = (
-        db.query(ProspectAccount)
-        .filter(ProspectAccount.domain == domain)
-        .first()
-    )
+    existing = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
     if existing:
         return {
             "prospect_id": existing.id,

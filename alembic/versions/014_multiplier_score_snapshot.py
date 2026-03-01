@@ -10,8 +10,9 @@ Revises: 013_avail_score_snapshot
 Create Date: 2026-02-26
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "014_multiplier_score_snapshot"
 down_revision = "013_avail_score_snapshot"
@@ -21,7 +22,8 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    conn.execute(text("""
+    conn.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS multiplier_score_snapshot (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -60,16 +62,21 @@ def upgrade() -> None:
             created_at TIMESTAMP,
             updated_at TIMESTAMP
         )
-    """))
-    conn.execute(text(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_mss_user_month ON multiplier_score_snapshot (user_id, month, role_type)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_mss_month_role_rank ON multiplier_score_snapshot (month, role_type, rank)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_mss_month_role_points ON multiplier_score_snapshot (month, role_type, total_points)"
-    ))
+    """)
+    )
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_mss_user_month ON multiplier_score_snapshot (user_id, month, role_type)"
+        )
+    )
+    conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_mss_month_role_rank ON multiplier_score_snapshot (month, role_type, rank)")
+    )
+    conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_mss_month_role_points ON multiplier_score_snapshot (month, role_type, total_points)"
+        )
+    )
 
 
 def downgrade() -> None:

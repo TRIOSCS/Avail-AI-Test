@@ -24,9 +24,7 @@ class Quote(Base):
 
     __tablename__ = "quotes"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
 
     quote_number = Column(String(50), nullable=False, unique=True)
@@ -76,9 +74,7 @@ class QuoteLine(Base):
 
     __tablename__ = "quote_lines"
     id = Column(Integer, primary_key=True)
-    quote_id = Column(
-        Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
-    )
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"))
     mpn = Column(String(255), nullable=False)
@@ -103,12 +99,8 @@ class BuyPlan(Base):
 
     __tablename__ = "buy_plans"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
-    quote_id = Column(
-        Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
-    )
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
 
     status = Column(String(30), default="pending_approval")
     # Workflow: draft | pending_approval | approved | complete (UI shows: Draft -> Pending -> Approved -> Completed)

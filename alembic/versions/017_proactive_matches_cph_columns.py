@@ -9,8 +9,9 @@ Revises: 016_add_sightings_vendor_name_normalized
 Create Date: 2026-02-26
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "017_proactive_matches_cph"
 down_revision = "016_add_sightings_vendor_name_normalized"

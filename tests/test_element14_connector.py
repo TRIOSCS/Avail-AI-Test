@@ -111,9 +111,7 @@ async def test_api_search_400_returns_empty(connector, monkeypatch):
     fake_request = httpx.Request("GET", "https://api.element14.com/catalog/products")
 
     async def mock_get(*args, **kwargs):
-        return httpx.Response(
-            400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}}
-        )
+        return httpx.Response(400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}})
 
     monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
     results = await connector._api_search("TPS65217CRSLR", "TPS65217CRSLR")
@@ -137,9 +135,7 @@ async def test_keyword_fallback_survives_400(connector, monkeypatch):
                 request=fake_request,
                 json={"manufacturerPartNumberSearchReturn": {"products": []}},
             )
-        return httpx.Response(
-            400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}}
-        )
+        return httpx.Response(400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}})
 
     monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
     results = await connector._do_search("TPS65217CRSLR")

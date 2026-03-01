@@ -6,15 +6,14 @@ credential-based status fix, system alerts endpoint, dashboard endpoint.
 Depends on: conftest.py (db_session, TestSessionLocal, engine)
 """
 
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.models.config import ApiSource, ApiUsageLog
 from app.models import User
-
+from app.models.config import ApiSource, ApiUsageLog
 
 # ── Model Tests ──────────────────────────────────────────────────────
 
@@ -22,16 +21,23 @@ from app.models import User
 def test_api_usage_log_creation(db_session):
     """ApiUsageLog records can be created and linked to an ApiSource."""
     src = ApiSource(
-        name="test_src", display_name="Test", category="api",
-        source_type="test", status="live",
+        name="test_src",
+        display_name="Test",
+        category="api",
+        source_type="test",
+        status="live",
     )
     db_session.add(src)
     db_session.flush()
 
     log = ApiUsageLog(
-        source_id=src.id, timestamp=datetime.now(timezone.utc),
-        endpoint="search", status_code=200, response_ms=150,
-        success=True, check_type="ping",
+        source_id=src.id,
+        timestamp=datetime.now(timezone.utc),
+        endpoint="search",
+        status_code=200,
+        response_ms=150,
+        success=True,
+        check_type="ping",
     )
     db_session.add(log)
     db_session.commit()
@@ -45,8 +51,12 @@ def test_api_usage_log_creation(db_session):
 def test_api_source_new_columns(db_session):
     """ApiSource has the new health monitoring columns."""
     src = ApiSource(
-        name="test_cols", display_name="Test Cols", category="api",
-        source_type="test", status="pending", monthly_quota=1000,
+        name="test_cols",
+        display_name="Test Cols",
+        category="api",
+        source_type="test",
+        status="pending",
+        monthly_quota=1000,
         calls_this_month=50,
     )
     db_session.add(src)
@@ -66,8 +76,12 @@ def test_api_source_new_columns(db_session):
 async def test_ping_source_success(db_session):
     """Successful ping updates status to live and records timestamp."""
     src = ApiSource(
-        name="nexar", display_name="Nexar", category="api",
-        source_type="aggregator", status="pending", is_active=True,
+        name="nexar",
+        display_name="Nexar",
+        category="api",
+        source_type="aggregator",
+        status="pending",
+        is_active=True,
         env_vars=["NEXAR_CLIENT_ID", "NEXAR_CLIENT_SECRET"],
     )
     db_session.add(src)
@@ -78,6 +92,7 @@ async def test_ping_source_success(db_session):
 
     with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
         from app.services.health_monitor import ping_source
+
         result = await ping_source(src, db_session)
 
     assert result["success"] is True
@@ -89,8 +104,12 @@ async def test_ping_source_success(db_session):
 async def test_ping_source_failure(db_session):
     """Failed ping updates status to error and records error message."""
     src = ApiSource(
-        name="digikey", display_name="DigiKey", category="api",
-        source_type="authorized", status="live", is_active=True,
+        name="digikey",
+        display_name="DigiKey",
+        category="api",
+        source_type="authorized",
+        status="live",
+        is_active=True,
         env_vars=["DIGIKEY_CLIENT_ID", "DIGIKEY_CLIENT_SECRET"],
     )
     db_session.add(src)
@@ -101,6 +120,7 @@ async def test_ping_source_failure(db_session):
 
     with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
         from app.services.health_monitor import ping_source
+
         result = await ping_source(src, db_session)
 
     assert result["success"] is False
@@ -112,8 +132,12 @@ async def test_ping_source_failure(db_session):
 async def test_ping_source_no_connector(db_session):
     """Source with no connector gets status disabled."""
     src = ApiSource(
-        name="unknown", display_name="Unknown", category="api",
-        source_type="test", status="pending", is_active=True,
+        name="unknown",
+        display_name="Unknown",
+        category="api",
+        source_type="test",
+        status="pending",
+        is_active=True,
         env_vars=[],
     )
     db_session.add(src)
@@ -121,6 +145,7 @@ async def test_ping_source_no_connector(db_session):
 
     with patch("app.services.health_monitor._get_connector", return_value=None):
         from app.services.health_monitor import ping_source
+
         result = await ping_source(src, db_session)
 
     assert result["success"] is False
@@ -131,8 +156,12 @@ async def test_ping_source_no_connector(db_session):
 async def test_deep_test_records_usage_log(db_session):
     """Deep test writes an ApiUsageLog entry."""
     src = ApiSource(
-        name="mouser", display_name="Mouser", category="api",
-        source_type="authorized", status="live", is_active=True,
+        name="mouser",
+        display_name="Mouser",
+        category="api",
+        source_type="authorized",
+        status="live",
+        is_active=True,
         env_vars=["MOUSER_API_KEY"],
     )
     db_session.add(src)
@@ -143,6 +172,7 @@ async def test_deep_test_records_usage_log(db_session):
 
     with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
         from app.services.health_monitor import deep_test_source
+
         await deep_test_source(src, db_session)
 
     logs = db_session.query(ApiUsageLog).filter_by(source_id=src.id).all()
@@ -155,8 +185,12 @@ async def test_deep_test_records_usage_log(db_session):
 async def test_deep_test_failure_records_log(db_session):
     """Deep test failure also writes a usage log entry with error."""
     src = ApiSource(
-        name="mouser_fail", display_name="Mouser", category="api",
-        source_type="authorized", status="live", is_active=True,
+        name="mouser_fail",
+        display_name="Mouser",
+        category="api",
+        source_type="authorized",
+        status="live",
+        is_active=True,
         env_vars=["MOUSER_API_KEY"],
     )
     db_session.add(src)
@@ -167,6 +201,7 @@ async def test_deep_test_failure_records_log(db_session):
 
     with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
         from app.services.health_monitor import deep_test_source
+
         result = await deep_test_source(src, db_session)
 
     assert result["success"] is False
@@ -181,14 +216,19 @@ async def test_deep_test_failure_records_log(db_session):
 async def test_deep_test_no_connector_records_log(db_session):
     """Deep test with no connector writes a log entry and disables source."""
     src = ApiSource(
-        name="no_conn", display_name="No Conn", category="api",
-        source_type="test", status="pending", is_active=True,
+        name="no_conn",
+        display_name="No Conn",
+        category="api",
+        source_type="test",
+        status="pending",
+        is_active=True,
     )
     db_session.add(src)
     db_session.flush()
 
     with patch("app.services.health_monitor._get_connector", return_value=None):
         from app.services.health_monitor import deep_test_source
+
         result = await deep_test_source(src, db_session)
 
     assert result["success"] is False
@@ -198,6 +238,250 @@ async def test_deep_test_no_connector_records_log(db_session):
     assert logs[0].error_message == "No connector"
 
 
+# ── _get_connector Tests (lines 29-33) ──────────────────────────────
+
+
+def test_get_connector_success(db_session):
+    """_get_connector returns a connector when _get_connector_for_source works."""
+    src = ApiSource(
+        name="nexar_gc",
+        display_name="Nexar",
+        category="api",
+        source_type="aggregator",
+        status="live",
+        is_active=True,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    mock_connector = MagicMock()
+    with patch(
+        "app.routers.sources._get_connector_for_source",
+        return_value=mock_connector,
+    ):
+        from app.services.health_monitor import _get_connector
+
+        result = _get_connector(src, db_session)
+
+    assert result is mock_connector
+
+
+def test_get_connector_returns_none_on_exception(db_session):
+    """_get_connector returns None when _get_connector_for_source raises."""
+    src = ApiSource(
+        name="broken_gc",
+        display_name="Broken",
+        category="api",
+        source_type="test",
+        status="pending",
+        is_active=True,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    with patch(
+        "app.routers.sources._get_connector_for_source",
+        side_effect=ValueError("No credentials"),
+    ):
+        from app.services.health_monitor import _get_connector
+
+        result = _get_connector(src, db_session)
+
+    assert result is None
+
+
+# ── run_health_checks Tests (lines 156-196) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_ping(db_session):
+    """run_health_checks with ping runs ping_source on all active sources."""
+    src1 = ApiSource(
+        name="src_ping_a",
+        display_name="Source A",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+    )
+    src2 = ApiSource(
+        name="src_ping_b",
+        display_name="Source B",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+    )
+    db_session.add_all([src1, src2])
+    db_session.commit()
+
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.all.return_value = [src1, src2]
+    mock_session_cls = MagicMock(return_value=mock_session)
+    ping_mock = AsyncMock(return_value={"success": True, "elapsed_ms": 42, "error": None})
+
+    with (
+        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.services.health_monitor.ping_source", ping_mock),
+    ):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("ping")
+
+    assert result["total"] == 2
+    assert result["passed"] == 2
+    assert result["failed"] == 0
+    assert ping_mock.call_count == 2
+    mock_session.commit.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_deep(db_session):
+    """run_health_checks with deep runs deep_test_source."""
+    src = ApiSource(
+        name="src_deep",
+        display_name="Deep Src",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.all.return_value = [src]
+    mock_session_cls = MagicMock(return_value=mock_session)
+    deep_mock = AsyncMock(
+        return_value={
+            "success": True,
+            "results_count": 5,
+            "elapsed_ms": 200,
+            "error": None,
+        }
+    )
+
+    with (
+        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.services.health_monitor.deep_test_source", deep_mock),
+    ):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("deep")
+
+    assert result["total"] == 1
+    assert result["passed"] == 1
+    assert deep_mock.call_count == 1
+    mock_session.commit.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_mixed_results(db_session):
+    """run_health_checks correctly counts passed and failed sources."""
+    src_ok = ApiSource(
+        name="hc_ok", display_name="OK", category="api", source_type="test", status="live", is_active=True
+    )
+    src_bad = ApiSource(
+        name="hc_bad", display_name="Bad", category="api", source_type="test", status="error", is_active=True
+    )
+    db_session.add_all([src_ok, src_bad])
+    db_session.commit()
+
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.all.return_value = [src_ok, src_bad]
+    mock_session_cls = MagicMock(return_value=mock_session)
+    ping_mock = AsyncMock(
+        side_effect=[
+            {"success": True, "elapsed_ms": 50, "error": None},
+            {"success": False, "elapsed_ms": 100, "error": "Connection refused"},
+        ]
+    )
+
+    with (
+        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.services.health_monitor.ping_source", ping_mock),
+    ):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("ping")
+
+    assert result["total"] == 2
+    assert result["passed"] == 1
+    assert result["failed"] == 1
+    mock_session.commit.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_source_crash(db_session):
+    """When a per-source check crashes, it is counted as failed."""
+    src = ApiSource(
+        name="hc_crash", display_name="Crash", category="api", source_type="test", status="live", is_active=True
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.all.return_value = [src]
+    mock_session_cls = MagicMock(return_value=mock_session)
+    ping_mock = AsyncMock(side_effect=RuntimeError("unexpected crash"))
+
+    with (
+        patch("app.database.SessionLocal", mock_session_cls),
+        patch("app.services.health_monitor.ping_source", ping_mock),
+    ):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("ping")
+
+    assert result["total"] == 1
+    assert result["passed"] == 0
+    assert result["failed"] == 1
+    assert "unexpected crash" in result["sources"]["hc_crash"]["error"]
+    mock_session.commit.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_db_error_rollback():
+    """When the DB query itself fails, the session is rolled back and closed."""
+    mock_session = MagicMock()
+    mock_session.query.side_effect = RuntimeError("DB connection lost")
+    mock_session_cls = MagicMock(return_value=mock_session)
+
+    with patch("app.database.SessionLocal", mock_session_cls):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("ping")
+
+    assert result["total"] == 0
+    assert result["passed"] == 0
+    assert result["failed"] == 0
+    mock_session.rollback.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_run_health_checks_no_active_sources():
+    """run_health_checks with no active sources returns zeroes."""
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.all.return_value = []
+    mock_session_cls = MagicMock(return_value=mock_session)
+
+    with patch("app.database.SessionLocal", mock_session_cls):
+        from app.services.health_monitor import run_health_checks
+
+        result = await run_health_checks("ping")
+
+    assert result["total"] == 0
+    assert result["passed"] == 0
+    assert result["failed"] == 0
+    mock_session.commit.assert_called_once()
+    mock_session.close.assert_called_once()
+
+
 # ── Fixtures for Endpoint Tests ──────────────────────────────────────
 
 
@@ -205,8 +489,11 @@ async def test_deep_test_no_connector_records_log(db_session):
 def admin_user(db_session):
     """Admin user for endpoint tests."""
     user = User(
-        email="admin@test.com", name="Test Admin", role="admin",
-        azure_id="test-azure-health", created_at=datetime.now(timezone.utc),
+        email="admin@test.com",
+        name="Test Admin",
+        role="admin",
+        azure_id="test-azure-health",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -244,9 +531,13 @@ def test_list_sources_does_not_auto_set_status(admin_client, db_session):
     health checks.
     """
     src = ApiSource(
-        name="broken_but_creds_set", display_name="Broken API",
-        category="api", source_type="test", status="error",
-        is_active=True, env_vars=["SOME_API_KEY"],
+        name="broken_but_creds_set",
+        display_name="Broken API",
+        category="api",
+        source_type="test",
+        status="error",
+        is_active=True,
+        env_vars=["SOME_API_KEY"],
         last_error="Connection refused",
     )
     db_session.add(src)
@@ -264,7 +555,8 @@ def test_list_sources_does_not_auto_set_status(admin_client, db_session):
 
 def test_scheduler_has_health_jobs():
     """Scheduler registers health check jobs."""
-    from app.scheduler import scheduler, configure_scheduler
+    from app.scheduler import configure_scheduler, scheduler
+
     configure_scheduler()
     job_ids = [j.id for j in scheduler.get_jobs()]
     assert "health_ping" in job_ids
@@ -280,12 +572,20 @@ def test_scheduler_has_health_jobs():
 def test_system_alerts_returns_errors(admin_client, db_session):
     """GET /api/system/alerts returns sources in error/degraded state."""
     ok_src = ApiSource(
-        name="ok_api", display_name="OK API", category="api",
-        source_type="test", status="live", is_active=True,
+        name="ok_api",
+        display_name="OK API",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
     )
     bad_src = ApiSource(
-        name="bad_api", display_name="Bad API", category="api",
-        source_type="test", status="error", is_active=True,
+        name="bad_api",
+        display_name="Bad API",
+        category="api",
+        source_type="test",
+        status="error",
+        is_active=True,
         last_error="401 Unauthorized",
     )
     db_session.add_all([ok_src, bad_src])
@@ -302,8 +602,12 @@ def test_system_alerts_returns_errors(admin_client, db_session):
 def test_system_alerts_includes_degraded(admin_client, db_session):
     """Degraded sources also appear in alerts."""
     src = ApiSource(
-        name="degraded_api", display_name="Degraded API", category="api",
-        source_type="test", status="degraded", is_active=True,
+        name="degraded_api",
+        display_name="Degraded API",
+        category="api",
+        source_type="test",
+        status="degraded",
+        is_active=True,
         last_error="Timeout",
     )
     db_session.add(src)
@@ -318,8 +622,12 @@ def test_system_alerts_includes_degraded(admin_client, db_session):
 def test_system_alerts_empty_when_healthy(admin_client, db_session):
     """No alerts when all sources are live."""
     src = ApiSource(
-        name="healthy", display_name="Healthy", category="api",
-        source_type="test", status="live", is_active=True,
+        name="healthy",
+        display_name="Healthy",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
     )
     db_session.add(src)
     db_session.commit()
@@ -336,10 +644,17 @@ def test_system_alerts_empty_when_healthy(admin_client, db_session):
 def test_api_health_dashboard(admin_client, db_session):
     """GET /api/admin/api-health/dashboard returns full connector stats."""
     src = ApiSource(
-        name="dash_test", display_name="Dashboard Test", category="api",
-        source_type="test", status="live", is_active=True,
-        total_searches=100, total_results=500, avg_response_ms=200,
-        monthly_quota=1000, calls_this_month=450,
+        name="dash_test",
+        display_name="Dashboard Test",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+        total_searches=100,
+        total_results=500,
+        avg_response_ms=200,
+        monthly_quota=1000,
+        calls_this_month=450,
     )
     db_session.add(src)
     db_session.commit()
@@ -358,16 +673,22 @@ def test_api_health_dashboard(admin_client, db_session):
 def test_api_health_dashboard_usage_log(admin_client, db_session):
     """Dashboard includes recent health check history from usage log."""
     src = ApiSource(
-        name="log_test", display_name="Log Test", category="api",
-        source_type="test", status="live", is_active=True,
+        name="log_test",
+        display_name="Log Test",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
     )
     db_session.add(src)
     db_session.flush()
 
     for i in range(3):
         log = ApiUsageLog(
-            source_id=src.id, timestamp=datetime.now(timezone.utc),
-            success=(i != 1), response_ms=100 + i * 50,
+            source_id=src.id,
+            timestamp=datetime.now(timezone.utc),
+            success=(i != 1),
+            response_ms=100 + i * 50,
             check_type="ping",
         )
         db_session.add(log)

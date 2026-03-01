@@ -62,13 +62,15 @@ async def enrich_from_sam_gov(prospect: ProspectAccount) -> dict | None:
         physical = core.get("physicalAddress", {})
 
         naics_list = []
-        for n in (core.get("naicsCodeList") or []):
+        for n in core.get("naicsCodeList") or []:
             if isinstance(n, dict):
-                naics_list.append({
-                    "code": n.get("naicsCode"),
-                    "description": n.get("naicsDescription", ""),
-                    "primary": n.get("primaryNaicsCode", False),
-                })
+                naics_list.append(
+                    {
+                        "code": n.get("naicsCode"),
+                        "description": n.get("naicsDescription", ""),
+                        "primary": n.get("primaryNaicsCode", False),
+                    }
+                )
 
         return {
             "source": "sam_gov",
@@ -131,13 +133,15 @@ async def enrich_from_google_news(prospect: ProspectAccount, max_items: int = 5)
             # Classify the signal type from the headline
             signal_type = _classify_headline(title)
 
-            items.append({
-                "title": title,
-                "link": link,
-                "pub_date": pub_date,
-                "source": source,
-                "signal_type": signal_type,
-            })
+            items.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "pub_date": pub_date,
+                    "source": source,
+                    "signal_type": signal_type,
+                }
+            )
 
         return items
 
@@ -221,23 +225,21 @@ async def run_free_enrichment(prospect_id: int) -> dict:
             signal_events = []
             for item in news:
                 if item["signal_type"] != "general":
-                    signal_events.append({
-                        "type": item["signal_type"],
-                        "description": item["title"][:120],
-                        "date": item["pub_date"],
-                        "source": "google_news",
-                    })
+                    signal_events.append(
+                        {
+                            "type": item["signal_type"],
+                            "description": item["title"][:120],
+                            "date": item["pub_date"],
+                            "source": "google_news",
+                        }
+                    )
 
             # Merge news-derived events into readiness_signals
             if signal_events:
                 signals = dict(prospect.readiness_signals or {})
                 existing_events = signals.get("events", [])
                 # Add news events without duplicating
-                existing_types = {
-                    e.get("description", "")[:50]
-                    for e in existing_events
-                    if isinstance(e, dict)
-                }
+                existing_types = {e.get("description", "")[:50] for e in existing_events if isinstance(e, dict)}
                 for ev in signal_events:
                     if ev["description"][:50] not in existing_types:
                         existing_events.append(ev)
@@ -253,7 +255,9 @@ async def run_free_enrichment(prospect_id: int) -> dict:
 
         logger.info(
             "Free enrichment for prospect {}: sam={}, news={}",
-            prospect_id, result["sam_gov"], result["news_count"],
+            prospect_id,
+            result["sam_gov"],
+            result["news_count"],
         )
         return result
 

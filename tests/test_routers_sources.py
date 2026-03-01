@@ -47,24 +47,38 @@ def test_get_connector_unknown_source():
 
 def test_get_connector_email_mining_when_enabled(monkeypatch):
     """Email mining returns test connector when enabled."""
-    monkeypatch.setattr("app.routers.sources.settings", SimpleNamespace(
-        email_mining_enabled=True,
-        nexar_client_id=None, brokerbin_api_key=None, ebay_client_id=None,
-        digikey_client_id=None, mouser_api_key=None, oemsecrets_api_key=None,
-        sourcengine_api_key=None,
-    ))
+    monkeypatch.setattr(
+        "app.routers.sources.settings",
+        SimpleNamespace(
+            email_mining_enabled=True,
+            nexar_client_id=None,
+            brokerbin_api_key=None,
+            ebay_client_id=None,
+            digikey_client_id=None,
+            mouser_api_key=None,
+            oemsecrets_api_key=None,
+            sourcengine_api_key=None,
+        ),
+    )
     result = _get_connector_for_source("email_mining")
     assert isinstance(result, _EmailMiningTestConnector)
 
 
 def test_get_connector_email_mining_when_disabled(monkeypatch):
     """Email mining returns None when disabled."""
-    monkeypatch.setattr("app.routers.sources.settings", SimpleNamespace(
-        email_mining_enabled=False,
-        nexar_client_id=None, brokerbin_api_key=None, ebay_client_id=None,
-        digikey_client_id=None, mouser_api_key=None, oemsecrets_api_key=None,
-        sourcengine_api_key=None,
-    ))
+    monkeypatch.setattr(
+        "app.routers.sources.settings",
+        SimpleNamespace(
+            email_mining_enabled=False,
+            nexar_client_id=None,
+            brokerbin_api_key=None,
+            ebay_client_id=None,
+            digikey_client_id=None,
+            mouser_api_key=None,
+            oemsecrets_api_key=None,
+            sourcengine_api_key=None,
+        ),
+    )
     result = _get_connector_for_source("email_mining")
     assert result is None
 
@@ -82,9 +96,7 @@ def _mock_db_for_sightings(requirements: list, existing_sightings: list | None =
         if model_name == "Requirement":
             mock_q.filter_by.return_value.all.return_value = requirements
         elif model_name == "Sighting":
-            mock_q.filter_by.return_value.first.return_value = (
-                existing_sightings[0] if existing_sightings else None
-            )
+            mock_q.filter_by.return_value.first.return_value = existing_sightings[0] if existing_sightings else None
         return mock_q
 
     db.query.side_effect = query_side_effect
@@ -358,15 +370,19 @@ def test_email_mining_status(sources_client: TestClient, _email_mining_source: A
 def test_scan_inbox(sources_client: TestClient, _email_mining_source: ApiSource):
     """POST /api/email-mining/scan with mocked deps returns scan results."""
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 50,
-        "vendors_found": 3,
-        "offers_parsed": [],
-        "contacts_enriched": [],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 50,
+            "vendors_found": 3,
+            "offers_parsed": [],
+            "contacts_enriched": [],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan")
 
     assert resp.status_code == 200
@@ -407,15 +423,19 @@ def test_scan_outbound(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "messages_scanned": 30,
-        "rfqs_detected": 5,
-        "vendors_contacted": {"arrow.com": 3, "digikey.com": 2},
-        "used_delta": False,
-    })
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "messages_scanned": 30,
+            "rfqs_detected": 5,
+            "vendors_contacted": {"arrow.com": 3, "digikey.com": 2},
+            "used_delta": False,
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan-outbound")
 
     assert resp.status_code == 200
@@ -601,17 +621,19 @@ def test_parse_response_attachments_no_attachments(
     db_session.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {"name": "image.png", "contentBytes": "abc"},  # not parseable
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {"name": "image.png", "contentBytes": "abc"},  # not parseable
+            ]
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -638,24 +660,26 @@ def test_parse_response_attachments_success(
 
     fake_content = base64.b64encode(b"fake-excel-content").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {"name": "quote.xlsx", "contentBytes": fake_content},
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {"name": "quote.xlsx", "contentBytes": fake_content},
+            ]
+        }
+    )
 
     parsed_rows = [
         {"mpn": "LM358N", "qty": 500, "unit_price": 0.45, "manufacturer": "TI"},
     ]
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows), \
-         patch("app.utils.file_validation.validate_file", return_value=(True, "")), \
-         patch("app.routers.sources._create_sightings_from_attachment", return_value=1):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "")),
+        patch("app.routers.sources._create_sightings_from_attachment", return_value=1),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -847,11 +871,16 @@ def test_get_connector_mouser():
 def test_get_connector_oemsecrets():
     """OEMSecrets source returns OEMSecretsConnector when key is set."""
     creds = {
-        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None,
+        "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None,
+        "MOUSER_API_KEY": None,
         "OEMSECRETS_API_KEY": "oem_key",
     }
 
@@ -867,12 +896,18 @@ def test_get_connector_oemsecrets():
 def test_get_connector_sourcengine():
     """Sourcengine source returns SourcengineConnector when key is set."""
     creds = {
-        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": "src_key",
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None,
+        "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None,
+        "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None,
+        "SOURCENGINE_API_KEY": "src_key",
     }
 
     def fake_cred(db, name, var):
@@ -887,12 +922,18 @@ def test_get_connector_sourcengine():
 def test_get_connector_newark():
     """Newark source returns Element14Connector when key is set."""
     creds = {
-        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None,
+        "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None,
+        "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None,
+        "SOURCENGINE_API_KEY": None,
         "ELEMENT14_API_KEY": "e14_key",
     }
 
@@ -908,6 +949,7 @@ def test_get_connector_newark():
 def test_get_connector_anthropic_ai():
     """Anthropic AI returns _AnthropicTestConnector (no env_vars needed)."""
     from app.routers.sources import _AnthropicTestConnector
+
     result = _get_connector_for_source("anthropic_ai")
     assert isinstance(result, _AnthropicTestConnector)
 
@@ -915,6 +957,7 @@ def test_get_connector_anthropic_ai():
 def test_get_connector_teams_notifications():
     """Teams returns _TeamsTestConnector."""
     from app.routers.sources import _TeamsTestConnector
+
     result = _get_connector_for_source("teams_notifications")
     assert isinstance(result, _TeamsTestConnector)
 
@@ -922,14 +965,15 @@ def test_get_connector_teams_notifications():
 def test_get_connector_apollo_enrichment():
     """Apollo returns _ApolloTestConnector."""
     from app.routers.sources import _ApolloTestConnector
+
     result = _get_connector_for_source("apollo_enrichment")
     assert isinstance(result, _ApolloTestConnector)
-
 
 
 def test_get_connector_explorium_enrichment():
     """Explorium returns _ExploriumTestConnector."""
     from app.routers.sources import _ExploriumTestConnector
+
     result = _get_connector_for_source("explorium_enrichment")
     assert isinstance(result, _ExploriumTestConnector)
 
@@ -937,6 +981,7 @@ def test_get_connector_explorium_enrichment():
 def test_get_connector_azure_oauth():
     """Azure OAuth returns _AzureOAuthTestConnector."""
     from app.routers.sources import _AzureOAuthTestConnector
+
     result = _get_connector_for_source("azure_oauth")
     assert isinstance(result, _AzureOAuthTestConnector)
 
@@ -965,8 +1010,10 @@ async def test_anthropic_test_connector_search_success():
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"model": "claude-haiku-4-5-20251001"}
 
-    with patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"), \
-         patch("app.routers.sources._AnthropicTestConnector.__init__", return_value=None):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"),
+        patch("app.routers.sources._AnthropicTestConnector.__init__", return_value=None),
+    ):
         connector = _AnthropicTestConnector()
         with patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
             results = await connector.search("LM358N")
@@ -995,8 +1042,10 @@ async def test_anthropic_test_connector_api_error():
     mock_resp.text = "Invalid API key"
 
     connector = _AnthropicTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Anthropic API returned 401"):
             await connector.search("LM358N")
 
@@ -1010,8 +1059,10 @@ async def test_teams_test_connector_success():
     mock_resp.status_code = 200
 
     connector = _TeamsTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert results[0]["mpn_matched"] == "Message posted"
@@ -1038,8 +1089,10 @@ async def test_teams_test_connector_api_error():
     mock_resp.text = "Internal error"
 
     connector = _TeamsTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Teams webhook returned 500"):
             await connector.search("LM358N")
 
@@ -1053,8 +1106,10 @@ async def test_teams_test_connector_202_accepted():
     mock_resp.status_code = 202
 
     connector = _TeamsTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert results[0]["status"] == "ok"
@@ -1070,8 +1125,10 @@ async def test_apollo_test_connector_success():
     mock_resp.json.return_value = {"people": [{"name": "Test"}]}
 
     connector = _ApolloTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="apollo_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="apollo_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert "1 result" in results[0]["mpn_matched"]
@@ -1098,13 +1155,12 @@ async def test_apollo_test_connector_api_error():
     mock_resp.text = "Forbidden"
 
     connector = _ApolloTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="apollo_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="apollo_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Apollo API returned 403"):
             await connector.search("LM358N")
-
-
-
 
 
 @pytest.mark.asyncio
@@ -1117,8 +1173,10 @@ async def test_explorium_test_connector_success():
     mock_resp.json.return_value = {"firmo_name": "Anthropic Inc"}
 
     connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert "Anthropic" in results[0]["mpn_matched"]
@@ -1134,8 +1192,10 @@ async def test_explorium_test_connector_fallback_name():
     mock_resp.json.return_value = {"name": "Some Corp"}
 
     connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert "Some Corp" in results[0]["mpn_matched"]
 
@@ -1150,8 +1210,10 @@ async def test_explorium_test_connector_no_name():
     mock_resp.json.return_value = {}
 
     connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert "matched" in results[0]["mpn_matched"]
 
@@ -1177,8 +1239,10 @@ async def test_explorium_test_connector_api_error():
     mock_resp.text = "Server error"
 
     connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.get_credential_cached", return_value="explorium_key"),
+        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Explorium API returned 500"):
             await connector.search("LM358N")
 
@@ -1194,8 +1258,10 @@ async def test_azure_oauth_test_connector_success():
 
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="test-tenant-id")
-    with patch("app.routers.sources.settings", mock_settings), \
-         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.settings", mock_settings),
+        patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         results = await connector.search("LM358N")
     assert len(results) == 1
     assert results[0]["mpn_matched"] == "Tenant verified"
@@ -1223,8 +1289,10 @@ async def test_azure_oauth_test_connector_api_error():
 
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="bad-tenant")
-    with patch("app.routers.sources.settings", mock_settings), \
-         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.settings", mock_settings),
+        patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Azure OpenID discovery returned 404"):
             await connector.search("LM358N")
 
@@ -1240,8 +1308,10 @@ async def test_azure_oauth_test_connector_tenant_mismatch():
 
     connector = _AzureOAuthTestConnector()
     mock_settings = SimpleNamespace(azure_tenant_id="my-tenant-id")
-    with patch("app.routers.sources.settings", mock_settings), \
-         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+    with (
+        patch("app.routers.sources.settings", mock_settings),
+        patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp),
+    ):
         with pytest.raises(ValueError, match="Tenant mismatch"):
             await connector.search("LM358N")
 
@@ -1499,22 +1569,26 @@ def test_scan_inbox_with_contacts_enriched(
 ):
     """POST /api/email-mining/scan enriches vendor cards from contacts_enriched data."""
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 20,
-        "vendors_found": 1,
-        "offers_parsed": [],
-        "contacts_enriched": [
-            {
-                "vendor_name": "NewVendor Corp",
-                "emails": ["sales@newvendor.com", "info@newvendor.com"],
-                "phones": ["+1-555-9999"],
-                "websites": ["newvendor.com"],
-            },
-        ],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 20,
+            "vendors_found": 1,
+            "offers_parsed": [],
+            "contacts_enriched": [
+                {
+                    "vendor_name": "NewVendor Corp",
+                    "emails": ["sales@newvendor.com", "info@newvendor.com"],
+                    "phones": ["+1-555-9999"],
+                    "websites": ["newvendor.com"],
+                },
+            ],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan")
 
     assert resp.status_code == 200
@@ -1540,22 +1614,26 @@ def test_scan_inbox_enriches_existing_vendor_card(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 10,
-        "vendors_found": 1,
-        "offers_parsed": [],
-        "contacts_enriched": [
-            {
-                "vendor_name": "Existing Vendor",
-                "emails": ["new@existing.com"],
-                "phones": ["+1-555-1234"],
-                "websites": [],
-            },
-        ],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 10,
+            "vendors_found": 1,
+            "offers_parsed": [],
+            "contacts_enriched": [
+                {
+                    "vendor_name": "Existing Vendor",
+                    "emails": ["new@existing.com"],
+                    "phones": ["+1-555-1234"],
+                    "websites": [],
+                },
+            ],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan")
 
     assert resp.status_code == 200
@@ -1567,15 +1645,19 @@ def test_scan_inbox_with_json_body_options(
 ):
     """POST /api/email-mining/scan with explicit JSON body parses mining options."""
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 10,
-        "vendors_found": 0,
-        "offers_parsed": [],
-        "contacts_enriched": [],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 10,
+            "vendors_found": 0,
+            "offers_parsed": [],
+            "contacts_enriched": [],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post(
             "/api/email-mining/scan",
             json={"lookback_days": 7},
@@ -1595,17 +1677,21 @@ def test_scan_inbox_empty_contacts(
 ):
     """POST /api/email-mining/scan with contact missing vendor_name is skipped."""
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 5,
-        "vendors_found": 0,
-        "offers_parsed": [],
-        "contacts_enriched": [
-            {"vendor_name": "", "emails": ["nobody@example.com"]},
-        ],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 5,
+            "vendors_found": 0,
+            "offers_parsed": [],
+            "contacts_enriched": [
+                {"vendor_name": "", "emails": ["nobody@example.com"]},
+            ],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan")
 
     assert resp.status_code == 200
@@ -1616,15 +1702,19 @@ def test_scan_inbox_empty_contacts(
 def test_scan_inbox_no_email_mining_source(sources_client: TestClient, db_session: Session):
     """POST /api/email-mining/scan works even if email_mining source row doesn't exist."""
     mock_miner = MagicMock()
-    mock_miner.scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 5,
-        "vendors_found": 0,
-        "offers_parsed": [],
-        "contacts_enriched": [],
-    })
+    mock_miner.scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 5,
+            "vendors_found": 0,
+            "offers_parsed": [],
+            "contacts_enriched": [],
+        }
+    )
 
-    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan")
 
     assert resp.status_code == 200
@@ -1656,15 +1746,19 @@ def test_scan_outbound_with_domain_match(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "messages_scanned": 10,
-        "rfqs_detected": 2,
-        "vendors_contacted": {"arrow.com": 3},
-        "used_delta": True,
-    })
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "messages_scanned": 10,
+            "rfqs_detected": 2,
+            "vendors_contacted": {"arrow.com": 3},
+            "used_delta": True,
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan-outbound")
 
     assert resp.status_code == 200
@@ -1696,15 +1790,19 @@ def test_scan_outbound_with_prefix_match(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "messages_scanned": 10,
-        "rfqs_detected": 1,
-        "vendors_contacted": {"mouser.com": 2},
-        "used_delta": False,
-    })
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "messages_scanned": 10,
+            "rfqs_detected": 1,
+            "vendors_contacted": {"mouser.com": 2},
+            "used_delta": False,
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan-outbound")
 
     assert resp.status_code == 200
@@ -1723,15 +1821,19 @@ def test_scan_outbound_db_commit_failure(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "messages_scanned": 5,
-        "rfqs_detected": 0,
-        "vendors_contacted": {},
-        "used_delta": False,
-    })
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "messages_scanned": 5,
+            "rfqs_detected": 0,
+            "vendors_contacted": {},
+            "used_delta": False,
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post("/api/email-mining/scan-outbound")
 
     assert resp.status_code == 200
@@ -1750,15 +1852,19 @@ def test_scan_outbound_with_json_body(
     db_session.commit()
 
     mock_miner = MagicMock()
-    mock_miner.scan_sent_items = AsyncMock(return_value={
-        "messages_scanned": 5,
-        "rfqs_detected": 0,
-        "vendors_contacted": {},
-        "used_delta": False,
-    })
+    mock_miner.scan_sent_items = AsyncMock(
+        return_value={
+            "messages_scanned": 5,
+            "rfqs_detected": 0,
+            "vendors_contacted": {},
+            "used_delta": False,
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+    ):
         resp = sources_client.post(
             "/api/email-mining/scan-outbound",
             json={"lookback_days": 14},
@@ -1838,9 +1944,7 @@ def test_parse_response_attachments_no_message_id(
     db_session.commit()
     db_session.refresh(vr)
 
-    resp = sources_client.post(
-        f"/api/email-mining/parse-response-attachments/{vr.id}"
-    )
+    resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
     assert resp.status_code == 400
 
 
@@ -1858,11 +1962,11 @@ def test_parse_response_attachments_graph_error(
     mock_gc = MagicMock()
     mock_gc.get_json = AsyncMock(side_effect=ConnectionError("Network error"))
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 502
 
@@ -1879,17 +1983,19 @@ def test_parse_response_attachments_no_content_bytes(
     db_session.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {"name": "quote.xlsx", "contentBytes": None},
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {"name": "quote.xlsx", "contentBytes": None},
+            ]
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -1912,18 +2018,20 @@ def test_parse_response_attachments_file_validation_fails(
 
     fake_content = base64.b64encode(b"bad-content").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {"name": "malicious.xlsx", "contentBytes": fake_content},
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {"name": "malicious.xlsx", "contentBytes": fake_content},
+            ]
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.utils.file_validation.validate_file", return_value=(False, "Invalid file")):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(False, "Invalid file")),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -1960,19 +2068,17 @@ def test_parse_response_attachments_no_requisition_id(
 
     fake_content = base64.b64encode(b"excel-data").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [{"name": "quote.csv", "contentBytes": fake_content}]
-    })
+    mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "quote.csv", "contentBytes": fake_content}]})
 
     parsed_rows = [{"mpn": "LM358N", "qty": 100}]
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows), \
-         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{vr.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "")),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -1997,21 +2103,19 @@ def test_parse_response_attachments_commit_failure(
 
     fake_content = base64.b64encode(b"excel-data").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [{"name": "quote.xlsx", "contentBytes": fake_content}]
-    })
+    mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "quote.xlsx", "contentBytes": fake_content}]})
 
     parsed_rows = [{"mpn": "LM358N", "qty": 100}]
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows), \
-         patch("app.utils.file_validation.validate_file", return_value=(True, "")), \
-         patch("app.routers.sources._create_sightings_from_attachment", return_value=1), \
-         patch.object(db_session, "commit", side_effect=SQLAlchemyError("DB error")):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "")),
+        patch("app.routers.sources._create_sightings_from_attachment", return_value=1),
+        patch.object(db_session, "commit", side_effect=SQLAlchemyError("DB error")),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 500
 
@@ -2030,11 +2134,11 @@ def test_parse_response_attachments_empty_value(
     mock_gc = MagicMock()
     mock_gc.get_json = AsyncMock(return_value=None)
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -2080,17 +2184,15 @@ def test_parse_response_attachments_vendor_domain_extraction(
 
     fake_content = base64.b64encode(b"data").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [{"name": "stock.csv", "contentBytes": fake_content}]
-    })
+    mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "stock.csv", "contentBytes": fake_content}]})
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]) as mock_parse, \
-         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{vr.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]) as mock_parse,
+        patch("app.utils.file_validation.validate_file", return_value=(True, "")),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
 
     assert resp.status_code == 200
     # Verify domain was passed to parse_attachment
@@ -2113,24 +2215,26 @@ def test_parse_response_attachments_multiple_file_types(
 
     fake_content = base64.b64encode(b"data").decode()
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {"name": "quote.xlsx", "contentBytes": fake_content},
-            {"name": "quote.csv", "contentBytes": fake_content},
-            {"name": "quote.xls", "contentBytes": fake_content},
-            {"name": "quote.tsv", "contentBytes": fake_content},
-            {"name": "image.png", "contentBytes": fake_content},  # not parseable
-            {"name": "doc.pdf", "contentBytes": fake_content},  # not parseable
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {"name": "quote.xlsx", "contentBytes": fake_content},
+                {"name": "quote.csv", "contentBytes": fake_content},
+                {"name": "quote.xls", "contentBytes": fake_content},
+                {"name": "quote.tsv", "contentBytes": fake_content},
+                {"name": "image.png", "contentBytes": fake_content},  # not parseable
+                {"name": "doc.pdf", "contentBytes": fake_content},  # not parseable
+            ]
+        }
+    )
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]), \
-         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
-        resp = sources_client.post(
-            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
-        )
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "")),
+    ):
+        resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{_vendor_response.id}")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -2155,8 +2259,7 @@ def test_create_sightings_unmatched_mpn():
     assert created == 0
 
 
-def test_create_sightings_vendor_email_without_at(
-):
+def test_create_sightings_vendor_email_without_at():
     """Sightings created even when vendor_email has no '@'."""
     req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="no-at-sign")
@@ -2174,18 +2277,20 @@ def test_create_sightings_with_all_optional_fields():
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
-    rows = [{
-        "mpn": "LM358N",
-        "qty": 500,
-        "unit_price": "$2.50",
-        "manufacturer": "Texas Instruments",
-        "condition": "New",
-        "date_code": "2025+",
-        "packaging": "Reel",
-        "lead_time": "2 weeks",
-        "moq": 100,
-        "currency": "USD",
-    }]
+    rows = [
+        {
+            "mpn": "LM358N",
+            "qty": 500,
+            "unit_price": "$2.50",
+            "manufacturer": "Texas Instruments",
+            "condition": "New",
+            "date_code": "2025+",
+            "packaging": "Reel",
+            "lead_time": "2 weeks",
+            "moq": 100,
+            "currency": "USD",
+        }
+    ]
     created = _create_sightings_from_attachment(db, vr, rows)
 
     assert created == 1
@@ -2235,8 +2340,13 @@ def test_toggle_source_active_not_found(sources_client: TestClient):
 def test_health_summary_no_errors(sources_client: TestClient, db_session: Session):
     """Health summary returns no errors when no active sources have error status."""
     src = ApiSource(
-        name="healthy_src", display_name="Healthy", category="api",
-        source_type="api", status="live", is_active=True, env_vars=[],
+        name="healthy_src",
+        display_name="Healthy",
+        category="api",
+        source_type="api",
+        status="live",
+        is_active=True,
+        env_vars=[],
     )
     db_session.add(src)
     db_session.commit()
@@ -2250,8 +2360,13 @@ def test_health_summary_no_errors(sources_client: TestClient, db_session: Sessio
 def test_health_summary_with_active_error(sources_client: TestClient, db_session: Session):
     """Health summary returns errored active sources."""
     src = ApiSource(
-        name="broken_src", display_name="Broken API", category="api",
-        source_type="api", status="error", is_active=True, env_vars=["KEY"],
+        name="broken_src",
+        display_name="Broken API",
+        category="api",
+        source_type="api",
+        status="error",
+        is_active=True,
+        env_vars=["KEY"],
         last_error="Connection timeout",
     )
     db_session.add(src)
@@ -2268,8 +2383,13 @@ def test_health_summary_with_active_error(sources_client: TestClient, db_session
 def test_health_summary_ignores_planned(sources_client: TestClient, db_session: Session):
     """Health summary ignores sources where is_active=False even if status=error."""
     src = ApiSource(
-        name="planned_err", display_name="Planned Error", category="api",
-        source_type="api", status="error", is_active=False, env_vars=[],
+        name="planned_err",
+        display_name="Planned Error",
+        category="api",
+        source_type="api",
+        status="error",
+        is_active=False,
+        env_vars=[],
         last_error="Not configured",
     )
     db_session.add(src)

@@ -178,8 +178,8 @@ def test_nc_search_queue_unique_requirement(db_session, test_requisition):
         normalized_mpn="LM317T",
     )
     db_session.add(item2)
-    import sqlalchemy
     import pytest as pt
+    import sqlalchemy
 
     with pt.raises(sqlalchemy.exc.IntegrityError):
         db_session.commit()

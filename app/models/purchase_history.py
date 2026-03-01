@@ -33,16 +33,10 @@ class CustomerPartHistory(Base):
     __tablename__ = "customer_part_history"
 
     id = Column(Integer, primary_key=True)
-    company_id = Column(
-        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
-    )
-    material_card_id = Column(
-        Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False
-    )
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False)
     mpn = Column(String(100), nullable=False)  # Denormalized for display
-    source = Column(
-        String(50), nullable=False
-    )  # salesforce_import, avail_offer, avail_quote_won, acctivate_po
+    source = Column(String(50), nullable=False)  # salesforce_import, avail_offer, avail_quote_won, acctivate_po
 
     last_purchased_at = Column(DateTime)
     purchase_count = Column(Integer, default=1)
@@ -64,7 +58,9 @@ class CustomerPartHistory(Base):
 
     __table_args__ = (
         UniqueConstraint(
-            "company_id", "material_card_id", "source",
+            "company_id",
+            "material_card_id",
+            "source",
             name="uq_cph_company_card_source",
         ),
         Index("ix_cph_material_card_id", "material_card_id"),

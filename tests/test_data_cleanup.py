@@ -267,66 +267,79 @@ class TestNormalizePackaging:
 class TestSchemaValidators:
     def test_requirement_create_normalizes_mpn(self):
         from app.schemas.requisitions import RequirementCreate
+
         r = RequirementCreate(primary_mpn="lm317t", target_qty=100)
         assert r.primary_mpn == "LM317T"
 
     def test_requirement_create_normalizes_substitutes(self):
         from app.schemas.requisitions import RequirementCreate
+
         r = RequirementCreate(primary_mpn="LM317T", substitutes=["ne555p", "lm7805"])
         assert r.substitutes == ["NE555P", "LM7805"]
 
     def test_requirement_update_normalizes_mpn(self):
         from app.schemas.requisitions import RequirementUpdate
+
         r = RequirementUpdate(primary_mpn="lm317t")
         assert r.primary_mpn == "LM317T"
 
     def test_requirement_update_normalizes_condition(self):
         from app.schemas.requisitions import RequirementUpdate
+
         r = RequirementUpdate(condition="Factory New")
         assert r.condition == "new"
 
     def test_requirement_update_normalizes_packaging(self):
         from app.schemas.requisitions import RequirementUpdate
+
         r = RequirementUpdate(packaging="Tape and Reel")
         assert r.packaging == "reel"
 
     def test_company_update_normalizes_country(self):
         from app.schemas.crm import CompanyUpdate
+
         c = CompanyUpdate(hq_country="United States")
         assert c.hq_country == "US"
 
     def test_company_update_normalizes_state(self):
         from app.schemas.crm import CompanyUpdate
+
         c = CompanyUpdate(hq_state="California")
         assert c.hq_state == "CA"
 
     def test_company_create_normalizes_phone(self):
         from app.schemas.crm import CompanyCreate
+
         c = CompanyCreate(name="Acme", phone="(555) 123-4567")
         assert c.phone == "+15551234567"
 
     def test_site_create_normalizes_country(self):
         from app.schemas.crm import SiteCreate
+
         s = SiteCreate(site_name="HQ", country="United States")
         assert s.country == "US"
 
     def test_site_create_normalizes_state(self):
         from app.schemas.crm import SiteCreate
+
         s = SiteCreate(site_name="HQ", state="California")
         assert s.state == "CA"
 
     def test_offer_create_normalizes_mpn(self):
         from app.schemas.crm import OfferCreate
+
         o = OfferCreate(mpn="lm317t", vendor_name="Arrow")
         assert o.mpn == "LM317T"
 
     def test_site_contact_normalizes_phone(self):
         from app.schemas.crm import SiteContactCreate
+
         c = SiteContactCreate(full_name="John Doe", phone="555-123-4567")
         assert c.phone == "+15551234567"
 
     def test_none_fields_pass_through(self):
         from app.schemas.crm import CompanyUpdate
+
         c = CompanyUpdate(hq_country=None, hq_state=None, phone=None)
         assert c.hq_country is None
         assert c.hq_state is None

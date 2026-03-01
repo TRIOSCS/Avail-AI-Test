@@ -16,15 +16,12 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import asyncio
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
 from app.models.prospect_account import ProspectAccount
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -194,9 +191,7 @@ class TestEnrichMissingSignals:
             },
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_missing_signals(p.id, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
         assert result is False
 
     @patch("app.http_client.http")
@@ -214,15 +209,13 @@ class TestEnrichMissingSignals:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "businesses": [{
-                "business_intent_topics": [
-                    "electronic components", "semiconductors", "procurement solutions"
-                ],
-                "workforce_trends": {"procurement": 3},
-                "recent_events": [
-                    {"type": "new_funding_round", "date": "2026-01", "description": "Raised $10M"}
-                ],
-            }]
+            "businesses": [
+                {
+                    "business_intent_topics": ["electronic components", "semiconductors", "procurement solutions"],
+                    "workforce_trends": {"procurement": 3},
+                    "recent_events": [{"type": "new_funding_round", "date": "2026-01", "description": "Raised $10M"}],
+                }
+            ]
         }
         mock_http.post = AsyncMock(return_value=mock_resp)
 
@@ -230,9 +223,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -261,9 +252,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -280,18 +269,14 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
     def test_backfill_nonexistent_prospect(self, db_session):
         from app.services.prospect_signals import enrich_missing_signals
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_missing_signals(99999, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(99999, db_session))
         assert result is False
 
     @patch("app.http_client.http")
@@ -314,9 +299,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -337,9 +320,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -360,9 +341,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -380,9 +359,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -395,7 +372,8 @@ class TestFindSimilarCustomers:
         from app.services.prospect_signals import find_similar_customers
 
         _make_company(
-            db_session, test_user,
+            db_session,
+            test_user,
             name="Lockheed Systems",
             industry="Aerospace & Defense Manufacturing",
             employee_size="5001-10000",
@@ -421,7 +399,8 @@ class TestFindSimilarCustomers:
         from app.services.prospect_signals import find_similar_customers
 
         _make_company(
-            db_session, test_user,
+            db_session,
+            test_user,
             name="MedDevice Corp",
             industry="Medical Device Manufacturing",
             employee_size="501-1000",
@@ -445,7 +424,8 @@ class TestFindSimilarCustomers:
         from app.services.prospect_signals import find_similar_customers
 
         _make_company(
-            db_session, test_user,
+            db_session,
+            test_user,
             name="EU Company",
             industry="General Manufacturing",
             employee_size="201-500",
@@ -478,7 +458,8 @@ class TestFindSimilarCustomers:
         # Create 5 companies with same industry
         for i in range(5):
             _make_company(
-                db_session, test_user,
+                db_session,
+                test_user,
                 name=f"Aero Company {i}",
                 industry="Aerospace & Defense",
                 domain=f"aero{i}.com",
@@ -618,9 +599,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value="BorgWarner is a major automotive Tier 1 supplier. They show strong buying intent for electronic components.",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                generate_ai_writeup(p, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
 
         assert "BorgWarner" in result
         db_session.refresh(p)
@@ -646,9 +625,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                generate_ai_writeup(p, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
 
         assert "FallbackCorp" in result
         assert "501-1000" in result
@@ -669,9 +646,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             side_effect=Exception("API down"),
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                generate_ai_writeup(p, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
 
         assert "ExceptionCorp" in result
         db_session.refresh(p)
@@ -687,9 +662,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value="StoreCorp is a great prospect.",
         ):
-            asyncio.get_event_loop().run_until_complete(
-                generate_ai_writeup(p, db_session)
-            )
+            asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
 
         db_session.refresh(p)
         assert p.ai_writeup == "StoreCorp is a great prospect."
@@ -840,9 +813,7 @@ class TestRunSignalEnrichmentBatch:
     @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
     @patch("app.services.prospect_signals.find_similar_customers")
     @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
-    def test_batch_runs_all_steps(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_batch_runs_all_steps(self, mock_enrich, mock_similar, mock_writeup, db_session):
         from app.services.prospect_signals import run_signal_enrichment_batch
 
         # Create prospects
@@ -865,9 +836,7 @@ class TestRunSignalEnrichmentBatch:
         mock_writeup.return_value = "Great prospect."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["signals_added"] >= 1
         assert result["similar_computed"] >= 1
@@ -876,9 +845,7 @@ class TestRunSignalEnrichmentBatch:
     @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
     @patch("app.services.prospect_signals.find_similar_customers")
     @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
-    def test_batch_skips_low_score_prospects(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_batch_skips_low_score_prospects(self, mock_enrich, mock_similar, mock_writeup, db_session):
         from app.services.prospect_signals import run_signal_enrichment_batch
 
         _make_prospect(
@@ -889,9 +856,7 @@ class TestRunSignalEnrichmentBatch:
         )
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["signals_added"] == 0
         assert result["similar_computed"] == 0
@@ -900,9 +865,7 @@ class TestRunSignalEnrichmentBatch:
     @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
     @patch("app.services.prospect_signals.find_similar_customers", side_effect=Exception("DB error"))
     @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
-    def test_batch_continues_on_error(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_batch_continues_on_error(self, mock_enrich, mock_similar, mock_writeup, db_session):
         from app.services.prospect_signals import run_signal_enrichment_batch
 
         _make_prospect(
@@ -916,9 +879,7 @@ class TestRunSignalEnrichmentBatch:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         # Should still attempt writeups despite similar_customers error
@@ -930,7 +891,7 @@ class TestRunSignalEnrichmentBatch:
 
 class TestRecalculateReadiness:
     def test_recalculates_on_signal_add(self, db_session):
-        from app.services.prospect_signals import enrich_with_intent, enrich_with_events
+        from app.services.prospect_signals import enrich_with_events, enrich_with_intent
 
         p = _make_prospect(db_session, readiness_score=0, readiness_signals={})
 
@@ -970,14 +931,16 @@ class TestEnrichMissingSignalsHiringAndEvents:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "businesses": [{
-                "business_intent_topics": ["electronic components"],
-                "workforce_trends": {
-                    "procurement": None,
-                    "engineering": "12% growth",
-                },
-                "recent_events": [],
-            }]
+            "businesses": [
+                {
+                    "business_intent_topics": ["electronic components"],
+                    "workforce_trends": {
+                        "procurement": None,
+                        "engineering": "12% growth",
+                    },
+                    "recent_events": [],
+                }
+            ]
         }
         mock_http.post = AsyncMock(return_value=mock_resp)
 
@@ -985,9 +948,7 @@ class TestEnrichMissingSignalsHiringAndEvents:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -1009,13 +970,15 @@ class TestEnrichMissingSignalsHiringAndEvents:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "businesses": [{
-                "business_intent_topics": ["semiconductors"],
-                "recent_events": [
-                    "Acquired new subsidiary",
-                    {"type": "funding", "date": "2026-01", "description": "Series C"},
-                ],
-            }]
+            "businesses": [
+                {
+                    "business_intent_topics": ["semiconductors"],
+                    "recent_events": [
+                        "Acquired new subsidiary",
+                        {"type": "funding", "date": "2026-01", "description": "Series C"},
+                    ],
+                }
+            ]
         }
         mock_http.post = AsyncMock(return_value=mock_resp)
 
@@ -1023,9 +986,7 @@ class TestEnrichMissingSignalsHiringAndEvents:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_missing_signals(p.id, db_session)
-            )
+            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -1052,7 +1013,8 @@ class TestFindSimilarCustomersWeakMatch:
         from app.services.prospect_signals import find_similar_customers
 
         _make_company(
-            db_session, test_user,
+            db_session,
+            test_user,
             name="Region Only Corp",
             industry="Totally Different Industry",
             employee_size="1-50",
@@ -1116,9 +1078,7 @@ class TestRunBatchErrorPaths:
         new_callable=AsyncMock,
         side_effect=Exception("Explorium down"),
     )
-    def test_signal_enrichment_error_increments_errors(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_signal_enrichment_error_increments_errors(self, mock_enrich, mock_similar, mock_writeup, db_session):
         """Lines 640-642: exception in enrich_missing_signals increments errors."""
         from app.services.prospect_signals import run_signal_enrichment_batch
 
@@ -1133,9 +1093,7 @@ class TestRunBatchErrorPaths:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         assert result["signals_added"] == 0
@@ -1143,9 +1101,7 @@ class TestRunBatchErrorPaths:
     @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
     @patch("app.services.prospect_signals.find_similar_customers")
     @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
-    def test_skip_prospects_with_existing_similar_customers(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_skip_prospects_with_existing_similar_customers(self, mock_enrich, mock_similar, mock_writeup, db_session):
         """Line 656: skip prospects that already have similar_customers."""
         from app.services.prospect_signals import run_signal_enrichment_batch
 
@@ -1161,9 +1117,7 @@ class TestRunBatchErrorPaths:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         # similar_customers already set → find_similar_customers should NOT be called
         mock_similar.assert_not_called()
@@ -1176,9 +1130,7 @@ class TestRunBatchErrorPaths:
     )
     @patch("app.services.prospect_signals.find_similar_customers")
     @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
-    def test_writeup_generation_error_increments_errors(
-        self, mock_enrich, mock_similar, mock_writeup, db_session
-    ):
+    def test_writeup_generation_error_increments_errors(self, mock_enrich, mock_similar, mock_writeup, db_session):
         """Lines 679-681: exception in generate_ai_writeup increments errors."""
         from app.services.prospect_signals import run_signal_enrichment_batch
 
@@ -1194,9 +1146,7 @@ class TestRunBatchErrorPaths:
         mock_similar.return_value = []
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_signal_enrichment_batch(min_fit_score=40)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         assert result["writeups_generated"] == 0

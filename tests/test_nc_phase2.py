@@ -4,13 +4,10 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import NcSearchQueue, Requirement, Sighting
+from app.models import NcSearchQueue, Requirement
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.mpn_normalizer import normalize_mpn
 from app.services.nc_worker.queue_manager import (
@@ -20,7 +17,6 @@ from app.services.nc_worker.queue_manager import (
     mark_completed,
     mark_status,
 )
-
 
 # ── Config Tests ─────────────────────────────────────────────────────
 

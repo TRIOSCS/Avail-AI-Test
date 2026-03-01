@@ -32,11 +32,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        result = _run(generate_trouble_prompt(
-            user_message="The submit button doesn't work",
-            current_view="rfq",
-            reporter_name="Test User",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="The submit button doesn't work",
+                current_view="rfq",
+                reporter_name="Test User",
+            )
+        )
         assert result is not None
         assert result["title"] == MOCK_RESULT["title"]
         assert result["prompt"] == MOCK_RESULT["prompt"]
@@ -47,11 +49,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Page crashed",
-            console_errors='[{"msg":"TypeError: undefined is not a function","ts":123}]',
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Page crashed",
+                console_errors='[{"msg":"TypeError: undefined is not a function","ts":123}]',
+                reporter_name="Tester",
+            )
+        )
         # The prompt sent to gradient should contain the console errors
         call_args = mock_gradient.call_args
         prompt_text = call_args[0][0]  # first positional arg
@@ -62,11 +66,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="CRM view is broken",
-            current_view="crm",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="CRM view is broken",
+                current_view="crm",
+                reporter_name="Tester",
+            )
+        )
         call_args = mock_gradient.call_args
         prompt_text = call_args[0][0]
         assert "crm.js" in prompt_text
@@ -76,10 +82,12 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = None
-        result = _run(generate_trouble_prompt(
-            user_message="Something is wrong",
-            reporter_name="Tester",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="Something is wrong",
+                reporter_name="Tester",
+            )
+        )
         assert result is None
 
     @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
@@ -87,10 +95,12 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.side_effect = Exception("API timeout")
-        result = _run(generate_trouble_prompt(
-            user_message="Something is wrong",
-            reporter_name="Tester",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="Something is wrong",
+                reporter_name="Tester",
+            )
+        )
         assert result is None
 
     @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
@@ -98,10 +108,12 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = {"prompt": "some prompt but no title"}
-        result = _run(generate_trouble_prompt(
-            user_message="Issue here",
-            reporter_name="Tester",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="Issue here",
+                reporter_name="Tester",
+            )
+        )
         assert result is None
 
     @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
@@ -109,10 +121,12 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = {"title": "Some Title"}
-        result = _run(generate_trouble_prompt(
-            user_message="Issue here",
-            reporter_name="Tester",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="Issue here",
+                reporter_name="Tester",
+            )
+        )
         assert result is None
 
     @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
@@ -120,9 +134,11 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        result = _run(generate_trouble_prompt(
-            user_message="Minimal report",
-        ))
+        result = _run(
+            generate_trouble_prompt(
+                user_message="Minimal report",
+            )
+        )
         assert result is not None
         assert result["title"] == MOCK_RESULT["title"]
 
@@ -131,11 +147,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Visual bug",
-            has_screenshot=True,
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Visual bug",
+                has_screenshot=True,
+                reporter_name="Tester",
+            )
+        )
         call_args = mock_gradient.call_args
         prompt_text = call_args[0][0]
         assert "screenshot" in prompt_text.lower()
@@ -145,11 +163,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Issue in vendors/sourcing",
-            current_view="Vendors/sourcing",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Issue in vendors/sourcing",
+                current_view="Vendors/sourcing",
+                reporter_name="Tester",
+            )
+        )
         call_args = mock_gradient.call_args
         prompt_text = call_args[0][0]
         assert "sourcing" in prompt_text.lower()
@@ -160,11 +180,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Something broke",
-            current_url="https://app.avail.ai/#rfq/123",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Something broke",
+                current_url="https://app.avail.ai/#rfq/123",
+                reporter_name="Tester",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "https://app.avail.ai/#rfq/123" in prompt_text
 
@@ -174,11 +196,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Rendering bug",
-            browser_info="Chrome 120.0.6099.130",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Rendering bug",
+                browser_info="Chrome 120.0.6099.130",
+                reporter_name="Tester",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "Chrome 120" in prompt_text
 
@@ -188,11 +212,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Layout issue",
-            screen_size="1920x1080",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Layout issue",
+                screen_size="1920x1080",
+                reporter_name="Tester",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "1920x1080" in prompt_text
 
@@ -202,11 +228,13 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="State issue",
-            page_state='{"selectedTab": "quotes", "filterActive": true}',
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="State issue",
+                page_state='{"selectedTab": "quotes", "filterActive": true}',
+                reporter_name="Tester",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "Page state" in prompt_text
         assert "quotes" in prompt_text
@@ -217,17 +245,19 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="Everything is broken",
-            current_url="https://app.avail.ai/#crm",
-            current_view="crm",
-            browser_info="Firefox 121.0",
-            screen_size="2560x1440",
-            console_errors='[{"msg":"ReferenceError"}]',
-            page_state='{"tab":"companies"}',
-            has_screenshot=True,
-            reporter_name="Full Context User",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="Everything is broken",
+                current_url="https://app.avail.ai/#crm",
+                current_view="crm",
+                browser_info="Firefox 121.0",
+                screen_size="2560x1440",
+                console_errors='[{"msg":"ReferenceError"}]',
+                page_state='{"tab":"companies"}',
+                has_screenshot=True,
+                reporter_name="Full Context User",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "https://app.avail.ai/#crm" in prompt_text
         assert "crm" in prompt_text.lower()
@@ -243,10 +273,12 @@ class TestGenerateTroublePrompt:
         from app.services.ai_trouble_prompt import generate_trouble_prompt
 
         mock_gradient.return_value = MOCK_RESULT
-        _run(generate_trouble_prompt(
-            user_message="No errors",
-            console_errors="[]",
-            reporter_name="Tester",
-        ))
+        _run(
+            generate_trouble_prompt(
+                user_message="No errors",
+                console_errors="[]",
+                reporter_name="Tester",
+            )
+        )
         prompt_text = mock_gradient.call_args[0][0]
         assert "Console errors" not in prompt_text

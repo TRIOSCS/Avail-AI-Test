@@ -64,41 +64,84 @@ def main():
         print(f"Found {len(companies)} companies", file=sys.stderr)
 
         writer = csv.writer(sys.stdout)
-        writer.writerow([
-            "company_id", "company_name", "domain", "industry",
-            "account_type", "phone", "hq_city", "hq_state", "hq_country",
-            "site_id", "site_name", "site_city", "site_state", "site_country",
-            "contact_name", "contact_title", "contact_email", "contact_phone",
-            "is_primary",
-        ])
+        writer.writerow(
+            [
+                "company_id",
+                "company_name",
+                "domain",
+                "industry",
+                "account_type",
+                "phone",
+                "hq_city",
+                "hq_state",
+                "hq_country",
+                "site_id",
+                "site_name",
+                "site_city",
+                "site_state",
+                "site_country",
+                "contact_name",
+                "contact_title",
+                "contact_email",
+                "contact_phone",
+                "is_primary",
+            ]
+        )
 
         rows = 0
         for co in companies:
             if not co.sites:
-                writer.writerow([
-                    co.id, co.name, co.domain or "", co.industry or "",
-                    co.account_type or "", co.phone or "",
-                    co.hq_city or "", co.hq_state or "", co.hq_country or "",
-                    "", "", "", "", "",
-                    "", "", "", "", "",
-                ])
+                writer.writerow(
+                    [
+                        co.id,
+                        co.name,
+                        co.domain or "",
+                        co.industry or "",
+                        co.account_type or "",
+                        co.phone or "",
+                        co.hq_city or "",
+                        co.hq_state or "",
+                        co.hq_country or "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
                 rows += 1
             else:
                 for site in co.sites:
                     contacts = site.site_contacts if site.site_contacts else [None]
                     for contact in contacts:
-                        writer.writerow([
-                            co.id, co.name, co.domain or "", co.industry or "",
-                            co.account_type or "", co.phone or "",
-                            co.hq_city or "", co.hq_state or "", co.hq_country or "",
-                            site.id, site.site_name,
-                            site.city or "", site.state or "", site.country or "",
-                            contact.full_name if contact else "",
-                            contact.title if contact else "",
-                            contact.email if contact else "",
-                            contact.phone if contact else "",
-                            contact.is_primary if contact else "",
-                        ])
+                        writer.writerow(
+                            [
+                                co.id,
+                                co.name,
+                                co.domain or "",
+                                co.industry or "",
+                                co.account_type or "",
+                                co.phone or "",
+                                co.hq_city or "",
+                                co.hq_state or "",
+                                co.hq_country or "",
+                                site.id,
+                                site.site_name,
+                                site.city or "",
+                                site.state or "",
+                                site.country or "",
+                                contact.full_name if contact else "",
+                                contact.title if contact else "",
+                                contact.email if contact else "",
+                                contact.phone if contact else "",
+                                contact.is_primary if contact else "",
+                            ]
+                        )
                         rows += 1
 
         print(f"Exported {rows} rows", file=sys.stderr)

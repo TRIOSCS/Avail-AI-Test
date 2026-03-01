@@ -8,19 +8,14 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-import asyncio
-import hashlib
-import math
 import os
-import random
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
-from app.models import NcSearchLog, NcSearchQueue, NcWorkerStatus, Requirement, Sighting
+from app.models import NcSearchQueue, NcWorkerStatus, Requirement, Sighting
 from app.services.nc_worker.circuit_breaker import CircuitBreaker
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.human_behavior import HumanBehavior
@@ -40,11 +35,10 @@ from app.services.nc_worker.queue_manager import (
     mark_status,
     recover_stale_searches,
 )
-from app.services.nc_worker.result_parser import NcSighting, parse_quantity, parse_results_html
+from app.services.nc_worker.result_parser import NcSighting, parse_results_html
 from app.services.nc_worker.scheduler import SearchScheduler
 from app.services.nc_worker.search_engine import build_search_url, search_part
 from app.services.nc_worker.sighting_writer import save_nc_sightings
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # MPN NORMALIZER
@@ -284,7 +278,6 @@ class TestSearchEngine:
         assert result["mode"] == "http_empty"
 
 
-
 # ═══════════════════════════════════════════════════════════════════════
 # CIRCUIT BREAKER — fill coverage gaps
 # ═══════════════════════════════════════════════════════════════════════
@@ -310,7 +303,8 @@ class TestCircuitBreakerFull:
         breaker = CircuitBreaker()
 
         result = breaker.check_response_health(
-            200, "access denied - your account has been blocked",
+            200,
+            "access denied - your account has been blocked",
             "https://www.netcomponents.com/error",
         )
         assert result == "ACCESS_DENIED"
@@ -321,7 +315,8 @@ class TestCircuitBreakerFull:
         breaker = CircuitBreaker()
 
         result = breaker.check_response_health(
-            200, "we detected unusual activity on your account",
+            200,
+            "we detected unusual activity on your account",
             "https://www.netcomponents.com/warning",
         )
         assert result == "ACCESS_DENIED"
@@ -635,38 +630,51 @@ class TestQueueManager:
 
         # First req — completed search
         req1 = Requisition(
-            name="REQ-D1", customer_name="X", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-D1",
+            customer_name="X",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req1)
         db_session.flush()
 
         item1 = Requirement(
-            requisition_id=req1.id, primary_mpn="LM317T",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req1.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item1)
         db_session.flush()
 
         queue1 = NcSearchQueue(
-            requirement_id=item1.id, requisition_id=req1.id,
-            mpn="LM317T", normalized_mpn="LM317T",
-            status="completed", last_searched_at=datetime.now(timezone.utc),
+            requirement_id=item1.id,
+            requisition_id=req1.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="completed",
+            last_searched_at=datetime.now(timezone.utc),
         )
         db_session.add(queue1)
         db_session.commit()
 
         # Second req — same MPN but no material_card
         req2 = Requisition(
-            name="REQ-D2", customer_name="Y", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-D2",
+            customer_name="Y",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req2)
         db_session.flush()
 
         item2 = Requirement(
-            requisition_id=req2.id, primary_mpn="LM317T",
-            target_qty=50, created_at=datetime.now(timezone.utc),
+            requisition_id=req2.id,
+            primary_mpn="LM317T",
+            target_qty=50,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item2)
         db_session.commit()
@@ -835,10 +843,14 @@ class TestSightingWriterFull:
         db_session.add(queue_item)
         db_session.commit()
 
-        nc = [NcSighting(
-            part_number="LM317T", vendor_name="Arrow",
-            quantity=500, inventory_type="in_stock",
-        )]
+        nc = [
+            NcSighting(
+                part_number="LM317T",
+                vendor_name="Arrow",
+                quantity=500,
+                inventory_type="in_stock",
+            )
+        ]
         save_nc_sightings(db_session, queue_item, nc)
 
         s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
@@ -857,10 +869,14 @@ class TestSightingWriterFull:
         db_session.add(queue_item)
         db_session.commit()
 
-        nc = [NcSighting(
-            part_number="LM317T", vendor_name="Broker",
-            quantity=500, inventory_type="brokered",
-        )]
+        nc = [
+            NcSighting(
+                part_number="LM317T",
+                vendor_name="Broker",
+                quantity=500,
+                inventory_type="brokered",
+            )
+        ]
         save_nc_sightings(db_session, queue_item, nc)
 
         s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
@@ -879,12 +895,19 @@ class TestSightingWriterFull:
         db_session.add(queue_item)
         db_session.commit()
 
-        nc = [NcSighting(
-            part_number="LM317T", vendor_name="Arrow",
-            quantity=500, region="The Americas", country="US",
-            inventory_type="in_stock", uploaded_date="01/15/2026",
-            is_sponsor=True, description="Voltage Reg",
-        )]
+        nc = [
+            NcSighting(
+                part_number="LM317T",
+                vendor_name="Arrow",
+                quantity=500,
+                region="The Americas",
+                country="US",
+                inventory_type="in_stock",
+                uploaded_date="01/15/2026",
+                is_sponsor=True,
+                description="Voltage Reg",
+            )
+        ]
         save_nc_sightings(db_session, queue_item, nc)
 
         s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
@@ -929,9 +952,7 @@ class TestAiGate:
         from app.services.nc_worker.ai_gate import classify_parts_batch
 
         mock_result = {
-            "classifications": [
-                {"mpn": "STM32F103", "search_nc": True, "commodity": "semiconductor", "reason": "MCU"}
-            ]
+            "classifications": [{"mpn": "STM32F103", "search_nc": True, "commodity": "semiconductor", "reason": "MCU"}]
         }
 
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
@@ -944,7 +965,9 @@ class TestAiGate:
         """classify_parts_batch returns None on API failure."""
         from app.services.nc_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
+        with patch(
+            "app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")
+        ):
             result = await classify_parts_batch([{"mpn": "X", "manufacturer": "", "description": ""}])
             assert result is None
 
@@ -1524,8 +1547,6 @@ class TestResultParserExceptions:
     def test_exception_in_row_parsing(self):
         """Force an IndexError/AttributeError in row parsing (lines 143-145)."""
         from unittest.mock import patch as _patch
-
-        from bs4 import BeautifulSoup
 
         html = """
         <table>
@@ -2306,7 +2327,9 @@ class TestCircuitBreakerGaps:
     def test_captcha_detection(self):
         """Captcha in content triggers warning then trip on second."""
         breaker = CircuitBreaker()
-        result = breaker.check_response_health(200, "please verify you are human captcha", "https://www.netcomponents.com/search")
+        result = breaker.check_response_health(
+            200, "please verify you are human captcha", "https://www.netcomponents.com/search"
+        )
         assert result == "CAPTCHA_WARNING"
         assert breaker.captcha_count == 1
         assert not breaker.is_open
@@ -2539,10 +2562,12 @@ class TestNcSearchEngineFull:
         mock_page = AsyncMock()
         mock_page.goto = AsyncMock()
         mock_page.wait_for_selector = AsyncMock()
-        mock_page.evaluate = AsyncMock(side_effect=[
-            True,  # auth_check returns True
-            "<html>browser results</html>",  # page HTML
-        ])
+        mock_page.evaluate = AsyncMock(
+            side_effect=[
+                True,  # auth_check returns True
+                "<html>browser results</html>",  # page HTML
+            ]
+        )
 
         mock_session = MagicMock()
         mock_session.has_browser = True
@@ -2561,9 +2586,11 @@ class TestNcSearchEngineFull:
         mock_page = AsyncMock()
         mock_page.goto = AsyncMock()
         mock_page.wait_for_selector = AsyncMock()
-        mock_page.evaluate = AsyncMock(side_effect=[
-            False,  # auth_check fails
-        ])
+        mock_page.evaluate = AsyncMock(
+            side_effect=[
+                False,  # auth_check fails
+            ]
+        )
 
         mock_session = MagicMock()
         mock_session.has_browser = True
@@ -2594,10 +2621,12 @@ class TestNcSearchEngineFull:
         mock_page = AsyncMock()
         mock_page.goto = AsyncMock()
         mock_page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
-        mock_page.evaluate = AsyncMock(side_effect=[
-            True,  # auth_check
-            "<html>results after timeout</html>",  # page HTML
-        ])
+        mock_page.evaluate = AsyncMock(
+            side_effect=[
+                True,  # auth_check
+                "<html>results after timeout</html>",  # page HTML
+            ]
+        )
 
         mock_session = MagicMock()
         mock_session.has_browser = True
@@ -2617,7 +2646,12 @@ class TestNcSearchEngineFull:
         mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
         mock_session_mgr.has_browser = True
 
-        browser_result = {"html": "<div class='searchresultstable'>data</div>", "url": "url", "duration_ms": 500, "status_code": 200}
+        browser_result = {
+            "html": "<div class='searchresultstable'>data</div>",
+            "url": "url",
+            "duration_ms": 500,
+            "status_code": 200,
+        }
 
         with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
             result = search_part(mock_session_mgr, "XYZ123")
@@ -2822,8 +2856,9 @@ class TestNcResultParserFull:
 
     def test_parse_price_breaks_bad_json(self):
         """parse_price_breaks handles invalid JSON gracefully (line 90-92)."""
-        from app.services.nc_worker.result_parser import parse_price_breaks
         from bs4 import BeautifulSoup
+
+        from app.services.nc_worker.result_parser import parse_price_breaks
 
         soup = BeautifulSoup('<span class="ncprc" data-pbrk="not valid json"></span>', "html.parser")
         el = soup.find("span")
@@ -2841,8 +2876,9 @@ class TestNcResultParserFull:
 
     def test_parse_price_breaks_no_data_attr(self):
         """parse_price_breaks handles element without data-pbrk."""
-        from app.services.nc_worker.result_parser import parse_price_breaks
         from bs4 import BeautifulSoup
+
+        from app.services.nc_worker.result_parser import parse_price_breaks
 
         soup = BeautifulSoup('<span class="ncprc"></span>', "html.parser")
         el = soup.find("span")
@@ -3201,8 +3237,11 @@ class TestNcSightingWriterGaps:
         """save_nc_sightings skips entries without vendor_name (line 58)."""
         req = test_requisition.requirements[0]
         queue_item = NcSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -3215,8 +3254,11 @@ class TestNcSightingWriterGaps:
         """save_nc_sightings skips duplicate entries (line 66)."""
         req = test_requisition.requirements[0]
         queue_item = NcSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -3233,18 +3275,25 @@ class TestNcSightingWriterGaps:
 
         req = test_requisition.requirements[0]
         queue_item = NcSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(queue_item)
         db_session.commit()
 
-        nc = [NcSighting(
-            part_number="LM317T", vendor_name="DigiKey", quantity=500,
-            inventory_type="in_stock",
-            price_breaks=[PriceBreak(price=1.25, min_qty=1), PriceBreak(price=0.99, min_qty=100)],
-            currency="USD",
-        )]
+        nc = [
+            NcSighting(
+                part_number="LM317T",
+                vendor_name="DigiKey",
+                quantity=500,
+                inventory_type="in_stock",
+                price_breaks=[PriceBreak(price=1.25, min_qty=1), PriceBreak(price=0.99, min_qty=100)],
+                currency="USD",
+            )
+        ]
         save_nc_sightings(db_session, queue_item, nc)
 
         s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
@@ -3354,8 +3403,11 @@ class TestNcWorkerGaps:
 
         req = test_requisition.requirements[0]
         queue_item = NcSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -3385,7 +3437,13 @@ class TestNcWorkerGaps:
         mock_breaker.should_stop.return_value = False
         mock_breaker.check_response_health = MagicMock(return_value="HEALTHY")
 
-        search_result = {"html": "<table>results</table>", "total_count": 1, "url": "url", "duration_ms": 500, "status_code": 200}
+        search_result = {
+            "html": "<table>results</table>",
+            "total_count": 1,
+            "url": "url",
+            "duration_ms": 500,
+            "status_code": 200,
+        }
         mock_nc_sighting = MagicMock()
 
         try:
@@ -3417,8 +3475,11 @@ class TestNcWorkerGaps:
 
         req = test_requisition.requirements[0]
         queue_item = NcSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()

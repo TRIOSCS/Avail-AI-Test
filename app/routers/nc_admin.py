@@ -7,7 +7,6 @@ Called by: AVAIL admin UI, monitoring dashboards
 Depends on: nc_worker.queue_manager, database
 """
 
-
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 from sqlalchemy.orm import Session

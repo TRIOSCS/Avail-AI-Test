@@ -66,9 +66,7 @@ def get_pool_accounts(filters: PoolFilters, db: Session) -> PoolAccountList:
 
     if filters.search:
         safe = escape_like(filters.search.strip())
-        query = query.filter(
-            Company.name.ilike(f"%{safe}%") | Company.domain.ilike(f"%{safe}%")
-        )
+        query = query.filter(Company.name.ilike(f"%{safe}%") | Company.domain.ilike(f"%{safe}%"))
 
     total = query.count()
 
@@ -140,9 +138,7 @@ def claim_pool_account(company_id: int, user_id: int, user_name: str, db: Sessio
     }
 
 
-def dismiss_pool_account(
-    company_id: int, user_id: int, user_name: str, reason: str, db: Session
-) -> dict:
+def dismiss_pool_account(company_id: int, user_id: int, user_name: str, reason: str, db: Session) -> dict:
     """Dismiss a pool account — marks import_priority='dismissed'."""
     company = db.get(Company, company_id)
     if not company:

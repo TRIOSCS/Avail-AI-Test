@@ -65,8 +65,8 @@ class VendorCard(Base):
     engagement_computed_at = Column(DateTime)
 
     # Unified vendor score (order advancement based)
-    vendor_score = Column(Float)              # 0-100 unified score, or None
-    advancement_score = Column(Float)         # 0-100 raw advancement component
+    vendor_score = Column(Float)  # 0-100 unified score, or None
+    advancement_score = Column(Float)  # 0-100 raw advancement component
     is_new_vendor = Column(Boolean, default=True)
     vendor_score_computed_at = Column(DateTime)
 
@@ -83,10 +83,10 @@ class VendorCard(Base):
     material_tags_updated_at = Column(DateTime)
 
     # Email health scoring (Phase 5)
-    email_health_score = Column(Float)             # 0-100 composite score
+    email_health_score = Column(Float)  # 0-100 composite score
     email_health_computed_at = Column(DateTime)
-    response_rate = Column(Float)                  # 0.0-1.0 ratio
-    quote_quality_rate = Column(Float)             # 0.0-1.0 ratio
+    response_rate = Column(Float)  # 0.0-1.0 ratio
+    quote_quality_rate = Column(Float)  # 0.0-1.0 ratio
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
@@ -103,12 +103,8 @@ class VendorCard(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    reviews = relationship(
-        "VendorReview", back_populates="vendor_card", cascade="all, delete-orphan"
-    )
-    vendor_contacts = relationship(
-        "VendorContact", back_populates="vendor_card", cascade="all, delete-orphan"
-    )
+    reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
+    vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
@@ -119,9 +115,7 @@ class VendorCard(Base):
 class VendorContact(Base):
     __tablename__ = "vendor_contacts"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(
-        Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False
-    )
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     contact_type = Column(String(20), default="company")
     full_name = Column(String(255))
     first_name = Column(String(100))
@@ -142,8 +136,8 @@ class VendorContact(Base):
     last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Contact intelligence (computed nightly)
-    relationship_score = Column(Float)        # 0-100
-    activity_trend = Column(String(20))       # warming/stable/cooling/dormant
+    relationship_score = Column(Float)  # 0-100
+    activity_trend = Column(String(20))  # warming/stable/cooling/dormant
     score_computed_at = Column(DateTime)
 
     # OOO detection (from AI email classification)

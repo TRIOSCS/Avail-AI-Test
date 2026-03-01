@@ -19,14 +19,12 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, User
 from app.models.prospect_account import ProspectAccount
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -313,9 +311,7 @@ class TestSearchContactsApollo:
             },
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            search_contacts_apollo("company.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(search_contacts_apollo("company.com"))
 
         assert len(result) == 1
         assert result[0]["name"] == "Jane Doe"
@@ -335,9 +331,7 @@ class TestSearchContactsApollo:
             },
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            search_contacts_apollo("company.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(search_contacts_apollo("company.com"))
 
         assert result[0]["email"] is None  # personal email filtered
 
@@ -347,9 +341,7 @@ class TestSearchContactsApollo:
 
         mock_search.return_value = []
 
-        result = asyncio.get_event_loop().run_until_complete(
-            search_contacts_apollo("nocorp.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(search_contacts_apollo("nocorp.com"))
 
         assert result == []
 
@@ -361,9 +353,7 @@ class TestSearchContactsApollo:
             {"full_name": "No Email", "title": "Manager", "email": None},
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            search_contacts_apollo("company.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(search_contacts_apollo("company.com"))
 
         assert result[0]["email"] is None
 
@@ -378,9 +368,7 @@ class TestVerifyEmailHunter:
 
         mock_verify.return_value = {"email": "test@co.com", "status": "valid", "score": 95, "sources": 3}
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("test@co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter("test@co.com"))
 
         assert result["verified"] is True
         assert result["status"] == "valid"
@@ -391,9 +379,7 @@ class TestVerifyEmailHunter:
 
         mock_verify.return_value = {"email": "bad@co.com", "status": "invalid", "score": 10}
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("bad@co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter("bad@co.com"))
 
         assert result["verified"] is False
 
@@ -403,9 +389,7 @@ class TestVerifyEmailHunter:
 
         mock_verify.return_value = {"email": "test@co.com", "status": "accept_all", "score": 90}
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("test@co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter("test@co.com"))
 
         assert result["verified"] is True
 
@@ -415,9 +399,7 @@ class TestVerifyEmailHunter:
 
         mock_verify.return_value = {"email": "test@co.com", "status": "accept_all", "score": 50}
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("test@co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter("test@co.com"))
 
         assert result["verified"] is False
 
@@ -427,9 +409,7 @@ class TestVerifyEmailHunter:
 
         mock_verify.return_value = None
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("test@co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter("test@co.com"))
 
         assert result["verified"] is False
         assert result["status"] == "unknown"
@@ -442,9 +422,7 @@ class TestVerifyEmailHunter:
         cache = {}
 
         # First call — API called
-        asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("test@co.com", verification_cache=cache)
-        )
+        asyncio.get_event_loop().run_until_complete(verify_email_hunter("test@co.com", verification_cache=cache))
         assert mock_verify.call_count == 1
 
         # Second call — cached
@@ -457,9 +435,7 @@ class TestVerifyEmailHunter:
     def test_empty_email(self, db_session):
         from app.services.prospect_contacts import verify_email_hunter
 
-        result = asyncio.get_event_loop().run_until_complete(
-            verify_email_hunter("")
-        )
+        result = asyncio.get_event_loop().run_until_complete(verify_email_hunter(""))
         assert result["verified"] is False
 
 
@@ -476,9 +452,7 @@ class TestGetDomainPattern:
             {"email": "jane.doe@co.com", "first_name": "Jane", "last_name": "Doe"},
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            get_domain_pattern_hunter("co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(get_domain_pattern_hunter("co.com"))
 
         assert result == "{first}.{last}"
 
@@ -491,9 +465,7 @@ class TestGetDomainPattern:
             {"email": "jdoe@co.com", "first_name": "Jane", "last_name": "Doe"},
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            get_domain_pattern_hunter("co.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(get_domain_pattern_hunter("co.com"))
 
         assert result == "{f}{last}"
 
@@ -503,18 +475,14 @@ class TestGetDomainPattern:
 
         mock_find.return_value = []
 
-        result = asyncio.get_event_loop().run_until_complete(
-            get_domain_pattern_hunter("empty.com")
-        )
+        result = asyncio.get_event_loop().run_until_complete(get_domain_pattern_hunter("empty.com"))
 
         assert result is None
 
     def test_empty_domain(self, db_session):
         from app.services.prospect_contacts import get_domain_pattern_hunter
 
-        result = asyncio.get_event_loop().run_until_complete(
-            get_domain_pattern_hunter("")
-        )
+        result = asyncio.get_event_loop().run_until_complete(get_domain_pattern_hunter(""))
 
         assert result is None
 
@@ -555,9 +523,7 @@ class TestEnrichProspectContacts:
             {"email": "jane.vp@raytheon.com", "first_name": "Jane", "last_name": "VP"},
         ]
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_prospect_contacts(p.id, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_prospect_contacts(p.id, db_session))
 
         assert result["total_found"] == 2
         assert result["verified"] == 1  # only jane passes
@@ -574,9 +540,7 @@ class TestEnrichProspectContacts:
     def test_nonexistent_prospect(self, db_session):
         from app.services.prospect_contacts import enrich_prospect_contacts
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_prospect_contacts(99999, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_prospect_contacts(99999, db_session))
 
         assert result["total_found"] == 0
 
@@ -587,9 +551,7 @@ class TestEnrichProspectContacts:
         p = _make_prospect(db_session, domain="empty.com")
         mock_apollo.return_value = []
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_prospect_contacts(p.id, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_prospect_contacts(p.id, db_session))
 
         assert result["total_found"] == 0
 
@@ -654,9 +616,7 @@ class TestEnrichProspectContacts:
         ]
         mock_pattern.return_value = []
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_prospect_contacts(p.id, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(enrich_prospect_contacts(p.id, db_session))
 
         assert result["verified"] == 1
         # Hunter verify should NOT have been called — cache hit
@@ -676,13 +636,14 @@ class TestRunContactEnrichmentBatch:
         _make_prospect(db_session, domain="low.com", fit_score=30)  # below threshold
 
         mock_enrich.return_value = {
-            "total_found": 3, "verified": 2, "decision_makers": 1, "new_hires": 0,
+            "total_found": 3,
+            "verified": 2,
+            "decision_makers": 1,
+            "new_hires": 0,
         }
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_contact_enrichment_batch(min_fit_score=60)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_contact_enrichment_batch(min_fit_score=60))
 
         assert result["prospects_processed"] == 1
         assert result["total_contacts_found"] == 3
@@ -700,9 +661,7 @@ class TestRunContactEnrichmentBatch:
         )
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_contact_enrichment_batch(min_fit_score=60)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_contact_enrichment_batch(min_fit_score=60))
 
         assert result["skipped_already_enriched"] == 1
         assert result["prospects_processed"] == 0
@@ -717,9 +676,7 @@ class TestRunContactEnrichmentBatch:
         mock_enrich.side_effect = Exception("API error")
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(
-                run_contact_enrichment_batch(min_fit_score=60)
-            )
+            result = asyncio.get_event_loop().run_until_complete(run_contact_enrichment_batch(min_fit_score=60))
 
         assert result["errors"] == 1
 
@@ -739,8 +696,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "jsmith@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{f}{last}"
@@ -754,8 +710,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "j.smith@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{f}.{last}"
@@ -769,8 +724,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "john_smith@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{first}_{last}"
@@ -784,8 +738,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "smith.john@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{last}.{first}"
@@ -799,8 +752,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "john@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{first}"
@@ -814,8 +766,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "xq7@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern is None
@@ -831,8 +782,7 @@ class TestDomainPatternCoverageGaps:
             {"email": "john.smith@corp.com", "first_name": "John", "last_name": "Smith"},
         ]
 
-        with patch("app.connectors.hunter_client.find_domain_emails",
-                   new_callable=AsyncMock, return_value=contacts):
+        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
             pattern = await get_domain_pattern_hunter("corp.com")
 
         assert pattern == "{first}.{last}"
@@ -844,7 +794,7 @@ class TestEnrichContactsCoverageGaps:
     @pytest.mark.asyncio
     async def test_new_hire_counted(self, db_session):
         """Line 427: new_hires counter incremented."""
-        from app.services.prospect_contacts import enrich_prospect_contacts, CreditTracker
+        from app.services.prospect_contacts import CreditTracker, enrich_prospect_contacts
 
         recent_start = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         prospect = _make_prospect(db_session, domain="newhire.com")
@@ -852,7 +802,8 @@ class TestEnrichContactsCoverageGaps:
         contacts = [
             {
                 "name": "New Hire",
-                "email": "new@newhire.com", "title": "Buyer",
+                "email": "new@newhire.com",
+                "title": "Buyer",
                 "linkedin_url": None,
                 "seniority_level": "executor",
                 "started_current_role_at": recent_start,
@@ -861,12 +812,15 @@ class TestEnrichContactsCoverageGaps:
 
         tracker = CreditTracker(apollo_limit=100, hunter_search_limit=25, hunter_verify_limit=50)
 
-        with patch("app.services.prospect_contacts.search_contacts_apollo",
-                   new_callable=AsyncMock, return_value=contacts):
-            with patch("app.services.prospect_contacts.verify_email_hunter",
-                       new_callable=AsyncMock):
-                with patch("app.services.prospect_contacts.get_domain_pattern_hunter",
-                           new_callable=AsyncMock, return_value=None):
+        with patch(
+            "app.services.prospect_contacts.search_contacts_apollo", new_callable=AsyncMock, return_value=contacts
+        ):
+            with patch("app.services.prospect_contacts.verify_email_hunter", new_callable=AsyncMock):
+                with patch(
+                    "app.services.prospect_contacts.get_domain_pattern_hunter",
+                    new_callable=AsyncMock,
+                    return_value=None,
+                ):
                     stats = await enrich_prospect_contacts(prospect.id, db_session, credit_tracker=tracker)
 
         assert stats["new_hires"] >= 1
@@ -874,7 +828,7 @@ class TestEnrichContactsCoverageGaps:
     @pytest.mark.asyncio
     async def test_credit_limit_stops_batch(self, db_session):
         """Lines 517-519: Apollo credit exhaustion stops the batch."""
-        from app.services.prospect_contacts import run_contact_enrichment_batch, CreditTracker
+        from app.services.prospect_contacts import CreditTracker, run_contact_enrichment_batch
 
         _make_prospect(db_session, domain="credit1.com", fit_score=80)
         _make_prospect(db_session, domain="credit2.com", fit_score=80)
@@ -883,8 +837,6 @@ class TestEnrichContactsCoverageGaps:
 
         with patch("app.database.SessionLocal", return_value=db_session):
             with patch("app.services.prospect_contacts.CreditTracker", return_value=tracker):
-                result = asyncio.get_event_loop().run_until_complete(
-                    run_contact_enrichment_batch(min_fit_score=60)
-                )
+                result = asyncio.get_event_loop().run_until_complete(run_contact_enrichment_batch(min_fit_score=60))
 
         assert result["skipped_credit_limit"] > 0

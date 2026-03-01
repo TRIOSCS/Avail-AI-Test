@@ -99,32 +99,54 @@ async def send_batch_rfq(
 
         if isinstance(send_result, Exception):
             logger.error(f"Send error to {email}: {send_result}")
-            results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
-                            "status": "error", "error": str(send_result)[:200]})
+            results.append(
+                {
+                    "vendor_name": group["vendor_name"],
+                    "vendor_email": email,
+                    "status": "error",
+                    "error": str(send_result)[:200],
+                }
+            )
             continue
 
         if "error" in send_result:
             logger.error(f"Send failed to {email}: {send_result}")
-            results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
-                            "status": "failed", "error": str(send_result.get("detail", ""))[:200]})
+            results.append(
+                {
+                    "vendor_name": group["vendor_name"],
+                    "vendor_email": email,
+                    "status": "failed",
+                    "error": str(send_result.get("detail", ""))[:200],
+                }
+            )
             continue
 
         contact = Contact(
-            requisition_id=requisition_id, user_id=user_id, contact_type="email",
+            requisition_id=requisition_id,
+            user_id=user_id,
+            contact_type="email",
             vendor_name=group["vendor_name"],
             vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
             vendor_contact=email,
-            parts_included=group.get("parts", []), subject=tagged_subject,
-            details=group["body"], status="sent",
+            parts_included=group.get("parts", []),
+            subject=tagged_subject,
+            details=group["body"],
+            status="sent",
             status_updated_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
         db.add(contact)
         db.flush()
         contacts_to_lookup.append((contact, tagged_subject))
-        results.append({"id": contact.id, "vendor_name": contact.vendor_name,
-                        "vendor_email": email, "parts_count": len(contact.parts_included),
-                        "status": "sent"})
+        results.append(
+            {
+                "id": contact.id,
+                "vendor_name": contact.vendor_name,
+                "vendor_email": email,
+                "parts_count": len(contact.parts_included),
+                "status": "sent",
+            }
+        )
 
     # Batch-lookup sent message IDs in parallel for reply matching
     if contacts_to_lookup:
@@ -198,9 +220,7 @@ def log_phone_contact(
     }
 
 
-async def poll_inbox(
-    token: str, db: Session, requisition_id: int = None, scanned_by_user_id: int = None
-) -> list[dict]:
+async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanned_by_user_id: int = None) -> list[dict]:
     """Check inbox for vendor replies. Smart-matches to outbound RFQs.
 
     Matching priority:
@@ -296,11 +316,7 @@ async def poll_inbox(
     already_processed = set()
     if incoming_ids:
         # Check both VendorResponse and ProcessedMessage tables
-        vr_rows = (
-            db.query(VendorResponse.message_id)
-            .filter(VendorResponse.message_id.in_(incoming_ids))
-            .all()
-        )
+        vr_rows = db.query(VendorResponse.message_id).filter(VendorResponse.message_id.in_(incoming_ids)).all()
         pm_rows = (
             db.query(ProcessedMessage.message_id)
             .filter(
@@ -380,9 +396,7 @@ async def poll_inbox(
                 req_contacts = [
                     c
                     for c in all_contacts
-                    if c.requisition_id == avail_req_id
-                    and c.vendor_contact
-                    and c.vendor_contact.lower() == email_addr
+                    if c.requisition_id == avail_req_id and c.vendor_contact and c.vendor_contact.lower() == email_addr
                 ]
                 if req_contacts:
                     matched_contact = req_contacts[0]
@@ -458,9 +472,7 @@ async def poll_inbox(
                     "received_at": vr.received_at,
                     "message_id": msg_id,
                     "match_method": match_method,
-                    "matched_contact_id": matched_contact.id
-                    if matched_contact
-                    else None,
+                    "matched_contact_id": matched_contact.id if matched_contact else None,
                     "matched_requisition_id": matched_req_id,
                 }
             )
@@ -735,19 +747,17 @@ async def _submit_parse_batch(
     for vr in pending:
         cid = f"vr-{vr.id}"
         body_truncated = _clean_email_body(vr.body or "")[:4000]
-        prompt = (
-            f"Vendor: {vr.vendor_name}\n"
-            f"Subject: {vr.subject}\n\n"
-            f"Vendor reply:\n{body_truncated}"
+        prompt = f"Vendor: {vr.vendor_name}\nSubject: {vr.subject}\n\nVendor reply:\n{body_truncated}"
+        requests.append(
+            {
+                "custom_id": cid,
+                "prompt": prompt,
+                "schema": RESPONSE_PARSE_SCHEMA,
+                "system": SYSTEM_PROMPT,
+                "model_tier": "fast",
+                "max_tokens": 1024,
+            }
         )
-        requests.append({
-            "custom_id": cid,
-            "prompt": prompt,
-            "schema": RESPONSE_PARSE_SCHEMA,
-            "system": SYSTEM_PROMPT,
-            "model_tier": "fast",
-            "max_tokens": 1024,
-        })
         request_map[cid] = vr.id
 
     batch_id = await claude_batch_submit(requests)
@@ -799,6 +809,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
         try:
             from .services.response_parser import extract_draft_offers
+
             draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
             req = db.get(Requisition, vr.requisition_id)
             owner_id = vr.scanned_by_user_id
@@ -824,10 +835,14 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 raw_mpn = draft.get("mpn") or ""
                 mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
                 # Dedup: check if offer already exists from this vendor response
-                existing = db.query(Offer.id).filter(
-                    Offer.vendor_response_id == vr.id,
-                    Offer.mpn == draft.get("mpn", ""),
-                ).first()
+                existing = (
+                    db.query(Offer.id)
+                    .filter(
+                        Offer.vendor_response_id == vr.id,
+                        Offer.mpn == draft.get("mpn", ""),
+                    )
+                    .first()
+                )
                 if existing:
                     continue
 
@@ -864,24 +879,32 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
 
                 # Deduplicated notification — update existing if unread, else create new
                 if owner_id:
-                    existing_notif = db.query(ActivityLog).filter(
-                        ActivityLog.user_id == owner_id,
-                        ActivityLog.activity_type == "offer_pending_review",
-                        ActivityLog.requisition_id == vr.requisition_id,
-                        ActivityLog.dismissed_at.is_(None),
-                    ).first()
+                    existing_notif = (
+                        db.query(ActivityLog)
+                        .filter(
+                            ActivityLog.user_id == owner_id,
+                            ActivityLog.activity_type == "offer_pending_review",
+                            ActivityLog.requisition_id == vr.requisition_id,
+                            ActivityLog.dismissed_at.is_(None),
+                        )
+                        .first()
+                    )
                     if existing_notif:
-                        existing_notif.subject = f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}"
+                        existing_notif.subject = (
+                            f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}"
+                        )
                         existing_notif.created_at = datetime.now(timezone.utc)
                     else:
-                        db.add(ActivityLog(
-                            user_id=owner_id,
-                            activity_type="offer_pending_review",
-                            channel="system",
-                            requisition_id=vr.requisition_id,
-                            contact_name=vr.vendor_name,
-                            subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
-                        ))
+                        db.add(
+                            ActivityLog(
+                                user_id=owner_id,
+                                activity_type="offer_pending_review",
+                                channel="system",
+                                requisition_id=vr.requisition_id,
+                                contact_name=vr.vendor_name,
+                                subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
+                            )
+                        )
         except Exception as e:
             logger.warning(f"Failed to auto-create draft offers: {e}")
 
@@ -894,11 +917,7 @@ async def process_batch_results(db: Session) -> int:
     from app.services.response_parser import _normalize_parsed_parts
     from app.utils.claude_client import claude_batch_results
 
-    pending_batches = (
-        db.query(PendingBatch)
-        .filter(PendingBatch.status == "processing")
-        .all()
-    )
+    pending_batches = db.query(PendingBatch).filter(PendingBatch.status == "processing").all()
 
     if not pending_batches:
         return 0

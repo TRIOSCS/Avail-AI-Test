@@ -63,9 +63,7 @@ async def log_call(
 
 
 @router.get("/api/requisitions/{req_id}/contacts")
-async def list_contacts(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_contacts(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     contacts = (
         db.query(Contact)
         .options(joinedload(Contact.user))
@@ -121,22 +119,13 @@ async def poll(
     db: Session = Depends(get_db),
 ):
     token = await require_fresh_token(request, db)
-    results = await poll_inbox(
-        token, db, requisition_id=req_id, scanned_by_user_id=user.id
-    )
+    results = await poll_inbox(token, db, requisition_id=req_id, scanned_by_user_id=user.id)
     return {"responses": results}
 
 
 @router.get("/api/requisitions/{req_id}/responses")
-async def list_responses(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    resps = (
-        db.query(VendorResponse)
-        .filter_by(requisition_id=req_id)
-        .order_by(VendorResponse.created_at.desc())
-        .all()
-    )
+async def list_responses(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    resps = db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.created_at.desc()).all()
     return [
         {
             "id": r.id,
@@ -146,18 +135,14 @@ async def list_responses(
             "status": r.status,
             "parsed_data": r.parsed_data,
             "confidence": r.confidence,
-            "received_at": r.received_at.isoformat()
-            if isinstance(r.received_at, datetime)
-            else r.received_at,
+            "received_at": r.received_at.isoformat() if isinstance(r.received_at, datetime) else r.received_at,
         }
         for r in resps
     ]
 
 
 @router.get("/api/requisitions/{req_id}/activity")
-async def get_activity(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def get_activity(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
     contacts = (
         db.query(Contact)
@@ -167,10 +152,7 @@ async def get_activity(
         .all()
     )
     responses = (
-        db.query(VendorResponse)
-        .filter_by(requisition_id=req_id)
-        .order_by(VendorResponse.received_at.desc())
-        .all()
+        db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.received_at.desc()).all()
     )
     manual_activities = (
         db.query(ActivityLog)
@@ -215,9 +197,7 @@ async def get_activity(
                 "created_at": c.created_at.isoformat() if c.created_at else None,
                 "user_name": c.user.name if c.user else "",
                 "status": c.status or "sent",
-                "status_updated_at": c.status_updated_at.isoformat()
-                if c.status_updated_at
-                else None,
+                "status_updated_at": c.status_updated_at.isoformat() if c.status_updated_at else None,
             }
         )
         vendors[vk]["contact_types"].add(c.contact_type)
@@ -230,11 +210,7 @@ async def get_activity(
     for r in responses:
         # Group under the linked contact's vendor name when available,
         # so replies from "John Smith" appear under "Acme Corp" thread
-        group_name = (
-            contact_vendor_map.get(r.contact_id, r.vendor_name)
-            if r.contact_id
-            else r.vendor_name
-        )
+        group_name = contact_vendor_map.get(r.contact_id, r.vendor_name) if r.contact_id else r.vendor_name
         vk = normalize_vendor_name(group_name)
         if vk not in vendors:
             vendors[vk] = {
@@ -255,9 +231,7 @@ async def get_activity(
                 "parsed_data": r.parsed_data,
                 "confidence": r.confidence,
                 "classification": r.classification,
-                "received_at": r.received_at.isoformat()
-                if isinstance(r.received_at, datetime)
-                else r.received_at,
+                "received_at": r.received_at.isoformat() if isinstance(r.received_at, datetime) else r.received_at,
             }
         )
 
@@ -299,11 +273,7 @@ async def get_activity(
     unresolved = [vk for vk in vendors if vk not in vendor_card_ids]
     if unresolved:
         name_list = [vk for vk in unresolved]
-        cards = (
-            db.query(VendorCard)
-            .filter(VendorCard.normalized_name.in_(name_list))
-            .all()
-        )
+        cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(name_list)).all()
         for c in cards:
             nk = c.normalized_name
             if nk in vendors and nk not in vendor_card_ids:
@@ -313,11 +283,7 @@ async def get_activity(
     vendor_phones = {}
     all_card_ids = [cid for cid in vendor_card_ids.values() if cid]
     if all_card_ids:
-        phone_cards = (
-            db.query(VendorCard)
-            .filter(VendorCard.id.in_(all_card_ids))
-            .all()
-        )
+        phone_cards = db.query(VendorCard).filter(VendorCard.id.in_(all_card_ids)).all()
         for pc in phone_cards:
             phones = []
             if pc.phones:
@@ -350,11 +316,7 @@ async def get_activity(
                 vendor_status = "quoted"
             elif "declined" in contact_statuses:
                 # Has responses, at least one declined
-                vendor_status = (
-                    "replied"
-                    if (contact_statuses - {"declined", "sent", "opened"})
-                    else "declined"
-                )
+                vendor_status = "replied" if (contact_statuses - {"declined", "sent", "opened"}) else "declined"
             else:
                 vendor_status = "replied"
         elif "responded" in contact_statuses:
@@ -376,15 +338,9 @@ async def get_activity(
                 "contact_count": len(v["contacts"]),
                 "contact_types": sorted(v["contact_types"]),
                 "all_parts": sorted(v["all_parts"]),
-                "last_contacted_at": last_contact["created_at"]
-                if last_contact
-                else None,
-                "last_contacted_by": last_contact["user_name"]
-                if last_contact
-                else None,
-                "last_contact_email": last_contact["vendor_contact"]
-                if last_contact
-                else None,
+                "last_contacted_at": last_contact["created_at"] if last_contact else None,
+                "last_contacted_by": last_contact["user_name"] if last_contact else None,
+                "last_contact_email": last_contact["vendor_contact"] if last_contact else None,
                 "contacts": v["contacts"],
                 "responses": v["responses"],
                 "activities": v["activities"],
@@ -472,12 +428,14 @@ async def rfq_prepare(
             if pc_norm not in past_contacts_by_norm:
                 past_contacts_by_norm[pc_norm] = []
             if len(past_contacts_by_norm[pc_norm]) < 5:
-                past_contacts_by_norm[pc_norm].append({
-                    "req_id": pc.requisition_id,
-                    "parts": pc.parts_included or [],
-                    "date": pc.created_at.isoformat() if pc.created_at else None,
-                    "email": pc.vendor_contact,
-                })
+                past_contacts_by_norm[pc_norm].append(
+                    {
+                        "req_id": pc.requisition_id,
+                        "parts": pc.parts_included or [],
+                        "date": pc.created_at.isoformat() if pc.created_at else None,
+                        "email": pc.vendor_contact,
+                    }
+                )
 
     results = []
     for v in vendors[:50]:
@@ -496,9 +454,7 @@ async def rfq_prepare(
         }
 
         # Use past RFQ emails when vendor card has no emails (before enrichment)
-        past_emails = list(dict.fromkeys(
-            pc["email"] for pc in past_contacts if pc.get("email")
-        ))
+        past_emails = list(dict.fromkeys(pc["email"] for pc in past_contacts if pc.get("email")))
 
         if card and card.emails:
             base.update(
@@ -523,9 +479,7 @@ async def rfq_prepare(
         results.append(base)
 
     # ── Auto-lookup contacts for vendors missing emails (full waterfall) ──
-    needs_lookup_indices = [
-        i for i, r in enumerate(results) if r.get("needs_lookup")
-    ]
+    needs_lookup_indices = [i for i, r in enumerate(results) if r.get("needs_lookup")]
     if needs_lookup_indices:
         from ..enrichment_service import find_suggested_contacts
         from ..vendor_utils import merge_emails_into_card, merge_phones_into_card
@@ -546,18 +500,10 @@ async def rfq_prepare(
                         ),
                         timeout=15,
                     )
-                    emails = list(dict.fromkeys(
-                        c["email"] for c in contacts
-                        if c.get("email")
-                    ))
-                    phones = list(dict.fromkeys(
-                        c["phone"] for c in contacts
-                        if c.get("phone")
-                    ))
+                    emails = list(dict.fromkeys(c["email"] for c in contacts if c.get("email")))
+                    phones = list(dict.fromkeys(c["phone"] for c in contacts if c.get("phone")))
                     # Track which sources contributed
-                    sources = sorted(set(
-                        c.get("source", "") for c in contacts if c.get("email")
-                    ))
+                    sources = sorted(set(c.get("source", "") for c in contacts if c.get("email")))
                     if emails:
                         r["emails"] = emails
                         r["phones"] = phones
@@ -587,9 +533,7 @@ async def rfq_prepare(
 
 # ── Follow-Up Detection ───────────────────────────────────────────────
 @router.get("/api/follow-ups")
-async def get_follow_ups(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def get_follow_ups(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Return contacts that need follow-up: sent/opened > N days ago with no response."""
     from ..config import settings as cfg
 
@@ -603,9 +547,7 @@ async def get_follow_ups(
     )
     # Sales/trader sees only their own reqs' follow-ups
     if user.role in ("sales", "trader"):
-        stale_contacts = stale_contacts.join(Requisition).filter(
-            Requisition.created_by == user.id
-        )
+        stale_contacts = stale_contacts.join(Requisition).filter(Requisition.created_by == user.id)
 
     stale = stale_contacts.order_by(Contact.created_at.asc()).limit(500).all()
 
@@ -613,11 +555,7 @@ async def get_follow_ups(
     req_ids = {c.requisition_id for c in stale}
     req_names: dict[int, str] = {}
     if req_ids:
-        name_rows = (
-            db.query(Requisition.id, Requisition.name)
-            .filter(Requisition.id.in_(req_ids))
-            .all()
-        )
+        name_rows = db.query(Requisition.id, Requisition.name).filter(Requisition.id.in_(req_ids)).all()
         req_names = {r.id: r.name for r in name_rows}
 
     results = []
@@ -644,9 +582,7 @@ async def get_follow_ups(
 
 
 @router.get("/api/follow-ups/summary")
-async def follow_up_summary(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def follow_up_summary(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Cross-req follow-up counts for badge display."""
     from ..config import settings as cfg
 
@@ -672,9 +608,7 @@ async def follow_up_summary(
 
     rows = query.all()
     total = sum(r.stale_count for r in rows)
-    by_req = [
-        {"req_id": r.id, "req_name": r.name, "count": r.stale_count} for r in rows
-    ]
+    by_req = [{"req_id": r.id, "req_name": r.name, "count": r.stale_count} for r in rows]
 
     return {"total": total, "by_requisition": by_req}
 
@@ -705,11 +639,7 @@ async def send_follow_up(
 
     html_body = _build_html_body(body)
 
-    subject = (
-        f"Re: {contact.subject}"
-        if contact.subject
-        else "Follow-Up — RFQ from TRIO Supply Chain"
-    )
+    subject = f"Re: {contact.subject}" if contact.subject else "Follow-Up — RFQ from TRIO Supply Chain"
 
     payload = {
         "message": {
@@ -761,14 +691,17 @@ async def send_follow_up_batch(
         subject = f"Re: {contact.subject}" if contact.subject else "Follow-Up — RFQ from TRIO Supply Chain"
 
         try:
-            await gc.post_json("/me/sendMail", {
-                "message": {
-                    "subject": subject,
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+            await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": subject,
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+                    },
+                    "saveToSentItems": "true",
                 },
-                "saveToSentItems": "true",
-            })
+            )
             contact.status = "sent"
             contact.status_updated_at = datetime.now(timezone.utc)
             results.append({"contact_id": cid, "status": "sent"})
@@ -798,11 +731,7 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
         norm = normalize_vendor_name(name)
         norm_map.setdefault(norm, []).append(name)
 
-    cards = (
-        db.query(VendorCard)
-        .filter(VendorCard.normalized_name.in_(norm_map.keys()))
-        .all()
-    )
+    cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_map.keys())).all()
     card_by_norm = {c.normalized_name: c for c in cards}
 
     # Auto-create cards for vendors we haven't seen before
@@ -825,11 +754,7 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
 
     # Batch fetch reviews
     card_ids = [c.id for c in cards]
-    all_reviews = (
-        db.query(VendorReview).filter(VendorReview.vendor_card_id.in_(card_ids)).all()
-        if card_ids
-        else []
-    )
+    all_reviews = db.query(VendorReview).filter(VendorReview.vendor_card_id.in_(card_ids)).all() if card_ids else []
     reviews_by_card = {}
     for r in all_reviews:
         reviews_by_card.setdefault(r.vendor_card_id, []).append(r)
@@ -843,13 +768,9 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             "card_id": card.id,
             "avg_rating": avg,
             "review_count": len(revs),
-            "vendor_score": round(card.vendor_score, 1)
-            if card.vendor_score is not None
-            else None,
+            "vendor_score": round(card.vendor_score, 1) if card.vendor_score is not None else None,
             "is_new_vendor": card.is_new_vendor if card.is_new_vendor is not None else True,
-            "engagement_score": round(card.vendor_score, 1)
-            if card.vendor_score is not None
-            else None,
+            "engagement_score": round(card.vendor_score, 1) if card.vendor_score is not None else None,
             "has_emails": bool(card.emails),
             "email_count": len(card.emails or []),
             "is_blacklisted": card.is_blacklisted or False,
@@ -862,19 +783,11 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
     websites_by_norm = {}
     for group in results.values():
         for s in group.get("sightings", []):
-            if (
-                not s.get("is_historical")
-                and not s.get("is_material_history")
-                and s.get("vendor_name")
-            ):
+            if not s.get("is_historical") and not s.get("is_material_history") and s.get("vendor_name"):
                 n = normalize_vendor_name(s["vendor_name"])
-                mpns_by_norm.setdefault(n, set()).add(
-                    (s.get("mpn_matched") or "").lower()
-                )
+                mpns_by_norm.setdefault(n, set()).add((s.get("mpn_matched") or "").lower())
                 if s.get("vendor_email"):
-                    emails_by_norm.setdefault(n, set()).add(
-                        s["vendor_email"].strip().lower()
-                    )
+                    emails_by_norm.setdefault(n, set()).add(s["vendor_email"].strip().lower())
                 if s.get("vendor_phone"):
                     phones_by_norm.setdefault(n, set()).add(s["vendor_phone"].strip())
                 if s.get("vendor_url"):

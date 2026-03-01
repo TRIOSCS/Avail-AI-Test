@@ -65,6 +65,7 @@ def _tier(value, thresholds):
 #  BUYER AVAIL SCORE
 # ══════════════════════════════════════════════════════════════════════
 
+
 def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     """Compute all 10 buyer metrics for a given month.
 
@@ -82,25 +83,35 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     # ── Fetch user's reqs for the month ──
     # Include reqs the user created, sent RFQs on, or logged offers for
     created_ids = {
-        rid for (rid,) in db.query(Requisition.id).filter(
+        rid
+        for (rid,) in db.query(Requisition.id)
+        .filter(
             Requisition.created_by == user_id,
             Requisition.created_at >= start_dt,
             Requisition.created_at < end_dt,
-        ).all()
+        )
+        .all()
     }
     rfq_req_ids = {
-        rid for (rid,) in db.query(Contact.requisition_id.distinct()).filter(
+        rid
+        for (rid,) in db.query(Contact.requisition_id.distinct())
+        .filter(
             Contact.user_id == user_id,
             Contact.created_at >= start_dt,
             Contact.created_at < end_dt,
-        ).all()
+        )
+        .all()
     }
     offer_req_ids = {
-        rid for (rid,) in db.query(Offer.requisition_id.distinct()).filter(
+        rid
+        for (rid,) in db.query(Offer.requisition_id.distinct())
+        .filter(
             Offer.entered_by_id == user_id,
             Offer.created_at >= start_dt,
             Offer.created_at < end_dt,
-        ).all() if rid is not None
+        )
+        .all()
+        if rid is not None
     }
     all_req_ids = created_ids | rfq_req_ids | offer_req_ids
     user_reqs = db.query(Requisition).filter(Requisition.id.in_(all_req_ids)).all() if all_req_ids else []
@@ -109,11 +120,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in (
-        db.query(Quote.line_items)
-        .filter(Quote.status.in_(["sent", "won", "lost"]))
-        .all()
-    ):
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -195,12 +202,19 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     # ── O3: Win Rate ──
     won = (
         db.query(sqlfunc.count(Quote.id))
-        .filter(Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt)
+        .filter(
+            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+        )
         .scalar()
     ) or 0
     lost = (
         db.query(sqlfunc.count(Quote.id))
-        .filter(Quote.created_by_id == user_id, Quote.result == "lost", Quote.result_at >= start_dt, Quote.result_at < end_dt)
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == "lost",
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
         .scalar()
     ) or 0
     win_pct = round(won / (won + lost) * 100) if (won + lost) else 0
@@ -236,17 +250,37 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     return {
         "role_type": "buyer",
         "qualified": total_reqs >= MIN_REQS_BUYER,
-        "b1_score": b1_score, "b1_label": "Speed to Source", "b1_raw": b1_raw,
-        "b2_score": b2_score, "b2_label": "Multi-Source", "b2_raw": b2_raw,
-        "b3_score": b3_score, "b3_label": "Vendor Follow-Up", "b3_raw": b3_raw,
-        "b4_score": b4_score, "b4_label": "Pipeline Hygiene", "b4_raw": b4_raw,
-        "b5_score": b5_score, "b5_label": "Stock Lists", "b5_raw": b5_raw,
+        "b1_score": b1_score,
+        "b1_label": "Speed to Source",
+        "b1_raw": b1_raw,
+        "b2_score": b2_score,
+        "b2_label": "Multi-Source",
+        "b2_raw": b2_raw,
+        "b3_score": b3_score,
+        "b3_label": "Vendor Follow-Up",
+        "b3_raw": b3_raw,
+        "b4_score": b4_score,
+        "b4_label": "Pipeline Hygiene",
+        "b4_raw": b4_raw,
+        "b5_score": b5_score,
+        "b5_label": "Stock Lists",
+        "b5_raw": b5_raw,
         "behavior_total": behavior_total,
-        "o1_score": o1_score, "o1_label": "Sourcing Ratio", "o1_raw": o1_raw,
-        "o2_score": o2_score, "o2_label": "Offer→Quote", "o2_raw": o2_raw,
-        "o3_score": o3_score, "o3_label": "Win Rate", "o3_raw": o3_raw,
-        "o4_score": o4_score, "o4_label": "BP Completion", "o4_raw": o4_raw,
-        "o5_score": o5_score, "o5_label": "Vendor Diversity", "o5_raw": o5_raw,
+        "o1_score": o1_score,
+        "o1_label": "Sourcing Ratio",
+        "o1_raw": o1_raw,
+        "o2_score": o2_score,
+        "o2_label": "Offer→Quote",
+        "o2_raw": o2_raw,
+        "o3_score": o3_score,
+        "o3_label": "Win Rate",
+        "o3_raw": o3_raw,
+        "o4_score": o4_score,
+        "o4_label": "BP Completion",
+        "o4_raw": o4_raw,
+        "o5_score": o5_score,
+        "o5_label": "Vendor Diversity",
+        "o5_raw": o5_raw,
         "outcome_total": outcome_total,
         "total_score": total_score,
     }
@@ -408,6 +442,7 @@ def _buyer_b4_pipeline_hygiene(db, req_ids, user_reqs):
 #  SALES AVAIL SCORE
 # ══════════════════════════════════════════════════════════════════════
 
+
 def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     """Compute all 10 sales metrics for a given month."""
     month_start = month.replace(day=1)
@@ -423,19 +458,15 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     # ── B1: Account Coverage ──
     # % of owned accounts with outbound activity this month
     owned_company_ids = [
-        r[0] for r in
-        db.query(CustomerSite.company_id)
-        .filter(CustomerSite.owner_id == user_id)
-        .distinct()
-        .all()
+        r[0] for r in db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user_id).distinct().all()
     ]
     total_owned = len(owned_company_ids)
 
     contacted_ids = set()
     if owned_company_ids:
         contacted_ids = {
-            r[0] for r in
-            db.query(ActivityLog.company_id)
+            r[0]
+            for r in db.query(ActivityLog.company_id)
             .filter(
                 ActivityLog.user_id == user_id,
                 ActivityLog.activity_type.in_(outbound_types),
@@ -511,12 +542,19 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     # ── O1: Win Rate ──
     won = (
         db.query(sqlfunc.count(Quote.id))
-        .filter(Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt)
+        .filter(
+            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+        )
         .scalar()
     ) or 0
     lost = (
         db.query(sqlfunc.count(Quote.id))
-        .filter(Quote.created_by_id == user_id, Quote.result == "lost", Quote.result_at >= start_dt, Quote.result_at < end_dt)
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == "lost",
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
         .scalar()
     ) or 0
     win_pct = round(won / (won + lost) * 100) if (won + lost) else 0
@@ -527,7 +565,9 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     # We score absolute revenue here; normalization happens at ranking time
     revenue = (
         db.query(sqlfunc.coalesce(sqlfunc.sum(Quote.won_revenue), 0))
-        .filter(Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt)
+        .filter(
+            Quote.created_by_id == user_id, Quote.result == "won", Quote.result_at >= start_dt, Quote.result_at < end_dt
+        )
         .scalar()
     ) or 0
     revenue = float(revenue)
@@ -601,17 +641,37 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     return {
         "role_type": "sales",
         "qualified": total_activities >= MIN_ACTIVITIES_SALES,
-        "b1_score": b1_score, "b1_label": "Account Coverage", "b1_raw": b1_raw,
-        "b2_score": b2_score, "b2_label": "Outreach Consistency", "b2_raw": b2_raw,
-        "b3_score": b3_score, "b3_label": "Quote Follow-Up", "b3_raw": b3_raw,
-        "b4_score": b4_score, "b4_label": "Proactive Selling", "b4_raw": b4_raw,
-        "b5_score": b5_score, "b5_label": "New Business", "b5_raw": b5_raw,
+        "b1_score": b1_score,
+        "b1_label": "Account Coverage",
+        "b1_raw": b1_raw,
+        "b2_score": b2_score,
+        "b2_label": "Outreach Consistency",
+        "b2_raw": b2_raw,
+        "b3_score": b3_score,
+        "b3_label": "Quote Follow-Up",
+        "b3_raw": b3_raw,
+        "b4_score": b4_score,
+        "b4_label": "Proactive Selling",
+        "b4_raw": b4_raw,
+        "b5_score": b5_score,
+        "b5_label": "New Business",
+        "b5_raw": b5_raw,
         "behavior_total": behavior_total,
-        "o1_score": o1_score, "o1_label": "Win Rate", "o1_raw": o1_raw,
-        "o2_score": o2_score, "o2_label": "Revenue", "o2_raw": o2_raw,
-        "o3_score": o3_score, "o3_label": "Quote Volume", "o3_raw": o3_raw,
-        "o4_score": o4_score, "o4_label": "Proactive Conversion", "o4_raw": o4_raw,
-        "o5_score": o5_score, "o5_label": "Strategic Wins", "o5_raw": o5_raw,
+        "o1_score": o1_score,
+        "o1_label": "Win Rate",
+        "o1_raw": o1_raw,
+        "o2_score": o2_score,
+        "o2_label": "Revenue",
+        "o2_raw": o2_raw,
+        "o3_score": o3_score,
+        "o3_label": "Quote Volume",
+        "o3_raw": o3_raw,
+        "o4_score": o4_score,
+        "o4_label": "Proactive Conversion",
+        "o4_raw": o4_raw,
+        "o5_score": o5_score,
+        "o5_label": "Strategic Wins",
+        "o5_raw": o5_raw,
         "outcome_total": outcome_total,
         "total_score": total_score,
     }
@@ -654,8 +714,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             .filter(
                 # Match by company through the quote's customer_site
                 ActivityLog.company_id.in_(
-                    db.query(CustomerSite.company_id)
-                    .filter(CustomerSite.id == q.customer_site_id)
+                    db.query(CustomerSite.company_id).filter(CustomerSite.id == q.customer_site_id)
                 )
             )
             .first()
@@ -671,6 +730,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
 # ══════════════════════════════════════════════════════════════════════
 #  BATCH COMPUTE + RANK + BONUS
 # ══════════════════════════════════════════════════════════════════════
+
 
 def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
     """Compute Avail Scores for all buyers and salespeople, rank, assign bonuses.
@@ -767,13 +827,44 @@ def _upsert_snapshot(db: Session, result: dict, month: date) -> int:
     if not existing:
         db.add(snap)
 
-    for key in ["b1_score", "b1_label", "b1_raw", "b2_score", "b2_label", "b2_raw",
-                "b3_score", "b3_label", "b3_raw", "b4_score", "b4_label", "b4_raw",
-                "b5_score", "b5_label", "b5_raw", "behavior_total",
-                "o1_score", "o1_label", "o1_raw", "o2_score", "o2_label", "o2_raw",
-                "o3_score", "o3_label", "o3_raw", "o4_score", "o4_label", "o4_raw",
-                "o5_score", "o5_label", "o5_raw", "outcome_total",
-                "total_score", "rank", "qualified", "bonus_amount"]:
+    for key in [
+        "b1_score",
+        "b1_label",
+        "b1_raw",
+        "b2_score",
+        "b2_label",
+        "b2_raw",
+        "b3_score",
+        "b3_label",
+        "b3_raw",
+        "b4_score",
+        "b4_label",
+        "b4_raw",
+        "b5_score",
+        "b5_label",
+        "b5_raw",
+        "behavior_total",
+        "o1_score",
+        "o1_label",
+        "o1_raw",
+        "o2_score",
+        "o2_label",
+        "o2_raw",
+        "o3_score",
+        "o3_label",
+        "o3_raw",
+        "o4_score",
+        "o4_label",
+        "o4_raw",
+        "o5_score",
+        "o5_label",
+        "o5_raw",
+        "outcome_total",
+        "total_score",
+        "rank",
+        "qualified",
+        "bonus_amount",
+    ]:
         setattr(snap, key, result.get(key))
 
     return 1
@@ -782,6 +873,7 @@ def _upsert_snapshot(db: Session, result: dict, month: date) -> int:
 # ══════════════════════════════════════════════════════════════════════
 #  API QUERY
 # ══════════════════════════════════════════════════════════════════════
+
 
 def get_avail_scores(db: Session, role_type: str, month: date) -> list[dict]:
     """Return ranked Avail Scores for a role type and month."""

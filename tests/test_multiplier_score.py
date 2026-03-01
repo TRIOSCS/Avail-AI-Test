@@ -9,10 +9,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
-from datetime import date, datetime, timedelta, timezone
-
-import pytest
-from sqlalchemy.orm import Session
+from datetime import date, datetime, timezone
 from unittest.mock import patch
 
 from app.models import (
@@ -25,14 +22,11 @@ from app.models import (
     Quote,
     Requisition,
     User,
-    VendorCard,
 )
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot, StockListHash
 from app.services.multiplier_score_service import (
     BONUS_1ST,
     BONUS_2ND,
-    BONUS_3RD,
-    MIN_OFFERS_BUYER,
     PTS_NEW_ACCOUNT,
     PTS_OFFER_BASE,
     PTS_OFFER_BUYPLAN,
@@ -44,8 +38,6 @@ from app.services.multiplier_score_service import (
     PTS_QUOTE_WON,
     PTS_RFQ_SENT,
     PTS_STOCK_LIST,
-    QUALIFY_SCORE_1ST,
-    QUALIFY_SCORE_2ND,
     _attach_avail_scores_and_rank,
     compute_all_multiplier_scores,
     compute_buyer_multiplier,
@@ -53,8 +45,6 @@ from app.services.multiplier_score_service import (
     determine_bonus_winners,
     get_multiplier_scores,
 )
-from tests.conftest import engine
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -95,8 +85,18 @@ def _make_offer(db, req_id, user_id, created_at=None):
     return o
 
 
-def _make_quote(db, req_id, site_id, user_id, offers=None, status="sent",
-                result=None, sent_at=None, result_at=None, won_revenue=None):
+def _make_quote(
+    db,
+    req_id,
+    site_id,
+    user_id,
+    offers=None,
+    status="sent",
+    result=None,
+    sent_at=None,
+    result_at=None,
+    won_revenue=None,
+):
     q = Quote(
         requisition_id=req_id,
         customer_site_id=site_id,
@@ -187,7 +187,7 @@ class TestBuyerMultiplierNonStacking:
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
         assert result["offers_total"] == 3
         assert result["offers_quoted_count"] == 2  # o1, o2
-        assert result["offers_base_count"] == 1    # o3
+        assert result["offers_base_count"] == 1  # o3
         # Non-stacking: 2×3 + 1×1 = 7, NOT 3×1 + 2×3 = 9
         assert result["offer_points"] == 2 * PTS_OFFER_QUOTED + 1 * PTS_OFFER_BASE
 
@@ -221,12 +221,11 @@ class TestBuyerMultiplierNonStacking:
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
         assert result["offers_total"] == 50
         assert result["offers_po_count"] == 3
-        assert result["offers_bp_count"] == 5    # 8 - 3 = 5 (BP but not PO)
+        assert result["offers_bp_count"] == 5  # 8 - 3 = 5 (BP but not PO)
         assert result["offers_quoted_count"] == 12  # 20 - 8 = 12 (quoted but not BP)
         assert result["offers_base_count"] == 30  # 50 - 20 = 30
 
-        expected = (30 * PTS_OFFER_BASE + 12 * PTS_OFFER_QUOTED
-                    + 5 * PTS_OFFER_BUYPLAN + 3 * PTS_OFFER_PO)
+        expected = 30 * PTS_OFFER_BASE + 12 * PTS_OFFER_QUOTED + 5 * PTS_OFFER_BUYPLAN + 3 * PTS_OFFER_PO
         assert result["offer_points"] == expected
 
     def test_rfq_bonus_points(self, db_session):
@@ -234,15 +233,17 @@ class TestBuyerMultiplierNonStacking:
         buyer = _make_user(db_session, "RFQ Buyer", "buyer", "rfq")
         req = _make_req(db_session, buyer.id)
         for i in range(10):
-            db_session.add(Contact(
-                requisition_id=req.id,
-                user_id=buyer.id,
-                contact_type="email",
-                vendor_name=f"Vendor-{i}",
-                vendor_name_normalized=f"vendor-{i}",
-                status="sent",
-                created_at=NOW,
-            ))
+            db_session.add(
+                Contact(
+                    requisition_id=req.id,
+                    user_id=buyer.id,
+                    contact_type="email",
+                    vendor_name=f"Vendor-{i}",
+                    vendor_name_normalized=f"vendor-{i}",
+                    status="sent",
+                    created_at=NOW,
+                )
+            )
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
@@ -254,13 +255,15 @@ class TestBuyerMultiplierNonStacking:
         """Stock list uploads earn 2 pts each."""
         buyer = _make_user(db_session, "Stock Buyer", "buyer", "stockmult")
         for i in range(3):
-            db_session.add(StockListHash(
-                user_id=buyer.id,
-                content_hash=f"hash-mult-{i}",
-                file_name=f"stock-{i}.csv",
-                row_count=100,
-                first_seen_at=NOW,
-            ))
+            db_session.add(
+                StockListHash(
+                    user_id=buyer.id,
+                    content_hash=f"hash-mult-{i}",
+                    file_name=f"stock-{i}.csv",
+                    row_count=100,
+                    first_seen_at=NOW,
+                )
+            )
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
@@ -279,11 +282,9 @@ class TestBuyerMultiplierNonStacking:
 
         req = _make_req(db_session, buyer.id)
         # Offer from Jan 28 (within 7-day grace window)
-        grace_offer = _make_offer(db_session, req.id, buyer.id,
-                                  created_at=datetime(2026, 1, 28, tzinfo=timezone.utc))
+        grace_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 28, tzinfo=timezone.utc))
         # Offer from Jan 20 (outside grace window)
-        old_offer = _make_offer(db_session, req.id, buyer.id,
-                                created_at=datetime(2026, 1, 20, tzinfo=timezone.utc))
+        old_offer = _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 20, tzinfo=timezone.utc))
         # Put grace_offer in a quote (it advanced)
         _make_quote(db_session, req.id, site.id, buyer.id, offers=[grace_offer])
         db_session.commit()
@@ -346,8 +347,9 @@ class TestSalesMultiplier:
             _make_quote(db_session, req.id, site.id, sales.id, status="sent")
         for i in range(2):
             req = _make_req(db_session, sales.id)
-            _make_quote(db_session, req.id, site.id, sales.id, status="won",
-                        result="won", result_at=NOW, won_revenue=5000)
+            _make_quote(
+                db_session, req.id, site.id, sales.id, status="won", result="won", result_at=NOW, won_revenue=5000
+            )
         db_session.commit()
 
         result = compute_sales_multiplier(db_session, sales.id, MONTH)
@@ -370,13 +372,15 @@ class TestSalesMultiplier:
         # 5 proactive offers, 2 converted
         for i in range(5):
             status = "converted" if i < 2 else "sent"
-            db_session.add(ProactiveOffer(
-                salesperson_id=sales.id,
-                customer_site_id=site.id,
-                sent_at=NOW,
-                status=status,
-                converted_at=NOW if status == "converted" else None,
-            ))
+            db_session.add(
+                ProactiveOffer(
+                    salesperson_id=sales.id,
+                    customer_site_id=site.id,
+                    sent_at=NOW,
+                    status=status,
+                    converted_at=NOW if status == "converted" else None,
+                )
+            )
         db_session.commit()
 
         result = compute_sales_multiplier(db_session, sales.id, MONTH)
@@ -389,11 +393,13 @@ class TestSalesMultiplier:
         """New accounts earn 3 pts each."""
         sales = _make_user(db_session, "NewAcct Sales", "sales", "newacctmult")
         for i in range(4):
-            db_session.add(Company(
-                name=f"NewCo-mult-{i}",
-                account_owner_id=sales.id,
-                created_at=NOW,
-            ))
+            db_session.add(
+                Company(
+                    name=f"NewCo-mult-{i}",
+                    account_owner_id=sales.id,
+                    created_at=NOW,
+                )
+            )
         db_session.commit()
 
         result = compute_sales_multiplier(db_session, sales.id, MONTH)
@@ -538,10 +544,14 @@ class TestComputeAll:
 
         compute_all_multiplier_scores(db_session, MONTH)
 
-        snaps = db_session.query(MultiplierScoreSnapshot).filter(
-            MultiplierScoreSnapshot.user_id == buyer.id,
-            MultiplierScoreSnapshot.role_type == "buyer",
-        ).all()
+        snaps = (
+            db_session.query(MultiplierScoreSnapshot)
+            .filter(
+                MultiplierScoreSnapshot.user_id == buyer.id,
+                MultiplierScoreSnapshot.role_type == "buyer",
+            )
+            .all()
+        )
         assert len(snaps) == 1
         assert snaps[0].total_points >= 0
         assert snaps[0].offers_base_count is not None
@@ -554,9 +564,13 @@ class TestComputeAll:
         compute_all_multiplier_scores(db_session, MONTH)
         compute_all_multiplier_scores(db_session, MONTH)
 
-        count = db_session.query(MultiplierScoreSnapshot).filter(
-            MultiplierScoreSnapshot.user_id == buyer.id,
-        ).count()
+        count = (
+            db_session.query(MultiplierScoreSnapshot)
+            .filter(
+                MultiplierScoreSnapshot.user_id == buyer.id,
+            )
+            .count()
+        )
         assert count == 1
 
 
@@ -576,16 +590,34 @@ class TestBonusWinners:
         _make_avail_snapshot(db_session, b2.id, "buyer", 55)
 
         # Seed multiplier snapshots directly
-        db_session.add(MultiplierScoreSnapshot(
-            user_id=b1.id, month=MONTH, role_type="buyer",
-            total_points=100, offer_points=90, bonus_points=10,
-            avail_score=75, qualified=True, rank=1, bonus_amount=BONUS_1ST,
-        ))
-        db_session.add(MultiplierScoreSnapshot(
-            user_id=b2.id, month=MONTH, role_type="buyer",
-            total_points=60, offer_points=50, bonus_points=10,
-            avail_score=55, qualified=True, rank=2, bonus_amount=BONUS_2ND,
-        ))
+        db_session.add(
+            MultiplierScoreSnapshot(
+                user_id=b1.id,
+                month=MONTH,
+                role_type="buyer",
+                total_points=100,
+                offer_points=90,
+                bonus_points=10,
+                avail_score=75,
+                qualified=True,
+                rank=1,
+                bonus_amount=BONUS_1ST,
+            )
+        )
+        db_session.add(
+            MultiplierScoreSnapshot(
+                user_id=b2.id,
+                month=MONTH,
+                role_type="buyer",
+                total_points=60,
+                offer_points=50,
+                bonus_points=10,
+                avail_score=55,
+                qualified=True,
+                rank=2,
+                bonus_amount=BONUS_2ND,
+            )
+        )
         db_session.commit()
 
         winners = determine_bonus_winners(db_session, "buyer", MONTH)
@@ -636,10 +668,11 @@ class TestGetMultiplierScores:
 class TestMultiplierAPI:
     def test_get_multiplier_scores_buyer(self, db_session):
         """GET /api/performance/multiplier-scores?role=buyer returns data."""
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
-        from fastapi.testclient import TestClient
 
         buyer = _make_user(db_session, "API Buyer", "buyer", "apibuyermult")
         db_session.commit()
@@ -659,10 +692,11 @@ class TestMultiplierAPI:
 
     def test_get_bonus_winners(self, db_session):
         """GET /api/performance/bonus-winners returns data."""
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
-        from fastapi.testclient import TestClient
 
         buyer = _make_user(db_session, "BW Buyer", "buyer", "bwbuyer")
         db_session.commit()
@@ -680,10 +714,11 @@ class TestMultiplierAPI:
 
     def test_invalid_role_rejected(self, db_session):
         """Invalid role returns 422."""
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
-        from fastapi.testclient import TestClient
 
         user = _make_user(db_session, "Bad Role", "buyer", "badrolemult")
         db_session.commit()
@@ -699,10 +734,11 @@ class TestMultiplierAPI:
 
     def test_refresh_requires_admin(self, db_session):
         """POST refresh requires admin role."""
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
-        from fastapi.testclient import TestClient
 
         buyer = _make_user(db_session, "NonAdmin", "buyer", "nonadminmult")
         db_session.commit()
@@ -739,8 +775,7 @@ class TestEdgeCases:
         # Same offer in two quotes
         _make_quote(db_session, req.id, site.id, buyer.id, offers=[offer], status="sent")
         req2 = _make_req(db_session, buyer.id)
-        _make_quote(db_session, req2.id, site.id, buyer.id, offers=[offer], status="won",
-                    result="won", result_at=NOW)
+        _make_quote(db_session, req2.id, site.id, buyer.id, offers=[offer], status="won", result="won", result_at=NOW)
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
@@ -754,11 +789,9 @@ class TestEdgeCases:
         buyer = _make_user(db_session, "Boundary Buyer", "buyer", "boundarymult")
         req = _make_req(db_session, buyer.id)
         # Jan offer (outside Feb)
-        _make_offer(db_session, req.id, buyer.id,
-                    created_at=datetime(2026, 1, 10, tzinfo=timezone.utc))
+        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 1, 10, tzinfo=timezone.utc))
         # Feb offer (inside)
-        _make_offer(db_session, req.id, buyer.id,
-                    created_at=datetime(2026, 2, 10, tzinfo=timezone.utc))
+        _make_offer(db_session, req.id, buyer.id, created_at=datetime(2026, 2, 10, tzinfo=timezone.utc))
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
@@ -786,8 +819,9 @@ class TestMultiplierCoverageGaps:
         buyer = _make_user(db_session, "Err Buyer", "buyer", "err-mult-b")
         db_session.commit()
 
-        with patch("app.services.multiplier_score_service.compute_buyer_multiplier",
-                   side_effect=RuntimeError("buyer exploded")):
+        with patch(
+            "app.services.multiplier_score_service.compute_buyer_multiplier", side_effect=RuntimeError("buyer exploded")
+        ):
             result = compute_all_multiplier_scores(db_session, MONTH)
 
         assert isinstance(result, dict)
@@ -797,8 +831,9 @@ class TestMultiplierCoverageGaps:
         sales = _make_user(db_session, "Err Sales", "sales", "err-mult-s")
         db_session.commit()
 
-        with patch("app.services.multiplier_score_service.compute_sales_multiplier",
-                   side_effect=RuntimeError("sales exploded")):
+        with patch(
+            "app.services.multiplier_score_service.compute_sales_multiplier", side_effect=RuntimeError("sales exploded")
+        ):
             result = compute_all_multiplier_scores(db_session, MONTH)
 
         assert isinstance(result, dict)
@@ -811,9 +846,14 @@ class TestMultiplierCoverageGaps:
         for i in range(3):
             u = _make_user(db_session, f"W{i}", "buyer", f"winner{i}")
             snap = MultiplierScoreSnapshot(
-                user_id=u.id, month=MONTH, role_type="buyer",
-                total_points=100 - i * 10, offer_points=80 - i * 10,
-                bonus_points=20, qualified=True, avail_score=90 - i * 5,
+                user_id=u.id,
+                month=MONTH,
+                role_type="buyer",
+                total_points=100 - i * 10,
+                offer_points=80 - i * 10,
+                bonus_points=20,
+                qualified=True,
+                avail_score=90 - i * 5,
             )
             db_session.add(snap)
         db_session.commit()
@@ -827,9 +867,16 @@ class TestMultiplierCoverageGaps:
 
         sales = _make_user(db_session, "Sales Rep", "sales", "sales-bd")
         snap = MultiplierScoreSnapshot(
-            user_id=sales.id, month=MONTH, role_type="sales",
-            total_points=50, offer_points=0, bonus_points=50,
-            rank=1, avail_score=80, qualified=True, bonus_amount=0,
+            user_id=sales.id,
+            month=MONTH,
+            role_type="sales",
+            total_points=50,
+            offer_points=0,
+            bonus_points=50,
+            rank=1,
+            avail_score=80,
+            qualified=True,
+            bonus_amount=0,
         )
         db_session.add(snap)
         db_session.commit()
@@ -872,23 +919,27 @@ class TestMultiplierCoverageGaps:
 
     def test_buyer_qualification_with_offers(self, db_session):
         """Line 418: buyer qualification requires min offers."""
-        from app.services.multiplier_score_service import _attach_avail_scores_and_rank
         from app.models.performance import AvailScoreSnapshot
+        from app.services.multiplier_score_service import _attach_avail_scores_and_rank
 
         buyer = _make_user(db_session, "Qual Buyer", "buyer", "qual-b")
         # Create avail score snapshot to pass threshold
         snap = AvailScoreSnapshot(
-            user_id=buyer.id, month=MONTH, role_type="buyer",
+            user_id=buyer.id,
+            month=MONTH,
+            role_type="buyer",
             total_score=90,
         )
         db_session.add(snap)
         db_session.commit()
 
-        results = [{
-            "user_id": buyer.id,
-            "total_points": 50,
-            "offers_total": 0,  # Below MIN_OFFERS_BUYER
-        }]
+        results = [
+            {
+                "user_id": buyer.id,
+                "total_points": 50,
+                "offers_total": 0,  # Below MIN_OFFERS_BUYER
+            }
+        ]
 
         _attach_avail_scores_and_rank(db_session, results, MONTH, "buyer")
         assert results[0]["qualified"] is False  # not enough offers

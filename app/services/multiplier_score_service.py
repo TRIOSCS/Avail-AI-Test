@@ -66,6 +66,7 @@ MIN_ACTIVITIES_SALES = 20
 #  HELPERS
 # ══════════════════════════════════════════════════════════════════════
 
+
 def _month_range(month: date):
     """Return (start_dt, end_dt) as aware datetimes for the given month."""
     month_start = month.replace(day=1)
@@ -81,9 +82,7 @@ def _month_range(month: date):
 def _load_quoted_offer_ids(db: Session) -> set[int]:
     """Return set of offer IDs that appear in any sent/won/lost quote line_items."""
     ids = set()
-    for (items,) in db.query(Quote.line_items).filter(
-        Quote.status.in_(["sent", "won", "lost"])
-    ).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -109,8 +108,11 @@ def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
 #  BUYER MULTIPLIER
 # ══════════════════════════════════════════════════════════════════════
 
+
 def compute_buyer_multiplier(
-    db: Session, user_id: int, month: date,
+    db: Session,
+    user_id: int,
+    month: date,
     *,
     quoted_ids: set[int] | None = None,
     bp_ids: set[int] | None = None,
@@ -206,8 +208,13 @@ def compute_buyer_multiplier(
     bonus_points = pts_rfqs + pts_stock
     total_points = offer_points + bonus_points
 
-    logger.debug("Buyer multiplier user=%d: %d offers, %.1f offer_pts, %.1f bonus_pts",
-              user_id, len(all_offers), offer_points, bonus_points)
+    logger.debug(
+        "Buyer multiplier user=%d: %d offers, %.1f offer_pts, %.1f bonus_pts",
+        user_id,
+        len(all_offers),
+        offer_points,
+        bonus_points,
+    )
 
     return {
         "user_id": user_id,
@@ -235,6 +242,7 @@ def compute_buyer_multiplier(
 # ══════════════════════════════════════════════════════════════════════
 #  SALES MULTIPLIER
 # ══════════════════════════════════════════════════════════════════════
+
 
 def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     """Compute multiplier points for a salesperson in a given month.
@@ -316,8 +324,7 @@ def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     bonus_points = pts_accounts
     total_points = offer_points + bonus_points
 
-    logger.debug("Sales multiplier user=%d: %.1f offer_pts, %.1f bonus_pts",
-              user_id, offer_points, bonus_points)
+    logger.debug("Sales multiplier user=%d: %.1f offer_pts, %.1f bonus_pts", user_id, offer_points, bonus_points)
 
     return {
         "user_id": user_id,
@@ -343,6 +350,7 @@ def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
 #  BATCH COMPUTE + RANK + BONUS
 # ══════════════════════════════════════════════════════════════════════
 
+
 def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dict:
     """Compute multiplier scores for all users, rank, and assign bonuses."""
     month = (month or date.today()).replace(day=1)
@@ -361,8 +369,12 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
     for user in buyers:
         try:
             result = compute_buyer_multiplier(
-                db, user.id, month,
-                quoted_ids=quoted_ids, bp_ids=bp_ids, po_ids=po_ids,
+                db,
+                user.id,
+                month,
+                quoted_ids=quoted_ids,
+                bp_ids=bp_ids,
+                po_ids=po_ids,
             )
             result["user_name"] = user.name
             buyer_results.append(result)
@@ -389,8 +401,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             saved += _upsert_multiplier(db, r, month)
 
     db.commit()
-    logger.info("Multiplier scores: %d buyers, %d sales, %d saved",
-             len(buyer_results), len(sales_results), saved)
+    logger.info("Multiplier scores: %d buyers, %d sales, %d saved", len(buyer_results), len(sales_results), saved)
     return {"buyers": len(buyer_results), "sales": len(sales_results), "saved": saved}
 
 
@@ -399,10 +410,14 @@ def _attach_avail_scores_and_rank(db: Session, results: list[dict], month: date,
     month_start = month.replace(day=1)
 
     avail_map = {}
-    for snap in db.query(AvailScoreSnapshot).filter(
-        AvailScoreSnapshot.month == month_start,
-        AvailScoreSnapshot.role_type == role_type,
-    ).all():
+    for snap in (
+        db.query(AvailScoreSnapshot)
+        .filter(
+            AvailScoreSnapshot.month == month_start,
+            AvailScoreSnapshot.role_type == role_type,
+        )
+        .all()
+    ):
         avail_map[snap.user_id] = snap.total_score or 0
 
     for r in results:
@@ -410,10 +425,7 @@ def _attach_avail_scores_and_rank(db: Session, results: list[dict], month: date,
         r["avail_score"] = avail_map.get(uid, 0)
 
         if role_type == "buyer":
-            r["qualified"] = (
-                r["avail_score"] >= QUALIFY_SCORE_2ND
-                and r.get("offers_total", 0) >= MIN_OFFERS_BUYER
-            )
+            r["qualified"] = r["avail_score"] >= QUALIFY_SCORE_2ND and r.get("offers_total", 0) >= MIN_OFFERS_BUYER
         else:
             r["qualified"] = r["avail_score"] >= QUALIFY_SCORE_2ND
 
@@ -462,21 +474,37 @@ def _upsert_multiplier(db: Session, result: dict, month: date) -> int:
     snap.total_points = result["total_points"]
 
     # Buyer breakdown (NULL for sales rows)
-    for col in ("offers_total", "offers_base_count", "offers_base_pts",
-                "offers_quoted_count", "offers_quoted_pts",
-                "offers_bp_count", "offers_bp_pts",
-                "offers_po_count", "offers_po_pts",
-                "rfqs_sent_count", "rfqs_sent_pts",
-                "stock_lists_count", "stock_lists_pts"):
+    for col in (
+        "offers_total",
+        "offers_base_count",
+        "offers_base_pts",
+        "offers_quoted_count",
+        "offers_quoted_pts",
+        "offers_bp_count",
+        "offers_bp_pts",
+        "offers_po_count",
+        "offers_po_pts",
+        "rfqs_sent_count",
+        "rfqs_sent_pts",
+        "stock_lists_count",
+        "stock_lists_pts",
+    ):
         if col in result:
             setattr(snap, col, result[col])
 
     # Sales breakdown (NULL for buyer rows)
-    for col in ("quotes_sent_count", "quotes_sent_pts",
-                "quotes_won_count", "quotes_won_pts",
-                "proactive_sent_count", "proactive_sent_pts",
-                "proactive_converted_count", "proactive_converted_pts",
-                "new_accounts_count", "new_accounts_pts"):
+    for col in (
+        "quotes_sent_count",
+        "quotes_sent_pts",
+        "quotes_won_count",
+        "quotes_won_pts",
+        "proactive_sent_count",
+        "proactive_sent_pts",
+        "proactive_converted_count",
+        "proactive_converted_pts",
+        "new_accounts_count",
+        "new_accounts_pts",
+    ):
         if col in result:
             setattr(snap, col, result[col])
 
@@ -491,6 +519,7 @@ def _upsert_multiplier(db: Session, result: dict, month: date) -> int:
 # ══════════════════════════════════════════════════════════════════════
 #  BONUS WINNER DETERMINATION
 # ══════════════════════════════════════════════════════════════════════
+
 
 def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[dict]:
     """Return bonus winners for a role+month from persisted multiplier scores.
@@ -516,32 +545,40 @@ def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[di
             break
 
         if len(winners) == 0 and snap.avail_score >= QUALIFY_SCORE_1ST:
-            winners.append({
-                "user_id": snap.user_id,
-                "user_name": user_name,
-                "rank": 1,
-                "total_points": snap.total_points,
-                "avail_score": snap.avail_score,
-                "bonus_amount": BONUS_1ST,
-            })
+            winners.append(
+                {
+                    "user_id": snap.user_id,
+                    "user_name": user_name,
+                    "rank": 1,
+                    "total_points": snap.total_points,
+                    "avail_score": snap.avail_score,
+                    "bonus_amount": BONUS_1ST,
+                }
+            )
         elif len(winners) == 1 and snap.avail_score >= QUALIFY_SCORE_2ND:
-            winners.append({
-                "user_id": snap.user_id,
-                "user_name": user_name,
-                "rank": 2,
-                "total_points": snap.total_points,
-                "avail_score": snap.avail_score,
-                "bonus_amount": BONUS_2ND,
-            })
-        elif len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD:  # pragma: no cover — unreachable: break at >=2
-            winners.append({
-                "user_id": snap.user_id,
-                "user_name": user_name,
-                "rank": 3,
-                "total_points": snap.total_points,
-                "avail_score": snap.avail_score,
-                "bonus_amount": BONUS_3RD,
-            })
+            winners.append(
+                {
+                    "user_id": snap.user_id,
+                    "user_name": user_name,
+                    "rank": 2,
+                    "total_points": snap.total_points,
+                    "avail_score": snap.avail_score,
+                    "bonus_amount": BONUS_2ND,
+                }
+            )
+        elif (
+            len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD
+        ):  # pragma: no cover — unreachable: break at >=2
+            winners.append(
+                {
+                    "user_id": snap.user_id,
+                    "user_name": user_name,
+                    "rank": 3,
+                    "total_points": snap.total_points,
+                    "avail_score": snap.avail_score,
+                    "bonus_amount": BONUS_3RD,
+                }
+            )
 
     return winners
 
@@ -549,6 +586,7 @@ def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[di
 # ══════════════════════════════════════════════════════════════════════
 #  API QUERIES
 # ══════════════════════════════════════════════════════════════════════
+
 
 def get_multiplier_scores(db: Session, role_type: str, month: date) -> list[dict]:
     """Return ranked multiplier scores for a role type and month."""

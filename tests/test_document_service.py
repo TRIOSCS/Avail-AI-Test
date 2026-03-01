@@ -47,9 +47,7 @@ class TestGenerateRfqSummaryPdf:
         with pytest.raises(ValueError, match="not found"):
             generate_rfq_summary_pdf(99999, db_session)
 
-    def test_renders_template_and_calls_weasyprint(
-        self, db_session, test_requisition, test_offer
-    ):
+    def test_renders_template_and_calls_weasyprint(self, db_session, test_requisition, test_offer):
         result = generate_rfq_summary_pdf(test_requisition.id, db_session)
 
         assert result == b"%PDF-1.4 fake"
@@ -89,9 +87,7 @@ class TestGenerateQuoteReportPdf:
         with pytest.raises(ValueError, match="not found"):
             generate_quote_report_pdf(99999, db_session)
 
-    def test_renders_template_and_calls_weasyprint(
-        self, db_session, test_quote, test_customer_site, test_company
-    ):
+    def test_renders_template_and_calls_weasyprint(self, db_session, test_quote, test_customer_site, test_company):
         result = generate_quote_report_pdf(test_quote.id, db_session)
 
         assert result == b"%PDF-1.4 fake"
@@ -99,9 +95,7 @@ class TestGenerateQuoteReportPdf:
         html_string = _mock_html_cls.call_args.kwargs["string"]
         assert test_quote.quote_number in html_string
 
-    def test_includes_customer_and_company(
-        self, db_session, test_quote, test_customer_site, test_company
-    ):
+    def test_includes_customer_and_company(self, db_session, test_quote, test_customer_site, test_company):
         generate_quote_report_pdf(test_quote.id, db_session)
 
         html_string = _mock_html_cls.call_args.kwargs["string"]
@@ -116,8 +110,22 @@ class TestGenerateQuoteReportPdf:
             quote_number="Q-2026-LI-01",
             status="draft",
             line_items=[
-                {"mpn": "LM317T", "manufacturer": "TI", "qty": 1000, "cost_each": 0.45, "sell_each": 0.75, "margin_pct": 40.0},
-                {"mpn": "NE555P", "manufacturer": "TI", "qty": 500, "cost_each": 0.20, "sell_each": 0.35, "margin_pct": 42.9},
+                {
+                    "mpn": "LM317T",
+                    "manufacturer": "TI",
+                    "qty": 1000,
+                    "cost_each": 0.45,
+                    "sell_each": 0.75,
+                    "margin_pct": 40.0,
+                },
+                {
+                    "mpn": "NE555P",
+                    "manufacturer": "TI",
+                    "qty": 500,
+                    "cost_each": 0.20,
+                    "sell_each": 0.35,
+                    "margin_pct": 42.9,
+                },
             ],
             subtotal=975.0,
             total_cost=550.0,
@@ -134,9 +142,7 @@ class TestGenerateQuoteReportPdf:
         assert "LM317T" in html_string
         assert "NE555P" in html_string
 
-    def test_quote_with_empty_line_items(
-        self, db_session, test_customer_site, test_user, test_requisition
-    ):
+    def test_quote_with_empty_line_items(self, db_session, test_customer_site, test_user, test_requisition):
         """Quote with empty line_items list should still render cleanly."""
         quote = Quote(
             requisition_id=test_requisition.id,
@@ -172,9 +178,7 @@ class TestGenerateQuoteReportPdf:
         html_string = _mock_html_cls.call_args.kwargs["string"]
         assert "Special pricing for bulk order" in html_string
 
-    def test_includes_payment_and_shipping_terms(
-        self, db_session, test_customer_site, test_user, test_requisition
-    ):
+    def test_includes_payment_and_shipping_terms(self, db_session, test_customer_site, test_user, test_requisition):
         quote = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=test_customer_site.id,

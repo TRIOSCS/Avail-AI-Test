@@ -10,10 +10,7 @@ os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 from datetime import date, datetime, timedelta, timezone
-
-import pytest
 from unittest.mock import patch
-from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
@@ -35,11 +32,7 @@ from app.services.avail_score_service import (
     BONUS_1ST,
     BONUS_2ND,
     BONUS_3RD,
-    MIN_ACTIVITIES_SALES,
     MIN_REQS_BUYER,
-    QUALIFY_1ST,
-    QUALIFY_2ND,
-    QUALIFY_3RD,
     _rank_and_bonus,
     _tier,
     compute_all_avail_scores,
@@ -47,8 +40,6 @@ from app.services.avail_score_service import (
     compute_sales_avail_score,
     get_avail_scores,
 )
-from tests.conftest import engine
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -105,7 +96,18 @@ def _make_offer(db, req_id, user_id, vendor_card_id=None, created_at=None):
     return o
 
 
-def _make_quote(db, req_id, site_id, user_id, status="sent", result=None, offers=None, sent_at=None, result_at=None, won_revenue=None):
+def _make_quote(
+    db,
+    req_id,
+    site_id,
+    user_id,
+    status="sent",
+    result=None,
+    offers=None,
+    sent_at=None,
+    result_at=None,
+    won_revenue=None,
+):
     q = Quote(
         requisition_id=req_id,
         customer_site_id=site_id,
@@ -272,13 +274,15 @@ class TestBuyerAvailScore:
         """Stock list uploads score B5."""
         buyer = _make_user(db_session, "Stock Buyer", "buyer", "stock")
         for i in range(6):
-            db_session.add(StockListHash(
-                user_id=buyer.id,
-                content_hash=f"hash-{i}",
-                file_name=f"stock-{i}.csv",
-                row_count=100,
-                first_seen_at=NOW - timedelta(days=i),
-            ))
+            db_session.add(
+                StockListHash(
+                    user_id=buyer.id,
+                    content_hash=f"hash-{i}",
+                    file_name=f"stock-{i}.csv",
+                    row_count=100,
+                    first_seen_at=NOW - timedelta(days=i),
+                )
+            )
         db_session.commit()
 
         result = compute_buyer_avail_score(db_session, buyer.id, MONTH)
@@ -348,13 +352,15 @@ class TestSalesAvailScore:
 
         # Contact 8 of 10
         for co in companies[:8]:
-            db_session.add(ActivityLog(
-                user_id=sales.id,
-                activity_type="email_sent",
-                channel="email",
-                company_id=co.id,
-                created_at=NOW,
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=sales.id,
+                    activity_type="email_sent",
+                    channel="email",
+                    company_id=co.id,
+                    created_at=NOW,
+                )
+            )
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -364,12 +370,14 @@ class TestSalesAvailScore:
         """Sales active on 15 days gets 8 on B2."""
         sales = _make_user(db_session, "Consistent Sales", "sales", "consistent")
         for i in range(15):
-            db_session.add(ActivityLog(
-                user_id=sales.id,
-                activity_type="call_outbound",
-                channel="phone",
-                created_at=datetime(2026, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=sales.id,
+                    activity_type="call_outbound",
+                    channel="phone",
+                    created_at=datetime(2026, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc),
+                )
+            )
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -385,11 +393,13 @@ class TestSalesAvailScore:
         db_session.add(site)
         db_session.flush()
         for i in range(6):
-            db_session.add(ProactiveOffer(
-                salesperson_id=sales.id,
-                customer_site_id=site.id,
-                sent_at=NOW - timedelta(days=i),
-            ))
+            db_session.add(
+                ProactiveOffer(
+                    salesperson_id=sales.id,
+                    customer_site_id=site.id,
+                    sent_at=NOW - timedelta(days=i),
+                )
+            )
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -405,12 +415,14 @@ class TestSalesAvailScore:
             site = CustomerSite(company_id=co.id, site_name=f"NewSite-{i}", owner_id=sales.id)
             db_session.add(site)
             db_session.flush()
-            db_session.add(SiteContact(
-                customer_site_id=site.id,
-                full_name=f"Contact {i}",
-                email=f"c{i}@co{i}.com",
-                created_at=NOW,
-            ))
+            db_session.add(
+                SiteContact(
+                    customer_site_id=site.id,
+                    full_name=f"Contact {i}",
+                    email=f"c{i}@co{i}.com",
+                    created_at=NOW,
+                )
+            )
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -431,12 +443,12 @@ class TestSalesAvailScore:
         # 3 wins, 2 losses = 60% win rate
         for i in range(3):
             req = _make_req(db_session, sales.id)
-            _make_quote(db_session, req.id, site.id, sales.id, status="won",
-                        result="won", result_at=NOW, won_revenue=10000)
+            _make_quote(
+                db_session, req.id, site.id, sales.id, status="won", result="won", result_at=NOW, won_revenue=10000
+            )
         for i in range(2):
             req = _make_req(db_session, sales.id)
-            _make_quote(db_session, req.id, site.id, sales.id, status="lost",
-                        result="lost", result_at=NOW)
+            _make_quote(db_session, req.id, site.id, sales.id, status="lost", result="lost", result_at=NOW)
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -453,8 +465,7 @@ class TestSalesAvailScore:
         db_session.flush()
 
         req = _make_req(db_session, sales.id)
-        _make_quote(db_session, req.id, site.id, sales.id, status="won",
-                    result="won", result_at=NOW, won_revenue=20000)
+        _make_quote(db_session, req.id, site.id, sales.id, status="won", result="won", result_at=NOW, won_revenue=20000)
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -472,8 +483,9 @@ class TestSalesAvailScore:
 
         for i in range(3):
             req = _make_req(db_session, sales.id)
-            _make_quote(db_session, req.id, site.id, sales.id, status="won",
-                        result="won", result_at=NOW, won_revenue=5000)
+            _make_quote(
+                db_session, req.id, site.id, sales.id, status="won", result="won", result_at=NOW, won_revenue=5000
+            )
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
@@ -497,10 +509,14 @@ class TestComputeAll:
 
         compute_all_avail_scores(db_session, MONTH)
 
-        snaps = db_session.query(AvailScoreSnapshot).filter(
-            AvailScoreSnapshot.user_id == buyer.id,
-            AvailScoreSnapshot.role_type == "buyer",
-        ).all()
+        snaps = (
+            db_session.query(AvailScoreSnapshot)
+            .filter(
+                AvailScoreSnapshot.user_id == buyer.id,
+                AvailScoreSnapshot.role_type == "buyer",
+            )
+            .all()
+        )
         assert len(snaps) == 1
         assert snaps[0].month == MONTH
         assert snaps[0].total_score >= 0
@@ -513,9 +529,13 @@ class TestComputeAll:
         compute_all_avail_scores(db_session, MONTH)
         compute_all_avail_scores(db_session, MONTH)
 
-        count = db_session.query(AvailScoreSnapshot).filter(
-            AvailScoreSnapshot.user_id == buyer.id,
-        ).count()
+        count = (
+            db_session.query(AvailScoreSnapshot)
+            .filter(
+                AvailScoreSnapshot.user_id == buyer.id,
+            )
+            .count()
+        )
         assert count == 1
 
     def test_ranking_across_users(self, db_session):
@@ -533,10 +553,8 @@ class TestComputeAll:
 
         compute_all_avail_scores(db_session, MONTH)
 
-        s1 = db_session.query(AvailScoreSnapshot).filter(
-            AvailScoreSnapshot.user_id == b1.id).first()
-        s2 = db_session.query(AvailScoreSnapshot).filter(
-            AvailScoreSnapshot.user_id == b2.id).first()
+        s1 = db_session.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.user_id == b1.id).first()
+        s2 = db_session.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.user_id == b2.id).first()
         assert s1.rank < s2.rank  # b1 should rank higher
         assert s1.total_score >= s2.total_score
 
@@ -583,8 +601,9 @@ class TestAvailScoreAPI:
         db_session.commit()
         compute_all_avail_scores(db_session, MONTH)
 
-        from app.database import get_db
         from fastapi.testclient import TestClient
+
+        from app.database import get_db
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: buyer
@@ -607,8 +626,9 @@ class TestAvailScoreAPI:
         db_session.commit()
         compute_all_avail_scores(db_session, MONTH)
 
-        from app.database import get_db
         from fastapi.testclient import TestClient
+
+        from app.database import get_db
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: sales
@@ -630,8 +650,9 @@ class TestAvailScoreAPI:
         user = _make_user(db_session, "Bad Role", "buyer", "badrole")
         db_session.commit()
 
-        from app.database import get_db
         from fastapi.testclient import TestClient
+
+        from app.database import get_db
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: user
@@ -650,8 +671,9 @@ class TestAvailScoreAPI:
         buyer = _make_user(db_session, "NonAdmin", "buyer", "nonadmin")
         db_session.commit()
 
-        from app.database import get_db
         from fastapi.testclient import TestClient
+
+        from app.database import get_db
 
         app.dependency_overrides[get_db] = lambda: db_session
         app.dependency_overrides[require_user] = lambda: buyer
@@ -721,6 +743,7 @@ class TestEdgeCases:
 
 # ── Coverage Gap Tests ──────────────────────────────────────────────
 
+
 class TestAvailScoreCoverageGaps:
     """Cover specific uncovered lines."""
 
@@ -747,15 +770,17 @@ class TestAvailScoreCoverageGaps:
         """Lines 117-120: extract offer_ids from quote line_items."""
         buyer = _make_user(db_session, "Quote Buyer", "buyer", "quote-buyer")
         reqn = _make_req(db_session, buyer.id)
-        from app.models import Requirement
         req = Requirement(requisition_id=reqn.id, primary_mpn="TEST-PART")
         db_session.add(req)
         db_session.flush()
 
         offer = Offer(
-            requisition_id=reqn.id, requirement_id=req.id,
-            vendor_name="TestVend", mpn="TEST-PART",
-            entered_by_id=buyer.id, created_at=NOW,
+            requisition_id=reqn.id,
+            requirement_id=req.id,
+            vendor_name="TestVend",
+            mpn="TEST-PART",
+            entered_by_id=buyer.id,
+            created_at=NOW,
         )
         db_session.add(offer)
         db_session.flush()
@@ -770,21 +795,25 @@ class TestAvailScoreCoverageGaps:
 
         # Create a quote with line_items referencing the offer
         quote = Quote(
-            requisition_id=reqn.id, customer_site_id=site.id,
+            requisition_id=reqn.id,
+            customer_site_id=site.id,
             quote_number=f"Q-COVER-{offer.id}",
             status="sent",
             line_items=[{"offer_id": offer.id, "qty": 100}],
-            created_by_id=buyer.id, created_at=NOW,
+            created_by_id=buyer.id,
+            created_at=NOW,
         )
         db_session.add(quote)
         db_session.flush()
 
         # BuyPlan with line_items referencing the offer
         bp = BuyPlan(
-            requisition_id=reqn.id, quote_id=quote.id,
+            requisition_id=reqn.id,
+            quote_id=quote.id,
             status="po_confirmed",
             line_items=[{"offer_id": offer.id}],
-            submitted_by_id=buyer.id, created_at=NOW,
+            submitted_by_id=buyer.id,
+            created_at=NOW,
         )
         db_session.add(bp)
         db_session.commit()
@@ -797,13 +826,14 @@ class TestAvailScoreCoverageGaps:
         """Line 385: req with no created_at is skipped in B4 pipeline hygiene."""
         buyer = _make_user(db_session, "NoDt Buyer", "buyer", "nodt")
         reqn = Requisition(
-            name="REQ-NODT", status="active",
-            created_by=buyer.id, created_at=NOW,
+            name="REQ-NODT",
+            status="active",
+            created_by=buyer.id,
+            created_at=NOW,
         )
         db_session.add(reqn)
         db_session.flush()
 
-        from app.models import Requirement
         req = Requirement(requisition_id=reqn.id, primary_mpn="PART-X")
         db_session.add(req)
         db_session.flush()
@@ -821,8 +851,9 @@ class TestAvailScoreCoverageGaps:
         buyer = _make_user(db_session, "Error Buyer", "buyer", "err-buyer")
         db_session.commit()
 
-        with patch("app.services.avail_score_service.compute_buyer_avail_score",
-                   side_effect=RuntimeError("score exploded")):
+        with patch(
+            "app.services.avail_score_service.compute_buyer_avail_score", side_effect=RuntimeError("score exploded")
+        ):
             result = compute_all_avail_scores(db_session, MONTH)
 
         # Should not crash; buyer is skipped
@@ -833,8 +864,10 @@ class TestAvailScoreCoverageGaps:
         sales = _make_user(db_session, "Error Sales", "sales", "err-sales")
         db_session.commit()
 
-        with patch("app.services.avail_score_service.compute_sales_avail_score",
-                   side_effect=RuntimeError("sales score exploded")):
+        with patch(
+            "app.services.avail_score_service.compute_sales_avail_score",
+            side_effect=RuntimeError("sales score exploded"),
+        ):
             result = compute_all_avail_scores(db_session, MONTH)
 
         assert isinstance(result, dict)

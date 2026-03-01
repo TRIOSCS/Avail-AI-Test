@@ -12,8 +12,9 @@ Adds:
 revision = "033_graph_intelligence"
 down_revision = "032_email_intelligence"
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 
 def upgrade() -> None:

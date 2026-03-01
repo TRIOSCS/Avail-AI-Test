@@ -15,14 +15,13 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.*
 """
 
-import asyncio
 import io
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -31,18 +30,13 @@ from app.models import (
     CustomerSite,
     MaterialCard,
     MaterialVendorHistory,
-    Offer,
     Quote,
     Requirement,
     Requisition,
     Sighting,
-    SiteContact,
     User,
     VendorCard,
-    VendorContact,
-    VendorReview,
 )
-
 
 # ── 1. Clone Requisition (crm.py lines 3024+ which overrides requisitions.py 506) ──
 # Per MEMORY.md: Duplicate clone endpoint at crm.py:3024 overrides requisitions.py:506
@@ -90,11 +84,7 @@ def test_clone_requisition_with_substitutes(client, db_session, test_user):
     clone = db_session.get(Requisition, data["id"])
     assert clone is not None
     assert clone.cloned_from_id == req.id
-    cloned_reqs = (
-        db_session.query(Requirement)
-        .filter_by(requisition_id=clone.id)
-        .all()
-    )
+    cloned_reqs = db_session.query(Requirement).filter_by(requisition_id=clone.id).all()
     assert len(cloned_reqs) == 1
     cloned_r = cloned_reqs[0]
     assert cloned_r.primary_mpn is not None
@@ -127,11 +117,13 @@ def test_add_requirement_teams_alert_exception(client, db_session, test_requisit
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
-                json=[{
-                    "primary_mpn": "TEST-HOT-001",
-                    "target_qty": 10000,
-                    "target_price": 100.00,
-                }],
+                json=[
+                    {
+                        "primary_mpn": "TEST-HOT-001",
+                        "target_qty": 10000,
+                        "target_price": 100.00,
+                    }
+                ],
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -358,9 +350,7 @@ def test_import_stock_skips_unparseable_rows(client, db_session, test_requisitio
 
 @patch("app.routers.crm.companies.get_credential_cached", return_value="fake-key")
 @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
-def test_create_company_auto_discover_contacts(
-    mock_normalize, mock_cred, client, db_session
-):
+def test_create_company_auto_discover_contacts(mock_normalize, mock_cred, client, db_session):
     """Company creation with enrichment triggers auto-discover of contacts."""
     mock_normalize.return_value = ("Disco Corp", "discocorp.com")
 
@@ -375,7 +365,12 @@ def test_create_company_auto_discover_contacts(
                 "app.enrichment_service.find_suggested_contacts",
                 new_callable=AsyncMock,
                 return_value=[
-                    {"full_name": "John Doe", "title": "VP Sales", "email": "john@discocorp.com", "phone": "+1-555-0001"},
+                    {
+                        "full_name": "John Doe",
+                        "title": "VP Sales",
+                        "email": "john@discocorp.com",
+                        "phone": "+1-555-0001",
+                    },
                     {"full_name": "Jane Doe", "title": "CTO", "email": "jane@discocorp.com", "phone": None},
                 ],
             ):
@@ -392,9 +387,7 @@ def test_create_company_auto_discover_contacts(
 
 @patch("app.routers.crm.companies.get_credential_cached", return_value="fake-key")
 @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
-def test_create_company_enrichment_bg_exception(
-    mock_normalize, mock_cred, client, db_session
-):
+def test_create_company_enrichment_bg_exception(mock_normalize, mock_cred, client, db_session):
     """Background enrichment exception is caught and logged (lines 487-488)."""
     mock_normalize.return_value = ("Fail Corp", "failcorp.com")
 
@@ -419,7 +412,7 @@ def test_create_company_enrichment_bg_exception(
 
 def test_create_offer_activity_event_exception(client, db_session, test_requisition, test_offer, monkeypatch):
     """Activity event creation exception is caught and does not break the offer flow."""
-    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+    monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
     req = test_requisition
     requirement = req.requirements[0]
 
@@ -432,11 +425,11 @@ def test_create_offer_activity_event_exception(client, db_session, test_requisit
     original_add = db_session.add
 
     def patched_add(obj):
-        if isinstance(obj, ActivityLog) and getattr(obj, 'activity_type', None) == 'competitive_quote':
+        if isinstance(obj, ActivityLog) and getattr(obj, "activity_type", None) == "competitive_quote":
             raise Exception("DB error during activity creation")
         return original_add(obj)
 
-    with patch.object(db_session, 'add', side_effect=patched_add):
+    with patch.object(db_session, "add", side_effect=patched_add):
         resp = client.post(
             f"/api/requisitions/{req.id}/offers",
             json={
@@ -790,16 +783,23 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
     with patch("app.config.settings") as mock_cfg:
         mock_cfg.teams_hot_threshold = 0
         # Make the import succeed but the function raise AttributeError
-        with patch.dict("sys.modules", {"app.services.teams": MagicMock(
-            send_hot_requirement_alert=MagicMock(side_effect=AttributeError("no teams"))
-        )}):
+        with patch.dict(
+            "sys.modules",
+            {
+                "app.services.teams": MagicMock(
+                    send_hot_requirement_alert=MagicMock(side_effect=AttributeError("no teams"))
+                )
+            },
+        ):
             resp = client.post(
                 f"/api/requisitions/{req.id}/requirements",
-                json=[{
-                    "primary_mpn": "HOT-MPN-001",
-                    "target_qty": 100,
-                    "target_price": 1.00,
-                }],
+                json=[
+                    {
+                        "primary_mpn": "HOT-MPN-001",
+                        "target_qty": 100,
+                        "target_price": 1.00,
+                    }
+                ],
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -811,7 +811,7 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
 
 def test_upload_requirements_with_empty_substitute(client, db_session, test_requisition):
     """Upload requirements CSV with substitutes that have empty MPNs -- should skip them."""
-    csv_content = b"mpn,qty,substitutes\nLM317T,1000,\"LM337T,,  ,NE555P\""
+    csv_content = b'mpn,qty,substitutes\nLM317T,1000,"LM337T,,  ,NE555P"'
     with patch("app.file_utils.parse_tabular_file") as mock_parse:
         mock_parse.return_value = [
             {"mpn": "LM317T", "target_qty": "1000", "substitutes": "LM337T,,  ,NE555P"},
@@ -962,11 +962,13 @@ async def test_standalone_stock_import_vendor_card_integrity_direct(db_session, 
     mock_file.filename = "test.csv"
 
     mock_form = MagicMock()
-    mock_form.get = MagicMock(side_effect=lambda key, default=None: {
-        "file": mock_file,
-        "vendor_name": "IE Vendor",
-        "vendor_website": "",
-    }.get(key, default))
+    mock_form.get = MagicMock(
+        side_effect=lambda key, default=None: {
+            "file": mock_file,
+            "vendor_name": "IE Vendor",
+            "vendor_website": "",
+        }.get(key, default)
+    )
 
     mock_request = MagicMock()
     mock_request.form = AsyncMock(return_value=mock_form)
@@ -985,7 +987,7 @@ def test_upload_requirements_csv_with_bad_substitutes(client, db_session, test_r
     """Upload CSV where a row has substitutes with blank entries that get skipped (line 779)."""
     # The file_utils parse returns rows, and the upload code handles subs processing
     # We need rows where substitutes column contains empty/invalid entries
-    csv_content = b"mpn,qty,substitutes\nLM317T,1000,\"LM337T, , ,\""
+    csv_content = b'mpn,qty,substitutes\nLM317T,1000,"LM337T, , ,"'
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/upload",
         files={"file": ("reqs.csv", io.BytesIO(csv_content), "text/csv")},
@@ -1005,7 +1007,6 @@ def test_vendor_search_fts_zero_results_fallback(client, db_session, test_vendor
     # Mock the FTS query to not raise but return count=0
     # This is tricky because we need the specific query chain to work
     # The simplest approach: mock only the specific FTS path
-    from sqlalchemy import text as sqltext
 
     original_query = db_session.query
 
@@ -1018,7 +1019,7 @@ def test_vendor_search_fts_zero_results_fallback(client, db_session, test_vendor
         def patched_filter(*fargs, **fkwargs):
             # Check if this is the FTS filter
             for arg in fargs:
-                if hasattr(arg, 'text') and 'plainto_tsquery' in str(getattr(arg, 'text', '')):
+                if hasattr(arg, "text") and "plainto_tsquery" in str(getattr(arg, "text", "")):
                     fts_attempted[0] = True
             return original_filter(*fargs, **fkwargs)
 
@@ -1102,7 +1103,9 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
     card = VendorCard(
         normalized_name="fts test vendor",
         display_name="FTS Test Vendor",
-        emails=[], phones=[], sighting_count=5,
+        emails=[],
+        phones=[],
+        sighting_count=5,
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card)
@@ -1140,8 +1143,7 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="fts test vendor", tag="", limit=200, offset=0,
-                                user=test_user, db=mock_db)
+    result = await list_vendors(q="fts test vendor", tag="", limit=200, offset=0, user=test_user, db=mock_db)
     assert result["total"] == 1
     assert len(result["vendors"]) == 1
 
@@ -1154,7 +1156,9 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
     card = VendorCard(
         normalized_name="ilike fallback vendor",
         display_name="ILIKE Fallback Vendor",
-        emails=[], phones=[], sighting_count=1,
+        emails=[],
+        phones=[],
+        sighting_count=1,
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card)
@@ -1193,8 +1197,7 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="ilike fallback", tag="", limit=200, offset=0,
-                                user=test_user, db=mock_db)
+    result = await list_vendors(q="ilike fallback", tag="", limit=200, offset=0, user=test_user, db=mock_db)
     assert result["total"] == 1
 
 
@@ -1212,23 +1215,32 @@ async def test_stock_import_vendor_card_integrity_error(db_session, test_user):
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")
     mock_file.filename = "test.csv"
     mock_form = MagicMock()
-    mock_form.get = MagicMock(side_effect=lambda key, default=None: {
-        "file": mock_file,
-        "vendor_name": "IE Race Vendor",
-        "vendor_website": "",
-    }.get(key, default))
+    mock_form.get = MagicMock(
+        side_effect=lambda key, default=None: {
+            "file": mock_file,
+            "vendor_name": "IE Race Vendor",
+            "vendor_website": "",
+        }.get(key, default)
+    )
     mock_request = MagicMock()
     mock_request.form = AsyncMock(return_value=mock_form)
 
     # Create a vendor card that the re-query will find after IntegrityError
     vc = VendorCard(
-        id=9990, normalized_name="ie race vendor", display_name="IE Race Vendor",
-        emails=[], phones=[], sighting_count=0,
+        id=9990,
+        normalized_name="ie race vendor",
+        display_name="IE Race Vendor",
+        emails=[],
+        phones=[],
+        sighting_count=0,
         created_at=datetime.now(timezone.utc),
     )
     # MaterialCard for the LM317T row
     mc = MaterialCard(
-        id=9990, normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="",
+        id=9990,
+        normalized_mpn="lm317t",
+        display_mpn="LM317T",
+        manufacturer="",
         created_at=datetime.now(timezone.utc),
     )
 
@@ -1305,21 +1317,30 @@ async def test_stock_import_material_card_integrity_error(db_session, test_user)
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")
     mock_file.filename = "test.csv"
     mock_form = MagicMock()
-    mock_form.get = MagicMock(side_effect=lambda key, default=None: {
-        "file": mock_file,
-        "vendor_name": "MC IE Vendor",
-        "vendor_website": "",
-    }.get(key, default))
+    mock_form.get = MagicMock(
+        side_effect=lambda key, default=None: {
+            "file": mock_file,
+            "vendor_name": "MC IE Vendor",
+            "vendor_website": "",
+        }.get(key, default)
+    )
     mock_request = MagicMock()
     mock_request.form = AsyncMock(return_value=mock_form)
 
     vc = VendorCard(
-        id=9991, normalized_name="mc ie vendor", display_name="MC IE Vendor",
-        emails=[], phones=[], sighting_count=0,
+        id=9991,
+        normalized_name="mc ie vendor",
+        display_name="MC IE Vendor",
+        emails=[],
+        phones=[],
+        sighting_count=0,
         created_at=datetime.now(timezone.utc),
     )
     mc = MaterialCard(
-        id=9991, normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="",
+        id=9991,
+        normalized_mpn="lm317t",
+        display_mpn="LM317T",
+        manufacturer="",
         created_at=datetime.now(timezone.utc),
     )
 
@@ -1410,8 +1431,7 @@ def test_is_password_protected_true():
     """is_password_protected returns True when openpyxl raises password error (line 144)."""
     from app.utils.file_validation import is_password_protected
 
-    with patch("openpyxl.load_workbook",
-               side_effect=Exception("File is password protected or encrypted")):
+    with patch("openpyxl.load_workbook", side_effect=Exception("File is password protected or encrypted")):
         assert is_password_protected(b"fake xlsx data") is True
 
 
@@ -1433,8 +1453,11 @@ def test_build_quote_email_html_zero_price(db_session, test_user):
     from app.routers.crm import _build_quote_email_html
 
     req = Requisition(
-        name="REQ-FMT", customer_name="Test Co", status="open",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        name="REQ-FMT",
+        customer_name="Test Co",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(req)
     db_session.flush()
@@ -1452,10 +1475,11 @@ def test_build_quote_email_html_zero_price(db_session, test_user):
         quote_number="Q-FMT-001",
         status="draft",
         line_items=[
-            {"mpn": "LM317T", "manufacturer": "TI", "qty": 100,
-             "sell_price": 0, "condition": "New"},
+            {"mpn": "LM317T", "manufacturer": "TI", "qty": 100, "sell_price": 0, "condition": "New"},
         ],
-        subtotal=0, total_cost=0, total_margin_pct=0,
+        subtotal=0,
+        total_cost=0,
+        total_margin_pct=0,
         created_by_id=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -1474,7 +1498,7 @@ def test_build_quote_email_html_zero_price(db_session, test_user):
 def test_upload_requirements_substitute_normalizes_to_none(client, db_session, test_requisition):
     """Upload where a substitute normalize_mpn returns None (line 779)."""
     # A substitute like "-" will normalize_mpn → None, triggering the continue
-    csv_content = b'mpn,qty,sub_1,sub_2\nLM317T,1000,-,LM337T'
+    csv_content = b"mpn,qty,sub_1,sub_2\nLM317T,1000,-,LM337T"
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/upload",
         files={"file": ("reqs.csv", io.BytesIO(csv_content), "text/csv")},
@@ -1536,8 +1560,7 @@ def test_search_redis_setup():
         mock_redis_mod.from_url.return_value = mock_conn
         mock_conn.ping.return_value = True
 
-        with patch.dict("os.environ", {"TESTING": ""}), \
-             patch.dict("sys.modules", {"redis": mock_redis_mod}):
+        with patch.dict("os.environ", {"TESTING": ""}), patch.dict("sys.modules", {"redis": mock_redis_mod}):
             result = ss._get_search_redis()
         assert result is mock_conn
     finally:
@@ -1558,8 +1581,7 @@ def test_search_redis_setup_failure():
         mock_redis_mod = MagicMock()
         mock_redis_mod.from_url.side_effect = Exception("connection refused")
 
-        with patch.dict("os.environ", {"TESTING": ""}), \
-             patch.dict("sys.modules", {"redis": mock_redis_mod}):
+        with patch.dict("os.environ", {"TESTING": ""}), patch.dict("sys.modules", {"redis": mock_redis_mod}):
             result = ss._get_search_redis()
         assert result is None
     finally:

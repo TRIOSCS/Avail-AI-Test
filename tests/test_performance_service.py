@@ -175,10 +175,7 @@ class TestComputeComposite:
         """All 4 values provided -> weighted average scaled to 0-1."""
         result = _compute_composite(0.8, 0.6, 0.4, 0.9)
         expected = (
-            0.8 * W_RESPONSE_RATE
-            + 0.6 * W_QUOTE_CONVERSION
-            + 0.4 * W_PO_CONVERSION
-            + 0.9 * W_REVIEW_RATING
+            0.8 * W_RESPONSE_RATE + 0.6 * W_QUOTE_CONVERSION + 0.4 * W_PO_CONVERSION + 0.9 * W_REVIEW_RATING
         ) / (W_RESPONSE_RATE + W_QUOTE_CONVERSION + W_PO_CONVERSION + W_REVIEW_RATING)
         assert result == pytest.approx(expected, abs=1e-4)
 
@@ -202,9 +199,7 @@ class TestComputeComposite:
     def test_compute_composite_two_metrics(self):
         """Two values, two None -> weighted avg of available metrics only."""
         result = _compute_composite(0.6, None, 0.4, None)
-        expected = (0.6 * W_RESPONSE_RATE + 0.4 * W_PO_CONVERSION) / (
-            W_RESPONSE_RATE + W_PO_CONVERSION
-        )
+        expected = (0.6 * W_RESPONSE_RATE + 0.4 * W_PO_CONVERSION) / (W_RESPONSE_RATE + W_PO_CONVERSION)
         assert result == pytest.approx(expected, abs=1e-4)
 
 
@@ -369,9 +364,7 @@ class TestComputeVendorScorecard:
         quoted = {offers[0].id}
         po = {offers[1].id}
 
-        result = compute_vendor_scorecard(
-            db_session, vc.id, quoted_offer_ids=quoted, po_offer_ids=po
-        )
+        result = compute_vendor_scorecard(db_session, vc.id, quoted_offer_ids=quoted, po_offer_ids=po)
         # 1 of 3 quoted, 1 of 3 PO
         assert result["quote_conversion"] == pytest.approx(1 / 3, abs=1e-4)
         assert result["po_conversion"] == pytest.approx(1 / 3, abs=1e-4)
@@ -405,9 +398,7 @@ class TestComputeAllVendorScorecards:
         assert result["updated"] + result["skipped_cold_start"] > 0
 
         # Verify snapshot exists
-        snaps = db_session.query(VendorMetricsSnapshot).filter(
-            VendorMetricsSnapshot.vendor_card_id == vc.id
-        ).all()
+        snaps = db_session.query(VendorMetricsSnapshot).filter(VendorMetricsSnapshot.vendor_card_id == vc.id).all()
         assert len(snaps) == 1
         assert snaps[0].snapshot_date == date.today()
 
@@ -425,10 +416,14 @@ class TestComputeAllVendorScorecards:
         compute_all_vendor_scorecards(db_session)
         compute_all_vendor_scorecards(db_session)
 
-        snaps = db_session.query(VendorMetricsSnapshot).filter(
-            VendorMetricsSnapshot.vendor_card_id == vc.id,
-            VendorMetricsSnapshot.snapshot_date == date.today(),
-        ).all()
+        snaps = (
+            db_session.query(VendorMetricsSnapshot)
+            .filter(
+                VendorMetricsSnapshot.vendor_card_id == vc.id,
+                VendorMetricsSnapshot.snapshot_date == date.today(),
+            )
+            .all()
+        )
         assert len(snaps) == 1  # Upsert, not duplicate
 
     def test_compute_all_error_isolation(self, db_session, test_user, monkeypatch):
@@ -446,7 +441,11 @@ class TestComputeAllVendorScorecards:
         db_session.commit()
 
         # Patch compute_vendor_scorecard to raise on vc2 but work for vc1
-        original = compute_vendor_scorecard.__wrapped__ if hasattr(compute_vendor_scorecard, '__wrapped__') else compute_vendor_scorecard
+        original = (
+            compute_vendor_scorecard.__wrapped__
+            if hasattr(compute_vendor_scorecard, "__wrapped__")
+            else compute_vendor_scorecard
+        )
 
         call_count = {"good": 0, "bad": 0}
 
@@ -465,12 +464,8 @@ class TestComputeAllVendorScorecards:
         compute_all_vendor_scorecards(db_session)
 
         # vc1 should have a snapshot; vc2 should not
-        snap1 = db_session.query(VendorMetricsSnapshot).filter(
-            VendorMetricsSnapshot.vendor_card_id == vc1.id
-        ).first()
-        snap2 = db_session.query(VendorMetricsSnapshot).filter(
-            VendorMetricsSnapshot.vendor_card_id == vc2.id
-        ).first()
+        snap1 = db_session.query(VendorMetricsSnapshot).filter(VendorMetricsSnapshot.vendor_card_id == vc1.id).first()
+        snap2 = db_session.query(VendorMetricsSnapshot).filter(VendorMetricsSnapshot.vendor_card_id == vc2.id).first()
         assert snap1 is not None
         assert snap2 is None
 
@@ -524,9 +519,7 @@ class TestScorecardListDetail:
         db_session.commit()
 
         # Sort desc
-        result = get_vendor_scorecard_list(
-            db_session, sort_by="composite_score", order="desc"
-        )
+        result = get_vendor_scorecard_list(db_session, sort_by="composite_score", order="desc")
         scores = [item["composite_score"] for item in result["items"]]
         assert scores == sorted(scores, reverse=True)
 
@@ -596,7 +589,10 @@ class TestBuyerLeaderboard:
         offers = []
         for i in range(3):
             o = _make_offer(
-                db_session, req, buyer, vc,
+                db_session,
+                req,
+                buyer,
+                vc,
                 created_at=datetime(month.year, month.month, 10, tzinfo=timezone.utc),
             )
             offers.append(o)
@@ -619,10 +615,14 @@ class TestBuyerLeaderboard:
         result = compute_buyer_leaderboard(db_session, month)
         assert result["entries"] == 1
 
-        snap = db_session.query(BuyerLeaderboardSnapshot).filter(
-            BuyerLeaderboardSnapshot.user_id == buyer.id,
-            BuyerLeaderboardSnapshot.month == month,
-        ).first()
+        snap = (
+            db_session.query(BuyerLeaderboardSnapshot)
+            .filter(
+                BuyerLeaderboardSnapshot.user_id == buyer.id,
+                BuyerLeaderboardSnapshot.month == month,
+            )
+            .first()
+        )
         assert snap is not None
         assert snap.offers_logged == 3
         assert snap.offers_quoted == 1
@@ -642,11 +642,17 @@ class TestBuyerLeaderboard:
 
         # Offer created within grace window (last GRACE_DAYS of previous month)
         grace_date = datetime(
-            prev_month_end.year, prev_month_end.month, prev_month_end.day,
+            prev_month_end.year,
+            prev_month_end.month,
+            prev_month_end.day,
             tzinfo=timezone.utc,
         )
         grace_offer = _make_offer(
-            db_session, req, buyer, vc, created_at=grace_date,
+            db_session,
+            req,
+            buyer,
+            vc,
+            created_at=grace_date,
         )
 
         # This offer was quoted (advanced) -> should count in current month
@@ -665,10 +671,14 @@ class TestBuyerLeaderboard:
         db_session.commit()
 
         compute_buyer_leaderboard(db_session, month)
-        snap = db_session.query(BuyerLeaderboardSnapshot).filter(
-            BuyerLeaderboardSnapshot.user_id == buyer.id,
-            BuyerLeaderboardSnapshot.month == month,
-        ).first()
+        snap = (
+            db_session.query(BuyerLeaderboardSnapshot)
+            .filter(
+                BuyerLeaderboardSnapshot.user_id == buyer.id,
+                BuyerLeaderboardSnapshot.month == month,
+            )
+            .first()
+        )
         assert snap is not None
         # Grace offer that advanced counts as both logged and quoted
         assert snap.offers_logged >= 1
@@ -680,17 +690,22 @@ class TestBuyerLeaderboard:
         month = date.today().replace(day=1)
 
         buyers = []
-        for i, (email, n_offers) in enumerate([
-            ("rank-top@test.com", 10),
-            ("rank-mid@test.com", 5),
-            ("rank-low@test.com", 1),
-        ]):
+        for i, (email, n_offers) in enumerate(
+            [
+                ("rank-top@test.com", 10),
+                ("rank-mid@test.com", 5),
+                ("rank-low@test.com", 1),
+            ]
+        ):
             buyer = _make_user(db_session, email, role="buyer", name=f"Buyer {i}")
             buyers.append(buyer)
             req = _make_requisition(db_session, buyer, f"REQ-RANK-{i}")
             for j in range(n_offers):
                 _make_offer(
-                    db_session, req, buyer, vc,
+                    db_session,
+                    req,
+                    buyer,
+                    vc,
                     created_at=datetime(month.year, month.month, 10, tzinfo=timezone.utc),
                 )
 
@@ -768,17 +783,19 @@ class TestStockDedup:
         rows = [{"mpn": "LM317T"}, {"mpn": "NE555P"}]
         content_hash = compute_stock_list_hash(rows)
 
-        result = check_and_record_stock_list(
-            db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2
-        )
+        result = check_and_record_stock_list(db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2)
         assert result["is_duplicate"] is False
         assert result["upload_count"] == 1
 
         # Verify row was created
-        slh = db_session.query(StockListHash).filter(
-            StockListHash.user_id == test_user.id,
-            StockListHash.content_hash == content_hash,
-        ).first()
+        slh = (
+            db_session.query(StockListHash)
+            .filter(
+                StockListHash.user_id == test_user.id,
+                StockListHash.content_hash == content_hash,
+            )
+            .first()
+        )
         assert slh is not None
         assert slh.file_name == "stock_v1.xlsx"
         assert slh.row_count == 2
@@ -789,14 +806,10 @@ class TestStockDedup:
         content_hash = compute_stock_list_hash(rows)
 
         # First upload
-        check_and_record_stock_list(
-            db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2
-        )
+        check_and_record_stock_list(db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2)
 
         # Second upload with same hash
-        result = check_and_record_stock_list(
-            db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2
-        )
+        result = check_and_record_stock_list(db_session, test_user.id, content_hash, None, "stock_v1.xlsx", 2)
         assert result["is_duplicate"] is True
         assert result["upload_count"] == 2
 
@@ -889,9 +902,7 @@ class TestScorecardListInvalidSort:
         db_session.add(snap)
         db_session.commit()
 
-        result = get_vendor_scorecard_list(
-            db_session, sort_by="INVALID_COLUMN", order="desc"
-        )
+        result = get_vendor_scorecard_list(db_session, sort_by="INVALID_COLUMN", order="desc")
         assert result["total"] == 1  # Still returns results
 
     def test_invalid_order_falls_back(self, db_session):
@@ -906,9 +917,7 @@ class TestScorecardListInvalidSort:
         db_session.add(snap)
         db_session.commit()
 
-        result = get_vendor_scorecard_list(
-            db_session, sort_by="composite_score", order="INVALID"
-        )
+        result = get_vendor_scorecard_list(db_session, sort_by="composite_score", order="INVALID")
         assert result["total"] == 1
 
     def test_asc_order(self, db_session):
@@ -925,9 +934,7 @@ class TestScorecardListInvalidSort:
             db_session.add(snap)
         db_session.commit()
 
-        result = get_vendor_scorecard_list(
-            db_session, sort_by="composite_score", order="asc"
-        )
+        result = get_vendor_scorecard_list(db_session, sort_by="composite_score", order="asc")
         scores = [item["composite_score"] for item in result["items"]]
         assert scores == sorted(scores)
 
@@ -965,11 +972,20 @@ class TestBuyerLeaderboardMonths:
         buyer = _make_user(db_session, "months-buyer@test.com", role="buyer")
         for month_date in [date(2026, 1, 1), date(2026, 2, 1)]:
             snap = BuyerLeaderboardSnapshot(
-                user_id=buyer.id, month=month_date,
-                offers_logged=1, offers_quoted=0, offers_in_buyplan=0,
-                offers_po_confirmed=0, stock_lists_uploaded=0,
-                points_offers=1, points_quoted=0, points_buyplan=0,
-                points_po=0, points_stock=0, total_points=1, rank=1,
+                user_id=buyer.id,
+                month=month_date,
+                offers_logged=1,
+                offers_quoted=0,
+                offers_in_buyplan=0,
+                offers_po_confirmed=0,
+                stock_lists_uploaded=0,
+                points_offers=1,
+                points_quoted=0,
+                points_buyplan=0,
+                points_po=0,
+                points_stock=0,
+                total_points=1,
+                rank=1,
             )
             db_session.add(snap)
         db_session.commit()

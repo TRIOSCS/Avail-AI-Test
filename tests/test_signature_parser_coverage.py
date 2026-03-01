@@ -4,16 +4,17 @@ test_signature_parser_coverage.py -- Full coverage tests for signature_parser.py
 Targets missing lines: 123, 130, 165, 171, 202-249, 254-270, 314-316
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.services.signature_parser import (
     _extract_signature_block,
-    parse_signature_regex,
+    cache_signature_extract,
+    extract_signature,
     parse_signature_ai,
     parse_signature_gradient,
-    extract_signature,
-    cache_signature_extract,
+    parse_signature_regex,
 )
 
 
@@ -52,9 +53,7 @@ class TestParseSignatureRegex:
 
     def test_basic_extraction(self):
         body = (
-            "Hello please review.\n\n---\n"
-            "John Doe\nCEO\nAcme Corp\n"
-            "Phone: 555-123-4567\njohn@acme.com\nwww.acme.com\n"
+            "Hello please review.\n\n---\nJohn Doe\nCEO\nAcme Corp\nPhone: 555-123-4567\njohn@acme.com\nwww.acme.com\n"
         )
         result = parse_signature_regex(body)
         assert result["full_name"] == "John Doe"
@@ -66,32 +65,19 @@ class TestParseSignatureRegex:
 
     def test_mobile_phone_label(self):
         """Line 123: mobile label in text before phone regex match sets mobile."""
-        body = (
-            "Hello.\n\n---\n"
-            "John Doe\n"
-            "Mobile/Cell | Tel: 555-987-6543\n"
-            "john@acme.com\n"
-        )
+        body = "Hello.\n\n---\nJohn Doe\nMobile/Cell | Tel: 555-987-6543\njohn@acme.com\n"
         result = parse_signature_regex(body)
         assert result["mobile"] == "555-987-6543"
 
     def test_cell_phone_label(self):
         """Line 123: cell label triggers mobile field."""
-        body = (
-            "Hello.\n\n---\n"
-            "John Doe\n"
-            "Cell/Direct | Office: 555-111-2222\n"
-            "john@acme.com\n"
-        )
+        body = "Hello.\n\n---\nJohn Doe\nCell/Direct | Office: 555-111-2222\njohn@acme.com\n"
         result = parse_signature_regex(body)
         assert result["mobile"] == "555-111-2222"
 
     def test_bare_phone_fallback(self):
         """Line 130: bare phone regex fallback when no labeled phones found."""
-        body = (
-            "Hello.\n\n---\n"
-            "John Doe\n555-444-3333\njohn@acme.com\n"
-        )
+        body = "Hello.\n\n---\nJohn Doe\n555-444-3333\njohn@acme.com\n"
         result = parse_signature_regex(body)
         assert result["phone"] == "555-444-3333"
 
@@ -186,10 +172,14 @@ class TestParseSignatureAI:
     async def test_successful_ai_parse(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO, Acme Corp\njohn@acme.com\n"
         ai_response = {
-            "full_name": "John Doe", "title": "CEO",
-            "company_name": "Acme Corp", "phone": "555-123-4567",
-            "mobile": None, "website": "acme.com",
-            "linkedin_url": None, "address": "123 Main St",
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme Corp",
+            "phone": "555-123-4567",
+            "mobile": None,
+            "website": "acme.com",
+            "linkedin_url": None,
+            "address": "123 Main St",
         }
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
             result = await parse_signature_ai(body, "John Doe", "john@acme.com")
@@ -216,7 +206,9 @@ class TestParseSignatureAI:
     @pytest.mark.asyncio
     async def test_ai_exception(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO\n"
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, side_effect=RuntimeError("API error")):
+        with patch(
+            "app.utils.claude_client.claude_json", new_callable=AsyncMock, side_effect=RuntimeError("API error")
+        ):
             result = await parse_signature_ai(body)
         assert result == {"confidence": 0.0}
 
@@ -224,10 +216,14 @@ class TestParseSignatureAI:
     async def test_ai_confidence_capped_at_095(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO\n"
         ai_response = {
-            "full_name": "John Doe", "title": "CEO",
-            "company_name": "Acme", "phone": "555-123-4567",
-            "mobile": "555-987-6543", "website": "acme.com",
-            "linkedin_url": "https://linkedin.com/in/jd", "address": "123 Main St",
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme",
+            "phone": "555-123-4567",
+            "mobile": "555-987-6543",
+            "website": "acme.com",
+            "linkedin_url": "https://linkedin.com/in/jd",
+            "address": "123 Main St",
         }
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
             result = await parse_signature_ai(body, "John Doe", "john@acme.com")
@@ -237,9 +233,14 @@ class TestParseSignatureAI:
     async def test_ai_no_sender_email_yields_none(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO\n"
         ai_response = {
-            "full_name": "John", "title": None, "company_name": None,
-            "phone": None, "mobile": None, "website": None,
-            "linkedin_url": None, "address": None,
+            "full_name": "John",
+            "title": None,
+            "company_name": None,
+            "phone": None,
+            "mobile": None,
+            "website": None,
+            "linkedin_url": None,
+            "address": None,
         }
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
             result = await parse_signature_ai(body, "John", "")
@@ -259,10 +260,14 @@ class TestParseSignatureGradient:
     async def test_successful_gradient_parse(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO, Acme Corp\njohn@acme.com\n"
         gradient_response = {
-            "full_name": "John Doe", "title": "CEO",
-            "company_name": "Acme Corp", "phone": "555-123-4567",
-            "mobile": None, "website": "acme.com",
-            "linkedin_url": None, "address": "123 Main St",
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme Corp",
+            "phone": "555-123-4567",
+            "mobile": None,
+            "website": "acme.com",
+            "linkedin_url": None,
+            "address": "123 Main St",
         }
         with patch(
             "app.services.gradient_service.gradient_json",
@@ -313,10 +318,14 @@ class TestParseSignatureGradient:
     async def test_gradient_confidence_capped_at_095(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO\n"
         gradient_response = {
-            "full_name": "John Doe", "title": "CEO",
-            "company_name": "Acme", "phone": "555-123-4567",
-            "mobile": "555-987-6543", "website": "acme.com",
-            "linkedin_url": "https://linkedin.com/in/jd", "address": "123 Main St",
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme",
+            "phone": "555-123-4567",
+            "mobile": "555-987-6543",
+            "website": "acme.com",
+            "linkedin_url": "https://linkedin.com/in/jd",
+            "address": "123 Main St",
         }
         with patch(
             "app.services.gradient_service.gradient_json",
@@ -330,9 +339,14 @@ class TestParseSignatureGradient:
     async def test_gradient_no_sender_email_yields_none(self):
         body = "Hello.\n\n---\nJohn Doe\nCEO\n"
         gradient_response = {
-            "full_name": "John", "title": None, "company_name": None,
-            "phone": None, "mobile": None, "website": None,
-            "linkedin_url": None, "address": None,
+            "full_name": "John",
+            "title": None,
+            "company_name": None,
+            "phone": None,
+            "mobile": None,
+            "website": None,
+            "linkedin_url": None,
+            "address": None,
         }
         with patch(
             "app.services.gradient_service.gradient_json",
@@ -353,12 +367,20 @@ class TestExtractSignatureGradientPath:
         gradient_result = {"full_name": "John Doe", "title": "CEO", "confidence": 0.85}
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
 
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_gradient",
-                   new_callable=AsyncMock, return_value=gradient_result), \
-             patch("app.services.signature_parser.parse_signature_ai",
-                   new_callable=AsyncMock, return_value={"confidence": 0.3}), \
-             patch("app.config.settings", mock_settings):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch(
+                "app.services.signature_parser.parse_signature_gradient",
+                new_callable=AsyncMock,
+                return_value=gradient_result,
+            ),
+            patch(
+                "app.services.signature_parser.parse_signature_ai",
+                new_callable=AsyncMock,
+                return_value={"confidence": 0.3},
+            ),
+            patch("app.config.settings", mock_settings),
+        ):
             result = await extract_signature("body", "John", "john@acme.com")
         assert result["extraction_method"] == "gradient_ai"
         assert result["confidence"] == 0.85
@@ -371,12 +393,16 @@ class TestExtractSignatureGradientPath:
         higher_ai = {"full_name": "John Doe", "confidence": 0.8}
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
 
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_gradient",
-                   new_callable=AsyncMock, return_value=gradient_result), \
-             patch("app.services.signature_parser.parse_signature_ai",
-                   new_callable=AsyncMock, return_value=higher_ai), \
-             patch("app.config.settings", mock_settings):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch(
+                "app.services.signature_parser.parse_signature_gradient",
+                new_callable=AsyncMock,
+                return_value=gradient_result,
+            ),
+            patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=higher_ai),
+            patch("app.config.settings", mock_settings),
+        ):
             result = await extract_signature("body", "John", "john@acme.com")
         assert result["extraction_method"] == "claude_ai"
 
@@ -387,12 +413,16 @@ class TestExtractSignatureGradientPath:
         higher_ai = {"full_name": "John Doe", "confidence": 0.8}
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
 
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_gradient",
-                   new_callable=AsyncMock, side_effect=RuntimeError("Gradient down")), \
-             patch("app.services.signature_parser.parse_signature_ai",
-                   new_callable=AsyncMock, return_value=higher_ai), \
-             patch("app.config.settings", mock_settings):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch(
+                "app.services.signature_parser.parse_signature_gradient",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("Gradient down"),
+            ),
+            patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=higher_ai),
+            patch("app.config.settings", mock_settings),
+        ):
             result = await extract_signature("body", "John", "john@acme.com")
         assert result["extraction_method"] == "claude_ai"
 
@@ -403,10 +433,11 @@ class TestExtractSignatureGradientPath:
         higher_ai = {"full_name": "John Doe", "confidence": 0.8}
         mock_settings = type("S", (), {"do_gradient_api_key": ""})()
 
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_ai",
-                   new_callable=AsyncMock, return_value=higher_ai), \
-             patch("app.config.settings", mock_settings):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=higher_ai),
+            patch("app.config.settings", mock_settings),
+        ):
             result = await extract_signature("body", "John", "john@acme.com")
         # Should go to claude_ai, not gradient
         assert result["extraction_method"] == "claude_ai"
@@ -416,8 +447,12 @@ class TestExtractSignature:
     @pytest.mark.asyncio
     async def test_high_confidence_regex_returns_regex(self):
         high_conf = {
-            "full_name": "John Doe", "title": "CEO", "company_name": "Acme",
-            "phone": "555-1234567", "email": "john@acme.com", "confidence": 0.8,
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme",
+            "phone": "555-1234567",
+            "email": "john@acme.com",
+            "confidence": 0.8,
         }
         with patch("app.services.signature_parser.parse_signature_regex", return_value=high_conf):
             result = await extract_signature("body")
@@ -428,8 +463,10 @@ class TestExtractSignature:
     async def test_low_regex_falls_back_to_ai(self):
         low_regex = {"full_name": "John", "confidence": 0.4}
         high_ai = {"full_name": "John Doe", "title": "CEO", "confidence": 0.85}
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=high_ai):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=high_ai),
+        ):
             result = await extract_signature("body")
         assert result["extraction_method"] == "claude_ai"
         assert result["confidence"] == 0.85
@@ -438,16 +475,24 @@ class TestExtractSignature:
     async def test_ai_lower_than_regex_returns_regex(self):
         low_regex = {"full_name": "John", "confidence": 0.5}
         lower_ai = {"confidence": 0.3}
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=lower_ai):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=lower_ai),
+        ):
             result = await extract_signature("body")
         assert result["extraction_method"] == "regex"
 
     @pytest.mark.asyncio
     async def test_ai_exception_falls_back_to_regex(self):
         low_regex = {"full_name": "John", "confidence": 0.4}
-        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
-             patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, side_effect=RuntimeError("fail")):
+        with (
+            patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
+            patch(
+                "app.services.signature_parser.parse_signature_ai",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("fail"),
+            ),
+        ):
             result = await extract_signature("body")
         assert result["extraction_method"] == "regex"
         assert result["confidence"] == 0.4
@@ -456,12 +501,18 @@ class TestExtractSignature:
 class TestCacheSignatureExtract:
     def test_creates_new_record(self, db_session):
         from app.models import EmailSignatureExtract
+
         extract = {
-            "full_name": "John Doe", "title": "CEO", "company_name": "Acme",
-            "phone": "555-1234567", "mobile": "555-9876543",
-            "website": "acme.com", "address": "123 Main St",
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme",
+            "phone": "555-1234567",
+            "mobile": "555-9876543",
+            "website": "acme.com",
+            "address": "123 Main St",
             "linkedin_url": "https://linkedin.com/in/jd",
-            "extraction_method": "regex", "confidence": 0.8,
+            "extraction_method": "regex",
+            "confidence": 0.8,
         }
         cache_signature_extract(db_session, "john@acme.com", extract)
         record = db_session.query(EmailSignatureExtract).filter_by(sender_email="john@acme.com").first()
@@ -472,17 +523,27 @@ class TestCacheSignatureExtract:
 
     def test_updates_existing_higher_confidence(self, db_session):
         from app.models import EmailSignatureExtract
+
         initial = EmailSignatureExtract(
-            sender_email="john@acme.com", full_name="John",
-            confidence=0.5, extraction_method="regex", seen_count=1,
+            sender_email="john@acme.com",
+            full_name="John",
+            confidence=0.5,
+            extraction_method="regex",
+            seen_count=1,
         )
         db_session.add(initial)
         db_session.flush()
         extract = {
-            "full_name": "John Doe", "title": "CEO", "company_name": "Acme Corp",
-            "phone": "555-1234567", "mobile": None, "website": "acme.com",
-            "address": None, "linkedin_url": None,
-            "extraction_method": "claude_ai", "confidence": 0.9,
+            "full_name": "John Doe",
+            "title": "CEO",
+            "company_name": "Acme Corp",
+            "phone": "555-1234567",
+            "mobile": None,
+            "website": "acme.com",
+            "address": None,
+            "linkedin_url": None,
+            "extraction_method": "claude_ai",
+            "confidence": 0.9,
         }
         cache_signature_extract(db_session, "john@acme.com", extract)
         record = db_session.query(EmailSignatureExtract).filter_by(sender_email="john@acme.com").first()
@@ -492,9 +553,13 @@ class TestCacheSignatureExtract:
 
     def test_updates_existing_lower_confidence_only_increments_count(self, db_session):
         from app.models import EmailSignatureExtract
+
         initial = EmailSignatureExtract(
-            sender_email="john@acme.com", full_name="John Doe",
-            confidence=0.9, extraction_method="claude_ai", seen_count=3,
+            sender_email="john@acme.com",
+            full_name="John Doe",
+            confidence=0.9,
+            extraction_method="claude_ai",
+            seen_count=3,
         )
         db_session.add(initial)
         db_session.flush()

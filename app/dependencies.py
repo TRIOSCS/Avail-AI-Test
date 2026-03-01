@@ -47,6 +47,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     if not user:
         # Check for agent API key (service-to-service auth)
         from .config import settings
+
         agent_key = request.headers.get("x-agent-key")
         if agent_key and settings.agent_api_key and agent_key == settings.agent_api_key:
             user = db.query(User).filter_by(email="agent@availai.local").first()
@@ -133,7 +134,11 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     # Check if token needs refresh (15-min buffer)
     needs_refresh = False
     if user.token_expires_at:
-        expiry = user.token_expires_at if user.token_expires_at.tzinfo else user.token_expires_at.replace(tzinfo=timezone.utc)
+        expiry = (
+            user.token_expires_at
+            if user.token_expires_at.tzinfo
+            else user.token_expires_at.replace(tzinfo=timezone.utc)
+        )
         if datetime.now(timezone.utc) > expiry - timedelta(minutes=15):
             needs_refresh = True
 

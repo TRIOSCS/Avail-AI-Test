@@ -16,11 +16,9 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  EmailIntelligence Model
@@ -138,9 +136,7 @@ class TestClassifyEmailAI:
         }
 
         with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                classify_email_ai("Test", "Body", "a@b.com")
-            )
+            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result["classification"] == "general"
 
@@ -149,9 +145,7 @@ class TestClassifyEmailAI:
         from app.services.email_intelligence_service import classify_email_ai
 
         with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
-                classify_email_ai("Test", "Body", "a@b.com")
-            )
+            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result is None
 
@@ -169,9 +163,7 @@ class TestClassifyEmailAI:
         }
 
         with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                classify_email_ai("Test", "Body", "a@b.com")
-            )
+            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result["confidence"] == 1.0
 
@@ -251,8 +243,14 @@ class TestProcessEmailIntelligence:
         """2+ regex matches skip AI classification and go straight to pricing."""
         from app.services.email_intelligence_service import process_email_intelligence
 
-        with patch("app.services.email_intelligence_service.extract_pricing_intelligence", new_callable=AsyncMock, return_value=None) as mock_extract, \
-             patch("app.services.email_intelligence_service.classify_email_ai", new_callable=AsyncMock) as mock_classify:
+        with (
+            patch(
+                "app.services.email_intelligence_service.extract_pricing_intelligence",
+                new_callable=AsyncMock,
+                return_value=None,
+            ) as mock_extract,
+            patch("app.services.email_intelligence_service.classify_email_ai", new_callable=AsyncMock) as mock_classify,
+        ):
             result = asyncio.get_event_loop().run_until_complete(
                 process_email_intelligence(
                     db_session,
@@ -288,7 +286,11 @@ class TestProcessEmailIntelligence:
             "commodities_detected": [],
         }
 
-        with patch("app.services.email_intelligence_service.classify_email_ai", new_callable=AsyncMock, return_value=mock_classification):
+        with patch(
+            "app.services.email_intelligence_service.classify_email_ai",
+            new_callable=AsyncMock,
+            return_value=mock_classification,
+        ):
             result = asyncio.get_event_loop().run_until_complete(
                 process_email_intelligence(
                     db_session,
@@ -320,14 +322,16 @@ class TestEmailIntelligenceEndpoint:
 
         # Create test records
         for i in range(3):
-            db_session.add(EmailIntelligence(
-                message_id=f"msg-ep-{i}",
-                user_id=test_user.id,
-                sender_email=f"vendor{i}@test.com",
-                sender_domain="test.com",
-                classification="offer" if i == 0 else "general",
-                confidence=0.8,
-            ))
+            db_session.add(
+                EmailIntelligence(
+                    message_id=f"msg-ep-{i}",
+                    user_id=test_user.id,
+                    sender_email=f"vendor{i}@test.com",
+                    sender_domain="test.com",
+                    classification="offer" if i == 0 else "general",
+                    confidence=0.8,
+                )
+            )
         db_session.commit()
 
         resp = client.get("/api/email-intelligence")
@@ -340,16 +344,26 @@ class TestEmailIntelligenceEndpoint:
         """GET /api/email-intelligence?classification=offer filters results."""
         from app.models import EmailIntelligence
 
-        db_session.add(EmailIntelligence(
-            message_id="msg-f-1", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="offer", confidence=0.9,
-        ))
-        db_session.add(EmailIntelligence(
-            message_id="msg-f-2", user_id=test_user.id,
-            sender_email="v@t.com", sender_domain="t.com",
-            classification="general", confidence=0.7,
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="msg-f-1",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="offer",
+                confidence=0.9,
+            )
+        )
+        db_session.add(
+            EmailIntelligence(
+                message_id="msg-f-2",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="general",
+                confidence=0.7,
+            )
+        )
         db_session.commit()
 
         resp = client.get("/api/email-intelligence?classification=offer")
@@ -376,6 +390,7 @@ class TestCountOfferMatches:
     def _make_miner(self):
         with patch("app.utils.graph_client.GraphClient"):
             from app.connectors.email_mining import EmailMiner
+
             miner = EmailMiner("fake-token")
             miner.gc = MagicMock()
         return miner
@@ -383,19 +398,13 @@ class TestCountOfferMatches:
     def test_clear_offer_high_count(self):
         """Clear offer email matches multiple patterns."""
         miner = self._make_miner()
-        count = miner._count_offer_matches(
-            "RFQ Response: Quotation",
-            "We have LM317T in stock. Unit price $0.50."
-        )
+        count = miner._count_offer_matches("RFQ Response: Quotation", "We have LM317T in stock. Unit price $0.50.")
         assert count >= 2
 
     def test_general_email_low_count(self):
         """Non-offer email matches few patterns."""
         miner = self._make_miner()
-        count = miner._count_offer_matches(
-            "Meeting invitation",
-            "Please join the call at 2pm."
-        )
+        count = miner._count_offer_matches("Meeting invitation", "Please join the call at 2pm.")
         assert count == 0
 
     def test_is_offer_email_uses_count(self):

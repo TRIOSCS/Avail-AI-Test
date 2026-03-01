@@ -9,6 +9,7 @@ and quote_quality_rate columns to vendor_cards table.
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "035_vendor_email_health"

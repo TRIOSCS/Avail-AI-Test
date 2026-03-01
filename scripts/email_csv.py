@@ -21,8 +21,7 @@ from app.models.auth import User
 from app.utils.graph_client import GraphClient
 
 
-async def send_email(token: str, to: str, subject: str, body: str,
-                     filename: str, file_bytes: bytes):
+async def send_email(token: str, to: str, subject: str, body: str, filename: str, file_bytes: bytes):
     gc = GraphClient(token)
     csv_b64 = base64.b64encode(file_bytes).decode("utf-8")
 
@@ -51,8 +50,7 @@ def main():
     parser = argparse.ArgumentParser(description="Email a CSV attachment")
     parser.add_argument("--to", required=True, help="Recipient email")
     parser.add_argument("--subject", default="AvailAI Export", help="Email subject")
-    parser.add_argument("--body", default="<p>Please see the attached export.</p>",
-                        help="HTML body")
+    parser.add_argument("--body", default="<p>Please see the attached export.</p>", help="HTML body")
     parser.add_argument("--file", required=True, help="Path to CSV file")
     parser.add_argument("--sender-id", type=int, help="User ID to send as (default: first admin)")
     args = parser.parse_args()
@@ -81,10 +79,16 @@ def main():
             file_bytes = f.read()
 
         filename = os.path.basename(args.file)
-        result = asyncio.run(send_email(
-            user.access_token, args.to, args.subject, args.body,
-            filename, file_bytes,
-        ))
+        result = asyncio.run(
+            send_email(
+                user.access_token,
+                args.to,
+                args.subject,
+                args.body,
+                filename,
+                file_bytes,
+            )
+        )
 
         if result and "error" in result:
             print(f"Send failed: {result}", file=sys.stderr)

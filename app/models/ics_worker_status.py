@@ -34,6 +34,4 @@ class IcsWorkerStatus(Base):
     daily_stats_json = Column(JSON)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        CheckConstraint("id = 1", name="ck_ics_worker_status_singleton"),
-    )
+    __table_args__ = (CheckConstraint("id = 1", name="ck_ics_worker_status_singleton"),)

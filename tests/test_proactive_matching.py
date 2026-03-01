@@ -6,10 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from tests.conftest import engine  # noqa: F401
-
 from app.models import (
-    ActivityLog,
     Company,
     CustomerSite,
     MaterialCard,
@@ -34,25 +31,33 @@ from app.services.proactive_matching import (
     mark_match_sent,
     run_proactive_scan,
 )
+from tests.conftest import engine  # noqa: F401
 
 
 def _setup_scenario(db):
     """Create a common test scenario: company + site + owner + card + CPH + requisition."""
     owner = User(
-        email="sales@trioscs.com", name="Sales Rep", role="sales",
-        azure_id="sales-001", created_at=datetime.now(timezone.utc),
+        email="sales@trioscs.com",
+        name="Sales Rep",
+        role="sales",
+        azure_id="sales-001",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(owner)
     db.flush()
 
     company = Company(
-        name="Sensata Technologies", is_active=True, account_owner_id=owner.id,
+        name="Sensata Technologies",
+        is_active=True,
+        account_owner_id=owner.id,
     )
     db.add(company)
     db.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="Sensata HQ", is_active=True,
+        company_id=company.id,
+        site_name="Sensata HQ",
+        is_active=True,
     )
     db.add(site)
     db.flush()
@@ -63,32 +68,46 @@ def _setup_scenario(db):
 
     # Create a requisition + requirement so the match has valid FKs
     req = Requisition(
-        name="Test Req", customer_site_id=site.id, status="archived", created_by=owner.id,
+        name="Test Req",
+        customer_site_id=site.id,
+        status="archived",
+        created_by=owner.id,
     )
     db.add(req)
     db.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="STM32F407",
-        normalized_mpn="stm32f407", material_card_id=card.id,
+        requisition_id=req.id,
+        primary_mpn="STM32F407",
+        normalized_mpn="stm32f407",
+        material_card_id=card.id,
     )
     db.add(requirement)
     db.flush()
 
     # Purchase history
     cph = CustomerPartHistory(
-        company_id=company.id, material_card_id=card.id, mpn="STM32F407",
-        source="avail_offer", purchase_count=3,
+        company_id=company.id,
+        material_card_id=card.id,
+        mpn="STM32F407",
+        source="avail_offer",
+        purchase_count=3,
         last_purchased_at=datetime.now(timezone.utc) - timedelta(days=60),
-        avg_unit_price=Decimal("12.50"), last_unit_price=Decimal("13.00"),
+        avg_unit_price=Decimal("12.50"),
+        last_unit_price=Decimal("13.00"),
         total_quantity=500,
     )
     db.add(cph)
     db.commit()
 
     return {
-        "owner": owner, "company": company, "site": site, "card": card,
-        "requisition": req, "requirement": requirement, "cph": cph,
+        "owner": owner,
+        "company": company,
+        "site": site,
+        "card": card,
+        "requisition": req,
+        "requirement": requirement,
+        "cph": cph,
     }
 
 
@@ -312,8 +331,8 @@ def test_run_proactive_scan(db_session):
     db_session.commit()
 
     # Reset scan timestamp so it picks up the offer
-    from app.services.proactive_matching import _last_scan_at
     import app.services.proactive_matching as pm
+
     pm._last_scan_at = datetime.now(timezone.utc) - timedelta(hours=1)
 
     result = run_proactive_scan(db_session)
@@ -629,20 +648,27 @@ def test_find_matches_below_min_margin(db_session):
 def test_find_matches_no_requisition_history(db_session):
     """Company with CPH but no requisition for the part is skipped."""
     owner = User(
-        email="sales2@trioscs.com", name="Sales2", role="sales",
-        azure_id="sales-002", created_at=datetime.now(timezone.utc),
+        email="sales2@trioscs.com",
+        name="Sales2",
+        role="sales",
+        azure_id="sales-002",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(owner)
     db_session.flush()
 
     company = Company(
-        name="NoReq Corp", is_active=True, account_owner_id=owner.id,
+        name="NoReq Corp",
+        is_active=True,
+        account_owner_id=owner.id,
     )
     db_session.add(company)
     db_session.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="NoReq HQ", is_active=True,
+        company_id=company.id,
+        site_name="NoReq HQ",
+        is_active=True,
     )
     db_session.add(site)
     db_session.flush()
@@ -653,10 +679,14 @@ def test_find_matches_no_requisition_history(db_session):
 
     # CPH exists, but NO requisition/requirement for this card+site
     cph = CustomerPartHistory(
-        company_id=company.id, material_card_id=card.id, mpn="ATMEGA328P",
-        source="avail_offer", purchase_count=3,
+        company_id=company.id,
+        material_card_id=card.id,
+        mpn="ATMEGA328P",
+        source="avail_offer",
+        purchase_count=3,
         last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
-        avg_unit_price=Decimal("5.00"), last_unit_price=Decimal("5.50"),
+        avg_unit_price=Decimal("5.00"),
+        last_unit_price=Decimal("5.50"),
         total_quantity=100,
     )
     db_session.add(cph)
@@ -664,21 +694,27 @@ def test_find_matches_no_requisition_history(db_session):
 
     # Need a requisition for the Offer FK, but on a DIFFERENT site/card
     other_site = CustomerSite(
-        company_id=company.id, site_name="Other Site", is_active=True,
+        company_id=company.id,
+        site_name="Other Site",
+        is_active=True,
     )
     db_session.add(other_site)
     db_session.flush()
 
     req = Requisition(
-        name="Other Req", customer_site_id=other_site.id,
-        status="archived", created_by=owner.id,
+        name="Other Req",
+        customer_site_id=other_site.id,
+        status="archived",
+        created_by=owner.id,
     )
     db_session.add(req)
     db_session.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="ATMEGA328P",
-        normalized_mpn="atmega328p", material_card_id=card.id,
+        requisition_id=req.id,
+        primary_mpn="ATMEGA328P",
+        normalized_mpn="atmega328p",
+        material_card_id=card.id,
     )
     db_session.add(requirement)
     db_session.flush()
@@ -708,20 +744,27 @@ def test_find_matches_no_requisition_history(db_session):
 def test_find_matches_sighting_no_fallback_offer(db_session):
     """Sighting-triggered match without any existing offer for the part is skipped."""
     owner = User(
-        email="sales3@trioscs.com", name="Sales3", role="sales",
-        azure_id="sales-003", created_at=datetime.now(timezone.utc),
+        email="sales3@trioscs.com",
+        name="Sales3",
+        role="sales",
+        azure_id="sales-003",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(owner)
     db_session.flush()
 
     company = Company(
-        name="NoOffer Corp", is_active=True, account_owner_id=owner.id,
+        name="NoOffer Corp",
+        is_active=True,
+        account_owner_id=owner.id,
     )
     db_session.add(company)
     db_session.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="NoOffer HQ", is_active=True,
+        company_id=company.id,
+        site_name="NoOffer HQ",
+        is_active=True,
     )
     db_session.add(site)
     db_session.flush()
@@ -731,24 +774,32 @@ def test_find_matches_sighting_no_fallback_offer(db_session):
     db_session.flush()
 
     req = Requisition(
-        name="PIC Req", customer_site_id=site.id,
-        status="archived", created_by=owner.id,
+        name="PIC Req",
+        customer_site_id=site.id,
+        status="archived",
+        created_by=owner.id,
     )
     db_session.add(req)
     db_session.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="PIC16F877A",
-        normalized_mpn="pic16f877a", material_card_id=card.id,
+        requisition_id=req.id,
+        primary_mpn="PIC16F877A",
+        normalized_mpn="pic16f877a",
+        material_card_id=card.id,
     )
     db_session.add(requirement)
     db_session.flush()
 
     cph = CustomerPartHistory(
-        company_id=company.id, material_card_id=card.id, mpn="PIC16F877A",
-        source="avail_offer", purchase_count=4,
+        company_id=company.id,
+        material_card_id=card.id,
+        mpn="PIC16F877A",
+        source="avail_offer",
+        purchase_count=4,
         last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
-        avg_unit_price=Decimal("10.00"), last_unit_price=Decimal("11.00"),
+        avg_unit_price=Decimal("10.00"),
+        last_unit_price=Decimal("11.00"),
         total_quantity=200,
     )
     db_session.add(cph)
@@ -822,24 +873,32 @@ def test_run_proactive_scan_dedup_and_sightings(db_session):
 
     # Need CPH, requisition, requirement, and an existing offer for this second card
     req2 = Requisition(
-        name="Req2", customer_site_id=data["site"].id,
-        status="archived", created_by=data["owner"].id,
+        name="Req2",
+        customer_site_id=data["site"].id,
+        status="archived",
+        created_by=data["owner"].id,
     )
     db_session.add(req2)
     db_session.flush()
 
     requirement2 = Requirement(
-        requisition_id=req2.id, primary_mpn="LM358N",
-        normalized_mpn="lm358n", material_card_id=card2.id,
+        requisition_id=req2.id,
+        primary_mpn="LM358N",
+        normalized_mpn="lm358n",
+        material_card_id=card2.id,
     )
     db_session.add(requirement2)
     db_session.flush()
 
     cph2 = CustomerPartHistory(
-        company_id=data["company"].id, material_card_id=card2.id, mpn="LM358N",
-        source="avail_offer", purchase_count=5,
+        company_id=data["company"].id,
+        material_card_id=card2.id,
+        mpn="LM358N",
+        source="avail_offer",
+        purchase_count=5,
         last_purchased_at=datetime.now(timezone.utc) - timedelta(days=10),
-        avg_unit_price=Decimal("2.00"), last_unit_price=Decimal("2.50"),
+        avg_unit_price=Decimal("2.00"),
+        last_unit_price=Decimal("2.50"),
         total_quantity=1000,
     )
     db_session.add(cph2)
@@ -945,8 +1004,11 @@ def test_dismiss_match_wrong_user(db_session):
 
     # Try to dismiss with a different user_id
     other_user = User(
-        email="other@trioscs.com", name="Other", role="sales",
-        azure_id="other-001", created_at=datetime.now(timezone.utc),
+        email="other@trioscs.com",
+        name="Other",
+        role="sales",
+        azure_id="other-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other_user)
     db_session.commit()
@@ -986,8 +1048,11 @@ def test_mark_match_sent_wrong_user(db_session):
     assert len(matches) == 1
 
     other_user = User(
-        email="other2@trioscs.com", name="Other2", role="sales",
-        azure_id="other-002", created_at=datetime.now(timezone.utc),
+        email="other2@trioscs.com",
+        name="Other2",
+        role="sales",
+        azure_id="other-002",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other_user)
     db_session.commit()

@@ -17,7 +17,6 @@ Covers:
 - process_batch_results (full lifecycle: pending, completed, timeout, error)
 """
 
-import asyncio
 import json
 import os
 
@@ -27,7 +26,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.email_service import (
     NOISE_DOMAINS,
@@ -51,12 +49,10 @@ from app.models import (
     Contact,
     PendingBatch,
     ProcessedMessage,
-    Requisition,
     SyncState,
     User,
     VendorResponse,
 )
-
 
 # ── _build_html_body ─────────────────────────────────────────────────
 
@@ -1015,9 +1011,8 @@ class TestApplyParsedResult:
     def test_with_notification_created(self, db_session, test_user, test_requisition):
         """When draft offers are extracted, offer_pending_review ActivityLog is created."""
         from app.models import Requirement
-        req = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+
+        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
         vr = VendorResponse(
             requisition_id=test_requisition.id,
@@ -1042,9 +1037,7 @@ class TestApplyParsedResult:
         db_session.flush()
 
         # Check offer_pending_review notification was created
-        activities = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "offer_pending_review"
-        ).all()
+        activities = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "offer_pending_review").all()
         assert len(activities) >= 1
 
     def test_no_notification_high_confidence(self):
@@ -1106,9 +1099,7 @@ class TestApplyParsedResult:
         _apply_parsed_result(vr, parsed, db_session)
         db_session.flush()
 
-        activity = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "offer_pending_review"
-        ).first()
+        activity = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "offer_pending_review").first()
         assert activity is not None
         # Owner should be the requisition creator, not scanner
         assert activity.user_id == test_user.id
@@ -1133,9 +1124,7 @@ class TestApplyParsedResult:
         _apply_parsed_result(vr, parsed, db_session)
         db_session.flush()
 
-        activity = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "offer_pending_review"
-        ).first()
+        activity = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "offer_pending_review").first()
         # No offers extracted, so no notification
         assert activity is None
 
@@ -1499,9 +1488,7 @@ class TestPollInbox:
         """When delta query fails, fall back to full fetch."""
         mock_gc = AsyncMock()
         mock_gc.delta_query.side_effect = Exception("Delta gone")
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message()]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -1530,9 +1517,7 @@ class TestPollInbox:
 
         mock_gc = AsyncMock()
         mock_gc.delta_query.side_effect = Exception("410 SyncStateNotFound")
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message()]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -1613,9 +1598,7 @@ class TestPollInbox:
         db_session.commit()
 
         mock_gc = AsyncMock()
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message(msg_id="msg-1")]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message(msg_id="msg-1")]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -1635,9 +1618,7 @@ class TestPollInbox:
         mock_gc = AsyncMock()
         mock_gc.get_json.return_value = {
             "value": [
-                self._make_inbox_message(
-                    msg_id="msg-noise", sender_email="noreply@microsoft.com"
-                ),
+                self._make_inbox_message(msg_id="msg-noise", sender_email="noreply@microsoft.com"),
             ]
         }
 
@@ -1888,9 +1869,7 @@ class TestPollInbox:
     async def test_ai_parse_triggered(self, db_session, test_user, test_requisition):
         """When anthropic key is available, AI parse is triggered (batch path)."""
         mock_gc = AsyncMock()
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message()]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -1910,9 +1889,7 @@ class TestPollInbox:
     async def test_ai_batch_failure_fallback(self, db_session, test_user, test_requisition):
         """When batch submit fails, fall back to sequential parsing."""
         mock_gc = AsyncMock()
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message()]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -2017,9 +1994,7 @@ class TestPollInbox:
     async def test_commit_failure_returns_empty(self, db_session, test_user, test_requisition):
         """If final commit fails, return empty results."""
         mock_gc = AsyncMock()
-        mock_gc.get_json.return_value = {
-            "value": [self._make_inbox_message()]
-        }
+        mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -2442,9 +2417,7 @@ class TestProcessBatchResults:
         db_session.add(pb)
         db_session.commit()
 
-        batch_results = {
-            "vr-" + str(vr.id): {"overall_sentiment": "positive", "parts": [], "confidence": 0.5}
-        }
+        batch_results = {"vr-" + str(vr.id): {"overall_sentiment": "positive", "parts": [], "confidence": 0.5}}
 
         with (
             patch(
@@ -2538,11 +2511,13 @@ class TestProcessBatchResults:
         db_session.add(pb)
         db_session.commit()
 
-        json_str = json.dumps({
-            "overall_sentiment": "positive",
-            "parts": [{"unit_price": 2.0}],
-            "confidence": 0.85,
-        })
+        json_str = json.dumps(
+            {
+                "overall_sentiment": "positive",
+                "parts": [{"unit_price": 2.0}],
+                "confidence": 0.85,
+            }
+        )
 
         batch_results = {"vr-" + str(vr.id): json_str}
 

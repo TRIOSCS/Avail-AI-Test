@@ -19,7 +19,6 @@ import base64
 import json
 import os
 import random
-import statistics
 import sys
 import time
 from dataclasses import dataclass, field
@@ -95,9 +94,7 @@ class PhaseStats:
 
     @property
     def errors(self) -> int:
-        return sum(
-            1 for r in self.results if r.status_code >= 400 and r.status_code != 429
-        )
+        return sum(1 for r in self.results if r.status_code >= 400 and r.status_code != 429)
 
     @property
     def rate_limited(self) -> int:
@@ -307,8 +304,13 @@ async def _post_json(client: StressClient, path, body, phase, user_id=1):
 
     duration_ms = (time.perf_counter() - start) * 1000
     result = RequestResult(
-        method="POST", path=path, status_code=status,
-        duration_ms=duration_ms, phase=phase, user_id=user_id, error=error,
+        method="POST",
+        path=path,
+        status_code=status,
+        duration_ms=duration_ms,
+        phase=phase,
+        user_id=user_id,
+        error=error,
     )
     client.results.append(result)
     return result, resp_body
@@ -338,8 +340,10 @@ async def phase_setup(client: StressClient, data: TestData):
 
     # Site
     r, body = await _post_json(
-        client, f"/api/companies/{data.company_id}/sites",
-        {"site_name": "STRESS_Site"}, phase,
+        client,
+        f"/api/companies/{data.company_id}/sites",
+        {"site_name": "STRESS_Site"},
+        phase,
     )
     data.site_id = _extract_id(body)
     print(f"  Site id={data.site_id}")
@@ -347,15 +351,20 @@ async def phase_setup(client: StressClient, data: TestData):
     # Site contact
     if data.site_id:
         r, body = await _post_json(
-            client, f"/api/sites/{data.site_id}/contacts",
-            {"full_name": "STRESS_Contact", "email": "stress@test.example.com"}, phase,
+            client,
+            f"/api/sites/{data.site_id}/contacts",
+            {"full_name": "STRESS_Contact", "email": "stress@test.example.com"},
+            phase,
         )
         data.site_contact_id = _extract_id(body)
         print(f"  Site contact id={data.site_contact_id}")
 
     # Requisition
     r, body = await _post_json(
-        client, "/api/requisitions", {"name": "STRESS_TestReq"}, phase,
+        client,
+        "/api/requisitions",
+        {"name": "STRESS_TestReq"},
+        phase,
     )
     data.requisition_id = _extract_id(body)
     print(f"  Requisition id={data.requisition_id}")
@@ -363,8 +372,10 @@ async def phase_setup(client: StressClient, data: TestData):
     # Requirement
     if data.requisition_id:
         r, body = await _post_json(
-            client, f"/api/requisitions/{data.requisition_id}/requirements",
-            {"primary_mpn": "STRESSLM7805CT", "target_qty": 1000}, phase,
+            client,
+            f"/api/requisitions/{data.requisition_id}/requirements",
+            {"primary_mpn": "STRESSLM7805CT", "target_qty": 1000},
+            phase,
         )
         data.requirement_id = _extract_id(body)
         print(f"  Requirement id={data.requirement_id}")
@@ -372,7 +383,8 @@ async def phase_setup(client: StressClient, data: TestData):
     # Offer
     if data.requisition_id:
         r, body = await _post_json(
-            client, f"/api/requisitions/{data.requisition_id}/offers",
+            client,
+            f"/api/requisitions/{data.requisition_id}/offers",
             {
                 "mpn": "STRESSLM7805CT",
                 "vendor_name": "STRESS_TestVendor",
@@ -387,8 +399,11 @@ async def phase_setup(client: StressClient, data: TestData):
     # Vendor (auto-created by offer, look up)
     try:
         resp = await client._client.request(
-            "GET", "/api/vendors", params={"search": "STRESS_"},
-            cookies=client._cookies(1), headers=client._headers(),
+            "GET",
+            "/api/vendors",
+            params={"search": "STRESS_"},
+            cookies=client._cookies(1),
+            headers=client._headers(),
         )
         vendors_resp = resp.json()
         # Response is {"vendors": [...], "total": int, ...}
@@ -406,7 +421,8 @@ async def phase_setup(client: StressClient, data: TestData):
     # Vendor contact
     if data.vendor_id:
         r, body = await _post_json(
-            client, f"/api/vendors/{data.vendor_id}/contacts",
+            client,
+            f"/api/vendors/{data.vendor_id}/contacts",
             {"email": "stress-vc@test.example.com", "full_name": "STRESS_VContact"},
             phase,
         )
@@ -415,8 +431,10 @@ async def phase_setup(client: StressClient, data: TestData):
 
     # Error report
     r, body = await _post_json(
-        client, "/api/error-reports",
-        {"message": "STRESS_test error message", "title": "STRESS_Report"}, phase,
+        client,
+        "/api/error-reports",
+        {"message": "STRESS_test error message", "title": "STRESS_Report"},
+        phase,
     )
     data.error_report_id = _extract_id(body)
     print(f"  Error report id={data.error_report_id}")
@@ -516,7 +534,9 @@ async def phase_read_stress(client: StressClient, data: TestData, concurrency: i
     ok = sum(1 for r in phase_results if 200 <= r.status_code < 400)
     errs = sum(1 for r in phase_results if r.status_code >= 400 and r.status_code != 429)
     limited = sum(1 for r in phase_results if r.status_code == 429)
-    print(f"  {GREEN}✓ Read stress done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}")
+    print(
+        f"  {GREEN}✓ Read stress done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}"
+    )
 
 
 async def phase_write_stress(client: StressClient, data: TestData, concurrency: int):
@@ -529,8 +549,10 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     async def _create_company(i: int):
         async with sem:
             r, body = await _post_json(
-                client, "/api/companies",
-                {"name": f"STRESS_BulkCo_{i}"}, phase,
+                client,
+                "/api/companies",
+                {"name": f"STRESS_BulkCo_{i}"},
+                phase,
             )
             cid = _extract_id(body)
             if cid:
@@ -539,8 +561,10 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     async def _create_requisition(i: int):
         async with sem:
             r, body = await _post_json(
-                client, "/api/requisitions",
-                {"name": f"STRESS_BulkReq_{i}"}, phase,
+                client,
+                "/api/requisitions",
+                {"name": f"STRESS_BulkReq_{i}"},
+                phase,
             )
             rid = _extract_id(body)
             if rid:
@@ -557,7 +581,8 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     async def _add_vendor_review(vid: int, i: int):
         async with sem:
             await _post_json(
-                client, f"/api/vendors/{vid}/reviews",
+                client,
+                f"/api/vendors/{vid}/reviews",
                 {"rating": random.randint(1, 5), "comment": f"STRESS_review_{i}"},
                 phase,
             )
@@ -565,7 +590,8 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     async def _add_vendor_contact(vid: int, i: int):
         async with sem:
             r, body = await _post_json(
-                client, f"/api/vendors/{vid}/contacts",
+                client,
+                f"/api/vendors/{vid}/contacts",
                 {"email": f"stress-bulk-{i}@test.example.com", "full_name": f"STRESS_VC_{i}"},
                 phase,
             )
@@ -576,7 +602,8 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     async def _create_error_report(i: int):
         async with sem:
             r, body = await _post_json(
-                client, "/api/error-reports",
+                client,
+                "/api/error-reports",
                 {"message": f"STRESS_bulk_error_{i}", "title": f"STRESS_BulkReport_{i}"},
                 phase,
             )
@@ -612,7 +639,9 @@ async def phase_write_stress(client: StressClient, data: TestData, concurrency: 
     ok = sum(1 for r in phase_results if 200 <= r.status_code < 400)
     errs = sum(1 for r in phase_results if r.status_code >= 400 and r.status_code != 429)
     limited = sum(1 for r in phase_results if r.status_code == 429)
-    print(f"  {GREEN}✓ Write stress done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}")
+    print(
+        f"  {GREEN}✓ Write stress done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}"
+    )
 
 
 async def phase_mixed_load(client: StressClient, data: TestData, concurrency: int, total_ops: int):
@@ -655,17 +684,22 @@ async def phase_mixed_load(client: StressClient, data: TestData, concurrency: in
             choice = random.randint(0, 2)
             if choice == 0:
                 await _post_json(
-                    client, "/api/companies",
-                    {"name": f"STRESS_Mixed_{i}"}, phase,
+                    client,
+                    "/api/companies",
+                    {"name": f"STRESS_Mixed_{i}"},
+                    phase,
                 )
             elif choice == 1:
                 await _post_json(
-                    client, "/api/requisitions",
-                    {"name": f"STRESS_MixedReq_{i}"}, phase,
+                    client,
+                    "/api/requisitions",
+                    {"name": f"STRESS_MixedReq_{i}"},
+                    phase,
                 )
             else:
                 await _post_json(
-                    client, "/api/error-reports",
+                    client,
+                    "/api/error-reports",
                     {"message": f"STRESS_mixed_{i}", "title": f"STRESS_MixedReport_{i}"},
                     phase,
                 )
@@ -683,7 +717,9 @@ async def phase_mixed_load(client: StressClient, data: TestData, concurrency: in
     ok = sum(1 for r in phase_results if 200 <= r.status_code < 400)
     errs = sum(1 for r in phase_results if r.status_code >= 400 and r.status_code != 429)
     limited = sum(1 for r in phase_results if r.status_code == 429)
-    print(f"  {GREEN}✓ Mixed load done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}")
+    print(
+        f"  {GREEN}✓ Mixed load done: {ok} ok, {errs} errors, {limited} rate-limited out of {len(phase_results)}{RESET}"
+    )
 
 
 async def phase_cleanup(client: StressClient, data: TestData):
@@ -719,12 +755,14 @@ async def phase_cleanup(client: StressClient, data: TestData):
     # Archive companies (no DELETE endpoint — use PUT to deactivate)
     for cid in data.extra_company_ids:
         await client.put(
-            f"/api/companies/{cid}", phase=phase,
+            f"/api/companies/{cid}",
+            phase=phase,
             json_body={"name": f"[ARCHIVED] STRESS_BulkCo_{cid}"},
         )
     if data.company_id:
         await client.put(
-            f"/api/companies/{data.company_id}", phase=phase,
+            f"/api/companies/{data.company_id}",
+            phase=phase,
             json_body={"name": "[ARCHIVED] STRESS_TestCo"},
         )
 
@@ -735,8 +773,11 @@ async def phase_cleanup(client: StressClient, data: TestData):
     # Clean up mixed-phase data: archive remaining STRESS_ companies and requisitions
     try:
         resp = await client._client.request(
-            "GET", "/api/companies", params={"search": "STRESS_"},
-            cookies=client._cookies(1), headers=client._headers(),
+            "GET",
+            "/api/companies",
+            params={"search": "STRESS_"},
+            cookies=client._cookies(1),
+            headers=client._headers(),
         )
         companies = resp.json()
         # list_companies returns a plain list
@@ -745,7 +786,8 @@ async def phase_cleanup(client: StressClient, data: TestData):
             cid = c.get("id")
             if cid:
                 await client.put(
-                    f"/api/companies/{cid}", phase=phase,
+                    f"/api/companies/{cid}",
+                    phase=phase,
                     json_body={"name": f"[ARCHIVED] {c.get('name', 'STRESS')}"},
                 )
     except Exception:
@@ -755,9 +797,11 @@ async def phase_cleanup(client: StressClient, data: TestData):
     try:
         for _ in range(5):  # max 5 passes to avoid infinite loop
             resp = await client._client.request(
-                "GET", "/api/requisitions",
+                "GET",
+                "/api/requisitions",
                 params={"q": "STRESS_", "status": "active", "limit": "500"},
-                cookies=client._cookies(1), headers=client._headers(),
+                cookies=client._cookies(1),
+                headers=client._headers(),
             )
             reqs = resp.json()
             if isinstance(reqs, dict):
@@ -772,7 +816,8 @@ async def phase_cleanup(client: StressClient, data: TestData):
             for r in active:
                 if r.get("id"):
                     await client.put(
-                        f"/api/requisitions/{r['id']}/archive", phase=phase,
+                        f"/api/requisitions/{r['id']}/archive",
+                        phase=phase,
                     )
     except Exception:
         pass
@@ -810,10 +855,7 @@ def print_results(client: StressClient):
     print(f"\n{BOLD}{bar}{RESET}")
     print(f"{BOLD}  AVAIL STRESS TEST RESULTS{RESET}")
     print(f"{BOLD}{bar}{RESET}")
-    print(
-        f"  {'Phase':<16s} {'Reqs':>5s} {'OK':>5s} {'Err':>5s} {'429':>5s} "
-        f"{'p50':>7s} {'p95':>7s} {'p99':>7s}"
-    )
+    print(f"  {'Phase':<16s} {'Reqs':>5s} {'OK':>5s} {'Err':>5s} {'429':>5s} {'p50':>7s} {'p95':>7s} {'p99':>7s}")
 
     for p in phases:
         ps = stats[p]
@@ -825,9 +867,7 @@ def print_results(client: StressClient):
         )
 
     print(f"  {line}")
-    print(
-        f"  {'TOTAL':<16s} {total:>5d} {total_ok:>5d} {total_err:>5d} {total_429:>5d}"
-    )
+    print(f"  {'TOTAL':<16s} {total:>5d} {total_ok:>5d} {total_err:>5d} {total_429:>5d}")
 
     if passed:
         print(f"  Error Rate: {error_rate:.2f}%  {GREEN}✓ PASS{RESET}")
@@ -851,8 +891,7 @@ def print_results(client: StressClient):
     for r in by_duration:
         color = GREEN if 200 <= r.status_code < 400 else (YELLOW if r.status_code == 429 else RED)
         print(
-            f"  {r.duration_ms:>7.0f}ms  {r.method:>4s} {r.path:<50s} "
-            f"{color}{r.status_code}{RESET}  user={r.user_id}"
+            f"  {r.duration_ms:>7.0f}ms  {r.method:>4s} {r.path:<50s} {color}{r.status_code}{RESET}  user={r.user_id}"
         )
 
     # Errors detail
@@ -875,7 +914,9 @@ def print_results(client: StressClient):
 
 async def main():
     parser = argparse.ArgumentParser(description="AvailAI API Stress Test")
-    parser.add_argument("--base-url", default=BASE_URL, help="Base URL (default: $STRESS_BASE_URL or http://localhost:8000)")
+    parser.add_argument(
+        "--base-url", default=BASE_URL, help="Base URL (default: $STRESS_BASE_URL or http://localhost:8000)"
+    )
     parser.add_argument("--concurrency", type=int, default=READ_CONCURRENCY, help="Read concurrency (default: 50)")
     parser.add_argument("--reps", type=int, default=READ_REPS, help="Read repetitions (default: 3)")
     args = parser.parse_args()

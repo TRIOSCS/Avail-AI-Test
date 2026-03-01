@@ -28,8 +28,10 @@ class TestRequisitionListCache:
 
     def test_list_cached_on_second_call(self, client, db_session, test_user):
         """Second call with same params returns cached result."""
-        with patch("app.cache.decorators.get_cached", return_value=None) as mock_get, \
-             patch("app.cache.decorators.set_cached") as mock_set:
+        with (
+            patch("app.cache.decorators.get_cached", return_value=None) as mock_get,
+            patch("app.cache.decorators.set_cached") as mock_set,
+        ):
             resp1 = client.get("/api/requisitions")
             assert resp1.status_code == 200
 
@@ -47,9 +49,7 @@ class TestRequisitionListCache:
             assert resp.status_code == 200
             mock_inv.assert_called_with("req_list")
 
-    def test_update_requisition_invalidates_cache(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_update_requisition_invalidates_cache(self, client, db_session, test_requisition, test_user):
         """Updating a requisition invalidates the req_list cache."""
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
             resp = client.put(
@@ -59,9 +59,7 @@ class TestRequisitionListCache:
             assert resp.status_code == 200
             mock_inv.assert_called_with("req_list")
 
-    def test_archive_requisition_invalidates_cache(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_archive_requisition_invalidates_cache(self, client, db_session, test_requisition, test_user):
         """Archiving a requisition invalidates the req_list cache."""
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
             resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
@@ -75,14 +73,10 @@ class TestRequisitionListCache:
             assert resp.status_code == 200
             mock_inv.assert_called_with("req_list")
 
-    def test_dismiss_new_offers_invalidates_cache(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_dismiss_new_offers_invalidates_cache(self, client, db_session, test_requisition, test_user):
         """Dismissing new offers invalidates the req_list cache."""
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/dismiss-new-offers"
-            )
+            resp = client.post(f"/api/requisitions/{test_requisition.id}/dismiss-new-offers")
             assert resp.status_code == 200
             mock_inv.assert_called_with("req_list")
 
@@ -113,8 +107,10 @@ class TestMaterialListCache:
 
     def test_list_materials_cached(self, client, db_session, test_user):
         """Materials list uses caching with material_list prefix."""
-        with patch("app.cache.decorators.get_cached", return_value=None), \
-             patch("app.cache.decorators.set_cached") as mock_set:
+        with (
+            patch("app.cache.decorators.get_cached", return_value=None),
+            patch("app.cache.decorators.set_cached") as mock_set,
+        ):
             resp = client.get("/api/materials")
             assert resp.status_code == 200
 

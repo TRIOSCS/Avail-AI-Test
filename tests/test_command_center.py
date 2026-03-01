@@ -64,7 +64,7 @@ class TestCommandCenterActions:
 
     def test_pending_quotes_returned(self, client, db_session, test_user, test_requisition):
         """Quotes with status='sent' and sent >5 days ago appear as pending."""
-        from app.models.crm import CustomerSite, Company
+        from app.models.crm import Company, CustomerSite
 
         co = Company(name="Test Co", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)

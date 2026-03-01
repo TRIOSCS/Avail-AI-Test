@@ -30,7 +30,8 @@ from app.services.ownership_service import (
 
 def _make_company(db, name="Test Co", owner_id=None, last_activity_at=None):
     co = Company(
-        name=name, is_active=True,
+        name=name,
+        is_active=True,
         account_owner_id=owner_id,
         last_activity_at=last_activity_at,
         created_at=datetime.now(timezone.utc),
@@ -42,7 +43,9 @@ def _make_company(db, name="Test Co", owner_id=None, last_activity_at=None):
 
 def _make_sales_user(db, email="sales1@trioscs.com"):
     u = User(
-        email=email, name="Sales User", role="sales",
+        email=email,
+        name="Sales User",
+        role="sales",
         azure_id=f"azure-{email}",
         created_at=datetime.now(timezone.utc),
     )
@@ -96,7 +99,8 @@ class TestGetAccountsAtRisk:
     def test_old_account_at_risk(self, db_session):
         sales = _make_sales_user(db_session)
         co = _make_company(
-            db_session, owner_id=sales.id,
+            db_session,
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
@@ -136,7 +140,9 @@ class TestGetMyAccounts:
     def test_returns_owned_accounts(self, db_session):
         sales = _make_sales_user(db_session)
         _make_company(
-            db_session, name="My Account", owner_id=sales.id,
+            db_session,
+            name="My Account",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc),
         )
         db_session.commit()
@@ -160,7 +166,9 @@ class TestGetMyAccounts:
     def test_health_status_green(self, db_session):
         sales = _make_sales_user(db_session)
         _make_company(
-            db_session, name="Fresh Co", owner_id=sales.id,
+            db_session,
+            name="Fresh Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
         db_session.commit()
@@ -179,7 +187,8 @@ class TestRunOwnershipSweep:
         """35 days inactive (>30 limit) → ownership cleared."""
         sales = _make_sales_user(db_session)
         co = _make_company(
-            db_session, owner_id=sales.id,
+            db_session,
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         db_session.commit()
@@ -195,7 +204,8 @@ class TestRunOwnershipSweep:
         """24 days inactive (in 23-30 warning window) → alert sent."""
         sales = _make_sales_user(db_session)
         _make_company(
-            db_session, owner_id=sales.id,
+            db_session,
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=24),
         )
         db_session.commit()
@@ -210,7 +220,8 @@ class TestRunOwnershipSweep:
         """Strategic account (90-day limit) at 35 days → NOT cleared."""
         sales = _make_sales_user(db_session)
         co = _make_company(
-            db_session, owner_id=sales.id,
+            db_session,
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         co.is_strategic = True
@@ -227,7 +238,8 @@ class TestRunOwnershipSweep:
         """5 days inactive → no warning, no clear."""
         sales = _make_sales_user(db_session)
         _make_company(
-            db_session, owner_id=sales.id,
+            db_session,
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
         db_session.commit()
@@ -266,7 +278,9 @@ class TestGetManagerDigest:
     def test_at_risk_accounts_appear(self, db_session):
         sales = _make_sales_user(db_session)
         _make_company(
-            db_session, name="Risky Co", owner_id=sales.id,
+            db_session,
+            name="Risky Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
@@ -347,21 +361,27 @@ class TestSendManagerDigestEmail:
         # Create an at-risk account
         sales = _make_sales_user(db_session)
         admin = User(
-            email="admin@trioscs.com", name="Admin",
-            role="admin", azure_id="az-admin",
+            email="admin@trioscs.com",
+            name="Admin",
+            role="admin",
+            azure_id="az-admin",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(admin)
         db_session.flush()
         _make_company(
-            db_session, name="At Risk Co", owner_id=sales.id,
+            db_session,
+            name="At Risk Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings, \
-             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+        ):
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.customer_inactivity_days = 30
             mock_settings.strategic_inactivity_days = 90
@@ -377,21 +397,27 @@ class TestSendManagerDigestEmail:
         """Graph API error during digest send is logged, not raised."""
         sales = _make_sales_user(db_session)
         admin = User(
-            email="admin@trioscs.com", name="Admin",
-            role="admin", azure_id="az-admin-err",
+            email="admin@trioscs.com",
+            name="Admin",
+            role="admin",
+            azure_id="az-admin-err",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(admin)
         db_session.flush()
         _make_company(
-            db_session, name="Risk Co 2", owner_id=sales.id,
+            db_session,
+            name="Risk Co 2",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings, \
-             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+        ):
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.customer_inactivity_days = 30
             mock_settings.strategic_inactivity_days = 90
@@ -422,7 +448,9 @@ class TestGetMyAccountsStatuses:
         """Recent activity → 'green'."""
         sales = _make_sales_user(db_session, "stat2@t.com")
         _make_company(
-            db_session, name="Green Co", owner_id=sales.id,
+            db_session,
+            name="Green Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
         db_session.commit()
@@ -434,7 +462,9 @@ class TestGetMyAccountsStatuses:
         """24 days inactive (in 23-30 window) → 'yellow'."""
         sales = _make_sales_user(db_session, "stat3@t.com")
         _make_company(
-            db_session, name="Yellow Co", owner_id=sales.id,
+            db_session,
+            name="Yellow Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=24),
         )
         db_session.commit()
@@ -446,7 +476,9 @@ class TestGetMyAccountsStatuses:
         """31 days inactive (past 30-day limit) → 'red'."""
         sales = _make_sales_user(db_session, "stat4@t.com")
         _make_company(
-            db_session, name="Red Co", owner_id=sales.id,
+            db_session,
+            name="Red Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=31),
         )
         db_session.commit()
@@ -458,7 +490,9 @@ class TestGetMyAccountsStatuses:
         """Strategic account at 35 days → still 'green' (90-day limit)."""
         sales = _make_sales_user(db_session, "stat5@t.com")
         co = _make_company(
-            db_session, name="Strategic Co", owner_id=sales.id,
+            db_session,
+            name="Strategic Co",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         co.is_strategic = True
@@ -495,8 +529,10 @@ class TestSendWarningAlert:
         co = _make_company(db_session, owner_id=sales.id)
         db_session.commit()
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+        with (
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+        ):
             await _send_warning_alert(co, 25, 30, db_session)
             # GraphClient should never be instantiated
             mock_gc_class.assert_not_called()
@@ -510,9 +546,21 @@ class TestSendWarningAlert:
         co = _make_company(db_session, owner_id=sales.id)
         db_session.commit()
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class, \
-             patch("app.services.ownership_service.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams error")) if False else patch("app.services.teams.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams error")):
+        with (
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+            patch(
+                "app.services.ownership_service.send_ownership_warning",
+                new_callable=AsyncMock,
+                side_effect=Exception("Teams error"),
+            )
+            if False
+            else patch(
+                "app.services.teams.send_ownership_warning",
+                new_callable=AsyncMock,
+                side_effect=Exception("Teams error"),
+            ),
+        ):
             mock_gc = mock_gc_class.return_value
             mock_gc.post_json = AsyncMock(side_effect=Exception("Graph error"))
             # Should not raise
@@ -527,9 +575,15 @@ class TestSendWarningAlert:
         co = _make_company(db_session, owner_id=sales.id)
         db_session.commit()
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class, \
-             patch("app.services.teams.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams unavailable")):
+        with (
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+            patch(
+                "app.services.teams.send_ownership_warning",
+                new_callable=AsyncMock,
+                side_effect=Exception("Teams unavailable"),
+            ),
+        ):
             mock_gc = mock_gc_class.return_value
             mock_gc.post_json = AsyncMock()
             # Should not raise
@@ -547,27 +601,35 @@ class TestSendManagerDigestEmailPaths:
         """Digest includes recently cleared accounts."""
         sales = _make_sales_user(db_session, "cleared@t.com")
         admin = User(
-            email="digestadmin@trioscs.com", name="Digest Admin",
-            role="admin", azure_id="az-digestadmin",
+            email="digestadmin@trioscs.com",
+            name="Digest Admin",
+            role="admin",
+            azure_id="az-digestadmin",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(admin)
         db_session.flush()
         co = _make_company(
-            db_session, name="Cleared Co", owner_id=None,
+            db_session,
+            name="Cleared Co",
+            owner_id=None,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         co.ownership_cleared_at = datetime.now(timezone.utc) - timedelta(days=1)
         # Also add an at-risk account so the digest is not empty
         _make_company(
-            db_session, name="Risk2", owner_id=sales.id,
+            db_session,
+            name="Risk2",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings, \
-             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+        ):
             mock_settings.admin_emails = ["digestadmin@trioscs.com"]
             mock_settings.customer_inactivity_days = 30
             mock_settings.strategic_inactivity_days = 90
@@ -584,14 +646,18 @@ class TestSendManagerDigestEmailPaths:
         """When admin email not found in DB, sending is skipped."""
         sales = _make_sales_user(db_session, "noadmin@t.com")
         _make_company(
-            db_session, name="Risk3", owner_id=sales.id,
+            db_session,
+            name="Risk3",
+            owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
         )
         db_session.commit()
 
-        with patch("app.services.ownership_service.settings") as mock_settings, \
-             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+        with (
+            patch("app.services.ownership_service.settings") as mock_settings,
+            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
+        ):
             mock_settings.admin_emails = ["nonexistent@trioscs.com"]
             mock_settings.customer_inactivity_days = 30
             mock_settings.strategic_inactivity_days = 90
@@ -634,8 +700,10 @@ class TestClaimTraderRole:
     def test_trader_can_claim(self, db_session):
         """Trader role should be able to claim open accounts."""
         trader = User(
-            email="claimtrader@trioscs.com", name="Claim Trader",
-            role="trader", azure_id="az-claim-trader",
+            email="claimtrader@trioscs.com",
+            name="Claim Trader",
+            role="trader",
+            azure_id="az-claim-trader",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(trader)

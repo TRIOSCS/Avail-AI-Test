@@ -26,9 +26,7 @@ class Offer(Base):
 
     __tablename__ = "offers"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
 
@@ -74,9 +72,7 @@ class Offer(Base):
     expires_at = Column(DateTime)
     reconfirmed_at = Column(DateTime)
     reconfirm_count = Column(Integer, default=0)
-    attribution_status = Column(
-        String(20), default="active"
-    )  # active, expired, converted
+    attribution_status = Column(String(20), default="active")  # active, expired, converted
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
@@ -85,9 +81,7 @@ class Offer(Base):
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
-    attachments = relationship(
-        "OfferAttachment", back_populates="offer", cascade="all, delete-orphan"
-    )
+    attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_offers_req", "requisition_id"),
@@ -110,9 +104,7 @@ class OfferAttachment(Base):
 
     __tablename__ = "offer_attachments"
     id = Column(Integer, primary_key=True)
-    offer_id = Column(
-        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
-    )
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
@@ -182,9 +174,7 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    match_method = Column(
-        String(50)
-    )  # conversation_id, subject_token, email_exact, domain, unmatched
+    match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

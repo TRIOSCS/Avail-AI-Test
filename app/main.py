@@ -36,10 +36,7 @@ async def lifespan(app):
     # S1: Fail-fast on default secret key (skip in test mode)
     if not os.environ.get("TESTING"):
         if settings.secret_key == "change-me-in-production":
-            raise RuntimeError(
-                "SESSION_SECRET or SECRET_KEY must be set. "
-                "See .env.example for required variables."
-            )
+            raise RuntimeError("SESSION_SECRET or SECRET_KEY must be set. See .env.example for required variables.")
 
     # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
     if not os.environ.get("TESTING"):
@@ -64,12 +61,21 @@ async def lifespan(app):
         def _sentry_before_send(event, hint):
             """Scrub sensitive data from Sentry events."""
             _SENSITIVE_HEADERS = {
-                "authorization", "cookie", "x-api-key",
-                "anthropic-api-key", "session",
+                "authorization",
+                "cookie",
+                "x-api-key",
+                "anthropic-api-key",
+                "session",
             }
             _SENSITIVE_VARS = {
-                "api_key", "apikey", "api_secret", "password",
-                "secret", "token", "dsn", "database_url",
+                "api_key",
+                "apikey",
+                "api_secret",
+                "password",
+                "secret",
+                "token",
+                "dsn",
+                "database_url",
             }
             if "request" in event:
                 req = event["request"]
@@ -107,6 +113,7 @@ async def lifespan(app):
     run_startup_migrations()
     _seed_api_sources()
     from .connector_status import log_connector_status
+
     _connector_status = log_connector_status()
     app.state.connector_status = _connector_status
 
@@ -119,12 +126,15 @@ async def lifespan(app):
     # Warm heavy caches in background so first user request is fast
     async def _warm_caches():  # pragma: no cover
         import asyncio
+
         await asyncio.sleep(2)  # let app finish startup first
         try:
             from .database import SessionLocal
+
             db = SessionLocal()
             try:
                 from .models import Company, Requisition, VendorCard
+
                 db.query(VendorCard).count()
                 db.query(Company).count()
                 db.query(Requisition).count()
@@ -135,6 +145,7 @@ async def lifespan(app):
             logger.warning(f"Cache warmup failed (non-fatal): {e}")
 
     import asyncio
+
     asyncio.create_task(_warm_caches())
 
     yield
@@ -276,7 +287,9 @@ templates = Jinja2Templates(directory="app/templates")
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
 
-Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(
+    app, endpoint="/metrics", include_in_schema=False
+)
 
 # Secret key validation moved to lifespan (fail-fast)
 
@@ -801,13 +814,9 @@ def _seed_api_sources():
         existing_map = {s.name: s for s in db.query(ApiSource).all()}
 
         # Quick check: if all sources exist and count matches, check version
-        if len(existing_map) == len(SOURCES) and all(
-            s["name"] in existing_map for s in SOURCES
-        ):
+        if len(existing_map) == len(SOURCES) and all(s["name"] in existing_map for s in SOURCES):
             # All sources present — skip update (descriptions only change on code update)
-            logger.debug(
-                f"API sources up to date ({len(SOURCES)} sources, hash={source_hash})"
-            )
+            logger.debug(f"API sources up to date ({len(SOURCES)} sources, hash={source_hash})")
             return
 
         # Batch fetch all existing sources (1 query instead of 25+)

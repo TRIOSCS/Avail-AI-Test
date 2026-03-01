@@ -18,8 +18,7 @@ depends_on = None
 
 def upgrade():
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_vendor_cards_name_trgm "
-        "ON vendor_cards USING gin (normalized_name gin_trgm_ops)"
+        "CREATE INDEX IF NOT EXISTS ix_vendor_cards_name_trgm ON vendor_cards USING gin (normalized_name gin_trgm_ops)"
     )
 
 

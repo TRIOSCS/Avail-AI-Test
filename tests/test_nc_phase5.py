@@ -4,14 +4,10 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-from app.models import NcSearchQueue, Requirement, Sighting
+from app.models import NcSearchQueue, Sighting
 from app.services.nc_worker.result_parser import NcSighting, parse_quantity, parse_results_html
 from app.services.nc_worker.search_engine import build_search_url
 from app.services.nc_worker.sighting_writer import save_nc_sightings
-
 
 # ── Search Engine Tests ──────────────────────────────────────────────
 
@@ -206,10 +202,14 @@ def test_save_nc_sightings(db_session, test_requisition):
     created = save_nc_sightings(db_session, queue_item, nc_sightings)
     assert created == 2
 
-    sightings = db_session.query(Sighting).filter(
-        Sighting.requirement_id == req.id,
-        Sighting.source_type == "netcomponents",
-    ).all()
+    sightings = (
+        db_session.query(Sighting)
+        .filter(
+            Sighting.requirement_id == req.id,
+            Sighting.source_type == "netcomponents",
+        )
+        .all()
+    )
     assert len(sightings) == 2
     assert sightings[0].source_searched_at is not None
     assert sightings[0].vendor_name_normalized is not None

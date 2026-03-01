@@ -14,11 +14,10 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
@@ -37,16 +36,13 @@ from app.models import (
     StockListHash,
     User,
     VendorCard,
-    VendorContact,
-    VendorMetricsSnapshot,
     VendorResponse,
-    VendorReview,
 )
-
 
 # ---------------------------------------------------------------------------
 #  Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_vendor(db, name="Test Vendor", domain="testvendor.com", domain_aliases=None):
     vc = VendorCard(
@@ -101,8 +97,9 @@ def _make_requirement(db, requisition_id, mpn="LM358DR"):
     return req
 
 
-def _make_contact(db, requisition_id, user_id, vendor_name,
-                  contact_type="email", created_at=None, graph_conversation_id=None):
+def _make_contact(
+    db, requisition_id, user_id, vendor_name, contact_type="email", created_at=None, graph_conversation_id=None
+):
     c = Contact(
         requisition_id=requisition_id,
         user_id=user_id,
@@ -117,9 +114,16 @@ def _make_contact(db, requisition_id, user_id, vendor_name,
     return c
 
 
-def _make_offer(db, requisition_id, vendor_card_id, user_id,
-                vendor_name="Test Vendor", status="active", unit_price=1.00,
-                created_at=None):
+def _make_offer(
+    db,
+    requisition_id,
+    vendor_card_id,
+    user_id,
+    vendor_name="Test Vendor",
+    status="active",
+    unit_price=1.00,
+    created_at=None,
+):
     o = Offer(
         requisition_id=requisition_id,
         vendor_card_id=vendor_card_id,
@@ -136,9 +140,16 @@ def _make_offer(db, requisition_id, vendor_card_id, user_id,
     return o
 
 
-def _make_vendor_response(db, vendor_name, vendor_email, contact_id=None,
-                          requisition_id=None, received_at=None, status="new",
-                          graph_conversation_id=None):
+def _make_vendor_response(
+    db,
+    vendor_name,
+    vendor_email,
+    contact_id=None,
+    requisition_id=None,
+    received_at=None,
+    status="new",
+    graph_conversation_id=None,
+):
     vr = VendorResponse(
         vendor_name=vendor_name,
         vendor_email=vendor_email,
@@ -165,15 +176,12 @@ class TestPerfDomainAliases:
         from app.services.performance_service import compute_vendor_scorecard
 
         user = _make_user(db_session, "alias@t.com")
-        vc = _make_vendor(db_session, "AliasVendor", "aliasv.com",
-                          domain_aliases=["alias1.com", "alias2.com"])
+        vc = _make_vendor(db_session, "AliasVendor", "aliasv.com", domain_aliases=["alias1.com", "alias2.com"])
         req = _make_requisition(db_session, user.id)
         for _ in range(3):
             _make_contact(db_session, req.id, user.id, "AliasVendor")
-        _make_vendor_response(db_session, "R1", "r@alias1.com",
-                              received_at=datetime.now(timezone.utc))
-        _make_vendor_response(db_session, "R2", "r@alias2.com",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "R1", "r@alias1.com", received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "R2", "r@alias2.com", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         result = compute_vendor_scorecard(db_session, vc.id)
@@ -183,12 +191,10 @@ class TestPerfDomainAliases:
         from app.services.performance_service import compute_vendor_scorecard
 
         user = _make_user(db_session, "empty@t.com")
-        vc = _make_vendor(db_session, "EmptyAlias", "emptya.com",
-                          domain_aliases=["", None, "real.com"])
+        vc = _make_vendor(db_session, "EmptyAlias", "emptya.com", domain_aliases=["", None, "real.com"])
         req = _make_requisition(db_session, user.id)
         _make_contact(db_session, req.id, user.id, "EmptyAlias")
-        _make_vendor_response(db_session, "R", "r@real.com",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "R", "r@real.com", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         result = compute_vendor_scorecard(db_session, vc.id)
@@ -219,17 +225,23 @@ class TestPerfQuoteBuyPlanPreload:
         o3 = _make_offer(db_session, req.id, vc.id, user.id, "PreVendor")
 
         q = Quote(
-            requisition_id=req.id, customer_site_id=cs.id,
-            quote_number="Q-PRE-001", status="sent",
+            requisition_id=req.id,
+            customer_site_id=cs.id,
+            quote_number="Q-PRE-001",
+            status="sent",
             line_items=[{"offer_id": o1.id}, {"offer_id": o2.id}],
-            subtotal=100, total_cost=50, total_margin_pct=50,
-            created_by_id=user.id, created_at=datetime.now(timezone.utc),
+            subtotal=100,
+            total_cost=50,
+            total_margin_pct=50,
+            created_by_id=user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(q)
         db_session.flush()
 
         bp = BuyPlan(
-            requisition_id=req.id, quote_id=q.id,
+            requisition_id=req.id,
+            quote_id=q.id,
             status="po_confirmed",
             line_items=[{"offer_id": o3.id}],
             submitted_by_id=user.id,
@@ -250,8 +262,7 @@ class TestPerfNullResult:
         _make_vendor(db_session, "NullVendor", "null.com")
         db_session.commit()
 
-        with patch("app.services.performance_service.compute_vendor_scorecard",
-                    return_value={}):
+        with patch("app.services.performance_service.compute_vendor_scorecard", return_value={}):
             result = compute_all_vendor_scorecards(db_session)
         assert result is not None
 
@@ -305,17 +316,23 @@ class TestPerfBuyplanLineItems:
         o1 = _make_offer(db_session, req.id, vc.id, user.id, "BPV", created_at=now)
 
         q = Quote(
-            requisition_id=req.id, customer_site_id=cs.id,
-            quote_number="Q-BP-001", status="sent",
+            requisition_id=req.id,
+            customer_site_id=cs.id,
+            quote_number="Q-BP-001",
+            status="sent",
             line_items=[{"offer_id": o1.id}],
-            subtotal=100, total_cost=50, total_margin_pct=50,
-            created_by_id=user.id, created_at=now,
+            subtotal=100,
+            total_cost=50,
+            total_margin_pct=50,
+            created_by_id=user.id,
+            created_at=now,
         )
         db_session.add(q)
         db_session.flush()
 
         bp = BuyPlan(
-            requisition_id=req.id, quote_id=q.id,
+            requisition_id=req.id,
+            quote_id=q.id,
             status="po_confirmed",
             line_items=[{"offer_id": o1.id}],
             submitted_by_id=user.id,
@@ -360,50 +377,62 @@ class TestPerfSalespersonAllBatches:
 
         user = _make_user(db_session, "met@t.com", role="buyer", name="Metrics")
 
-        co = Company(name="MCo", account_owner_id=user.id, is_active=True,
-                     created_at=datetime.now(timezone.utc))
+        co = Company(name="MCo", account_owner_id=user.id, is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.flush()
 
-        cs = CustomerSite(company_id=co.id, site_name="MS", contact_name="J",
-                          owner_id=user.id)
+        cs = CustomerSite(company_id=co.id, site_name="MS", contact_name="J", owner_id=user.id)
         db_session.add(cs)
         db_session.flush()
 
-        sc = SiteContact(customer_site_id=cs.id, full_name="New",
-                         created_at=datetime.now(timezone.utc))
+        sc = SiteContact(customer_site_id=cs.id, full_name="New", created_at=datetime.now(timezone.utc))
         db_session.add(sc)
 
-        al = ActivityLog(user_id=user.id, activity_type="call_outbound",
-                         channel="phone", created_at=datetime.now(timezone.utc))
+        al = ActivityLog(
+            user_id=user.id, activity_type="call_outbound", channel="phone", created_at=datetime.now(timezone.utc)
+        )
         db_session.add(al)
 
         req = _make_requisition(db_session, user.id)
         _make_contact(db_session, req.id, user.id, "SomeV")
 
         q = Quote(
-            requisition_id=req.id, customer_site_id=cs.id,
-            quote_number="Q-M-001", status="sent",
-            line_items=[], subtotal=1000, total_cost=500, total_margin_pct=50,
-            created_by_id=user.id, sent_at=datetime.now(timezone.utc),
-            result="won", result_at=datetime.now(timezone.utc),
-            won_revenue=1000.00, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            customer_site_id=cs.id,
+            quote_number="Q-M-001",
+            status="sent",
+            line_items=[],
+            subtotal=1000,
+            total_cost=500,
+            total_margin_pct=50,
+            created_by_id=user.id,
+            sent_at=datetime.now(timezone.utc),
+            result="won",
+            result_at=datetime.now(timezone.utc),
+            won_revenue=1000.00,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(q)
         db_session.flush()
 
         po = ProactiveOffer(
-            customer_site_id=cs.id, salesperson_id=user.id,
-            line_items=[], recipient_emails=[], status="converted",
+            customer_site_id=cs.id,
+            salesperson_id=user.id,
+            line_items=[],
+            recipient_emails=[],
+            status="converted",
             sent_at=datetime.now(timezone.utc),
             converted_at=datetime.now(timezone.utc),
-            total_sell=500.00, total_cost=300.00,
+            total_sell=500.00,
+            total_cost=300.00,
         )
         db_session.add(po)
 
         slh = StockListHash(
-            user_id=user.id, content_hash="abc123",
-            file_name="stock.csv", row_count=100,
+            user_id=user.id,
+            content_hash="abc123",
+            file_name="stock.csv",
+            row_count=100,
             first_seen_at=datetime.now(timezone.utc),
         )
         db_session.add(slh)
@@ -444,8 +473,7 @@ class TestEmailTier1Error:
         user = _make_user(db_session, "t1e@t.com")
         rq = _make_requisition(db_session, user.id)
         requirement = _make_requirement(db_session, rq.id)
-        _make_contact(db_session, rq.id, user.id, "V1",
-                      graph_conversation_id="conv-err-1")
+        _make_contact(db_session, rq.id, user.id, "V1", graph_conversation_id="conv-err-1")
         db_session.commit()
 
         with patch("app.services.email_threads.GraphClient") as gc_cls:
@@ -453,8 +481,7 @@ class TestEmailTier1Error:
             gc.get_all_pages = AsyncMock(side_effect=RuntimeError("Graph fail"))
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
         assert isinstance(result, list)
 
 
@@ -470,18 +497,22 @@ class TestEmailTier1b:
         rq = _make_requisition(db_session, user.id)
         requirement = _make_requirement(db_session, rq.id)
 
-        _make_vendor_response(db_session, "VR", "vr@vendor.com",
-                              requisition_id=rq.id,
-                              graph_conversation_id="vr-conv-1")
+        _make_vendor_response(
+            db_session, "VR", "vr@vendor.com", requisition_id=rq.id, graph_conversation_id="vr-conv-1"
+        )
         db_session.commit()
 
-        msgs = [{
-            "id": "m1", "subject": "RE: RFQ",
-            "from": {"emailAddress": {"name": "VR", "address": "vr@vendor.com"}},
-            "toRecipients": [{"emailAddress": {"address": "buy@trioscs.com"}}],
-            "bodyPreview": "Quote", "receivedDateTime": "2026-02-20T10:00:00Z",
-            "conversationId": "vr-conv-1",
-        }]
+        msgs = [
+            {
+                "id": "m1",
+                "subject": "RE: RFQ",
+                "from": {"emailAddress": {"name": "VR", "address": "vr@vendor.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buy@trioscs.com"}}],
+                "bodyPreview": "Quote",
+                "receivedDateTime": "2026-02-20T10:00:00Z",
+                "conversationId": "vr-conv-1",
+            }
+        ]
 
         async def _gap(*args, **kwargs):
             params = kwargs.get("params", {})
@@ -495,8 +526,7 @@ class TestEmailTier1b:
             gc.get_all_pages = AsyncMock(side_effect=_gap)
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
 
         assert len(result) >= 1
         assert result[0]["matched_via"] == "conversation_id"
@@ -510,9 +540,7 @@ class TestEmailTier1b:
         rq = _make_requisition(db_session, user.id)
         requirement = _make_requirement(db_session, rq.id)
 
-        _make_vendor_response(db_session, "VR2", "vr2@v.com",
-                              requisition_id=rq.id,
-                              graph_conversation_id="vr-err-1")
+        _make_vendor_response(db_session, "VR2", "vr2@v.com", requisition_id=rq.id, graph_conversation_id="vr-err-1")
         db_session.commit()
 
         async def _gap(*args, **kwargs):
@@ -527,8 +555,7 @@ class TestEmailTier1b:
             gc.get_all_pages = AsyncMock(side_effect=_gap)
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
         assert isinstance(result, list)
 
 
@@ -557,8 +584,7 @@ class TestEmailTier3Error:
             gc.get_all_pages = AsyncMock(side_effect=_gap)
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
         assert isinstance(result, list)
 
 
@@ -585,13 +611,17 @@ class TestEmailTier4CardDomain:
         db_session.add(s)
         db_session.commit()
 
-        msgs = [{
-            "id": "m-t4", "subject": "Offer",
-            "from": {"emailAddress": {"name": "T4", "address": "s@t4v.com"}},
-            "toRecipients": [{"emailAddress": {"address": "b@trioscs.com"}}],
-            "bodyPreview": "Stock", "receivedDateTime": "2026-02-20T10:00:00Z",
-            "conversationId": "t4-c1",
-        }]
+        msgs = [
+            {
+                "id": "m-t4",
+                "subject": "Offer",
+                "from": {"emailAddress": {"name": "T4", "address": "s@t4v.com"}},
+                "toRecipients": [{"emailAddress": {"address": "b@trioscs.com"}}],
+                "bodyPreview": "Stock",
+                "receivedDateTime": "2026-02-20T10:00:00Z",
+                "conversationId": "t4-c1",
+            }
+        ]
 
         async def _gap(*args, **kwargs):
             params = kwargs.get("params", {})
@@ -605,8 +635,7 @@ class TestEmailTier4CardDomain:
             gc.get_all_pages = AsyncMock(side_effect=_gap)
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
         assert isinstance(result, list)
 
 
@@ -643,8 +672,7 @@ class TestEmailTier4DomainError:
             gc.get_all_pages = AsyncMock(side_effect=_gap)
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_requirement(
-                requirement.id, "tok", db_session, user_id=user.id)
+            result = await fetch_threads_for_requirement(requirement.id, "tok", db_session, user_id=user.id)
         assert isinstance(result, list)
 
 
@@ -664,8 +692,7 @@ class TestEmailVendorDomainError:
             gc.get_all_pages = AsyncMock(side_effect=RuntimeError("VD fail"))
             gc_cls.return_value = gc
 
-            result = await fetch_threads_for_vendor(
-                vc.id, "tok", db_session, user_id=1)
+            result = await fetch_threads_for_vendor(vc.id, "tok", db_session, user_id=1)
         assert result == []
 
 
@@ -677,6 +704,7 @@ class TestEmailVendorDomainError:
 @pytest.fixture(autouse=True)
 def _ensure_gradient_key():
     from app.config import settings
+
     orig = settings.do_gradient_api_key
     settings.do_gradient_api_key = "test-key"
     yield
@@ -693,8 +721,7 @@ def _gmock(status_code=200, json_data=None, text=""):
 
 def _gchat(content):
     return {
-        "choices": [{"message": {"role": "assistant", "content": content},
-                     "finish_reason": "stop"}],
+        "choices": [{"message": {"role": "assistant", "content": content}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 50, "completion_tokens": 20, "total_tokens": 70},
         "model": "anthropic-claude-4.5-sonnet",
     }
@@ -708,11 +735,14 @@ class TestGradientExceptionExhausted:
         from app.services.gradient_service import gradient_text
 
         with patch("app.services.gradient_service.http") as mh:
-            mh.post = AsyncMock(side_effect=[
-                TimeoutError("T1"), TimeoutError("T2"), TimeoutError("T3"),
-            ])
-            with patch("app.services.gradient_service.asyncio.sleep",
-                        new_callable=AsyncMock):
+            mh.post = AsyncMock(
+                side_effect=[
+                    TimeoutError("T1"),
+                    TimeoutError("T2"),
+                    TimeoutError("T3"),
+                ]
+            )
+            with patch("app.services.gradient_service.asyncio.sleep", new_callable=AsyncMock):
                 result = await gradient_text("Test")
 
         assert result is None
@@ -764,7 +794,7 @@ class TestSafeJsonParseNewlines:
     def test_unfixable_json_returns_none(self):
         from app.services.gradient_service import _safe_json_parse
 
-        text = 'Preamble {invalid json that cannot be fixed} more'
+        text = "Preamble {invalid json that cannot be fixed} more"
         result = _safe_json_parse(text)
         assert result is None
 
@@ -807,14 +837,12 @@ class TestEngagementDomainAliases:
         from app.services.engagement_scorer import compute_all_engagement_scores
 
         user = _make_user(db_session, "ea@t.com")
-        vc = _make_vendor(db_session, "EngA", "enga.com",
-                          domain_aliases=["enga-alt.com", "enga-old.com"])
+        vc = _make_vendor(db_session, "EngA", "enga.com", domain_aliases=["enga-alt.com", "enga-old.com"])
         req = _make_requisition(db_session, user.id)
         for _ in range(3):
             _make_contact(db_session, req.id, user.id, "EngA")
 
-        _make_vendor_response(db_session, "R", "r@enga-alt.com",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "R", "r@enga-alt.com", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         await compute_all_engagement_scores(db_session)
@@ -835,8 +863,7 @@ class TestEngagementNoAtEmail:
         for _ in range(3):
             _make_contact(db_session, req.id, user.id, "NoAt")
 
-        _make_vendor_response(db_session, "Bad", "no-at-sign",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "Bad", "no-at-sign", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         result = await compute_all_engagement_scores(db_session)
@@ -852,8 +879,11 @@ class TestEngagementFallbackNormalize:
 
         user = _make_user(db_session, "fb@t.com")
         vc = VendorCard(
-            normalized_name="fallbackv", display_name="FallbackV",
-            domain=None, domain_aliases=[], emails=[],
+            normalized_name="fallbackv",
+            display_name="FallbackV",
+            domain=None,
+            domain_aliases=[],
+            emails=[],
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(vc)
@@ -863,8 +893,7 @@ class TestEngagementFallbackNormalize:
         for _ in range(3):
             _make_contact(db_session, req.id, user.id, "FallbackV")
 
-        _make_vendor_response(db_session, "SP", "sales@unknown.com",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "SP", "sales@unknown.com", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         result = await compute_all_engagement_scores(db_session)
@@ -885,14 +914,18 @@ class TestEngagementWinMap:
             _make_contact(db_session, req.id, user.id, "WinV")
 
         o = Offer(
-            requisition_id=req.id, vendor_card_id=vc.id,
-            vendor_name="WinV", mpn="X", qty_available=100,
-            unit_price=1.0, entered_by_id=user.id,
-            status="won", created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            vendor_card_id=vc.id,
+            vendor_name="WinV",
+            mpn="X",
+            qty_available=100,
+            unit_price=1.0,
+            entered_by_id=user.id,
+            status="won",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(o)
-        _make_vendor_response(db_session, "R", "r@winv.com",
-                              received_at=datetime.now(timezone.utc))
+        _make_vendor_response(db_session, "R", "r@winv.com", received_at=datetime.now(timezone.utc))
         db_session.commit()
 
         await compute_all_engagement_scores(db_session)
@@ -949,8 +982,7 @@ class TestGradientJsonTextIsNone:
         from app.services.gradient_service import gradient_json
 
         # Patch gradient_text to return None (e.g. API failure)
-        with patch("app.services.gradient_service.gradient_text",
-                    new_callable=AsyncMock, return_value=None):
+        with patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock, return_value=None):
             result = await gradient_json("Parse this")
 
         assert result is None
@@ -960,8 +992,7 @@ class TestGradientJsonTextIsNone:
         from app.services.gradient_service import gradient_json
 
         # Patch gradient_text to return empty string
-        with patch("app.services.gradient_service.gradient_text",
-                    new_callable=AsyncMock, return_value=""):
+        with patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock, return_value=""):
             result = await gradient_json("Parse this")
 
         assert result is None
@@ -993,10 +1024,11 @@ class TestEngagementFlushErrorInBatch:
         _make_vendor(db_session, "FlushBatch", "flushbatch.com")
         db_session.commit()
 
-        original_flush = db_session.flush.__func__ if hasattr(db_session.flush, '__func__') else None
+        original_flush = db_session.flush.__func__ if hasattr(db_session.flush, "__func__") else None
 
         # Directly mock db.flush to raise on the batch flush call
         call_idx = [0]
+
         def _counting_flush(*a, **kw):
             call_idx[0] += 1
             # The batch flush happens after card updates - raise then

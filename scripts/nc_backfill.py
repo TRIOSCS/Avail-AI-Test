@@ -11,7 +11,6 @@ Depends on: database, nc_worker.queue_manager
 """
 
 import argparse
-import sys
 
 from loguru import logger
 

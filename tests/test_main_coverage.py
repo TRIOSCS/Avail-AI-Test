@@ -9,14 +9,9 @@ Covers uncovered lines:
 - Health endpoint variations (lines 333-335)
 """
 
-import os
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # ── _check_backup_freshness ──────────────────────────────────────────
 
@@ -220,15 +215,40 @@ class TestSeedApiSources:
             # Create mock existing sources matching all expected names
             # Build the same name list the code would produce
             expected_names = [
-                "nexar", "brokerbin", "ebay", "digikey", "mouser",
-                "oemsecrets", "sourcengine", "email_mining", "azure_oauth",
-                "anthropic_ai", "teams_notifications", "apollo_enrichment",
-                "explorium_enrichment", "hunter_enrichment",
-                "rocketreach_enrichment", "clearbit_enrichment", "netcomponents",
-                "icsource", "thebrokersite", "findchips", "arrow", "avnet",
-                "lcsc", "partfuse", "stock_list_import", "element14",
-                "rs_components", "future", "rochester", "verical", "heilind",
-                "winsource", "siliconexpert", "aliexpress",
+                "nexar",
+                "brokerbin",
+                "ebay",
+                "digikey",
+                "mouser",
+                "oemsecrets",
+                "sourcengine",
+                "email_mining",
+                "azure_oauth",
+                "anthropic_ai",
+                "teams_notifications",
+                "apollo_enrichment",
+                "explorium_enrichment",
+                "hunter_enrichment",
+                "rocketreach_enrichment",
+                "clearbit_enrichment",
+                "netcomponents",
+                "icsource",
+                "thebrokersite",
+                "findchips",
+                "arrow",
+                "avnet",
+                "lcsc",
+                "partfuse",
+                "stock_list_import",
+                "element14",
+                "rs_components",
+                "future",
+                "rochester",
+                "verical",
+                "heilind",
+                "winsource",
+                "siliconexpert",
+                "aliexpress",
             ]
             mock_sources = []
             for name in expected_names:

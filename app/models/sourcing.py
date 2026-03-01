@@ -50,21 +50,11 @@ class Requisition(Base):
     creator = relationship("User", back_populates="requisitions", foreign_keys=[created_by])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    requirements = relationship(
-        "Requirement", back_populates="requisition", cascade="all, delete-orphan"
-    )
-    attachments = relationship(
-        "RequisitionAttachment", back_populates="requisition", cascade="all, delete-orphan"
-    )
-    contacts = relationship(
-        "Contact", back_populates="requisition", cascade="all, delete-orphan"
-    )
-    offers = relationship(
-        "Offer", back_populates="requisition", cascade="all, delete-orphan"
-    )
-    quotes = relationship(
-        "Quote", back_populates="requisition", cascade="all, delete-orphan"
-    )
+    requirements = relationship("Requirement", back_populates="requisition", cascade="all, delete-orphan")
+    attachments = relationship("RequisitionAttachment", back_populates="requisition", cascade="all, delete-orphan")
+    contacts = relationship("Contact", back_populates="requisition", cascade="all, delete-orphan")
+    offers = relationship("Offer", back_populates="requisition", cascade="all, delete-orphan")
+    quotes = relationship("Quote", back_populates="requisition", cascade="all, delete-orphan")
 
 
 class Requirement(Base):
@@ -92,15 +82,9 @@ class Requirement(Base):
 
     requisition = relationship("Requisition", back_populates="requirements")
     material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
-    attachments = relationship(
-        "RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan"
-    )
-    sightings = relationship(
-        "Sighting", back_populates="requirement", cascade="all, delete-orphan"
-    )
-    offers = relationship(
-        "Offer", back_populates="requirement", cascade="all, delete-orphan"
-    )
+    attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
+    sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
+    offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),
@@ -173,9 +157,7 @@ class RequisitionAttachment(Base):
 
     __tablename__ = "requisition_attachments"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
@@ -194,9 +176,7 @@ class RequirementAttachment(Base):
 
     __tablename__ = "requirement_attachments"
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(
-        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
-    )
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)

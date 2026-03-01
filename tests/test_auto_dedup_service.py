@@ -9,20 +9,22 @@ Depends on: conftest fixtures, app.models, app.services.auto_dedup_service
 
 import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User, VendorCard
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _make_user(db: Session, email: str = "dedup@test.com") -> User:
     u = User(
-        email=email, name="Dedup Tester", role="buyer",
-        azure_id=f"az-{email}", created_at=datetime.now(timezone.utc),
+        email=email,
+        name="Dedup Tester",
+        role="buyer",
+        azure_id=f"az-{email}",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(u)
     db.flush()
@@ -46,8 +48,10 @@ def _make_vendor(db: Session, display_name: str, normalized_name: str = None, **
 
 def _make_company(db: Session, name: str, **kw) -> Company:
     defaults = dict(
-        name=name, website=f"https://{name.lower().replace(' ', '')}.com",
-        industry="Electronics", is_active=True,
+        name=name,
+        website=f"https://{name.lower().replace(' ', '')}.com",
+        industry="Electronics",
+        is_active=True,
         created_at=datetime.now(timezone.utc),
     )
     defaults.update(kw)
@@ -60,6 +64,7 @@ def _make_company(db: Session, name: str, **kw) -> Company:
 # ══════════════════════════════════════════════════════════════════════
 # run_auto_dedup (top-level)
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestRunAutoDedup:
     def test_returns_stats_dict(self, db_session):
@@ -76,8 +81,7 @@ class TestRunAutoDedup:
         """If vendor dedup fails, company dedup should still run."""
         from app.services.auto_dedup_service import run_auto_dedup
 
-        with patch("app.services.auto_dedup_service._dedup_vendors",
-                   side_effect=RuntimeError("boom")):
+        with patch("app.services.auto_dedup_service._dedup_vendors", side_effect=RuntimeError("boom")):
             with patch("app.services.auto_dedup_service._dedup_companies", return_value=3):
                 result = run_auto_dedup(db_session)
 
@@ -89,8 +93,7 @@ class TestRunAutoDedup:
         from app.services.auto_dedup_service import run_auto_dedup
 
         with patch("app.services.auto_dedup_service._dedup_vendors", return_value=5):
-            with patch("app.services.auto_dedup_service._dedup_companies",
-                       side_effect=RuntimeError("boom")):
+            with patch("app.services.auto_dedup_service._dedup_companies", side_effect=RuntimeError("boom")):
                 result = run_auto_dedup(db_session)
 
         assert result["vendors_merged"] == 5
@@ -99,6 +102,7 @@ class TestRunAutoDedup:
     def test_empty_db_noop(self, db_session):
         """Empty database returns zero stats."""
         from app.services.auto_dedup_service import run_auto_dedup
+
         stats = run_auto_dedup(db_session)
         assert stats == {"vendors_merged": 0, "companies_merged": 0}
 
@@ -121,16 +125,15 @@ class TestRunAutoDedup:
 # _dedup_vendors
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestDedupVendors:
     def test_auto_merge_high_score(self, db_session):
         """Near-identical names (score >= 98) should auto-merge."""
         from app.services.auto_dedup_service import _dedup_vendors
 
         # "arrow electronics corp" vs "arrow electronics cor" = score 98
-        _make_vendor(db_session, "Arrow Electronics Corp",
-                     normalized_name="arrow electronics corp", sighting_count=20)
-        _make_vendor(db_session, "Arrow Electronics Cor",
-                     normalized_name="arrow electronics cor", sighting_count=5)
+        _make_vendor(db_session, "Arrow Electronics Corp", normalized_name="arrow electronics corp", sighting_count=20)
+        _make_vendor(db_session, "Arrow Electronics Cor", normalized_name="arrow electronics cor", sighting_count=5)
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -140,10 +143,12 @@ class TestDedupVendors:
         """The vendor with more sightings should be kept."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        v1 = _make_vendor(db_session, "Arrow Electronics Corp",
-                          normalized_name="arrow electronics corp", sighting_count=5)
-        v2 = _make_vendor(db_session, "Arrow Electronics Cor",
-                          normalized_name="arrow electronics cor", sighting_count=20)
+        v1 = _make_vendor(
+            db_session, "Arrow Electronics Corp", normalized_name="arrow electronics corp", sighting_count=5
+        )
+        v2 = _make_vendor(
+            db_session, "Arrow Electronics Cor", normalized_name="arrow electronics cor", sighting_count=20
+        )
         db_session.commit()
 
         _dedup_vendors(db_session)
@@ -155,10 +160,10 @@ class TestDedupVendors:
         """Blacklisted vendors should not be loaded for dedup."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Good Vendor", normalized_name="good vendor",
-                     sighting_count=10)
-        _make_vendor(db_session, "Good Vendor BL", normalized_name="good vendor bl",
-                     sighting_count=5, is_blacklisted=True)
+        _make_vendor(db_session, "Good Vendor", normalized_name="good vendor", sighting_count=10)
+        _make_vendor(
+            db_session, "Good Vendor BL", normalized_name="good vendor bl", sighting_count=5, is_blacklisted=True
+        )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -181,10 +186,8 @@ class TestDedupVendors:
 
         # Create 50 vendors in pairs with high similarity
         for i in range(25):
-            _make_vendor(db_session, f"Vendor{i} Corp",
-                         normalized_name=f"vendor{i} corp", sighting_count=100)
-            _make_vendor(db_session, f"Vendor{i} Cor",
-                         normalized_name=f"vendor{i} cor", sighting_count=50)
+            _make_vendor(db_session, f"Vendor{i} Corp", normalized_name=f"vendor{i} corp", sighting_count=100)
+            _make_vendor(db_session, f"Vendor{i} Cor", normalized_name=f"vendor{i} cor", sighting_count=50)
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -194,14 +197,11 @@ class TestDedupVendors:
         """If one merge fails, should continue processing."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Same Name A", normalized_name="same name a",
-                     sighting_count=20)
-        _make_vendor(db_session, "Same Name", normalized_name="same name",
-                     sighting_count=10)
+        _make_vendor(db_session, "Same Name A", normalized_name="same name a", sighting_count=20)
+        _make_vendor(db_session, "Same Name", normalized_name="same name", sighting_count=10)
         db_session.commit()
 
-        with patch("app.services.vendor_merge_service.merge_vendor_cards",
-                   side_effect=RuntimeError("merge failed")):
+        with patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge failed")):
             # Should not crash
             _dedup_vendors(db_session)
 
@@ -209,14 +209,11 @@ class TestDedupVendors:
         """Score 92-97 with AI approval should merge."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Arrow Electronics Inc",
-                     normalized_name="arrow electronics inc", sighting_count=20)
-        _make_vendor(db_session, "Arrow Elect LLC",
-                     normalized_name="arrow elect llc", sighting_count=5)
+        _make_vendor(db_session, "Arrow Electronics Inc", normalized_name="arrow electronics inc", sighting_count=20)
+        _make_vendor(db_session, "Arrow Elect LLC", normalized_name="arrow elect llc", sighting_count=5)
         db_session.commit()
 
-        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge",
-                   return_value=True):
+        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True):
             # Whether AI is called depends on the fuzzy score
             _dedup_vendors(db_session)
 
@@ -224,6 +221,7 @@ class TestDedupVendors:
 # ══════════════════════════════════════════════════════════════════════
 # _dedup_companies
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestDedupCompanies:
     def test_auto_merge_high_score(self, db_session):
@@ -234,15 +232,16 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corp Dup")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                 merged = _dedup_companies(db_session)
 
@@ -257,17 +256,17 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corporation")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 95,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 95,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
-            with patch("app.services.auto_dedup_service._ai_confirm_company_merge",
-                       return_value=True) as mock_ai:
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
+            with patch("app.services.auto_dedup_service._ai_confirm_company_merge", return_value=True) as mock_ai:
                 with patch("app.services.company_merge_service.merge_companies"):
                     merged = _dedup_companies(db_session)
 
@@ -285,15 +284,16 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=user2.id)
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                 merged = _dedup_companies(db_session)
 
@@ -309,15 +309,16 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=user.id)
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
                 merged = _dedup_companies(db_session)
 
@@ -331,15 +332,16 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=None)
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
                 merged = _dedup_companies(db_session)
 
@@ -357,15 +359,16 @@ class TestDedupCompanies:
 
         candidates = []
         for i in range(0, 24, 2):
-            candidates.append({
-                "company_a": {"id": companies[i].id},
-                "company_b": {"id": companies[i + 1].id},
-                "auto_keep_id": companies[i].id,
-                "score": 99,
-            })
+            candidates.append(
+                {
+                    "company_a": {"id": companies[i].id},
+                    "company_b": {"id": companies[i + 1].id},
+                    "auto_keep_id": companies[i].id,
+                    "score": 99,
+                }
+            )
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
                 merged = _dedup_companies(db_session)
 
@@ -382,23 +385,20 @@ class TestDedupCompanies:
         db_session.commit()
 
         candidates = [
-            {"company_a": {"id": keep1.id}, "company_b": {"id": rem1.id},
-             "auto_keep_id": keep1.id, "score": 99},
-            {"company_a": {"id": keep2.id}, "company_b": {"id": rem2.id},
-             "auto_keep_id": keep2.id, "score": 99},
+            {"company_a": {"id": keep1.id}, "company_b": {"id": rem1.id}, "auto_keep_id": keep1.id, "score": 99},
+            {"company_a": {"id": keep2.id}, "company_b": {"id": rem2.id}, "auto_keep_id": keep2.id, "score": 99},
         ]
 
         call_count = 0
+
         def merge_side_effect(*a, **kw):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
                 raise RuntimeError("merge failed")
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
-            with patch("app.services.company_merge_service.merge_companies",
-                       side_effect=merge_side_effect):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
+            with patch("app.services.company_merge_service.merge_companies", side_effect=merge_side_effect):
                 merged = _dedup_companies(db_session)
 
         assert merged == 1
@@ -410,15 +410,16 @@ class TestDedupCompanies:
         keep = _make_company(db_session, "Real Co")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": 99999},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": 99999},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                 merged = _dedup_companies(db_session)
 
@@ -433,17 +434,17 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corporation")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 94,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 94,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
-            with patch("app.services.auto_dedup_service._ai_confirm_company_merge",
-                       return_value=False):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
+            with patch("app.services.auto_dedup_service._ai_confirm_company_merge", return_value=False):
                 with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                     merged = _dedup_companies(db_session)
 
@@ -458,15 +459,16 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Remove")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": keep.id},
-            "company_b": {"id": remove.id},
-            "auto_keep_id": keep.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": keep.id},
+                "company_b": {"id": remove.id},
+                "auto_keep_id": keep.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                 _dedup_companies(db_session)
 
@@ -480,15 +482,16 @@ class TestDedupCompanies:
         co_b = _make_company(db_session, "CoB")
         db_session.commit()
 
-        candidates = [{
-            "company_a": {"id": co_a.id},
-            "company_b": {"id": co_b.id},
-            "auto_keep_id": co_b.id,
-            "score": 99,
-        }]
+        candidates = [
+            {
+                "company_a": {"id": co_a.id},
+                "company_b": {"id": co_b.id},
+                "auto_keep_id": co_b.id,
+                "score": 99,
+            }
+        ]
 
-        with patch("app.company_utils.find_company_dedup_candidates",
-                   return_value=candidates):
+        with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
                 _dedup_companies(db_session)
 
@@ -499,13 +502,13 @@ class TestDedupCompanies:
 # AI Confirmation Functions
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestAIConfirmation:
     def test_ai_confirm_vendor_merge_true(self):
         """Should return True when Claude says same entity."""
         from app.services.auto_dedup_service import _ai_confirm_vendor_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, return_value=True):
+        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=True):
             result = _ai_confirm_vendor_merge("Arrow Electronics", "Arrow Elec", 95)
 
         assert result is True
@@ -514,8 +517,7 @@ class TestAIConfirmation:
         """Should return False when Claude says different entity."""
         from app.services.auto_dedup_service import _ai_confirm_vendor_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, return_value=False):
+        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=False):
             result = _ai_confirm_vendor_merge("Arrow Electronics", "Digi-Key", 92)
 
         assert result is False
@@ -524,8 +526,11 @@ class TestAIConfirmation:
         """Should return False on exception (safe default)."""
         from app.services.auto_dedup_service import _ai_confirm_vendor_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, side_effect=RuntimeError("API error")):
+        with patch(
+            "app.services.auto_dedup_service._ask_claude_merge",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API error"),
+        ):
             result = _ai_confirm_vendor_merge("A", "B", 95)
 
         assert result is False
@@ -534,11 +539,8 @@ class TestAIConfirmation:
         """Should return True when Claude confirms company match."""
         from app.services.auto_dedup_service import _ai_confirm_company_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, return_value=True):
-            result = _ai_confirm_company_merge(
-                "Acme Corp", "ACME Corporation", "acme.com", "acme.com", 95
-            )
+        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=True):
+            result = _ai_confirm_company_merge("Acme Corp", "ACME Corporation", "acme.com", "acme.com", 95)
 
         assert result is True
 
@@ -546,8 +548,7 @@ class TestAIConfirmation:
         """Should handle None domains gracefully."""
         from app.services.auto_dedup_service import _ai_confirm_company_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, return_value=False):
+        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=False):
             result = _ai_confirm_company_merge("A", "B", None, None, 93)
 
         assert result is False
@@ -556,8 +557,11 @@ class TestAIConfirmation:
         """Should return False on exception."""
         from app.services.auto_dedup_service import _ai_confirm_company_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge",
-                   new_callable=AsyncMock, side_effect=RuntimeError("boom")):
+        with patch(
+            "app.services.auto_dedup_service._ask_claude_merge",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
             result = _ai_confirm_company_merge("A", "B", None, None, 95)
 
         assert result is False
@@ -567,17 +571,15 @@ class TestAIConfirmation:
 # _ask_claude_merge
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestAskClaudeMerge:
     def test_returns_true_high_confidence(self):
         """Should return True when same_entity=True and confidence >= 0.85."""
         from app.services.auto_dedup_service import _ask_claude_merge
 
         mock_result = {"same_entity": True, "confidence": 0.95}
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is True
 
@@ -586,11 +588,8 @@ class TestAskClaudeMerge:
         from app.services.auto_dedup_service import _ask_claude_merge
 
         mock_result = {"same_entity": True, "confidence": 0.60}
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is False
 
@@ -599,11 +598,8 @@ class TestAskClaudeMerge:
         from app.services.auto_dedup_service import _ask_claude_merge
 
         mock_result = {"same_entity": False, "confidence": 0.99}
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is False
 
@@ -611,11 +607,8 @@ class TestAskClaudeMerge:
         """Should return False when Claude returns None."""
         from app.services.auto_dedup_service import _ask_claude_merge
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is False
 
@@ -623,11 +616,8 @@ class TestAskClaudeMerge:
         """Should return False when response is missing keys."""
         from app.services.auto_dedup_service import _ask_claude_merge
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value={}):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={}):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is False
 
@@ -636,11 +626,8 @@ class TestAskClaudeMerge:
         from app.services.auto_dedup_service import _ask_claude_merge
 
         mock_result = {"same_entity": True, "confidence": 0.85}
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                _ask_claude_merge("Are A and B the same?")
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
         assert result is True
 
@@ -649,10 +636,12 @@ class TestAskClaudeMerge:
 # Coverage gap tests for _dedup_vendors edge cases
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestDedupVendorsCoverageGaps:
     def test_thefuzz_import_error(self, db_session):
         """Lines 54-56: when thefuzz is not installed, returns 0."""
         import builtins
+
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
@@ -674,12 +663,21 @@ class TestDedupVendorsCoverageGaps:
         # A (idx 0) and C (idx 2) are similar (will merge, C removed).
         # B (idx 1) has inner loop that includes C — should skip it.
         # A and C are similar (score=98), B is unrelated
-        _make_vendor(db_session, "Xyzzy Electronics Corporation Inc",
-                     normalized_name="xyzzy electronics corporation inc", sighting_count=100)
-        _make_vendor(db_session, "Totally Different Vendor",
-                     normalized_name="totally different vendor", sighting_count=50)
-        _make_vendor(db_session, "Xyzzy Electronics Corporation In",
-                     normalized_name="xyzzy electronics corporation in", sighting_count=10)
+        _make_vendor(
+            db_session,
+            "Xyzzy Electronics Corporation Inc",
+            normalized_name="xyzzy electronics corporation inc",
+            sighting_count=100,
+        )
+        _make_vendor(
+            db_session, "Totally Different Vendor", normalized_name="totally different vendor", sighting_count=50
+        )
+        _make_vendor(
+            db_session,
+            "Xyzzy Electronics Corporation In",
+            normalized_name="xyzzy electronics corporation in",
+            sighting_count=10,
+        )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -690,14 +688,11 @@ class TestDedupVendorsCoverageGaps:
         """Lines 112-114: merge exception is caught and rolled back."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        _make_vendor(db_session, "Fail Merge Corp",
-                     normalized_name="fail merge corp", sighting_count=20)
-        _make_vendor(db_session, "Fail Merge Cor",
-                     normalized_name="fail merge cor", sighting_count=10)
+        _make_vendor(db_session, "Fail Merge Corp", normalized_name="fail merge corp", sighting_count=20)
+        _make_vendor(db_session, "Fail Merge Cor", normalized_name="fail merge cor", sighting_count=10)
         db_session.commit()
 
-        with patch("app.services.vendor_merge_service.merge_vendor_cards",
-                   side_effect=RuntimeError("merge exploded")):
+        with patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge exploded")):
             merged = _dedup_vendors(db_session)
 
         assert merged == 0
@@ -709,10 +704,18 @@ class TestDedupVendorsCoverageGaps:
         # Create >40 vendor pairs that will auto-merge (score>=98)
         # "corp000 electronics inc" vs "corp000 electronics in" = score 98
         for i in range(25):
-            _make_vendor(db_session, f"Corp{i:03d} Electronics Inc",
-                         normalized_name=f"corp{i:03d} electronics inc", sighting_count=100)
-            _make_vendor(db_session, f"Corp{i:03d} Electronics In",
-                         normalized_name=f"corp{i:03d} electronics in", sighting_count=50)
+            _make_vendor(
+                db_session,
+                f"Corp{i:03d} Electronics Inc",
+                normalized_name=f"corp{i:03d} electronics inc",
+                sighting_count=100,
+            )
+            _make_vendor(
+                db_session,
+                f"Corp{i:03d} Electronics In",
+                normalized_name=f"corp{i:03d} electronics in",
+                sighting_count=50,
+            )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)

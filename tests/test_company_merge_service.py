@@ -5,9 +5,8 @@ FK references, and deletes the removed company while preserving all data.
 """
 
 import pytest
-from tests.conftest import engine
 
-from app.models import Company, CustomerSite, SiteContact
+from app.models import Company, CustomerSite
 from app.services.company_merge_service import merge_companies
 
 

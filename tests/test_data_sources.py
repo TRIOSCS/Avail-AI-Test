@@ -250,9 +250,7 @@ def test_delete_credential(admin_source_client, db_session, seed_sources):
     mouser.credentials = {"MOUSER_API_KEY": encrypt_value("test-key")}
     db_session.commit()
 
-    resp = admin_source_client.delete(
-        f"/api/admin/sources/{mouser.id}/credentials/MOUSER_API_KEY"
-    )
+    resp = admin_source_client.delete(f"/api/admin/sources/{mouser.id}/credentials/MOUSER_API_KEY")
     assert resp.status_code == 200
     assert resp.json()["status"] == "removed"
 
@@ -269,9 +267,7 @@ def test_delete_credential_updates_status(admin_source_client, db_session, seed_
     mouser.status = "live"
     db_session.commit()
 
-    admin_source_client.delete(
-        f"/api/admin/sources/{mouser.id}/credentials/MOUSER_API_KEY"
-    )
+    admin_source_client.delete(f"/api/admin/sources/{mouser.id}/credentials/MOUSER_API_KEY")
     db_session.refresh(mouser)
     assert mouser.status == "pending"
 

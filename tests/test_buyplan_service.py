@@ -168,7 +168,13 @@ class TestLogBuyplanActivity:
 class TestNotifyBuyplanSubmitted:
     @pytest.mark.asyncio
     async def test_creates_in_app_notifications_for_admins(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -177,9 +183,11 @@ class TestNotifyBuyplanSubmitted:
             submitted_by_id=test_user.id,
         )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         logs = _get_activities(db_session, "buyplan_pending")
@@ -190,7 +198,13 @@ class TestNotifyBuyplanSubmitted:
 
     @pytest.mark.asyncio
     async def test_sends_email_to_admin(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -201,10 +215,12 @@ class TestNotifyBuyplanSubmitted:
         )
 
         mock_gc_instance = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok-123"), \
-             patch(_PATCH_GC, return_value=mock_gc_instance) as MockGC, \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok-123"),
+            patch(_PATCH_GC, return_value=mock_gc_instance) as MockGC,
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         MockGC.assert_called_with("tok-123")
@@ -217,7 +233,13 @@ class TestNotifyBuyplanSubmitted:
 
     @pytest.mark.asyncio
     async def test_posts_to_teams_channel(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -228,9 +250,11 @@ class TestNotifyBuyplanSubmitted:
 
         mock_teams_channel = AsyncMock()
         mock_teams_dm = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, mock_teams_channel), \
-             patch(_PATCH_TEAMS_DM, mock_teams_dm):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, mock_teams_channel),
+            patch(_PATCH_TEAMS_DM, mock_teams_dm),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         mock_teams_channel.assert_awaited_once()
@@ -242,7 +266,12 @@ class TestNotifyBuyplanSubmitted:
 
     @pytest.mark.asyncio
     async def test_handles_missing_submitter(
-        self, db_session, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """Plan with a null submitted_by_id should not crash."""
         plan = _create_plan(
@@ -252,9 +281,11 @@ class TestNotifyBuyplanSubmitted:
             submitted_by_id=None,
         )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         logs = _get_activities(db_session, "buyplan_pending")
@@ -263,7 +294,13 @@ class TestNotifyBuyplanSubmitted:
 
     @pytest.mark.asyncio
     async def test_html_includes_line_items(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -277,10 +314,12 @@ class TestNotifyBuyplanSubmitted:
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         call_args = mock_gc.post_json.call_args[0][1]
@@ -292,7 +331,13 @@ class TestNotifyBuyplanSubmitted:
 
     @pytest.mark.asyncio
     async def test_salesperson_notes_in_html(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -303,10 +348,12 @@ class TestNotifyBuyplanSubmitted:
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         html_body = mock_gc.post_json.call_args[0][1]["message"]["body"]["content"]
@@ -320,7 +367,12 @@ class TestNotifyBuyplanSubmitted:
 class TestNotifyBuyplanApproved:
     @pytest.mark.asyncio
     async def test_notifies_buyer(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         """Buyer who entered offers gets in-app notification."""
         plan = _create_plan(
@@ -332,20 +384,27 @@ class TestNotifyBuyplanApproved:
             status="approved",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
                     "entered_by_id": test_user.id,
-                    "po_number": None, "po_verified": False,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -356,7 +415,13 @@ class TestNotifyBuyplanApproved:
 
     @pytest.mark.asyncio
     async def test_fallback_to_offer_entered_by(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, test_offer,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        test_offer,
     ):
         """When line items lack entered_by_id, falls back to offer's entered_by_id."""
         plan = _create_plan(
@@ -368,19 +433,26 @@ class TestNotifyBuyplanApproved:
             status="approved",
             line_items=[
                 {
-                    "offer_id": test_offer.id, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
-                    "po_number": None, "po_verified": False,
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -390,7 +462,12 @@ class TestNotifyBuyplanApproved:
 
     @pytest.mark.asyncio
     async def test_sends_email_to_buyer(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -401,20 +478,27 @@ class TestNotifyBuyplanApproved:
             status="approved",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
                     "entered_by_id": test_user.id,
-                    "po_number": None, "po_verified": False,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -427,7 +511,12 @@ class TestNotifyBuyplanApproved:
 
     @pytest.mark.asyncio
     async def test_posts_teams_channel(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -438,19 +527,26 @@ class TestNotifyBuyplanApproved:
             status="approved",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
                     "entered_by_id": test_user.id,
-                    "po_number": None, "po_verified": False,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
         mock_teams = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, mock_teams), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, mock_teams),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -460,7 +556,12 @@ class TestNotifyBuyplanApproved:
 
     @pytest.mark.asyncio
     async def test_manager_notes_in_email(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -472,20 +573,27 @@ class TestNotifyBuyplanApproved:
             manager_notes="Priority customer - expedite",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
                     "entered_by_id": test_user.id,
-                    "po_number": None, "po_verified": False,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -495,7 +603,11 @@ class TestNotifyBuyplanApproved:
 
     @pytest.mark.asyncio
     async def test_no_buyers_found(
-        self, db_session, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         """Plan with no identifiable buyers should not crash."""
         plan = _create_plan(
@@ -507,17 +619,24 @@ class TestNotifyBuyplanApproved:
             status="approved",
             line_items=[
                 {
-                    "offer_id": 99999, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.50,
-                    "po_number": None, "po_verified": False,
+                    "offer_id": 99999,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": None,
+                    "po_verified": False,
                 }
             ],
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_approved(plan, db_session)
 
@@ -531,7 +650,12 @@ class TestNotifyBuyplanApproved:
 class TestNotifyBuyplanRejected:
     @pytest.mark.asyncio
     async def test_creates_in_app_notification(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -543,10 +667,12 @@ class TestNotifyBuyplanRejected:
             rejection_reason="Price too high",
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_rejected(plan, db_session)
 
@@ -557,7 +683,12 @@ class TestNotifyBuyplanRejected:
 
     @pytest.mark.asyncio
     async def test_sends_rejection_email(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -570,11 +701,13 @@ class TestNotifyBuyplanRejected:
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_rejected(plan, db_session)
 
@@ -586,7 +719,12 @@ class TestNotifyBuyplanRejected:
 
     @pytest.mark.asyncio
     async def test_sends_teams_dm(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -599,10 +737,12 @@ class TestNotifyBuyplanRejected:
         )
 
         mock_dm = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, mock_dm):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, mock_dm),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_rejected(plan, db_session)
 
@@ -613,7 +753,12 @@ class TestNotifyBuyplanRejected:
 
     @pytest.mark.asyncio
     async def test_no_reason_given(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -625,10 +770,12 @@ class TestNotifyBuyplanRejected:
             rejection_reason=None,
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_rejected(plan, db_session)
 
@@ -638,7 +785,11 @@ class TestNotifyBuyplanRejected:
 
     @pytest.mark.asyncio
     async def test_missing_submitter_returns_early(
-        self, db_session, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         """If submitter not found (null), function returns early without error."""
         plan = _create_plan(
@@ -650,10 +801,12 @@ class TestNotifyBuyplanRejected:
             status="rejected",
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock) as mock_token, \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock) as mock_token,
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_rejected(plan, db_session)
 
@@ -668,7 +821,13 @@ class TestNotifyBuyplanRejected:
 class TestNotifyStockSaleApproved:
     @pytest.mark.asyncio
     async def test_creates_submitter_notification(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -680,8 +839,10 @@ class TestNotifyStockSaleApproved:
             is_stock_sale=True,
         )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             await notify_stock_sale_approved(plan, db_session)
 
         logs = _get_activities(db_session, "buyplan_completed")
@@ -691,7 +852,13 @@ class TestNotifyStockSaleApproved:
 
     @pytest.mark.asyncio
     async def test_sends_stock_sale_emails(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         admin_user.access_token = "existing-token"
         db_session.commit()
@@ -707,9 +874,11 @@ class TestNotifyStockSaleApproved:
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             await notify_stock_sale_approved(plan, db_session)
 
         assert mock_gc.post_json.await_count == 1
@@ -718,7 +887,13 @@ class TestNotifyStockSaleApproved:
 
     @pytest.mark.asyncio
     async def test_posts_teams_channel(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         plan = _create_plan(
             db_session,
@@ -731,8 +906,7 @@ class TestNotifyStockSaleApproved:
         )
 
         mock_teams = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, mock_teams):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), patch(_PATCH_TEAMS_CH, mock_teams):
             await notify_stock_sale_approved(plan, db_session)
 
         mock_teams.assert_awaited_once()
@@ -742,7 +916,12 @@ class TestNotifyStockSaleApproved:
 
     @pytest.mark.asyncio
     async def test_missing_submitter_still_works(
-        self, db_session, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """When submitted_by_id is null, no crash and no in-app notification."""
         plan = _create_plan(
@@ -755,8 +934,10 @@ class TestNotifyStockSaleApproved:
             is_stock_sale=True,
         )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             await notify_stock_sale_approved(plan, db_session)
 
         logs = _get_activities(db_session, "buyplan_completed")
@@ -769,7 +950,11 @@ class TestNotifyStockSaleApproved:
 class TestNotifyBuyplanCompleted:
     @pytest.mark.asyncio
     async def test_creates_in_app_notification(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -779,9 +964,11 @@ class TestNotifyBuyplanCompleted:
             status="complete",
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_completed(plan, db_session, "Admin User")
 
@@ -792,7 +979,11 @@ class TestNotifyBuyplanCompleted:
 
     @pytest.mark.asyncio
     async def test_sends_completion_email(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -804,10 +995,12 @@ class TestNotifyBuyplanCompleted:
         )
 
         mock_gc = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_completed(plan, db_session, "Manager Jones")
 
@@ -819,7 +1012,11 @@ class TestNotifyBuyplanCompleted:
 
     @pytest.mark.asyncio
     async def test_posts_teams_channel(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -830,9 +1027,11 @@ class TestNotifyBuyplanCompleted:
         )
 
         mock_teams = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, mock_teams):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, mock_teams),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_completed(plan, db_session, "Admin User")
 
@@ -843,7 +1042,10 @@ class TestNotifyBuyplanCompleted:
 
     @pytest.mark.asyncio
     async def test_missing_submitter_returns_early(
-        self, db_session, test_requisition, test_quote,
+        self,
+        db_session,
+        test_requisition,
+        test_quote,
     ):
         """When submitted_by_id is null, notify_buyplan_completed returns early."""
         plan = _create_plan(
@@ -854,9 +1056,11 @@ class TestNotifyBuyplanCompleted:
             status="complete",
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TOKEN, new_callable=AsyncMock) as mock_token, \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_SETTINGS) as mock_settings,
+            patch(_PATCH_TOKEN, new_callable=AsyncMock) as mock_token,
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_completed(plan, db_session, "Admin")
 
@@ -870,7 +1074,13 @@ class TestNotifyBuyplanCompleted:
 class TestNotifyBuyplanCancelled:
     @pytest.mark.asyncio
     async def test_submitter_cancels_notifies_admins(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """When submitter cancels their own plan, admins are notified."""
         plan = _create_plan(
@@ -894,7 +1104,12 @@ class TestNotifyBuyplanCancelled:
 
     @pytest.mark.asyncio
     async def test_admin_cancels_notifies_submitter(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         """When admin cancels, the original submitter is notified."""
         plan = _create_plan(
@@ -907,8 +1122,7 @@ class TestNotifyBuyplanCancelled:
             cancellation_reason="Vendor unreliable",
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with patch(_PATCH_SETTINGS) as mock_settings, patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
             mock_settings.admin_emails = [admin_user.email]
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_cancelled(plan, db_session)
@@ -920,7 +1134,12 @@ class TestNotifyBuyplanCancelled:
 
     @pytest.mark.asyncio
     async def test_no_reason(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -932,8 +1151,7 @@ class TestNotifyBuyplanCancelled:
             cancellation_reason=None,
         )
 
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with patch(_PATCH_SETTINGS) as mock_settings, patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
             mock_settings.admin_emails = [admin_user.email]
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_cancelled(plan, db_session)
@@ -944,7 +1162,12 @@ class TestNotifyBuyplanCancelled:
 
     @pytest.mark.asyncio
     async def test_posts_teams_channel(
-        self, db_session, test_user, admin_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -957,8 +1180,7 @@ class TestNotifyBuyplanCancelled:
         )
 
         mock_teams = AsyncMock()
-        with patch(_PATCH_SETTINGS) as mock_settings, \
-             patch(_PATCH_TEAMS_CH, mock_teams):
+        with patch(_PATCH_SETTINGS) as mock_settings, patch(_PATCH_TEAMS_CH, mock_teams):
             mock_settings.admin_emails = [admin_user.email]
             mock_settings.app_url = "https://avail.test"
             await notify_buyplan_cancelled(plan, db_session)
@@ -975,7 +1197,11 @@ class TestNotifyBuyplanCancelled:
 class TestVerifyPoSent:
     @pytest.mark.asyncio
     async def test_verifies_po_found(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -985,8 +1211,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-001",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -995,18 +1224,19 @@ class TestVerifyPoSent:
         )
 
         mock_gc = AsyncMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "value": [
-                {
-                    "subject": "PO-001 for Arrow Electronics",
-                    "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
-                    "sentDateTime": "2026-02-15T10:00:00Z",
-                }
-            ]
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "value": [
+                    {
+                        "subject": "PO-001 for Arrow Electronics",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+                        "sentDateTime": "2026-02-15T10:00:00Z",
+                    }
+                ]
+            }
+        )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             results = await verify_po_sent(plan, db_session)
 
         assert results["PO-001"]["verified"] is True
@@ -1019,7 +1249,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_po_not_found(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -1029,8 +1263,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-MISSING",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1041,8 +1278,7 @@ class TestVerifyPoSent:
         mock_gc = AsyncMock()
         mock_gc.get_json = AsyncMock(return_value={"value": []})
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             results = await verify_po_sent(plan, db_session)
 
         assert results["PO-MISSING"]["verified"] is False
@@ -1050,7 +1286,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_no_token_for_buyer(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -1060,8 +1300,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-NOTOKEN",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1077,7 +1320,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_skips_already_verified(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -1087,8 +1334,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-DONE",
                     "entered_by_id": test_user.id,
                     "po_verified": True,
@@ -1104,7 +1354,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_skips_no_po_number(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -1114,8 +1368,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": None,
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1131,7 +1388,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_all_verified_transitions_status(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         """When all POs verified, status transitions from po_entered to po_confirmed."""
         plan = _create_plan(
@@ -1142,8 +1403,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-A",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1152,18 +1416,19 @@ class TestVerifyPoSent:
         )
 
         mock_gc = AsyncMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "value": [
-                {
-                    "subject": "PO-A",
-                    "toRecipients": [{"emailAddress": {"address": "v@arrow.com"}}],
-                    "sentDateTime": "2026-02-15T10:00:00Z",
-                }
-            ]
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "value": [
+                    {
+                        "subject": "PO-A",
+                        "toRecipients": [{"emailAddress": {"address": "v@arrow.com"}}],
+                        "sentDateTime": "2026-02-15T10:00:00Z",
+                    }
+                ]
+            }
+        )
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             await verify_po_sent(plan, db_session)
 
         db_session.refresh(plan)
@@ -1171,7 +1436,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_partial_verification_no_transition(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         """When only some POs verified, status stays at po_entered."""
         plan = _create_plan(
@@ -1182,15 +1451,21 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-FOUND",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
                 },
                 {
-                    "offer_id": 2, "mpn": "NE555P", "vendor_name": "DigiKey",
-                    "qty": 500, "cost_price": 0.25,
+                    "offer_id": 2,
+                    "mpn": "NE555P",
+                    "vendor_name": "DigiKey",
+                    "qty": 500,
+                    "cost_price": 0.25,
                     "po_number": "PO-NOTFOUND",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1203,18 +1478,19 @@ class TestVerifyPoSent:
         async def _mock_get(url, params=None):
             if params and "PO-FOUND" in params.get("$search", ""):
                 return {
-                    "value": [{
-                        "subject": "PO-FOUND",
-                        "toRecipients": [{"emailAddress": {"address": "v@arrow.com"}}],
-                        "sentDateTime": "2026-02-15T10:00:00Z",
-                    }]
+                    "value": [
+                        {
+                            "subject": "PO-FOUND",
+                            "toRecipients": [{"emailAddress": {"address": "v@arrow.com"}}],
+                            "sentDateTime": "2026-02-15T10:00:00Z",
+                        }
+                    ]
                 }
             return {"value": []}
 
         mock_gc.get_json = _mock_get
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             results = await verify_po_sent(plan, db_session)
 
         db_session.refresh(plan)
@@ -1224,7 +1500,11 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_graph_api_error_handled(
-        self, db_session, test_user, test_requisition, test_quote,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
     ):
         plan = _create_plan(
             db_session,
@@ -1234,8 +1514,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-ERR",
                     "entered_by_id": test_user.id,
                     "po_verified": False,
@@ -1246,8 +1529,7 @@ class TestVerifyPoSent:
         mock_gc = AsyncMock()
         mock_gc.get_json = AsyncMock(side_effect=Exception("Graph API 503"))
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             results = await verify_po_sent(plan, db_session)
 
         assert results["PO-ERR"]["verified"] is False
@@ -1255,7 +1537,12 @@ class TestVerifyPoSent:
 
     @pytest.mark.asyncio
     async def test_fallback_to_offer_entered_by(
-        self, db_session, test_user, test_requisition, test_quote, test_offer,
+        self,
+        db_session,
+        test_user,
+        test_requisition,
+        test_quote,
+        test_offer,
     ):
         """When line item has no entered_by_id, falls back to offer.entered_by_id."""
         plan = _create_plan(
@@ -1266,8 +1553,11 @@ class TestVerifyPoSent:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": test_offer.id, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50,
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
                     "po_number": "PO-FALLBACK",
                     "po_verified": False,
                 }
@@ -1277,8 +1567,7 @@ class TestVerifyPoSent:
         mock_gc = AsyncMock()
         mock_gc.get_json = AsyncMock(return_value={"value": []})
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             results = await verify_po_sent(plan, db_session)
 
         assert "PO-FALLBACK" in results
@@ -1428,8 +1717,10 @@ class TestPostTeamsChannel:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
 
-        with patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"), \
-             patch("app.services.buyplan_service.http") as mock_http:
+        with (
+            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.buyplan_service.http") as mock_http,
+        ):
             mock_http.post = AsyncMock(return_value=mock_resp)
             await _post_teams_channel("Buy plan notification")
 
@@ -1442,8 +1733,10 @@ class TestPostTeamsChannel:
 
     @pytest.mark.asyncio
     async def test_handles_webhook_error(self):
-        with patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"), \
-             patch("app.services.buyplan_service.http") as mock_http:
+        with (
+            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.buyplan_service.http") as mock_http,
+        ):
             mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
             await _post_teams_channel("Test message")
 
@@ -1453,8 +1746,10 @@ class TestPostTeamsChannel:
         mock_resp.status_code = 403
         mock_resp.text = "Forbidden"
 
-        with patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"), \
-             patch("app.services.buyplan_service.http") as mock_http:
+        with (
+            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.buyplan_service.http") as mock_http,
+        ):
             mock_http.post = AsyncMock(return_value=mock_resp)
             await _post_teams_channel("Test message")
 
@@ -1468,8 +1763,7 @@ class TestSendTeamsDm:
         mock_gc = AsyncMock()
         mock_gc.post_json = AsyncMock(return_value={"id": "chat-123"})
 
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, return_value=mock_gc):
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), patch(_PATCH_GC, return_value=mock_gc):
             await _send_teams_dm(test_user, "Hello from test", db_session)
 
         assert mock_gc.post_json.await_count == 2
@@ -1489,8 +1783,10 @@ class TestSendTeamsDm:
 
     @pytest.mark.asyncio
     async def test_handles_graph_error(self, db_session, test_user):
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GC, side_effect=Exception("Teams API error")):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GC, side_effect=Exception("Teams API error")),
+        ):
             await _send_teams_dm(test_user, "Test", db_session)
 
 
@@ -1532,7 +1828,13 @@ class TestEdgeCases:
 
     @pytest.mark.asyncio
     async def test_submitted_total_cost_calculation(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """Teams channel post includes total cost from line items."""
         plan = _create_plan(
@@ -1547,9 +1849,11 @@ class TestEdgeCases:
         )
 
         mock_teams = AsyncMock()
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, mock_teams), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, mock_teams),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_submitted(plan, db_session)
 
         msg = mock_teams.call_args[0][0]
@@ -1601,7 +1905,13 @@ class TestSendTeamsDmDirectToken:
 class TestNotifyBuyplanApprovedBuyerFallback:
     @pytest.mark.asyncio
     async def test_buyer_ids_from_offers_when_no_entered_by(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """When line items have no entered_by_id, buyer_ids are resolved from offer records."""
         from app.models import Offer
@@ -1643,16 +1953,18 @@ class TestNotifyBuyplanApprovedBuyerFallback:
 
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value=None)
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="fake-token"), \
-             patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
-             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="fake-token"),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+            patch(_PATCH_TEAMS_DM, new_callable=AsyncMock),
+        ):
             await notify_buyplan_approved(plan, db_session)
 
         # Buyer should have been identified via Offer.entered_by_id fallback
         logs = _get_activities(db_session, "buyplan_approved")
         assert len(logs) >= 1
-        assert any(l.user_id == test_user.id for l in logs)
+        assert any(lg.user_id == test_user.id for lg in logs)
 
 
 # ── 16. notify_stock_sale_approved ──────────────────────────────────
@@ -1661,7 +1973,13 @@ class TestNotifyBuyplanApprovedBuyerFallback:
 class TestNotifyStockSaleApprovedEdgeCases:
     @pytest.mark.asyncio
     async def test_no_admin_with_token(
-        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+        self,
+        db_session,
+        test_user,
+        admin_user,
+        test_requisition,
+        test_quote,
+        admin_in_settings,
     ):
         """When no admin has an access_token, emails are skipped gracefully."""
         plan = _create_plan(
@@ -1675,8 +1993,10 @@ class TestNotifyStockSaleApprovedEdgeCases:
         )
 
         # admin_user has no access_token in test fixtures
-        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+        with (
+            patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_TEAMS_CH, new_callable=AsyncMock),
+        ):
             # Should not raise
             await notify_stock_sale_approved(plan, db_session)
 

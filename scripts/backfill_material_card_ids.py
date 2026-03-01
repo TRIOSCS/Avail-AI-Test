@@ -98,11 +98,7 @@ def backfill(dry_run: bool = False) -> dict:
         offset = 0
         while True:
             batch = (
-                db.query(Sighting)
-                .filter(Sighting.material_card_id.is_(None))
-                .limit(BATCH_SIZE)
-                .offset(offset)
-                .all()
+                db.query(Sighting).filter(Sighting.material_card_id.is_(None)).limit(BATCH_SIZE).offset(offset).all()
             )
             if not batch:
                 break

@@ -29,7 +29,11 @@ MAX_STAGE_POINTS = 8
 PO_CONFIRMED_STATUSES = {"po_entered", "po_confirmed", "complete"}
 # BuyPlan statuses that count as awarded (any non-cancelled)
 AWARDED_STATUSES = {
-    "pending_approval", "approved", "po_entered", "po_confirmed", "complete",
+    "pending_approval",
+    "approved",
+    "po_entered",
+    "po_confirmed",
+    "complete",
 }
 # Quote statuses that count as "used in quote"
 QUOTE_USED_STATUSES = {"sent", "won", "lost"}
@@ -81,21 +85,13 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
         return {"vendor_score": None, "advancement_score": None, "is_new_vendor": True}
 
     # Get all offers for this vendor
-    offers = (
-        db.query(Offer.id)
-        .filter(Offer.vendor_card_id == vendor_card_id)
-        .all()
-    )
+    offers = db.query(Offer.id).filter(Offer.vendor_card_id == vendor_card_id).all()
     offer_ids = {o.id for o in offers}
 
     if not offer_ids:
         # Fallback: match by normalized name
         norm = card.normalized_name
-        offers = (
-            db.query(Offer.id)
-            .filter(Offer.vendor_name_normalized == norm)
-            .all()
-        )
+        offers = db.query(Offer.id).filter(Offer.vendor_name_normalized == norm).all()
         offer_ids = {o.id for o in offers}
 
     offer_count = len(offer_ids)
@@ -108,16 +104,10 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
     awarded_offer_ids = _get_buyplan_offer_ids(db, offer_ids, AWARDED_STATUSES)
     po_confirmed_offer_ids = _get_buyplan_offer_ids(db, offer_ids, PO_CONFIRMED_STATUSES)
 
-    stage_points_sum = _calc_stage_points(
-        offer_ids, quote_offer_ids, awarded_offer_ids, po_confirmed_offer_ids
-    )
+    stage_points_sum = _calc_stage_points(offer_ids, quote_offer_ids, awarded_offer_ids, po_confirmed_offer_ids)
 
     # Avg rating
-    avg_rating = (
-        db.query(func.avg(VendorReview.rating))
-        .filter(VendorReview.vendor_card_id == vendor_card_id)
-        .scalar()
-    )
+    avg_rating = db.query(func.avg(VendorReview.rating)).filter(VendorReview.vendor_card_id == vendor_card_id).scalar()
     if avg_rating is not None:
         avg_rating = float(avg_rating)
 
@@ -136,10 +126,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     now = datetime.now(timezone.utc)
 
     # ── Preload all offer_ids grouped by vendor_card_id ──
-    offer_rows = (
-        db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name)
-        .all()
-    )
+    offer_rows = db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name).all()
 
     # Map vendor_card_id → set of offer_ids
     card_offer_ids: dict[int, set[int]] = {}
@@ -156,11 +143,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
             name_offer_ids.setdefault(norm, set()).add(oid)
 
     # ── Preload quote line_items to find offer_ids used in quotes ──
-    quotes = (
-        db.query(Quote.line_items, Quote.status)
-        .filter(Quote.status.in_(QUOTE_USED_STATUSES))
-        .all()
-    )
+    quotes = db.query(Quote.line_items, Quote.status).filter(Quote.status.in_(QUOTE_USED_STATUSES)).all()
     quote_offer_id_set: set[int] = set()
     for line_items, _status in quotes:
         if line_items:
@@ -170,11 +153,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
                     quote_offer_id_set.add(oid)
 
     # ── Preload buyplan line_items ──
-    buyplans = (
-        db.query(BuyPlan.line_items, BuyPlan.status)
-        .filter(BuyPlan.status != "cancelled")
-        .all()
-    )
+    buyplans = db.query(BuyPlan.line_items, BuyPlan.status).filter(BuyPlan.status != "cancelled").all()
     awarded_offer_id_set: set[int] = set()
     po_confirmed_offer_id_set: set[int] = set()
     for line_items, bp_status in buyplans:
@@ -205,13 +184,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     BATCH_SIZE = 1000
 
     for batch_offset in range(0, total_count, BATCH_SIZE):
-        cards = (
-            db.query(VendorCard)
-            .order_by(VendorCard.id)
-            .offset(batch_offset)
-            .limit(BATCH_SIZE)
-            .all()
-        )
+        cards = db.query(VendorCard).order_by(VendorCard.id).offset(batch_offset).limit(BATCH_SIZE).all()
 
         for card in cards:
             # Gather offer_ids for this vendor
@@ -262,11 +235,7 @@ def _get_quote_offer_ids(db: Session, offer_ids: set[int]) -> set[int]:
     """Get offer_ids that appear in sent/won/lost Quote line_items."""
     from app.models import Quote
 
-    quotes = (
-        db.query(Quote.line_items)
-        .filter(Quote.status.in_(QUOTE_USED_STATUSES))
-        .all()
-    )
+    quotes = db.query(Quote.line_items).filter(Quote.status.in_(QUOTE_USED_STATUSES)).all()
     found: set[int] = set()
     for (line_items,) in quotes:
         if line_items:
@@ -277,17 +246,11 @@ def _get_quote_offer_ids(db: Session, offer_ids: set[int]) -> set[int]:
     return found
 
 
-def _get_buyplan_offer_ids(
-    db: Session, offer_ids: set[int], statuses: set[str]
-) -> set[int]:
+def _get_buyplan_offer_ids(db: Session, offer_ids: set[int], statuses: set[str]) -> set[int]:
     """Get offer_ids that appear in BuyPlan line_items with given statuses."""
     from app.models import BuyPlan
 
-    plans = (
-        db.query(BuyPlan.line_items)
-        .filter(BuyPlan.status.in_(statuses))
-        .all()
-    )
+    plans = db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(statuses)).all()
     found: set[int] = set()
     for (line_items,) in plans:
         if line_items:

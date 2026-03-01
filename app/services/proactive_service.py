@@ -141,14 +141,16 @@ def scan_new_offers_for_matches(db: Session) -> dict:
             )
             # In-app notification for salesperson
             if sales_id:
-                db.add(ActivityLog(
-                    user_id=sales_id,
-                    activity_type="proactive_match",
-                    channel="system",
-                    requisition_id=requisition.id,
-                    contact_name=offer.vendor_name,
-                    subject=f"Proactive match: {offer_mpn} available — {offer.vendor_name or 'Unknown'}",
-                ))
+                db.add(
+                    ActivityLog(
+                        user_id=sales_id,
+                        activity_type="proactive_match",
+                        channel="system",
+                        requisition_id=requisition.id,
+                        contact_name=offer.vendor_name,
+                        subject=f"Proactive match: {offer_mpn} available — {offer.vendor_name or 'Unknown'}",
+                    )
+                )
             matches_created += 1
 
     if matches_created:
@@ -166,7 +168,11 @@ def scan_new_offers_for_matches(db: Session) -> dict:
 
 
 def get_matches_for_user(
-    db: Session, user_id: int, status: str = "new", *, admin_all: bool = False,
+    db: Session,
+    user_id: int,
+    status: str = "new",
+    *,
+    admin_all: bool = False,
 ) -> dict:
     """Get proactive matches grouped by customer site, with stats.
 
@@ -193,7 +199,8 @@ def get_matches_for_user(
 
     # Build do-not-offer set for filtering
     dno_rows = db.query(
-        ProactiveDoNotOffer.mpn, ProactiveDoNotOffer.company_id,
+        ProactiveDoNotOffer.mpn,
+        ProactiveDoNotOffer.company_id,
     ).all()
     dno_set = {(r.mpn, r.company_id) for r in dno_rows}
 
@@ -244,17 +251,13 @@ def get_matches_for_user(
                 "offer_id": m.offer_id,
                 "vendor_name": offer.vendor_name if offer else "",
                 "qty_available": offer.qty_available if offer else 0,
-                "unit_price": float(offer.unit_price)
-                if offer and offer.unit_price
-                else None,
+                "unit_price": float(offer.unit_price) if offer and offer.unit_price else None,
                 "condition": offer.condition if offer else "",
                 "warranty": offer.warranty if offer else "",
                 "lead_time": offer.lead_time if offer else "",
                 "country_of_origin": offer.country_of_origin if offer else "",
                 "manufacturer": offer.manufacturer if offer else "",
-                "offer_created_at": offer.created_at.isoformat()
-                if offer and offer.created_at
-                else None,
+                "offer_created_at": offer.created_at.isoformat() if offer and offer.created_at else None,
                 "original_req_name": m.requisition.name if m.requisition else "",
                 "status": m.status,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
@@ -263,9 +266,7 @@ def get_matches_for_user(
                 "margin_pct": margin,
                 "our_cost": m.our_cost,
                 "customer_purchase_count": m.customer_purchase_count or 0,
-                "customer_last_price": float(m.customer_last_price)
-                if m.customer_last_price
-                else None,
+                "customer_last_price": float(m.customer_last_price) if m.customer_last_price else None,
                 "customer_last_purchased_at": m.customer_last_purchased_at.isoformat()
                 if m.customer_last_purchased_at
                 else None,
@@ -276,8 +277,7 @@ def get_matches_for_user(
                 "overall_win_rate": round(vc.overall_win_rate * 100, 1) if vc and vc.overall_win_rate else None,
                 "vendor_total_wins": vc.total_wins if vc else 0,
                 # Buyer info
-                "entered_by_name": (entered_by.name or entered_by.email.split("@")[0])
-                if entered_by else "",
+                "entered_by_name": (entered_by.name or entered_by.email.split("@")[0]) if entered_by else "",
                 "entered_by_id": offer.entered_by_id if offer else None,
             }
         )
@@ -598,11 +598,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     # Create quote
     total_sell = sum(li["qty"] * li["sell_price"] for li in quote_line_items)
     total_cost_val = sum(li["qty"] * li["cost_price"] for li in quote_line_items)
-    margin_pct = (
-        round((total_sell - total_cost_val) / total_sell * 100, 2)
-        if total_sell > 0
-        else 0
-    )
+    margin_pct = round((total_sell - total_cost_val) / total_sell * 100, 2) if total_sell > 0 else 0
 
     quote = Quote(
         requisition_id=req.id,
@@ -692,24 +688,22 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     all_offers = query.all()
     sent = len(all_offers)
     converted = sum(1 for o in all_offers if o.status == "converted")
-    converted_revenue = sum(
-        float(o.total_sell or 0) for o in all_offers if o.status == "converted"
-    )
-    converted_cost = sum(
-        float(o.total_cost or 0) for o in all_offers if o.status == "converted"
-    )
+    converted_revenue = sum(float(o.total_sell or 0) for o in all_offers if o.status == "converted")
+    converted_cost = sum(float(o.total_cost or 0) for o in all_offers if o.status == "converted")
     gross_profit = converted_revenue - converted_cost
-    pending_revenue = sum(
-        float(o.total_sell or 0) for o in all_offers if o.status == "sent"
-    )
+    pending_revenue = sum(float(o.total_sell or 0) for o in all_offers if o.status == "sent")
     quoted = sum(1 for o in all_offers if o.converted_quote_id is not None)
     converted_quote_ids = [o.converted_quote_id for o in all_offers if o.converted_quote_id]
     po_count = 0
     if converted_quote_ids:
-        po_count = db.query(BuyPlan).filter(
-            BuyPlan.quote_id.in_(converted_quote_ids),
-            BuyPlan.status.in_(["approved", "po_entered"]),
-        ).count()
+        po_count = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.quote_id.in_(converted_quote_ids),
+                BuyPlan.status.in_(["approved", "po_entered"]),
+            )
+            .count()
+        )
 
     result = {
         "total_sent": sent,
@@ -725,32 +719,28 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     # Per-salesperson breakdown (for admin view)
     if not salesperson_id:
         sales_ids = {o.salesperson_id for o in all_offers}
-        salespeople = (
-            db.query(User).filter(User.id.in_(sales_ids)).all() if sales_ids else []
-        )
+        salespeople = db.query(User).filter(User.id.in_(sales_ids)).all() if sales_ids else []
         sales_map = {u.id: u.name or u.email.split("@")[0] for u in salespeople}
         breakdown = []
         for sid in sales_ids:
             user_offers = [o for o in all_offers if o.salesperson_id == sid]
             u_sent = len(user_offers)
             u_conv = sum(1 for o in user_offers if o.status == "converted")
-            u_rev = sum(
-                float(o.total_sell or 0) for o in user_offers if o.status == "converted"
-            )
-            u_cost = sum(
-                float(o.total_cost or 0) for o in user_offers if o.status == "converted"
-            )
-            u_pending = sum(
-                float(o.total_sell or 0) for o in user_offers if o.status == "sent"
-            )
+            u_rev = sum(float(o.total_sell or 0) for o in user_offers if o.status == "converted")
+            u_cost = sum(float(o.total_cost or 0) for o in user_offers if o.status == "converted")
+            u_pending = sum(float(o.total_sell or 0) for o in user_offers if o.status == "sent")
             u_quoted = sum(1 for o in user_offers if o.converted_quote_id is not None)
             u_quote_ids = [o.converted_quote_id for o in user_offers if o.converted_quote_id]
             u_po = 0
             if u_quote_ids:
-                u_po = db.query(BuyPlan).filter(
-                    BuyPlan.quote_id.in_(u_quote_ids),
-                    BuyPlan.status.in_(["approved", "po_entered"]),
-                ).count()
+                u_po = (
+                    db.query(BuyPlan)
+                    .filter(
+                        BuyPlan.quote_id.in_(u_quote_ids),
+                        BuyPlan.status.in_(["approved", "po_entered"]),
+                    )
+                    .count()
+                )
             breakdown.append(
                 {
                     "salesperson_id": sid,
@@ -759,9 +749,7 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
                     "converted": u_conv,
                     "quoted": u_quoted,
                     "po": u_po,
-                    "conversion_rate": round(u_conv / u_sent * 100, 1)
-                    if u_sent > 0
-                    else 0,
+                    "conversion_rate": round(u_conv / u_sent * 100, 1) if u_sent > 0 else 0,
                     "anticipated_revenue": round(u_pending, 2),
                     "revenue": round(u_rev, 2),
                     "gross_profit": round(u_rev - u_cost, 2),

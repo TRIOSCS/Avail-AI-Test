@@ -123,9 +123,7 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
     has_events = bool(signals.get("events"))
 
     if has_intent and (has_hiring or has_events):
-        logger.debug(
-            "Prospect {} already has signals, skipping backfill", prospect_id
-        )
+        logger.debug("Prospect {} already has signals, skipping backfill", prospect_id)
         return False
 
     # Lazy import to avoid circular dependency
@@ -163,7 +161,9 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
         if resp.status_code != 200:
             logger.warning(
                 "Explorium signal backfill failed for {}: {} {}",
-                domain, resp.status_code, resp.text[:200],
+                domain,
+                resp.status_code,
+                resp.text[:200],
             )
             return False
 
@@ -183,16 +183,22 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
             intent_topics = raw.get("business_intent_topics") or raw.get("intent_topics") or []
             if isinstance(intent_topics, list) and intent_topics:
                 component_topics = [
-                    t for t in intent_topics
-                    if any(kw in t.lower() for kw in [
-                        "electronic", "component", "semiconductor", "circuit",
-                        "procurement", "sourcing",
-                    ])
+                    t
+                    for t in intent_topics
+                    if any(
+                        kw in t.lower()
+                        for kw in [
+                            "electronic",
+                            "component",
+                            "semiconductor",
+                            "circuit",
+                            "procurement",
+                            "sourcing",
+                        ]
+                    )
                 ]
                 strength = (
-                    "strong" if len(component_topics) >= 3
-                    else "moderate" if len(component_topics) >= 1
-                    else "weak"
+                    "strong" if len(component_topics) >= 3 else "moderate" if len(component_topics) >= 1 else "weak"
                 )
                 new_signals["intent"] = {
                     "strength": strength,
@@ -221,11 +227,13 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
                 parsed_events = []
                 for ev in events_raw:
                     if isinstance(ev, dict):
-                        parsed_events.append({
-                            "type": ev.get("type") or ev.get("event_type", "unknown"),
-                            "date": ev.get("date") or ev.get("event_date"),
-                            "description": ev.get("description") or ev.get("title"),
-                        })
+                        parsed_events.append(
+                            {
+                                "type": ev.get("type") or ev.get("event_type", "unknown"),
+                                "date": ev.get("date") or ev.get("event_date"),
+                                "description": ev.get("description") or ev.get("title"),
+                            }
+                        )
                     elif isinstance(ev, str):
                         parsed_events.append({"type": ev, "date": None, "description": ev})
                 if parsed_events:
@@ -294,9 +302,7 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
                 seg_naics_4 = {c[:4] for c in seg["naics_codes"]}
                 if prospect_naics_4 in seg_naics_4:
                     # Check if company industry matches same segment keywords
-                    if company.industry and any(
-                        kw in company.industry.lower() for kw in seg["keywords"]
-                    ):
+                    if company.industry and any(kw in company.industry.lower() for kw in seg["keywords"]):
                         match_reasons.append(f"Same industry segment: {seg['name']}")
                         score += 30
                         break
@@ -311,9 +317,7 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
                 score += 15
 
         # Size similarity
-        size_similar = _compare_sizes(
-            prospect.employee_count_range, company.employee_size
-        )
+        size_similar = _compare_sizes(prospect.employee_count_range, company.employee_size)
         if size_similar:
             match_reasons.append("Similar company size")
             score += 10
@@ -324,14 +328,44 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
             country = company.hq_country.upper()
             region_match = (
                 (prospect_region == "US" and country in ("US", "USA", "UNITED STATES"))
-                or (prospect_region == "EU" and country in (
-                    "DE", "GB", "FR", "NL", "SE", "IT", "ES", "CH", "AT", "BE",
-                    "GERMANY", "UNITED KINGDOM", "FRANCE", "NETHERLANDS",
-                ))
-                or (prospect_region == "ASIA" and country in (
-                    "CN", "JP", "KR", "TW", "SG", "IN", "CHINA", "JAPAN",
-                    "SOUTH KOREA", "TAIWAN", "SINGAPORE", "INDIA",
-                ))
+                or (
+                    prospect_region == "EU"
+                    and country
+                    in (
+                        "DE",
+                        "GB",
+                        "FR",
+                        "NL",
+                        "SE",
+                        "IT",
+                        "ES",
+                        "CH",
+                        "AT",
+                        "BE",
+                        "GERMANY",
+                        "UNITED KINGDOM",
+                        "FRANCE",
+                        "NETHERLANDS",
+                    )
+                )
+                or (
+                    prospect_region == "ASIA"
+                    and country
+                    in (
+                        "CN",
+                        "JP",
+                        "KR",
+                        "TW",
+                        "SG",
+                        "IN",
+                        "CHINA",
+                        "JAPAN",
+                        "SOUTH KOREA",
+                        "TAIWAN",
+                        "SINGAPORE",
+                        "INDIA",
+                    )
+                )
             )
             if region_match:
                 match_reasons.append(f"Same region: {prospect.region}")
@@ -346,22 +380,22 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
             else:
                 strength = "weak"
 
-            matches.append({
-                "name": company.name,
-                "domain": company.domain,
-                "match_reason": "; ".join(match_reasons),
-                "match_strength": strength,
-                "score": score,
-            })
+            matches.append(
+                {
+                    "name": company.name,
+                    "domain": company.domain,
+                    "match_reason": "; ".join(match_reasons),
+                    "match_strength": strength,
+                    "score": score,
+                }
+            )
 
     # Sort by score descending, take top 3
     matches.sort(key=lambda m: m["score"], reverse=True)
     top_matches = matches[:3]
 
     # Remove internal score from output
-    result = [
-        {k: v for k, v in m.items() if k != "score"} for m in top_matches
-    ]
+    result = [{k: v for k, v in m.items() if k != "score"} for m in top_matches]
 
     prospect.similar_customers = result
     db.commit()
@@ -488,9 +522,7 @@ def _build_writeup_prompt(prospect: ProspectAccount) -> str:
         sim_names = [s.get("name", "") for s in similar[:3] if isinstance(s, dict)]
         parts.append(f"Similar existing customers: {', '.join(sim_names)}")
 
-    parts.append(
-        "\nWrite a 2-3 sentence sales-ready summary of this prospect."
-    )
+    parts.append("\nWrite a 2-3 sentence sales-ready summary of this prospect.")
 
     return "\n".join(parts)
 
@@ -577,9 +609,7 @@ async def generate_ai_writeup(prospect: ProspectAccount, db: Session) -> str:
         logger.warning("Claude API unavailable for writeup: {}", e)
 
     if not writeup:
-        logger.info(
-            "Using template fallback writeup for prospect {}", prospect.id
-        )
+        logger.info("Using template fallback writeup for prospect {}", prospect.id)
         writeup = _template_fallback_writeup(prospect)
 
     prospect.ai_writeup = writeup

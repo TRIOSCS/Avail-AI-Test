@@ -55,9 +55,7 @@ def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> d
         if target.id == admin_user.id and not updates["is_active"]:
             return {"error": "Cannot deactivate yourself", "status": 400}
         target.is_active = updates["is_active"]
-        logger.info(
-            f"Admin {admin_user.email} set user {target.email} is_active={updates['is_active']}"
-        )
+        logger.info(f"Admin {admin_user.email} set user {target.email} is_active={updates['is_active']}")
 
     if "role" in updates and updates["role"] is not None:
         if target.id == admin_user.id:
@@ -69,9 +67,7 @@ def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> d
             }
         old_role = target.role
         target.role = updates["role"]
-        logger.info(
-            f"Admin {admin_user.email} changed {target.email} role: {old_role} -> {updates['role']}"
-        )
+        logger.info(f"Admin {admin_user.email} changed {target.email} role: {old_role} -> {updates['role']}")
 
     if "name" in updates and updates["name"] is not None:
         target.name = updates["name"].strip()
@@ -150,7 +146,6 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     return {"key": row.key, "value": row.value, "updated_by": row.updated_by}
 
 
-
 # ── System Health ────────────────────────────────────────────────────
 
 
@@ -184,15 +179,9 @@ def get_system_health(db: Session) -> dict:
                 "email": u.email,
                 "m365_connected": u.m365_connected,
                 "has_refresh_token": bool(u.refresh_token),
-                "token_expires_at": u.token_expires_at.isoformat()
-                if u.token_expires_at
-                else None,
-                "last_inbox_scan": u.last_inbox_scan.isoformat()
-                if u.last_inbox_scan
-                else None,
-                "last_contacts_sync": u.last_contacts_sync.isoformat()
-                if u.last_contacts_sync
-                else None,
+                "token_expires_at": u.token_expires_at.isoformat() if u.token_expires_at else None,
+                "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
+                "last_contacts_sync": u.last_contacts_sync.isoformat() if u.last_contacts_sync else None,
             }
         )
 
@@ -207,9 +196,7 @@ def get_system_health(db: Session) -> dict:
                     "display_name": s.display_name,
                     "status": s.status,
                     "category": s.category,
-                    "last_success": s.last_success.isoformat()
-                    if s.last_success
-                    else None,
+                    "last_success": s.last_success.isoformat() if s.last_success else None,
                     "last_error": s.last_error,
                     "total_searches": s.total_searches,
                     "total_results": s.total_results,

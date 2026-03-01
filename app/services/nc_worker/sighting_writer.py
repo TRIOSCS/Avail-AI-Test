@@ -47,10 +47,7 @@ def save_nc_sightings(
         )
         .all()
     )
-    existing_keys = {
-        ((v or "").lower(), (m or "").lower(), q)
-        for v, m, q in existing
-    }
+    existing_keys = {((v or "").lower(), (m or "").lower(), q) for v, m, q in existing}
 
     created = 0
     for nc in nc_sightings:
@@ -83,10 +80,7 @@ def save_nc_sightings(
             "supplier_product_url": nc.supplier_product_url,
         }
         if nc.price_breaks:
-            raw_data["price_breaks"] = [
-                {"price": pb.price, "min_qty": pb.min_qty}
-                for pb in nc.price_breaks
-            ]
+            raw_data["price_breaks"] = [{"price": pb.price, "min_qty": pb.min_qty} for pb in nc.price_breaks]
 
         sighting = Sighting(
             requirement_id=req.id,

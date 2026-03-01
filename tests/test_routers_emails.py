@@ -16,10 +16,22 @@ from fastapi import HTTPException
 
 
 @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-@patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-       return_value=[{"conversation_id": "c1", "subject": "RFQ", "participants": [],
-                      "message_count": 2, "last_message_date": None, "snippet": "",
-                      "needs_response": False, "matched_via": "subject_token"}])
+@patch(
+    "app.routers.emails.fetch_threads_for_requirement",
+    new_callable=AsyncMock,
+    return_value=[
+        {
+            "conversation_id": "c1",
+            "subject": "RFQ",
+            "participants": [],
+            "message_count": 2,
+            "last_message_date": None,
+            "snippet": "",
+            "needs_response": False,
+            "matched_via": "subject_token",
+        }
+    ],
+)
 def test_requirement_emails_success(mock_fetch, mock_token, client):
     """Returns threads for requirement."""
     resp = client.get("/api/requirements/1/emails")
@@ -29,8 +41,7 @@ def test_requirement_emails_success(mock_fetch, mock_token, client):
     assert data["error"] is None
 
 
-@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock,
-       side_effect=HTTPException(401, "expired"))
+@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, side_effect=HTTPException(401, "expired"))
 def test_requirement_emails_no_token(mock_token, client):
     """Missing M365 token -> error message in response."""
     resp = client.get("/api/requirements/1/emails")
@@ -41,8 +52,9 @@ def test_requirement_emails_no_token(mock_token, client):
 
 
 @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-@patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-       side_effect=RuntimeError("Graph error"))
+@patch(
+    "app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock, side_effect=RuntimeError("Graph error")
+)
 def test_requirement_emails_service_error(mock_fetch, mock_token, client):
     """Service throws -> error in response (not 500)."""
     resp = client.get("/api/requirements/1/emails")
@@ -56,10 +68,22 @@ def test_requirement_emails_service_error(mock_fetch, mock_token, client):
 
 
 @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-@patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock,
-       return_value=[{"id": "m1", "from_name": "Vendor", "from_email": "v@v.com",
-                      "to": [], "subject": "RE: RFQ", "body_preview": "Hello",
-                      "received_date": None, "direction": "received"}])
+@patch(
+    "app.routers.emails.fetch_thread_messages",
+    new_callable=AsyncMock,
+    return_value=[
+        {
+            "id": "m1",
+            "from_name": "Vendor",
+            "from_email": "v@v.com",
+            "to": [],
+            "subject": "RE: RFQ",
+            "body_preview": "Hello",
+            "received_date": None,
+            "direction": "received",
+        }
+    ],
+)
 def test_thread_messages_success(mock_fetch, mock_token, client):
     """Returns messages in conversation."""
     resp = client.get("/api/emails/thread/conv-123")
@@ -78,8 +102,7 @@ def test_thread_messages_empty(mock_fetch, mock_token, client):
     assert data["messages"] == []
 
 
-@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock,
-       side_effect=HTTPException(401, "expired"))
+@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, side_effect=HTTPException(401, "expired"))
 def test_thread_messages_no_token(mock_token, client):
     """Missing M365 token -> error."""
     resp = client.get("/api/emails/thread/conv-123")
@@ -93,10 +116,22 @@ def test_thread_messages_no_token(mock_token, client):
 
 
 @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-@patch("app.routers.emails.fetch_threads_for_vendor", new_callable=AsyncMock,
-       return_value=[{"conversation_id": "c2", "subject": "Stock list",
-                      "participants": [], "message_count": 3, "last_message_date": None,
-                      "snippet": "", "needs_response": True, "matched_via": "vendor_domain"}])
+@patch(
+    "app.routers.emails.fetch_threads_for_vendor",
+    new_callable=AsyncMock,
+    return_value=[
+        {
+            "conversation_id": "c2",
+            "subject": "Stock list",
+            "participants": [],
+            "message_count": 3,
+            "last_message_date": None,
+            "snippet": "",
+            "needs_response": True,
+            "matched_via": "vendor_domain",
+        }
+    ],
+)
 def test_vendor_emails_success(mock_fetch, mock_token, client):
     """Returns threads for vendor."""
     resp = client.get("/api/vendors/1/emails")
@@ -105,8 +140,7 @@ def test_vendor_emails_success(mock_fetch, mock_token, client):
     assert len(data["threads"]) == 1
 
 
-@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock,
-       side_effect=HTTPException(401, "expired"))
+@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, side_effect=HTTPException(401, "expired"))
 def test_vendor_emails_no_token(mock_token, client):
     """Missing M365 token -> error."""
     resp = client.get("/api/vendors/1/emails")
@@ -129,26 +163,31 @@ def test_reply_success(mock_token, mock_html, mock_gc_cls, mock_cache, client):
     mock_gc.post_json = AsyncMock(return_value={})
     mock_gc_cls.return_value = mock_gc
 
-    resp = client.post("/api/emails/reply", json={
-        "conversation_id": "conv-1",
-        "to": "vendor@example.com",
-        "subject": "RE: RFQ",
-        "body": "Thanks for the quote",
-    })
+    resp = client.post(
+        "/api/emails/reply",
+        json={
+            "conversation_id": "conv-1",
+            "to": "vendor@example.com",
+            "subject": "RE: RFQ",
+            "body": "Thanks for the quote",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
 
-@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock,
-       side_effect=HTTPException(401, "expired"))
+@patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, side_effect=HTTPException(401, "expired"))
 def test_reply_no_m365(mock_token, client):
     """No M365 token -> 401."""
-    resp = client.post("/api/emails/reply", json={
-        "conversation_id": "conv-1",
-        "to": "vendor@example.com",
-        "subject": "RE: RFQ",
-        "body": "Thanks",
-    })
+    resp = client.post(
+        "/api/emails/reply",
+        json={
+            "conversation_id": "conv-1",
+            "to": "vendor@example.com",
+            "subject": "RE: RFQ",
+            "body": "Thanks",
+        },
+    )
     assert resp.status_code == 401
 
 
@@ -162,22 +201,28 @@ def test_reply_graph_failure(mock_token, mock_html, mock_gc_cls, mock_cache, cli
     mock_gc.post_json = AsyncMock(return_value={"error": 500, "detail": "Internal"})
     mock_gc_cls.return_value = mock_gc
 
-    resp = client.post("/api/emails/reply", json={
-        "conversation_id": "conv-1",
-        "to": "vendor@example.com",
-        "subject": "RE: RFQ",
-        "body": "Hello",
-    })
+    resp = client.post(
+        "/api/emails/reply",
+        json={
+            "conversation_id": "conv-1",
+            "to": "vendor@example.com",
+            "subject": "RE: RFQ",
+            "body": "Hello",
+        },
+    )
     assert resp.status_code == 502
 
 
 def test_reply_empty_body(client):
     """Empty body -> validation error (422)."""
-    resp = client.post("/api/emails/reply", json={
-        "conversation_id": "conv-1",
-        "to": "vendor@example.com",
-        "subject": "RE: RFQ",
-    })
+    resp = client.post(
+        "/api/emails/reply",
+        json={
+            "conversation_id": "conv-1",
+            "to": "vendor@example.com",
+            "subject": "RE: RFQ",
+        },
+    )
     assert resp.status_code == 422
 
 
@@ -186,8 +231,11 @@ def test_reply_empty_body(client):
 
 class TestVendorEmailsServiceError:
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_vendor", new_callable=AsyncMock,
-           side_effect=ConnectionError("SMTP failure"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_vendor",
+        new_callable=AsyncMock,
+        side_effect=ConnectionError("SMTP failure"),
+    )
     def test_vendor_emails_connection_error(self, mock_fetch, mock_token, client):
         """Vendor email fetch ConnectionError -> error in response, not 500."""
         resp = client.get("/api/vendors/1/emails")
@@ -197,8 +245,9 @@ class TestVendorEmailsServiceError:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_vendor", new_callable=AsyncMock,
-           side_effect=TimeoutError("Graph timeout"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_vendor", new_callable=AsyncMock, side_effect=TimeoutError("Graph timeout")
+    )
     def test_vendor_emails_timeout_error(self, mock_fetch, mock_token, client):
         """Vendor email fetch TimeoutError -> error message."""
         resp = client.get("/api/vendors/1/emails")
@@ -209,8 +258,11 @@ class TestVendorEmailsServiceError:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_vendor", new_callable=AsyncMock,
-           side_effect=OSError("Network unreachable"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_vendor",
+        new_callable=AsyncMock,
+        side_effect=OSError("Network unreachable"),
+    )
     def test_vendor_emails_os_error(self, mock_fetch, mock_token, client):
         """Vendor email fetch OSError -> error message."""
         resp = client.get("/api/vendors/1/emails")
@@ -222,8 +274,11 @@ class TestVendorEmailsServiceError:
 
 class TestThreadMessagesServiceError:
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock,
-           side_effect=ConnectionError("Connection reset"))
+    @patch(
+        "app.routers.emails.fetch_thread_messages",
+        new_callable=AsyncMock,
+        side_effect=ConnectionError("Connection reset"),
+    )
     def test_thread_messages_connection_error(self, mock_fetch, mock_token, client):
         """Thread messages ConnectionError -> error in response."""
         resp = client.get("/api/emails/thread/conv-123")
@@ -233,8 +288,7 @@ class TestThreadMessagesServiceError:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock,
-           side_effect=TimeoutError("Read timeout"))
+    @patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock, side_effect=TimeoutError("Read timeout"))
     def test_thread_messages_timeout_error(self, mock_fetch, mock_token, client):
         """Thread messages TimeoutError -> error in response."""
         resp = client.get("/api/emails/thread/conv-123")
@@ -244,8 +298,7 @@ class TestThreadMessagesServiceError:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock,
-           side_effect=OSError("Socket error"))
+    @patch("app.routers.emails.fetch_thread_messages", new_callable=AsyncMock, side_effect=OSError("Socket error"))
     def test_thread_messages_os_error(self, mock_fetch, mock_token, client):
         """Thread messages OSError -> error in response."""
         resp = client.get("/api/emails/thread/conv-123")
@@ -257,8 +310,11 @@ class TestThreadMessagesServiceError:
 
 class TestRequirementEmailsExtended:
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-           side_effect=ConnectionError("Connection refused"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_requirement",
+        new_callable=AsyncMock,
+        side_effect=ConnectionError("Connection refused"),
+    )
     def test_requirement_emails_connection_error(self, mock_fetch, mock_token, client):
         """Requirement email fetch ConnectionError -> error in response."""
         resp = client.get("/api/requirements/1/emails")
@@ -268,8 +324,11 @@ class TestRequirementEmailsExtended:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-           side_effect=TimeoutError("Request timeout"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_requirement",
+        new_callable=AsyncMock,
+        side_effect=TimeoutError("Request timeout"),
+    )
     def test_requirement_emails_timeout_error(self, mock_fetch, mock_token, client):
         """Requirement email fetch TimeoutError -> error in response."""
         resp = client.get("/api/requirements/1/emails")
@@ -279,8 +338,9 @@ class TestRequirementEmailsExtended:
         assert data["error"] is not None
 
     @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-           side_effect=OSError("Broken pipe"))
+    @patch(
+        "app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock, side_effect=OSError("Broken pipe")
+    )
     def test_requirement_emails_os_error(self, mock_fetch, mock_token, client):
         """Requirement email fetch OSError -> error in response."""
         resp = client.get("/api/requirements/1/emails")
@@ -301,12 +361,15 @@ class TestReplySendErrors:
         mock_gc.post_json = AsyncMock(side_effect=ConnectionError("Connection refused"))
         mock_gc_cls.return_value = mock_gc
 
-        resp = client.post("/api/emails/reply", json={
-            "conversation_id": "conv-1",
-            "to": "vendor@example.com",
-            "subject": "RE: RFQ",
-            "body": "Hello",
-        })
+        resp = client.post(
+            "/api/emails/reply",
+            json={
+                "conversation_id": "conv-1",
+                "to": "vendor@example.com",
+                "subject": "RE: RFQ",
+                "body": "Hello",
+            },
+        )
         assert resp.status_code == 502
 
     @patch("app.services.email_threads.clear_cache")
@@ -319,12 +382,15 @@ class TestReplySendErrors:
         mock_gc.post_json = AsyncMock(side_effect=TimeoutError("Send timed out"))
         mock_gc_cls.return_value = mock_gc
 
-        resp = client.post("/api/emails/reply", json={
-            "conversation_id": "conv-1",
-            "to": "vendor@example.com",
-            "subject": "RE: RFQ",
-            "body": "Hello",
-        })
+        resp = client.post(
+            "/api/emails/reply",
+            json={
+                "conversation_id": "conv-1",
+                "to": "vendor@example.com",
+                "subject": "RE: RFQ",
+                "body": "Hello",
+            },
+        )
         assert resp.status_code == 502
 
     @patch("app.services.email_threads.clear_cache")
@@ -337,10 +403,13 @@ class TestReplySendErrors:
         mock_gc.post_json = AsyncMock(side_effect=OSError("Broken pipe"))
         mock_gc_cls.return_value = mock_gc
 
-        resp = client.post("/api/emails/reply", json={
-            "conversation_id": "conv-1",
-            "to": "vendor@example.com",
-            "subject": "RE: RFQ",
-            "body": "Hello",
-        })
+        resp = client.post(
+            "/api/emails/reply",
+            json={
+                "conversation_id": "conv-1",
+                "to": "vendor@example.com",
+                "subject": "RE: RFQ",
+                "body": "Hello",
+            },
+        )
         assert resp.status_code == 502

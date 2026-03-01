@@ -26,6 +26,7 @@ def run_startup_migrations() -> None:
 
     # Create all tables/columns/indexes defined in ORM models (no-op if they exist)
     from .models import Base
+
     Base.metadata.create_all(bind=engine, checkfirst=True)
     logger.info("ORM schema sync complete (create_all checkfirst=True)")
 
@@ -148,7 +149,9 @@ def _add_missing_columns(conn) -> None:
         _exec(conn, stmt)
 
     # FK constraint migration: SET NULL on offers.vendor_card_id
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
           IF EXISTS (SELECT 1 FROM information_schema.table_constraints
             WHERE constraint_name='offers_vendor_card_id_fkey' AND table_name='offers')
@@ -158,9 +161,12 @@ def _add_missing_columns(conn) -> None:
               FOREIGN KEY (vendor_card_id) REFERENCES vendor_cards(id) ON DELETE SET NULL;
           END IF;
         END $$
-    """)
+    """,
+    )
     # FK constraint migration: SET NULL on offers.vendor_response_id
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
           IF EXISTS (SELECT 1 FROM information_schema.table_constraints
             WHERE constraint_name='offers_vendor_response_id_fkey' AND table_name='offers')
@@ -170,19 +176,25 @@ def _add_missing_columns(conn) -> None:
               FOREIGN KEY (vendor_response_id) REFERENCES vendor_responses(id) ON DELETE SET NULL;
           END IF;
         END $$
-    """)
+    """,
+    )
 
     # Backfill vendor_score from engagement_score as initial data
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE vendor_cards
         SET vendor_score = engagement_score,
             advancement_score = engagement_score,
             is_new_vendor = CASE WHEN engagement_score IS NULL THEN TRUE ELSE FALSE END
         WHERE vendor_score IS NULL AND engagement_score IS NOT NULL
-    """)
+    """,
+    )
 
     # Backfill first_name/last_name from full_name
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE vendor_contacts
         SET first_name = SPLIT_PART(full_name, ' ', 1),
             last_name = CASE
@@ -191,22 +203,29 @@ def _add_missing_columns(conn) -> None:
                 ELSE NULL
             END
         WHERE full_name IS NOT NULL AND first_name IS NULL
-    """)
+    """,
+    )
 
     # Backfill occurred_at from created_at
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE activity_log SET occurred_at = created_at WHERE occurred_at IS NULL
-    """)
+    """,
+    )
 
     # Backfill customer_sites.last_activity_at from parent company
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE customer_sites cs
         SET last_activity_at = c.last_activity_at
         FROM companies c
         WHERE cs.company_id = c.id
           AND cs.last_activity_at IS NULL
           AND c.last_activity_at IS NOT NULL
-    """)
+    """,
+    )
 
     # Backfill site_contacts.is_active
     _exec(conn, "UPDATE site_contacts SET is_active = TRUE WHERE is_active IS NULL")
@@ -238,7 +257,9 @@ def _enable_pg_stat_statements(conn) -> None:
 
 def _create_fts_triggers(conn) -> None:
     """Create trigger functions and triggers for FTS on vendor_cards and material_cards."""
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE OR REPLACE FUNCTION vendor_cards_fts_update() RETURNS trigger AS $$
         BEGIN
             NEW.search_vector :=
@@ -249,18 +270,24 @@ def _create_fts_triggers(conn) -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vc_fts') THEN
                 CREATE TRIGGER trg_vc_fts BEFORE INSERT OR UPDATE ON vendor_cards
                 FOR EACH ROW EXECUTE FUNCTION vendor_cards_fts_update();
             END IF;
         END $$;
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE OR REPLACE FUNCTION material_cards_fts_update() RETURNS trigger AS $$
         BEGIN
             NEW.search_vector :=
@@ -271,16 +298,20 @@ def _create_fts_triggers(conn) -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mc_fts') THEN
                 CREATE TRIGGER trg_mc_fts BEFORE INSERT OR UPDATE ON material_cards
                 FOR EACH ROW EXECUTE FUNCTION material_cards_fts_update();
             END IF;
         END $$;
-    """)
+    """,
+    )
 
 
 # ── One-time FTS backfill ────────────────────────────────────────────
@@ -288,23 +319,29 @@ def _create_fts_triggers(conn) -> None:
 
 def _backfill_fts(conn) -> None:
     """Backfill search_vector on existing rows where NULL."""
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE vendor_cards SET search_vector =
             setweight(to_tsvector('english', COALESCE(display_name, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(normalized_name, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(domain, '')), 'B') ||
             setweight(to_tsvector('english', COALESCE(industry, '')), 'C')
         WHERE search_vector IS NULL
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE material_cards SET search_vector =
             setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
             setweight(to_tsvector('english', COALESCE(description, '')), 'C')
         WHERE search_vector IS NULL
-    """)
+    """,
+    )
 
 
 # ── Seed data ────────────────────────────────────────────────────────
@@ -355,6 +392,7 @@ def _seed_site_contacts(conn) -> None:
 def _backfill_normalized_mpn() -> None:
     """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
     import re
+
     _nonalnum = re.compile(r"[^a-z0-9]")
 
     def _key(raw):
@@ -366,7 +404,9 @@ def _backfill_normalized_mpn() -> None:
         # 1. Backfill requirements.normalized_mpn where NULL
         try:
             rows = conn.execute(
-                sqltext("SELECT id, primary_mpn FROM requirements WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL")
+                sqltext(
+                    "SELECT id, primary_mpn FROM requirements WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL"
+                )
             ).fetchall()
             if rows:
                 for r in rows:
@@ -385,7 +425,9 @@ def _backfill_normalized_mpn() -> None:
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
         try:
             cards = conn.execute(
-                sqltext("SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL")
+                sqltext(
+                    "SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL"
+                )
             ).fetchall()
             updated = 0
             for c in cards:
@@ -419,7 +461,11 @@ def _add_check_constraints(conn) -> None:
         ("requirements", "chk_req_target_qty", "target_qty IS NULL OR target_qty >= 1"),
         ("requirements", "chk_req_target_price", "target_price IS NULL OR target_price >= 0"),
         ("requirements", "chk_req_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        ("requirements", "chk_req_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        (
+            "requirements",
+            "chk_req_packaging",
+            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')",
+        ),
         # ── sightings ──
         ("sightings", "chk_sight_qty", "qty_available IS NULL OR qty_available > 0"),
         ("sightings", "chk_sight_price", "unit_price IS NULL OR unit_price > 0"),
@@ -428,19 +474,29 @@ def _add_check_constraints(conn) -> None:
         ("sightings", "chk_sight_score", "score IS NULL OR score >= 0"),
         ("sightings", "chk_sight_lead_time", "lead_time_days IS NULL OR lead_time_days >= 0"),
         ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
-        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
+        (
+            "sightings",
+            "chk_sight_packaging",
+            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')",
+        ),
         # ── offers ──
         ("offers", "chk_offer_qty", "qty_available IS NULL OR qty_available > 0"),
         ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
         ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
         ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
-        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
+        (
+            "offers",
+            "chk_offer_packaging",
+            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')",
+        ),
         ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review','rejected')"),
     ]
     # NOTE: table/constraint names are hardcoded literals above — not user input.
     # DDL identifiers cannot use bind params. This is safe as-is.
     for table, name, check in constraints:
-        _exec(conn, f"""
+        _exec(
+            conn,
+            f"""
             DO $$ BEGIN
                 IF NOT EXISTS (
                     SELECT 1 FROM pg_constraint WHERE conname = '{name}'
@@ -448,7 +504,8 @@ def _add_check_constraints(conn) -> None:
                     ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({check}) NOT VALID;
                 END IF;
             END $$;
-        """)
+        """,
+        )
 
 
 # ── Performance indexes (idempotent) ─────────────────────────────────
@@ -456,61 +513,96 @@ def _add_check_constraints(conn) -> None:
 
 def _create_perf_indexes(conn) -> None:
     """Create functional/composite indexes for hot query paths."""
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_sightings_vendor_norm
         ON sightings (vendor_name_normalized)
-    """)
+    """,
+    )
     # Drop legacy expression index — vendor_name_normalized index handles all queries now
     _exec(conn, "DROP INDEX IF EXISTS ix_sightings_vendor_lower")
     # pg_trgm for fast ILIKE search on requisitions + requirements
     _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_requisitions_name_trgm
         ON requisitions USING gin (name gin_trgm_ops)
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_requisitions_customer_name_trgm
         ON requisitions USING gin (customer_name gin_trgm_ops)
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_requirements_mpn_trgm
         ON requirements USING gin (primary_mpn gin_trgm_ops)
-    """)
+    """,
+    )
     # Generated column + trigram index for substitutes search
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         ALTER TABLE requirements
         ADD COLUMN IF NOT EXISTS substitutes_text TEXT
         GENERATED ALWAYS AS (substitutes::text) STORED
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_requirements_subs_trgm
         ON requirements USING gin (substitutes_text gin_trgm_ops)
-    """)
+    """,
+    )
     # Phase 1: Additional performance indexes for hot query paths
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_vendor_cards_blacklisted
         ON vendor_cards (is_blacklisted) WHERE is_blacklisted = TRUE
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_requirements_primary_mpn
         ON requirements (LOWER(primary_mpn))
-    """)
+    """,
+    )
     # ix_sightings_mpn_matched removed — 0 scans, not worth the write overhead
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_offers_vendor_card
         ON offers (vendor_card_id) WHERE vendor_card_id IS NOT NULL
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_contacts_vendor_name
         ON contacts (vendor_name) WHERE vendor_name IS NOT NULL
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         CREATE INDEX IF NOT EXISTS ix_vendor_responses_vendor_name
         ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
-    """)
+    """,
+    )
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
     # ix_vendor_cards_created_at removed — 0 scans
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)")
+    _exec(
+        conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)"
+    )
 
     # GIN FTS indexes removed — 0 scans, 146 MB combined. Re-add if FTS search is implemented.
 
@@ -535,6 +627,7 @@ def _create_perf_indexes(conn) -> None:
 def _backfill_sighting_offer_normalized_mpn() -> None:
     """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
     import re
+
     _nonalnum = re.compile(r"[^a-z0-9]")
 
     def _key(raw):
@@ -547,8 +640,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
         try:
             rows = conn.execute(
                 sqltext(
-                    "SELECT id, mpn_matched FROM sightings "
-                    "WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
+                    "SELECT id, mpn_matched FROM sightings WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
                 )
             ).fetchall()
             if rows:
@@ -568,10 +660,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
         # Offers: compute from mpn
         try:
             rows = conn.execute(
-                sqltext(
-                    "SELECT id, mpn FROM offers "
-                    "WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
-                )
+                sqltext("SELECT id, mpn FROM offers WHERE normalized_mpn IS NULL AND mpn IS NOT NULL")
             ).fetchall()
             if rows:
                 for r in rows:
@@ -639,7 +728,9 @@ def _backfill_sighting_vendor_normalized() -> None:
 def _create_count_triggers(conn) -> None:
     """Create triggers to keep companies.site_count and open_req_count in sync."""
     # Trigger function: update site_count when customer_sites change
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE OR REPLACE FUNCTION trg_update_company_site_count() RETURNS trigger AS $$
         BEGIN
             IF TG_OP = 'DELETE' OR TG_OP = 'UPDATE' THEN
@@ -657,19 +748,25 @@ def _create_count_triggers(conn) -> None:
             RETURN NULL;
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_cs_site_count') THEN
                 CREATE TRIGGER trg_cs_site_count AFTER INSERT OR UPDATE OR DELETE ON customer_sites
                 FOR EACH ROW EXECUTE FUNCTION trg_update_company_site_count();
             END IF;
         END $$;
-    """)
+    """,
+    )
 
     # Trigger function: update open_req_count when requisitions change
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         CREATE OR REPLACE FUNCTION trg_update_company_req_count() RETURNS trigger AS $$
         DECLARE
             v_company_id INTEGER;
@@ -701,34 +798,44 @@ def _create_count_triggers(conn) -> None:
             RETURN NULL;
         END;
         $$ LANGUAGE plpgsql;
-    """)
+    """,
+    )
 
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         DO $$ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_req_count') THEN
                 CREATE TRIGGER trg_req_count AFTER INSERT OR UPDATE OR DELETE ON requisitions
                 FOR EACH ROW EXECUTE FUNCTION trg_update_company_req_count();
             END IF;
         END $$;
-    """)
+    """,
+    )
 
 
 def _backfill_company_counts(conn) -> None:
     """Idempotent backfill of site_count and open_req_count on companies."""
-    _exec(conn, """
+    _exec(
+        conn,
+        """
         UPDATE companies c SET site_count = (
             SELECT COUNT(*) FROM customer_sites cs
             WHERE cs.company_id = c.id AND cs.is_active = TRUE
         )
-    """)
-    _exec(conn, """
+    """,
+    )
+    _exec(
+        conn,
+        """
         UPDATE companies c SET open_req_count = (
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id
               AND r.status NOT IN ('archived', 'won', 'lost')
         )
-    """)
+    """,
+    )
 
 
 def _analyze_hot_tables(conn) -> None:

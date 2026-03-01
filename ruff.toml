@@ -6,12 +6,16 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]  # line length handled separately
 
 [lint.per-file-ignores]
-"tests/*" = ["E402"]  # allow late imports in tests
+"tests/*" = ["E402", "F841"]  # allow late imports and side-effect assignments in tests
 "app/models/*" = ["E402"]
 "app/routers/*" = ["E402"]  # routers use deferred imports for circular dep avoidance
 "app/main.py" = ["E402"]
+"app/scheduler.py" = ["E402"]
+"app/utils/graph_client.py" = ["E402"]
 "app/services/credential_service.py" = ["E402"]
 "app/services/routing_service.py" = ["E402"]
+"alembic/*" = ["E402"]
+"scripts/*" = ["F841"]
 
 [format]
 quote-style = "double"

@@ -1,4 +1,3 @@
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -27,9 +26,8 @@ async def enrich_company(
     db: Session = Depends(get_db),
 ):
     """Enrich a customer company with external data."""
-    if (
-        not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
+        "anthropic_ai", "ANTHROPIC_API_KEY"
     ):
         raise HTTPException(
             503,
@@ -42,18 +40,11 @@ async def enrich_company(
         raise HTTPException(404, "Company not found")
     domain = company.domain or company.website or ""
     if domain:
-        domain = (
-            domain.replace("https://", "")
-            .replace("http://", "")
-            .replace("www.", "")
-            .split("/")[0]
-        )
+        domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
     if payload.domain:
         domain = payload.domain
     if not domain:
-        raise HTTPException(
-            400, "No domain available — set company website or domain first"
-        )
+        raise HTTPException(400, "No domain available — set company website or domain first")
     enrichment = await enrich_entity(domain, company.name)
     updated = apply_enrichment_to_company(company, enrichment)
 
@@ -62,6 +53,7 @@ async def enrich_company(
     if settings.customer_enrichment_enabled:
         try:
             from ...services.customer_enrichment_service import enrich_customer_account
+
             waterfall_result = await enrich_customer_account(company_id, db)
         except Exception as e:
             logger.warning("Customer waterfall enrichment error: %s", e)
@@ -81,9 +73,8 @@ async def enrich_vendor_card(
     db: Session = Depends(get_db),
 ):
     """Enrich a vendor card with external data."""
-    if (
-        not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
+        "anthropic_ai", "ANTHROPIC_API_KEY"
     ):
         raise HTTPException(
             503,
@@ -96,18 +87,11 @@ async def enrich_vendor_card(
         raise HTTPException(404, "Vendor card not found")
     domain = card.domain or card.website or ""
     if domain:
-        domain = (
-            domain.replace("https://", "")
-            .replace("http://", "")
-            .replace("www.", "")
-            .split("/")[0]
-        )
+        domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
     if payload.domain:
         domain = payload.domain
     if not domain:
-        raise HTTPException(
-            400, "No domain available — set vendor website or domain first"
-        )
+        raise HTTPException(400, "No domain available — set vendor website or domain first")
     enrichment = await enrich_entity(domain, card.display_name)
     updated = apply_enrichment_to_vendor(card, enrichment)
     db.commit()
@@ -123,9 +107,8 @@ async def get_suggested_contacts(
     db: Session = Depends(get_db),
 ):
     """Find suggested contacts at a company from enrichment providers."""
-    if (
-        not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
+        "anthropic_ai", "ANTHROPIC_API_KEY"
     ):
         raise HTTPException(
             503,
@@ -135,12 +118,7 @@ async def get_suggested_contacts(
 
     if not domain:
         raise HTTPException(400, "domain parameter is required")
-    domain = (
-        domain.replace("https://", "")
-        .replace("http://", "")
-        .replace("www.", "")
-        .split("/")[0]
-    )
+    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
     contacts = await find_suggested_contacts(domain, name, title)
     return {"domain": domain, "contacts": contacts, "count": len(contacts)}
 
@@ -157,11 +135,7 @@ async def add_suggested_to_vendor(
         raise HTTPException(404, "Vendor card not found")
     added = 0
     for c in payload.contacts:
-        existing = (
-            db.query(VendorContact)
-            .filter_by(vendor_card_id=payload.vendor_card_id, email=c.email)
-            .first()
-        )
+        existing = db.query(VendorContact).filter_by(vendor_card_id=payload.vendor_card_id, email=c.email).first()
         if existing:
             continue
         vc = VendorContact(
@@ -238,14 +212,11 @@ async def get_sync_logs(
     ]
 
 
-
 # ── Users (simple list for dropdowns) ────────────────────────────────────
 
 
 @router.get("/api/users/list")
-async def list_users_simple(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_users_simple(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Simple user list for owner dropdowns."""
     users = db.query(User).order_by(User.name).all()
     return [

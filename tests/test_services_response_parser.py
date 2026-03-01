@@ -136,10 +136,7 @@ class TestCleanEmailBody:
         assert _clean_email_body(None) == ""
 
     def test_disclaimer_removal(self):
-        text = (
-            "We can quote LM317T at $0.75.\n\n"
-            "DISCLAIMER: This email and any attachments are confidential."
-        )
+        text = "We can quote LM317T at $0.75.\n\nDISCLAIMER: This email and any attachments are confidential."
         cleaned = _clean_email_body(text)
         assert "We can quote" in cleaned
 
@@ -324,15 +321,18 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.75}],
         }
 
-        with patch(
-            "app.services.response_parser.routed_structured",
-            new_callable=AsyncMock,
-            return_value=first_result,
-        ), patch(
-            "app.services.response_parser.claude_structured",
-            new_callable=AsyncMock,
-            return_value=retry_result,
-        ) as mock_retry:
+        with (
+            patch(
+                "app.services.response_parser.routed_structured",
+                new_callable=AsyncMock,
+                return_value=first_result,
+            ),
+            patch(
+                "app.services.response_parser.claude_structured",
+                new_callable=AsyncMock,
+                return_value=retry_result,
+            ) as mock_retry,
+        ):
             result = await parse_vendor_response(
                 email_body="We can offer LM317T",
                 email_subject="RE: RFQ",
@@ -361,15 +361,18 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "X", "status": "follow_up"}],
         }
 
-        with patch(
-            "app.services.response_parser.routed_structured",
-            new_callable=AsyncMock,
-            return_value=first_result,
-        ), patch(
-            "app.services.response_parser.claude_structured",
-            new_callable=AsyncMock,
-            return_value=retry_result,
-        ) as mock_retry:
+        with (
+            patch(
+                "app.services.response_parser.routed_structured",
+                new_callable=AsyncMock,
+                return_value=first_result,
+            ),
+            patch(
+                "app.services.response_parser.claude_structured",
+                new_callable=AsyncMock,
+                return_value=retry_result,
+            ) as mock_retry,
+        ):
             result = await parse_vendor_response(
                 email_body="Unclear response",
                 email_subject="RE: RFQ",
@@ -391,15 +394,18 @@ class TestParseVendorResponse:
             "parts": [],
         }
 
-        with patch(
-            "app.services.response_parser.routed_structured",
-            new_callable=AsyncMock,
-            return_value=first_result,
-        ), patch(
-            "app.services.response_parser.claude_structured",
-            new_callable=AsyncMock,
-            return_value=None,
-        ) as mock_retry:
+        with (
+            patch(
+                "app.services.response_parser.routed_structured",
+                new_callable=AsyncMock,
+                return_value=first_result,
+            ),
+            patch(
+                "app.services.response_parser.claude_structured",
+                new_callable=AsyncMock,
+                return_value=None,
+            ) as mock_retry,
+        ):
             result = await parse_vendor_response(
                 email_body="Hmm",
                 email_subject="RE: RFQ",

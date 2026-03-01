@@ -26,7 +26,6 @@ from app.vite import (
     vite_js_tags,
 )
 
-
 # ── Reset the lru_cache before each test ──────────────────────────────
 
 

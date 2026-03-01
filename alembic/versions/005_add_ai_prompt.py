@@ -4,10 +4,12 @@ Revision ID: 005_ai_prompt
 Revises: 004_warranty_coo
 Create Date: 2026-02-21
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "005_ai_prompt"
 down_revision: Union[str, None] = "004_warranty_coo"

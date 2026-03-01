@@ -36,11 +36,14 @@ async def add_site(
 
     # Trigger customer enrichment waterfall in the background for the parent company
     if settings.customer_enrichment_enabled and (company.domain or company.website):
+
         async def _bg_enrich(cid):
             from ...database import SessionLocal
+
             s = SessionLocal()
             try:
                 from ...services.customer_enrichment_service import enrich_customer_account
+
                 await enrich_customer_account(cid, s, force=False)
                 s.commit()
             except Exception as e:
@@ -48,6 +51,7 @@ async def add_site(
                 s.rollback()
             finally:
                 s.close()
+
         asyncio.create_task(_bg_enrich(company_id))
 
     return {"id": site.id, "site_name": site.site_name}
@@ -86,9 +90,7 @@ async def update_site(
 
 
 @router.get("/api/sites/{site_id}")
-async def get_site(
-    site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def get_site(site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     site = db.get(
         CustomerSite,
         site_id,
@@ -100,14 +102,25 @@ async def get_site(
     loop = asyncio.get_running_loop()
 
     def _q_reqs():
-        return db.query(Requisition).filter(
-            Requisition.customer_site_id == site_id,
-        ).order_by(Requisition.created_at.desc()).limit(20).all()
+        return (
+            db.query(Requisition)
+            .filter(
+                Requisition.customer_site_id == site_id,
+            )
+            .order_by(Requisition.created_at.desc())
+            .limit(20)
+            .all()
+        )
 
     def _q_contacts():
-        return db.query(SiteContact).filter(
-            SiteContact.customer_site_id == site_id,
-        ).order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
+        return (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+            )
+            .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+            .all()
+        )
 
     reqs, contacts = await asyncio.gather(
         loop.run_in_executor(None, _q_reqs),
@@ -210,9 +223,7 @@ async def list_customer_contacts(
             "is_primary": c.is_primary,
             "is_active": c.is_active,
             "company_id": c.customer_site.company_id if c.customer_site else None,
-            "company_name": c.customer_site.company.name
-            if c.customer_site and c.customer_site.company
-            else None,
+            "company_name": c.customer_site.company.name if c.customer_site and c.customer_site.company else None,
             "site_id": c.customer_site_id,
             "site_name": c.customer_site.site_name if c.customer_site else None,
             "contact_type": "customer",

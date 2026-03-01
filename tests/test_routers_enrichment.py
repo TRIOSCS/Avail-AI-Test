@@ -172,9 +172,13 @@ def test_queue_bulk_approve(mock_apply, client, queue_item):
 @patch("app.services.deep_enrichment_service.run_backfill_job", new_callable=AsyncMock, return_value=1)
 def test_backfill_start(mock_run, admin_client):
     """Admin starts backfill job -> 200."""
-    resp = admin_client.post("/api/enrichment/backfill", json={
-        "entity_types": ["vendor"], "max_items": 100,
-    })
+    resp = admin_client.post(
+        "/api/enrichment/backfill",
+        json={
+            "entity_types": ["vendor"],
+            "max_items": 100,
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "started"
     assert resp.json()["job_id"] == 1
@@ -182,9 +186,13 @@ def test_backfill_start(mock_run, admin_client):
 
 def test_backfill_non_admin(client):
     """Non-admin -> denied (require_admin calls require_user directly, not via DI)."""
-    resp = client.post("/api/enrichment/backfill", json={
-        "entity_types": ["vendor"], "max_items": 100,
-    })
+    resp = client.post(
+        "/api/enrichment/backfill",
+        json={
+            "entity_types": ["vendor"],
+            "max_items": 100,
+        },
+    )
     assert resp.status_code in (401, 403)
 
 
@@ -192,17 +200,23 @@ def test_backfill_non_admin(client):
 def test_backfill_already_running(mock_run, admin_client, db_session, admin_user):
     """Concurrent backfill -> 409."""
     running_job = EnrichmentJob(
-        job_type="backfill", status="running",
-        total_items=500, processed_items=100,
+        job_type="backfill",
+        status="running",
+        total_items=500,
+        processed_items=100,
         started_by_id=admin_user.id,
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(running_job)
     db_session.commit()
 
-    resp = admin_client.post("/api/enrichment/backfill", json={
-        "entity_types": ["vendor"], "max_items": 100,
-    })
+    resp = admin_client.post(
+        "/api/enrichment/backfill",
+        json={
+            "entity_types": ["vendor"],
+            "max_items": 100,
+        },
+    )
     assert resp.status_code == 409
 
 
@@ -242,8 +256,10 @@ def test_job_detail_not_found(client):
 def test_job_cancel(admin_client, db_session, admin_user):
     """Admin cancels running job."""
     job = EnrichmentJob(
-        job_type="backfill", status="running",
-        total_items=500, processed_items=100,
+        job_type="backfill",
+        status="running",
+        total_items=500,
+        processed_items=100,
         started_by_id=admin_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -264,8 +280,11 @@ def test_job_cancel_not_running(admin_client, enrichment_job):
 # ── On-demand: vendor ────────────────────────────────────────────────
 
 
-@patch("app.services.deep_enrichment_service.deep_enrich_vendor", new_callable=AsyncMock,
-       return_value={"status": "enriched", "fields": 5})
+@patch(
+    "app.services.deep_enrichment_service.deep_enrich_vendor",
+    new_callable=AsyncMock,
+    return_value={"status": "enriched", "fields": 5},
+)
 def test_enrich_vendor_success(mock_enrich, client, test_vendor_card):
     """Trigger vendor enrichment -> 200."""
     resp = client.post(f"/api/enrichment/vendor/{test_vendor_card.id}")
@@ -278,8 +297,11 @@ def test_enrich_vendor_not_found(client):
     assert resp.status_code == 404
 
 
-@patch("app.services.deep_enrichment_service.deep_enrich_vendor", new_callable=AsyncMock,
-       side_effect=RuntimeError("API error"))
+@patch(
+    "app.services.deep_enrichment_service.deep_enrich_vendor",
+    new_callable=AsyncMock,
+    side_effect=RuntimeError("API error"),
+)
 def test_enrich_vendor_service_error(mock_enrich, client, test_vendor_card):
     """Service throws -> exception propagates (no try/except in endpoint)."""
     with pytest.raises(RuntimeError, match="API error"):
@@ -289,8 +311,11 @@ def test_enrich_vendor_service_error(mock_enrich, client, test_vendor_card):
 # ── On-demand: company ───────────────────────────────────────────────
 
 
-@patch("app.services.deep_enrichment_service.deep_enrich_company", new_callable=AsyncMock,
-       return_value={"status": "enriched", "fields": 3})
+@patch(
+    "app.services.deep_enrichment_service.deep_enrich_company",
+    new_callable=AsyncMock,
+    return_value={"status": "enriched", "fields": 3},
+)
 def test_enrich_company_success(mock_enrich, client, test_company):
     """Trigger company enrichment -> 200."""
     resp = client.post(f"/api/enrichment/company/{test_company.id}")
@@ -364,10 +389,12 @@ def test_deep_email_scan(mock_token, mock_miner_cls, admin_client, admin_user, d
     db_session.commit()
 
     mock_miner = mock_miner_cls.return_value
-    mock_miner.deep_scan_inbox = AsyncMock(return_value={
-        "messages_scanned": 100,
-        "per_domain": {},
-    })
+    mock_miner.deep_scan_inbox = AsyncMock(
+        return_value={
+            "messages_scanned": 100,
+            "per_domain": {},
+        }
+    )
 
     resp = admin_client.post(f"/api/enrichment/deep-email-scan/{admin_user.id}")
     assert resp.status_code == 200
@@ -384,8 +411,11 @@ def test_deep_scan_invalid_user(admin_client):
 # ── Website scraping ─────────────────────────────────────────────────
 
 
-@patch("app.services.website_scraper.scrape_vendor_websites", new_callable=AsyncMock,
-       return_value={"scraped": 10, "contacts_found": 5})
+@patch(
+    "app.services.website_scraper.scrape_vendor_websites",
+    new_callable=AsyncMock,
+    return_value={"scraped": 10, "contacts_found": 5},
+)
 def test_scrape_websites(mock_scrape, admin_client):
     """Admin triggers website scrape."""
     resp = admin_client.post("/api/enrichment/scrape-websites")
@@ -530,8 +560,10 @@ def test_queue_bulk_approve_skips_wrong_status(mock_apply, client, db_session, q
 def test_job_detail_zero_total(client, db_session, admin_user):
     """Job with zero total items shows 0% progress."""
     job = EnrichmentJob(
-        job_type="backfill", status="running",
-        total_items=0, processed_items=0,
+        job_type="backfill",
+        status="running",
+        total_items=0,
+        processed_items=0,
         started_by_id=admin_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -546,8 +578,10 @@ def test_job_detail_zero_total(client, db_session, admin_user):
 def test_job_detail_no_starter(client, db_session):
     """Job with no started_by_id shows null started_by."""
     job = EnrichmentJob(
-        job_type="backfill", status="completed",
-        total_items=10, processed_items=10,
+        job_type="backfill",
+        status="completed",
+        total_items=10,
+        processed_items=10,
         enriched_items=5,
         started_by_id=None,
         created_at=datetime.now(timezone.utc),
@@ -569,9 +603,13 @@ def test_job_cancel_not_found(admin_client):
 def test_deep_scan_user_no_m365(admin_client, db_session, admin_user):
     """Deep scan user without M365 connected -> 400."""
     from app.models import User
+
     target = User(
-        email="nom365@trioscs.com", name="No M365", role="buyer",
-        azure_id="az-nom365", m365_connected=False,
+        email="nom365@trioscs.com",
+        name="No M365",
+        role="buyer",
+        azure_id="az-nom365",
+        m365_connected=False,
     )
     db_session.add(target)
     db_session.commit()
@@ -623,7 +661,7 @@ def test_enrich_company_with_force(client, test_company):
 
 def test_backfill_emails_with_data(admin_client, db_session, test_vendor_card, admin_user):
     """Email backfill processes activity log, vendor card emails, and brokerbin sightings."""
-    from app.models import ActivityLog, Sighting
+    from app.models import ActivityLog
 
     # Add an activity log entry with vendor_card_id and contact_email
     act = ActivityLog(
@@ -656,8 +694,11 @@ from app.models.crm import SiteContact
 
 
 class TestCustomerEnrichEndpoint:
-    @patch("app.services.customer_enrichment_service.enrich_customer_account",
-           new_callable=AsyncMock, return_value={"error": "No API keys configured"})
+    @patch(
+        "app.services.customer_enrichment_service.enrich_customer_account",
+        new_callable=AsyncMock,
+        return_value={"error": "No API keys configured"},
+    )
     def test_enrich_customer_returns_error(self, mock_enrich, admin_client, db_session):
         """Enrichment returns error dict -> returned as-is (line 678)."""
         co = Company(name="Error Co", is_active=True)
@@ -671,8 +712,11 @@ class TestCustomerEnrichEndpoint:
         assert resp.status_code == 200
         assert resp.json()["error"] == "No API keys configured"
 
-    @patch("app.services.customer_enrichment_service.enrich_customer_account",
-           new_callable=AsyncMock, return_value={"ok": True, "contacts_added": 2})
+    @patch(
+        "app.services.customer_enrichment_service.enrich_customer_account",
+        new_callable=AsyncMock,
+        return_value={"ok": True, "contacts_added": 2},
+    )
     def test_enrich_customer_success(self, mock_enrich, admin_client, db_session):
         co = Company(name="Good Co", is_active=True)
         db_session.add(co)
@@ -687,18 +731,22 @@ class TestCustomerEnrichEndpoint:
 
 
 class TestCustomerBackfill:
-    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
-           return_value=[])
+    @patch("app.services.customer_enrichment_service.get_enrichment_gaps", return_value=[])
     def test_backfill_no_gaps(self, mock_gaps, admin_client):
         """No enrichment gaps -> early return (line 728)."""
         resp = admin_client.post("/api/enrichment/customer-backfill", json={})
         assert resp.status_code == 200
         assert resp.json()["status"] == "no_gaps"
 
-    @patch("app.services.customer_enrichment_service.enrich_customer_account",
-           new_callable=AsyncMock, return_value={"ok": True, "contacts_added": 1})
-    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
-           return_value=[{"company_id": 1, "name": "Test", "account_owner_id": None}])
+    @patch(
+        "app.services.customer_enrichment_service.enrich_customer_account",
+        new_callable=AsyncMock,
+        return_value={"ok": True, "contacts_added": 1},
+    )
+    @patch(
+        "app.services.customer_enrichment_service.get_enrichment_gaps",
+        return_value=[{"company_id": 1, "name": "Test", "account_owner_id": None}],
+    )
     def test_backfill_processes_gaps(self, mock_gaps, mock_enrich, admin_client, db_session):
         """Processes enrichment gaps and creates job (lines 730-762)."""
         resp = admin_client.post("/api/enrichment/customer-backfill", json={})
@@ -707,10 +755,15 @@ class TestCustomerBackfill:
         assert data["status"] == "completed"
         assert data["processed"] == 1
 
-    @patch("app.services.customer_enrichment_service.enrich_customer_account",
-           new_callable=AsyncMock, side_effect=RuntimeError("API down"))
-    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
-           return_value=[{"company_id": 1, "name": "Test", "account_owner_id": 1}])
+    @patch(
+        "app.services.customer_enrichment_service.enrich_customer_account",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("API down"),
+    )
+    @patch(
+        "app.services.customer_enrichment_service.get_enrichment_gaps",
+        return_value=[{"company_id": 1, "name": "Test", "account_owner_id": 1}],
+    )
     def test_backfill_exception_captured(self, mock_gaps, mock_enrich, admin_client, db_session):
         """Exception during enrichment is captured in errors list (lines 750-752)."""
         resp = admin_client.post("/api/enrichment/customer-backfill", json={})
@@ -723,17 +776,23 @@ class TestCustomerBackfill:
 
 
 class TestBatchEnrichException:
-    @patch("app.services.customer_enrichment_service.enrich_customer_account",
-           new_callable=AsyncMock, side_effect=RuntimeError("API crash"))
+    @patch(
+        "app.services.customer_enrichment_service.enrich_customer_account",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("API crash"),
+    )
     def test_batch_enrich_exception_captured(self, mock_enrich, admin_client, db_session):
         """Exception during batch enrich captured in errors (lines 820-822)."""
         co = Company(name="Batch Error Co", is_active=True)
         db_session.add(co)
         db_session.commit()
 
-        resp = admin_client.post("/api/enrichment/batch", json={
-            "company_ids": [co.id],
-        })
+        resp = admin_client.post(
+            "/api/enrichment/batch",
+            json={
+                "company_ids": [co.id],
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["errors"] >= 1

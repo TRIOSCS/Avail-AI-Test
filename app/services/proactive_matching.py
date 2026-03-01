@@ -131,17 +131,11 @@ def _find_matches(
     source_sighting: Sighting | None = None,
 ) -> list[ProactiveMatch]:
     """Core matching logic — query CPH, score, create ProactiveMatch records."""
-    throttle_cutoff = datetime.now(timezone.utc) - timedelta(
-        days=settings.proactive_throttle_days
-    )
+    throttle_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_throttle_days)
     min_margin = settings.proactive_min_margin_pct
 
     # Find all CPH entries for this part
-    cph_rows = (
-        db.query(CustomerPartHistory)
-        .filter(CustomerPartHistory.material_card_id == material_card_id)
-        .all()
-    )
+    cph_rows = db.query(CustomerPartHistory).filter(CustomerPartHistory.material_card_id == material_card_id).all()
     if not cph_rows:
         return []
 
@@ -153,11 +147,7 @@ def _find_matches(
             continue
 
         # Get the primary site for this company
-        site = (
-            db.query(CustomerSite)
-            .filter_by(company_id=cph.company_id, is_active=True)
-            .first()
-        )
+        site = db.query(CustomerSite).filter_by(company_id=cph.company_id, is_active=True).first()
         if not site:
             continue
 
@@ -266,14 +256,16 @@ def _find_matches(
 
         # In-app notification
         if company.account_owner_id:
-            db.add(ActivityLog(
-                user_id=company.account_owner_id,
-                activity_type="proactive_match",
-                channel="system",
-                requisition_id=requisition.id,
-                contact_name=company.name,
-                subject=f"Proactive match: {mpn.upper().strip()} — {company.name} (score {score})",
-            ))
+            db.add(
+                ActivityLog(
+                    user_id=company.account_owner_id,
+                    activity_type="proactive_match",
+                    channel="system",
+                    requisition_id=requisition.id,
+                    contact_name=company.name,
+                    subject=f"Proactive match: {mpn.upper().strip()} — {company.name} (score {score})",
+                )
+            )
 
     return matches
 
@@ -345,7 +337,9 @@ def run_proactive_scan(db: Session) -> dict:
 
     logger.info(
         "Proactive scan: %d offers, %d sightings → %d matches",
-        len(new_offers), len(new_sightings), total_matches,
+        len(new_offers),
+        len(new_sightings),
+        total_matches,
     )
     return {
         "scanned_offers": len(new_offers),
@@ -382,9 +376,7 @@ def mark_match_sent(match_id: int, user_id: int, db: Session) -> None:
 
 def expire_old_matches(db: Session) -> int:
     """Expire matches older than proactive_match_expiry_days. Returns count expired."""
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        days=settings.proactive_match_expiry_days
-    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_match_expiry_days)
     expired = (
         db.query(ProactiveMatch)
         .filter(

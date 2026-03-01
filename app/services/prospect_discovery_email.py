@@ -17,13 +17,32 @@ from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
 
 # Common freemail domains to exclude
-FREEMAIL_DOMAINS = frozenset({
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
-    "icloud.com", "mail.com", "protonmail.com", "zoho.com", "yandex.com",
-    "live.com", "msn.com", "me.com", "comcast.net", "att.net",
-    "verizon.net", "sbcglobal.net", "cox.net", "charter.net",
-    "googlemail.com", "yahoo.co.uk", "hotmail.co.uk",
-})
+FREEMAIL_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "yahoo.com",
+        "hotmail.com",
+        "outlook.com",
+        "aol.com",
+        "icloud.com",
+        "mail.com",
+        "protonmail.com",
+        "zoho.com",
+        "yandex.com",
+        "live.com",
+        "msn.com",
+        "me.com",
+        "comcast.net",
+        "att.net",
+        "verizon.net",
+        "sbcglobal.net",
+        "cox.net",
+        "charter.net",
+        "googlemail.com",
+        "yahoo.co.uk",
+        "hotmail.co.uk",
+    }
+)
 
 # Internal domains to exclude
 INTERNAL_DOMAINS = frozenset(settings.own_domains) if hasattr(settings, "own_domains") else frozenset({"trioscs.com"})
@@ -56,10 +75,12 @@ async def mine_unknown_domains(
     # Get known domains to exclude
     customer_domains = set(
         row[0].lower()
-        for row in db.query(Company.domain).filter(
+        for row in db.query(Company.domain)
+        .filter(
             Company.domain.isnot(None),
             Company.account_owner_id.isnot(None),
-        ).all()
+        )
+        .all()
         if row[0]
     )
 
@@ -71,16 +92,9 @@ async def mine_unknown_domains(
                 if d:
                     vendor_domains.add(d)
 
-    prospect_domains = set(
-        row[0].lower()
-        for row in db.query(ProspectAccount.domain).all()
-        if row[0]
-    )
+    prospect_domains = set(row[0].lower() for row in db.query(ProspectAccount.domain).all() if row[0])
 
-    exclude_domains = (
-        customer_domains | vendor_domains | prospect_domains
-        | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
-    )
+    exclude_domains = customer_domains | vendor_domains | prospect_domains | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
 
     # Scan inbox via Graph API
     since = datetime.now(timezone.utc) - timedelta(days=days_back)
@@ -112,27 +126,27 @@ async def mine_unknown_domains(
             domain_counts[domain]["email_count"] += 1
             name = sender.get("name", "")
             if name and len(domain_counts[domain]["sample_senders"]) < 3:
-                domain_counts[domain]["sample_senders"].append({
-                    "name": name,
-                    "email": email,
-                })
+                domain_counts[domain]["sample_senders"].append(
+                    {
+                        "name": name,
+                        "email": email,
+                    }
+                )
 
     except Exception as e:
         logger.error("Email mining Graph API error: {}", e)
         return []
 
     # Only return domains with 2+ emails (not spam)
-    results = [
-        info for info in domain_counts.values()
-        if info["email_count"] >= 2
-    ]
+    results = [info for info in domain_counts.values() if info["email_count"] >= 2]
 
     # Sort by frequency
     results.sort(key=lambda x: x["email_count"], reverse=True)
 
     logger.info(
         "Email mining: scanned {} days, found {} unique unknown domains (2+ emails)",
-        days_back, len(results),
+        days_back,
+        len(results),
     )
 
     return results
@@ -210,7 +224,8 @@ async def enrich_email_domains(
 
     logger.info(
         "Email domain enrichment: {} domains submitted, {} enriched",
-        len(domains), len(prospects),
+        len(domains),
+        len(prospects),
     )
 
     return prospects
@@ -252,7 +267,9 @@ async def run_email_mining_batch(
 
     logger.info(
         "Email mining batch {}: {} domains mined, {} prospects created",
-        batch_id, len(domains), len(prospects),
+        batch_id,
+        len(domains),
+        len(prospects),
     )
 
     return prospects

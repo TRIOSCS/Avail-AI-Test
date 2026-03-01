@@ -9,30 +9,30 @@ Called by: pytest
 Depends on: app.schemas.buy_plan
 """
 
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 from pydantic import ValidationError
 
 from app.schemas.buy_plan import (
+    # Response schemas
+    AIFlag,
     BuyPlanLineEdit,
     BuyPlanLineIssue,
     BuyPlanLineOverride,
+    BuyPlanLineResponse,
     BuyPlanV3Approval,
+    BuyPlanV3ListItem,
+    BuyPlanV3Response,
     BuyPlanV3Submit,
+    OfferComparisonItem,
+    OfferComparisonResponse,
     POConfirmation,
     POVerificationRequest,
     SOVerificationRequest,
-    VerificationGroupUpdate,
-    # Response schemas
-    AIFlag,
-    BuyPlanLineResponse,
-    BuyPlanV3ListItem,
-    BuyPlanV3Response,
-    OfferComparisonItem,
-    OfferComparisonResponse,
     VerificationGroupMemberResponse,
+    VerificationGroupUpdate,
 )
-
 
 # ── BuyPlanV3Submit ──────────────────────────────────────────────────
 
@@ -104,7 +104,9 @@ class TestBuyPlanLineEdit:
 
     def test_with_sales_note(self):
         e = BuyPlanLineEdit(
-            requirement_id=1, offer_id=10, quantity=500,
+            requirement_id=1,
+            offer_id=10,
+            quantity=500,
             sales_note="Prefer this vendor, faster lead time",
         )
         assert e.sales_note is not None
@@ -270,21 +272,29 @@ class TestVerificationGroupUpdate:
 class TestResponseSchemas:
     def test_line_response(self):
         lr = BuyPlanLineResponse(
-            id=1, buy_plan_id=1, quantity=500,
-            status="awaiting_po", mpn="LM317T", vendor_name="Arrow",
+            id=1,
+            buy_plan_id=1,
+            quantity=500,
+            status="awaiting_po",
+            mpn="LM317T",
+            vendor_name="Arrow",
         )
         assert lr.mpn == "LM317T"
         assert lr.status == "awaiting_po"
 
     def test_plan_response_with_lines(self):
         pr = BuyPlanV3Response(
-            id=1, quote_id=1, requisition_id=1,
-            status="pending", so_status="pending",
+            id=1,
+            quote_id=1,
+            requisition_id=1,
+            status="pending",
+            so_status="pending",
             lines=[
                 BuyPlanLineResponse(id=1, buy_plan_id=1, quantity=600),
                 BuyPlanLineResponse(id=2, buy_plan_id=1, quantity=400),
             ],
-            line_count=2, vendor_count=2,
+            line_count=2,
+            vendor_count=2,
         )
         assert len(pr.lines) == 2
         assert pr.line_count == 2
@@ -292,15 +302,20 @@ class TestResponseSchemas:
     def test_plan_response_allows_extra_fields(self):
         """extra='allow' prevents breaking frontends when new fields added."""
         pr = BuyPlanV3Response(
-            id=1, quote_id=1, requisition_id=1,
+            id=1,
+            quote_id=1,
+            requisition_id=1,
             future_field="should not error",
         )
         assert pr.id == 1
 
     def test_list_item(self):
         li = BuyPlanV3ListItem(
-            id=1, quote_id=1, requisition_id=1,
-            status="pending", ai_flag_count=2,
+            id=1,
+            quote_id=1,
+            requisition_id=1,
+            status="pending",
+            ai_flag_count=2,
         )
         assert li.ai_flag_count == 2
 
@@ -310,16 +325,24 @@ class TestResponseSchemas:
 
     def test_offer_comparison(self):
         oc = OfferComparisonResponse(
-            requirement_id=1, mpn="LM317T", target_qty=1000,
+            requirement_id=1,
+            mpn="LM317T",
+            target_qty=1000,
             selected_offer_ids=[10],
             offers=[
                 OfferComparisonItem(
-                    offer_id=10, vendor_name="Arrow", unit_price=0.50,
-                    ai_score=85.0, is_selected=True,
+                    offer_id=10,
+                    vendor_name="Arrow",
+                    unit_price=0.50,
+                    ai_score=85.0,
+                    is_selected=True,
                 ),
                 OfferComparisonItem(
-                    offer_id=11, vendor_name="Digi-Key", unit_price=0.55,
-                    ai_score=72.0, is_selected=False,
+                    offer_id=11,
+                    vendor_name="Digi-Key",
+                    unit_price=0.55,
+                    ai_score=72.0,
+                    is_selected=False,
                 ),
             ],
         )
@@ -328,6 +351,9 @@ class TestResponseSchemas:
 
     def test_verification_group_member(self):
         m = VerificationGroupMemberResponse(
-            id=1, user_id=5, user_name="Ops User", is_active=True,
+            id=1,
+            user_id=5,
+            user_name="Ops User",
+            is_active=True,
         )
         assert m.user_name == "Ops User"

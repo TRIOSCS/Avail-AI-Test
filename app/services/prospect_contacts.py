@@ -20,11 +20,31 @@ from app.models.prospect_account import ProspectAccount
 # ── Personal Email Filter ────────────────────────────────────────────
 
 PERSONAL_DOMAINS = {
-    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
-    "icloud.com", "mail.com", "protonmail.com", "zoho.com", "yandex.com",
-    "live.com", "msn.com", "me.com", "qq.com", "163.com", "126.com",
-    "gmx.com", "gmx.de", "web.de", "t-online.de", "comcast.net",
-    "sbcglobal.net", "att.net", "verizon.net", "cox.net",
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
+    "aol.com",
+    "icloud.com",
+    "mail.com",
+    "protonmail.com",
+    "zoho.com",
+    "yandex.com",
+    "live.com",
+    "msn.com",
+    "me.com",
+    "qq.com",
+    "163.com",
+    "126.com",
+    "gmx.com",
+    "gmx.de",
+    "web.de",
+    "t-online.de",
+    "comcast.net",
+    "sbcglobal.net",
+    "att.net",
+    "verizon.net",
+    "cox.net",
 }
 
 # ── Title Keywords for Apollo Search ─────────────────────────────────
@@ -43,21 +63,43 @@ PROCUREMENT_TITLE_KEYWORDS = [
 # ── Seniority Classification ────────────────────────────────────────
 
 DECISION_MAKER_PATTERNS = [
-    r"\bvp\b", r"\bvice\s+president\b", r"\bdirector\b", r"\bdir\.?\b",
-    r"\bsvp\b", r"\bevp\b", r"\bc[- ]?suite\b", r"\bchief\b",
-    r"\bceo\b", r"\bcoo\b", r"\bcfo\b", r"\bcpo\b", r"\bcto\b",
-    r"\bhead\s+of\b", r"\bgm\b", r"\bgeneral\s+manager\b",
+    r"\bvp\b",
+    r"\bvice\s+president\b",
+    r"\bdirector\b",
+    r"\bdir\.?\b",
+    r"\bsvp\b",
+    r"\bevp\b",
+    r"\bc[- ]?suite\b",
+    r"\bchief\b",
+    r"\bceo\b",
+    r"\bcoo\b",
+    r"\bcfo\b",
+    r"\bcpo\b",
+    r"\bcto\b",
+    r"\bhead\s+of\b",
+    r"\bgm\b",
+    r"\bgeneral\s+manager\b",
 ]
 
 INFLUENCER_PATTERNS = [
-    r"\bmanager\b", r"\bsenior\b", r"\bsr\.?\b", r"\blead\b",
-    r"\bcommodity\s+manager\b", r"\bprincipal\b", r"\bteam\s+lead\b",
+    r"\bmanager\b",
+    r"\bsenior\b",
+    r"\bsr\.?\b",
+    r"\blead\b",
+    r"\bcommodity\s+manager\b",
+    r"\bprincipal\b",
+    r"\bteam\s+lead\b",
 ]
 
 EXECUTOR_PATTERNS = [
-    r"\bbuyer\b", r"\bpurchasing\s+agent\b", r"\bcoordinator\b",
-    r"\banalyst\b", r"\bspecialist\b", r"\bplanner\b",
-    r"\bassistant\b", r"\bclerk\b",
+    r"\bbuyer\b",
+    r"\bpurchasing\s+agent\b",
+    r"\bcoordinator\b",
+    r"\banalyst\b",
+    r"\bspecialist\b",
+    r"\bplanner\b",
+    r"\bassistant\b",
+    r"\bclerk\b",
 ]
 
 
@@ -121,9 +163,7 @@ def _is_new_hire(started_at: str | None) -> bool:
         return False
     try:
         start_date = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        six_months_ago = datetime.now(timezone.utc).replace(
-            month=max(1, datetime.now(timezone.utc).month - 6)
-        )
+        six_months_ago = datetime.now(timezone.utc).replace(month=max(1, datetime.now(timezone.utc).month - 6))
         return start_date >= six_months_ago
     except (ValueError, TypeError):
         return False
@@ -149,13 +189,11 @@ class CreditTracker:
         self.apollo_limit = apollo_limit if apollo_limit is not None else 10000
         self.hunter_search_used = 0
         self.hunter_search_limit = (
-            hunter_search_limit if hunter_search_limit is not None
-            else settings.hunter_monthly_search_limit
+            hunter_search_limit if hunter_search_limit is not None else settings.hunter_monthly_search_limit
         )
         self.hunter_verify_used = 0
         self.hunter_verify_limit = (
-            hunter_verify_limit if hunter_verify_limit is not None
-            else settings.hunter_monthly_verify_limit
+            hunter_verify_limit if hunter_verify_limit is not None else settings.hunter_monthly_verify_limit
         )
 
     def can_use_apollo(self) -> bool:
@@ -187,9 +225,7 @@ class CreditTracker:
 # ── Apollo People Search ────────────────────────────────────────────
 
 
-async def search_contacts_apollo(
-    domain: str, max_results: int = 10
-) -> list[dict]:
+async def search_contacts_apollo(domain: str, max_results: int = 10) -> list[dict]:
     """Search Apollo for procurement contacts at a domain.
 
     Filters by procurement/purchasing/supply chain titles.
@@ -215,14 +251,16 @@ async def search_contacts_apollo(
             logger.debug("Filtered personal email: {}", mask_email(email))
             email = None
 
-        results.append({
-            "name": c.get("full_name") or "Unknown",
-            "title": c.get("title") or "",
-            "email": email,
-            "linkedin_url": c.get("linkedin_url"),
-            "seniority_level": classify_contact_seniority(c.get("title") or ""),
-            "started_current_role_at": c.get("started_current_role_at"),
-        })
+        results.append(
+            {
+                "name": c.get("full_name") or "Unknown",
+                "title": c.get("title") or "",
+                "email": email,
+                "linkedin_url": c.get("linkedin_url"),
+                "seniority_level": classify_contact_seniority(c.get("title") or ""),
+                "started_current_role_at": c.get("started_current_role_at"),
+            }
+        )
 
     return results
 
@@ -230,9 +268,7 @@ async def search_contacts_apollo(
 # ── Hunter Email Verification ───────────────────────────────────────
 
 
-async def verify_email_hunter(
-    email: str, verification_cache: dict | None = None
-) -> dict:
+async def verify_email_hunter(email: str, verification_cache: dict | None = None) -> dict:
     """Verify an email via Hunter.io.
 
     Returns: {email, status, score, verified: bool}
@@ -258,10 +294,7 @@ async def verify_email_hunter(
     else:
         status = result.get("status", "unknown")
         score = result.get("score", 0)
-        verified = (
-            status == "valid"
-            or (status == "accept_all" and score > 80)
-        )
+        verified = status == "valid" or (status == "accept_all" and score > 80)
         out = {
             "email": email,
             "status": status,
@@ -327,6 +360,7 @@ async def get_domain_pattern_hunter(domain: str) -> str | None:
     if patterns_seen:
         # Most common pattern
         from collections import Counter
+
         most_common = Counter(patterns_seen).most_common(1)[0][0]
         return most_common
 
@@ -427,26 +461,30 @@ async def enrich_prospect_contacts(
             stats["new_hires"] += 1
 
         # Preview: masked email, seniority, verified flag
-        preview_contacts.append({
-            "name": contact.get("name", "Unknown"),
-            "title": title,
-            "email_masked": mask_email(email) if email else "",
-            "seniority": seniority,
-            "verified": verified,
-            "is_new_hire": is_new,
-        })
+        preview_contacts.append(
+            {
+                "name": contact.get("name", "Unknown"),
+                "title": title,
+                "email_masked": mask_email(email) if email else "",
+                "seniority": seniority,
+                "verified": verified,
+                "is_new_hire": is_new,
+            }
+        )
 
         # Full: unmasked email (only stored in enrichment_data, revealed after claim)
-        full_contacts.append({
-            "name": contact.get("name", "Unknown"),
-            "title": title,
-            "email": email,
-            "linkedin_url": contact.get("linkedin_url"),
-            "seniority": seniority,
-            "verified": verified,
-            "is_new_hire": is_new,
-            "started_current_role_at": contact.get("started_current_role_at"),
-        })
+        full_contacts.append(
+            {
+                "name": contact.get("name", "Unknown"),
+                "title": title,
+                "email": email,
+                "linkedin_url": contact.get("linkedin_url"),
+                "seniority": seniority,
+                "verified": verified,
+                "is_new_hire": is_new,
+                "started_current_role_at": contact.get("started_current_role_at"),
+            }
+        )
 
     # Update prospect
     prospect.contacts_preview = preview_contacts
@@ -460,9 +498,12 @@ async def enrich_prospect_contacts(
 
     logger.info(
         "Contact enrichment for prospect {} ({}): {} found, {} verified, {} DMs, {} new hires",
-        prospect_id, prospect.domain,
-        stats["total_found"], stats["verified"],
-        stats["decision_makers"], stats["new_hires"],
+        prospect_id,
+        prospect.domain,
+        stats["total_found"],
+        stats["verified"],
+        stats["decision_makers"],
+        stats["new_hires"],
     )
 
     return stats
@@ -514,14 +555,14 @@ async def run_contact_enrichment_batch(min_fit_score: int = 60) -> dict:
 
             # Check credit limits
             if not tracker.can_use_apollo():
-                summary["skipped_credit_limit"] += len(prospects) - summary["prospects_processed"] - summary["skipped_already_enriched"]
+                summary["skipped_credit_limit"] += (
+                    len(prospects) - summary["prospects_processed"] - summary["skipped_already_enriched"]
+                )
                 logger.warning("Apollo credits exhausted — stopping batch")
                 break
 
             try:
-                stats = await enrich_prospect_contacts(
-                    prospect.id, db, credit_tracker=tracker
-                )
+                stats = await enrich_prospect_contacts(prospect.id, db, credit_tracker=tracker)
                 summary["prospects_processed"] += 1
                 summary["total_contacts_found"] += stats["total_found"]
                 summary["total_verified"] += stats["verified"]

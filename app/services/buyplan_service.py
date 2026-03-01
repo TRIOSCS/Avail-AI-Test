@@ -31,6 +31,7 @@ def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
     Replaces the repeated inline async-def + create_task pattern throughout
     crm.py.  ``coro_factory`` is an async callable ``(plan, db, **kw)``.
     """
+
     async def _run():
         from ..database import SessionLocal
 
@@ -201,10 +202,12 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
         f"Total: ${total_cost:,.2f} | {len(plan.line_items or [])} line items\n\n"
         f"[Review in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
     )
-    await asyncio.gather(*[
-        _send_teams_dm(admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db)
-        for admin in admin_users
-    ])
+    await asyncio.gather(
+        *[
+            _send_teams_dm(admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db)
+            for admin in admin_users
+        ]
+    )
 
 
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
@@ -232,11 +235,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         if entered_by:
             buyer_ids.add(entered_by)
     if not buyer_ids:
-        offer_ids = [
-            item.get("offer_id")
-            for item in (plan.line_items or [])
-            if item.get("offer_id")
-        ]
+        offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
         if offer_ids:
             offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
             buyer_ids = {o.entered_by_id for o in offers if o.entered_by_id}
@@ -244,9 +243,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
     buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
     async def _notify_buyer(buyer):
-        buyer_items = [
-            i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id
-        ]
+        buyer_items = [i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id]
         if not buyer_items:
             buyer_items = plan.line_items or []
 
@@ -332,8 +329,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         # Teams DM
         await _send_teams_dm(
             buyer,
-            f"Buy Plan #{plan.id} has been approved. "
-            f"Please create POs for {len(buyer_items)} item(s) in Acctivate.",
+            f"Buy Plan #{plan.id} has been approved. Please create POs for {len(buyer_items)} item(s) in Acctivate.",
             db,
         )
 
@@ -385,9 +381,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
                     "message": {
                         "subject": f"[AVAIL] Buy Plan Rejected — #{plan.requisition_id}",
                         "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [
-                            {"emailAddress": {"address": submitter.email}}
-                        ],
+                        "toRecipients": [{"emailAddress": {"address": submitter.email}}],
                     },
                     "saveToSentItems": "false",
                 },
@@ -534,7 +528,7 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
         <h2 style="color:#16a34a">Buy Plan Complete</h2>
         <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong>
            has been marked complete by <strong>{html.escape(str(completer_name))}</strong>.</p>
-        <p>Sales Order: <strong>{html.escape(str(plan.sales_order_number or 'N/A'))}</strong></p>
+        <p>Sales Order: <strong>{html.escape(str(plan.sales_order_number or "N/A"))}</strong></p>
         <p style="margin-top:20px">
             <a href="{settings.app_url}/#buyplan/{plan.id}"
                style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
@@ -556,9 +550,7 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
                     "message": {
                         "subject": f"[AVAIL] Buy Plan Complete — #{plan.requisition_id}",
                         "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [
-                            {"emailAddress": {"address": submitter.email}}
-                        ],
+                        "toRecipients": [{"emailAddress": {"address": submitter.email}}],
                     },
                     "saveToSentItems": "false",
                 },
@@ -636,9 +628,7 @@ async def _post_teams_channel(message: str):
                             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
                             "type": "AdaptiveCard",
                             "version": "1.4",
-                            "body": [
-                                {"type": "TextBlock", "text": message, "wrap": True}
-                            ],
+                            "body": [{"type": "TextBlock", "text": message, "wrap": True}],
                         },
                     }
                 ],
@@ -646,9 +636,7 @@ async def _post_teams_channel(message: str):
             timeout=15,
         )
         if resp.status_code not in (200, 202):
-            logger.warning(
-                f"Teams webhook returned {resp.status_code}: {resp.text[:200]}"
-            )
+            logger.warning(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         logger.error(f"Teams channel post failed: {e}")
 
@@ -687,14 +675,10 @@ async def _send_teams_dm(user: User, message: str, db: Session = None):
         )
         chat_id = chat.get("id")
         if chat_id:
-            await gc.post_json(
-                f"/chats/{chat_id}/messages", {"body": {"content": message}}
-            )
+            await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
             logger.info(f"Teams DM sent to {user.email}")
     except Exception as e:
-        logger.debug(
-            f"Teams DM to {user.email} failed (may not have Chat permissions): {e}"
-        )
+        logger.debug(f"Teams DM to {user.email} failed (may not have Chat permissions): {e}")
 
 
 # ── PO Email Verification ────────────────────────────────────────────────
@@ -746,9 +730,7 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
             if messages:
                 msg = messages[0]
                 recipients = msg.get("toRecipients", [])
-                po_recipient = (
-                    recipients[0]["emailAddress"]["address"] if recipients else None
-                )
+                po_recipient = recipients[0]["emailAddress"]["address"] if recipients else None
                 po_sent_at = msg.get("sentDateTime")
 
                 # Update line item
@@ -775,11 +757,7 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
 
         flag_modified(plan, "line_items")
         # Check if all POs are verified
-        all_verified = all(
-            item.get("po_verified")
-            for item in (plan.line_items or [])
-            if item.get("po_number")
-        )
+        all_verified = all(item.get("po_verified") for item in (plan.line_items or []) if item.get("po_number"))
         if all_verified and plan.status == "po_entered":
             plan.status = "po_confirmed"
         db.commit()

@@ -27,12 +27,7 @@ async def analyze_customer_materials(company_id: int, db_session=None):
             return
 
         # Get all site IDs for this company
-        site_ids = [
-            s.id
-            for s in db.query(CustomerSite.id)
-            .filter(CustomerSite.company_id == company_id)
-            .all()
-        ]
+        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
         if not site_ids:
             return
 
@@ -80,9 +75,7 @@ async def analyze_customer_materials(company_id: int, db_session=None):
         prompt = (
             f"Analyze this customer's part purchasing history to identify their focus areas.\n\n"
             f"Customer: {company.name}\n"
-            f"Parts they've requested ({len(parts_list)} samples):\n"
-            + "\n".join(parts_list[:200])
-            + "\n\n"
+            f"Parts they've requested ({len(parts_list)} samples):\n" + "\n".join(parts_list[:200]) + "\n\n"
             "Return JSON with two arrays — ONLY include items that appear multiple times "
             "or show a clear concentration/focus. Do NOT list everything, only genuine focus areas.\n"
             '- "brands": brands/manufacturers this customer clearly focuses on '

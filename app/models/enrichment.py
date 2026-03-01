@@ -126,9 +126,7 @@ class ProspectContact(Base):
 
     __tablename__ = "prospect_contacts"
     id = Column(Integer, primary_key=True)
-    customer_site_id = Column(
-        Integer, ForeignKey("customer_sites.id", ondelete="SET NULL")
-    )
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
 
     full_name = Column(String(255), nullable=False)
@@ -179,9 +177,7 @@ class EnrichmentCreditUsage(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("ix_ecu_provider_month", "provider", "month", unique=True),
-    )
+    __table_args__ = (Index("ix_ecu_provider_month", "provider", "month", unique=True),)
 
 
 class IntelCache(Base):

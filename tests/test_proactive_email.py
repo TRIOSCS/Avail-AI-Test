@@ -18,7 +18,6 @@ from app.services.proactive_email import (
     draft_proactive_email,
 )
 
-
 # ── _format_parts ───────────────────────────────────────────────────
 
 
@@ -70,7 +69,14 @@ class TestFormatParts:
 class TestBuildHtml:
     def test_basic_html(self):
         parts = [
-            {"mpn": "LM317T", "manufacturer": "TI", "qty": 100, "sell_price": 1.5, "condition": "New", "lead_time": "2 weeks"},
+            {
+                "mpn": "LM317T",
+                "manufacturer": "TI",
+                "qty": 100,
+                "sell_price": 1.5,
+                "condition": "New",
+                "lead_time": "2 weeks",
+            },
         ]
         html = _build_html("Great parts!", "Alice", parts, "Bob", None)
         assert "Hi Alice," in html
@@ -108,7 +114,16 @@ class TestBuildHtml:
 
 class TestFallbackDraft:
     def test_returns_dict(self):
-        parts = [{"mpn": "LM317T", "manufacturer": "TI", "qty": 100, "sell_price": 1.5, "condition": "New", "lead_time": "2 weeks"}]
+        parts = [
+            {
+                "mpn": "LM317T",
+                "manufacturer": "TI",
+                "qty": 100,
+                "sell_price": 1.5,
+                "condition": "New",
+                "lead_time": "2 weeks",
+            }
+        ]
         result = _fallback_draft("Acme Corp", "Alice", parts, "Bob", None)
         assert "subject" in result
         assert "body" in result
@@ -116,7 +131,10 @@ class TestFallbackDraft:
         assert "Acme Corp" in result["subject"]
 
     def test_fallback_with_many_parts(self):
-        parts = [{"mpn": f"PART{i}", "qty": 1, "sell_price": 0.5, "manufacturer": "", "condition": "", "lead_time": ""} for i in range(5)]
+        parts = [
+            {"mpn": f"PART{i}", "qty": 1, "sell_price": 0.5, "manufacturer": "", "condition": "", "lead_time": ""}
+            for i in range(5)
+        ]
         result = _fallback_draft("BigCo", None, parts, "Rep", "hurry up")
         # All 5 parts appear in the HTML table
         assert "PART0" in result["html"]
@@ -142,7 +160,16 @@ class TestDraftProactiveEmail:
         result = await draft_proactive_email(
             company_name="Acme Corp",
             contact_name="Alice",
-            parts=[{"mpn": "LM317T", "manufacturer": "TI", "qty": 100, "sell_price": 1.5, "condition": "New", "lead_time": "2 weeks"}],
+            parts=[
+                {
+                    "mpn": "LM317T",
+                    "manufacturer": "TI",
+                    "qty": 100,
+                    "sell_price": 1.5,
+                    "condition": "New",
+                    "lead_time": "2 weeks",
+                }
+            ],
             salesperson_name="Bob",
         )
         assert result is not None
@@ -208,7 +235,16 @@ class TestDraftProactiveEmail:
         result = await draft_proactive_email(
             company_name="Acme",
             contact_name="Alice",
-            parts=[{"mpn": "A1", "qty": 50, "sell_price": 3.0, "manufacturer": "TI", "condition": "New", "lead_time": "1 week"}],
+            parts=[
+                {
+                    "mpn": "A1",
+                    "qty": 50,
+                    "sell_price": 3.0,
+                    "manufacturer": "TI",
+                    "condition": "New",
+                    "lead_time": "1 week",
+                }
+            ],
             notes="10% discount for repeat customers",
         )
         assert result is not None

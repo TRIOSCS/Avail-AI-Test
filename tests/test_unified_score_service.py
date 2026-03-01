@@ -8,15 +8,12 @@ Depends on: app/services/unified_score_service.py, app/models/unified_score.py
 """
 
 from datetime import date, datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
-from app.models import User
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 from app.models.unified_score import UnifiedScoreSnapshot
-
 
 # ── Category Math Tests ─────────────────────────────────────────────
 
@@ -26,24 +23,22 @@ class TestBuyerCategories:
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score",
-                      "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
+        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 10.0)
 
         cats = _buyer_categories(snap)
         assert len(cats) == 4
         assert "prospecting" not in cats
-        assert cats["execution"] == 100.0    # (10+10+10)/30 * 100
+        assert cats["execution"] == 100.0  # (10+10+10)/30 * 100
         assert cats["followthrough"] == 100.0  # (10+10)/20 * 100
-        assert cats["closing"] == 100.0      # (10+10)/20 * 100
-        assert cats["depth"] == 100.0        # 10/10 * 100
+        assert cats["closing"] == 100.0  # (10+10)/20 * 100
+        assert cats["depth"] == 100.0  # 10/10 * 100
 
     def test_zero_scores(self):
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score",
-                      "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
+        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 0)
 
         cats = _buyer_categories(snap)
@@ -74,8 +69,7 @@ class TestBuyerCategories:
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score",
-                      "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
+        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, None)
 
         cats = _buyer_categories(snap)
@@ -88,17 +82,16 @@ class TestSalesCategories:
         from app.services.unified_score_service import _sales_categories
 
         snap = MagicMock()
-        for attr in ("b2_score", "b3_score", "b4_score",
-                      "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
+        for attr in ("b2_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 10.0)
 
         cats = _sales_categories(snap)
         assert len(cats) == 4
         assert "prospecting" not in cats
-        assert cats["execution"] == 100.0   # (10+10+10)/30
+        assert cats["execution"] == 100.0  # (10+10+10)/30
         assert cats["followthrough"] == 100.0  # (10+10)/20
-        assert cats["closing"] == 100.0     # (10+10)/20 — no O5 double-count
-        assert cats["depth"] == 100.0       # 10/10
+        assert cats["closing"] == 100.0  # (10+10)/20 — no O5 double-count
+        assert cats["depth"] == 100.0  # 10/10
 
 
 class TestTraderMerge:
@@ -169,16 +162,40 @@ class TestComputeAllUnifiedScores:
 
         # Create AvailScoreSnapshots for both users
         buyer_snap = AvailScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            b1_score=8, b2_score=7, b3_score=6, b4_score=9, b5_score=5,
-            o1_score=7, o2_score=8, o3_score=6, o4_score=9, o5_score=4,
-            behavior_total=35, outcome_total=34, total_score=69,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            b1_score=8,
+            b2_score=7,
+            b3_score=6,
+            b4_score=9,
+            b5_score=5,
+            o1_score=7,
+            o2_score=8,
+            o3_score=6,
+            o4_score=9,
+            o5_score=4,
+            behavior_total=35,
+            outcome_total=34,
+            total_score=69,
         )
         sales_snap = AvailScoreSnapshot(
-            user_id=sales_user.id, month=month, role_type="sales",
-            b1_score=5, b2_score=6, b3_score=7, b4_score=4, b5_score=8,
-            o1_score=9, o2_score=3, o3_score=7, o4_score=6, o5_score=5,
-            behavior_total=30, outcome_total=30, total_score=60,
+            user_id=sales_user.id,
+            month=month,
+            role_type="sales",
+            b1_score=5,
+            b2_score=6,
+            b3_score=7,
+            b4_score=4,
+            b5_score=8,
+            o1_score=9,
+            o2_score=3,
+            o3_score=7,
+            o4_score=6,
+            o5_score=5,
+            behavior_total=30,
+            outcome_total=30,
+            total_score=60,
         )
         db_session.add_all([buyer_snap, sales_snap])
         db_session.commit()
@@ -201,16 +218,40 @@ class TestComputeAllUnifiedScores:
         month = date(2026, 2, 1)
 
         buyer_snap = AvailScoreSnapshot(
-            user_id=trader_user.id, month=month, role_type="buyer",
-            b1_score=10, b2_score=10, b3_score=10, b4_score=10, b5_score=10,
-            o1_score=10, o2_score=10, o3_score=10, o4_score=10, o5_score=10,
-            behavior_total=50, outcome_total=50, total_score=100,
+            user_id=trader_user.id,
+            month=month,
+            role_type="buyer",
+            b1_score=10,
+            b2_score=10,
+            b3_score=10,
+            b4_score=10,
+            b5_score=10,
+            o1_score=10,
+            o2_score=10,
+            o3_score=10,
+            o4_score=10,
+            o5_score=10,
+            behavior_total=50,
+            outcome_total=50,
+            total_score=100,
         )
         sales_snap = AvailScoreSnapshot(
-            user_id=trader_user.id, month=month, role_type="sales",
-            b1_score=0, b2_score=0, b3_score=0, b4_score=0, b5_score=0,
-            o1_score=0, o2_score=0, o3_score=0, o4_score=0, o5_score=0,
-            behavior_total=0, outcome_total=0, total_score=0,
+            user_id=trader_user.id,
+            month=month,
+            role_type="sales",
+            b1_score=0,
+            b2_score=0,
+            b3_score=0,
+            b4_score=0,
+            b5_score=0,
+            o1_score=0,
+            o2_score=0,
+            o3_score=0,
+            o4_score=0,
+            o5_score=0,
+            behavior_total=0,
+            outcome_total=0,
+            total_score=0,
         )
         db_session.add_all([buyer_snap, sales_snap])
         db_session.commit()
@@ -218,9 +259,7 @@ class TestComputeAllUnifiedScores:
         with patch("app.services.unified_score_service._refresh_blurbs"):
             result = compute_all_unified_scores(db_session, month)
 
-        snap = db_session.query(UnifiedScoreSnapshot).filter_by(
-            user_id=trader_user.id, month=month
-        ).first()
+        snap = db_session.query(UnifiedScoreSnapshot).filter_by(user_id=trader_user.id, month=month).first()
         assert snap is not None
         assert snap.primary_role == "trader"
         # All buyer cats are 100%, all sales cats are 0%, so average = 50%
@@ -246,7 +285,10 @@ class TestComputeAllUnifiedScores:
 
         # Create initial snapshot
         existing = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=10, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=10,
+            rank=1,
         )
         db_session.add(existing)
         db_session.commit()
@@ -254,10 +296,22 @@ class TestComputeAllUnifiedScores:
 
         # Create avail data
         snap = AvailScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            b1_score=10, b2_score=10, b3_score=10, b4_score=10, b5_score=10,
-            o1_score=10, o2_score=10, o3_score=10, o4_score=10, o5_score=10,
-            behavior_total=50, outcome_total=50, total_score=100,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            b1_score=10,
+            b2_score=10,
+            b3_score=10,
+            b4_score=10,
+            b5_score=10,
+            o1_score=10,
+            o2_score=10,
+            o3_score=10,
+            o4_score=10,
+            o5_score=10,
+            behavior_total=50,
+            outcome_total=50,
+            total_score=100,
         )
         db_session.add(snap)
         db_session.commit()
@@ -310,14 +364,28 @@ class TestGetUnifiedLeaderboard:
         month = date(2026, 2, 1)
 
         snap1 = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=85, rank=1,
-            primary_role="buyer", prospecting_pct=90, execution_pct=80,
-            followthrough_pct=70, closing_pct=90, depth_pct=60,
+            user_id=test_user.id,
+            month=month,
+            unified_score=85,
+            rank=1,
+            primary_role="buyer",
+            prospecting_pct=90,
+            execution_pct=80,
+            followthrough_pct=70,
+            closing_pct=90,
+            depth_pct=60,
         )
         snap2 = UnifiedScoreSnapshot(
-            user_id=sales_user.id, month=month, unified_score=65, rank=2,
-            primary_role="sales", prospecting_pct=60, execution_pct=70,
-            followthrough_pct=50, closing_pct=70, depth_pct=40,
+            user_id=sales_user.id,
+            month=month,
+            unified_score=65,
+            rank=2,
+            primary_role="sales",
+            prospecting_pct=60,
+            execution_pct=70,
+            followthrough_pct=50,
+            closing_pct=70,
+            depth_pct=40,
         )
         db_session.add_all([snap1, snap2])
         db_session.commit()
@@ -341,30 +409,67 @@ class TestGetUnifiedLeaderboard:
         month = date(2026, 2, 1)
 
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=75, rank=1,
-            primary_role="buyer", execution_pct=70,
-            followthrough_pct=80, closing_pct=90, depth_pct=60,
+            user_id=test_user.id,
+            month=month,
+            unified_score=75,
+            rank=1,
+            primary_role="buyer",
+            execution_pct=70,
+            followthrough_pct=80,
+            closing_pct=90,
+            depth_pct=60,
         )
         # Add avail score data
         avail = AvailScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            b1_score=8, b2_score=7, b3_score=6, b4_score=9, b5_score=5,
-            b1_label="Speed", b2_label="Multi", b3_label="Follow", b4_label="Hygiene", b5_label="Stock",
-            o1_score=7, o2_score=8, o3_score=6, o4_score=9, o5_score=4,
-            o1_label="Ratio", o2_label="OfferQuote", o3_label="WinRate", o4_label="BPComp", o5_label="Diversity",
-            behavior_total=35, outcome_total=34, total_score=69,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            b1_score=8,
+            b2_score=7,
+            b3_score=6,
+            b4_score=9,
+            b5_score=5,
+            b1_label="Speed",
+            b2_label="Multi",
+            b3_label="Follow",
+            b4_label="Hygiene",
+            b5_label="Stock",
+            o1_score=7,
+            o2_score=8,
+            o3_score=6,
+            o4_score=9,
+            o5_score=4,
+            o1_label="Ratio",
+            o2_label="OfferQuote",
+            o3_label="WinRate",
+            o4_label="BPComp",
+            o5_label="Diversity",
+            behavior_total=35,
+            outcome_total=34,
+            total_score=69,
         )
         # Add multiplier score data
         mult = MultiplierScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            offer_points=18, bonus_points=5, total_points=23,
-            offers_base_count=10, offers_base_pts=2,
-            offers_quoted_count=4, offers_quoted_pts=12,
-            offers_bp_count=1, offers_bp_pts=5,
-            offers_po_count=0, offers_po_pts=0,
-            rfqs_sent_count=20, rfqs_sent_pts=5,
-            stock_lists_count=0, stock_lists_pts=0,
-            qualified=True, bonus_amount=500,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            offer_points=18,
+            bonus_points=5,
+            total_points=23,
+            offers_base_count=10,
+            offers_base_pts=2,
+            offers_quoted_count=4,
+            offers_quoted_pts=12,
+            offers_bp_count=1,
+            offers_bp_pts=5,
+            offers_po_count=0,
+            offers_po_pts=0,
+            rfqs_sent_count=20,
+            rfqs_sent_pts=5,
+            stock_lists_count=0,
+            stock_lists_pts=0,
+            qualified=True,
+            bonus_amount=500,
         )
         db_session.add_all([snap, avail, mult])
         db_session.commit()
@@ -493,22 +598,45 @@ class TestMultiplierIndexPopulation:
 
         # Create AvailScoreSnapshot
         avail = AvailScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            b1_score=8, b2_score=7, b3_score=6, b4_score=9, b5_score=5,
-            o1_score=7, o2_score=8, o3_score=6, o4_score=9, o5_score=4,
-            behavior_total=35, outcome_total=34, total_score=69,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            b1_score=8,
+            b2_score=7,
+            b3_score=6,
+            b4_score=9,
+            b5_score=5,
+            o1_score=7,
+            o2_score=8,
+            o3_score=6,
+            o4_score=9,
+            o5_score=4,
+            behavior_total=35,
+            outcome_total=34,
+            total_score=69,
         )
         # Create MultiplierScoreSnapshot
         mult = MultiplierScoreSnapshot(
-            user_id=test_user.id, month=month, role_type="buyer",
-            offer_points=18, bonus_points=5, total_points=23,
-            offers_base_count=10, offers_base_pts=2,
-            offers_quoted_count=4, offers_quoted_pts=12,
-            offers_bp_count=1, offers_bp_pts=5,
-            offers_po_count=0, offers_po_pts=0,
-            rfqs_sent_count=20, rfqs_sent_pts=5,
-            stock_lists_count=0, stock_lists_pts=0,
-            qualified=True, bonus_amount=500,
+            user_id=test_user.id,
+            month=month,
+            role_type="buyer",
+            offer_points=18,
+            bonus_points=5,
+            total_points=23,
+            offers_base_count=10,
+            offers_base_pts=2,
+            offers_quoted_count=4,
+            offers_quoted_pts=12,
+            offers_bp_count=1,
+            offers_bp_pts=5,
+            offers_po_count=0,
+            offers_po_pts=0,
+            rfqs_sent_count=20,
+            rfqs_sent_pts=5,
+            stock_lists_count=0,
+            stock_lists_pts=0,
+            qualified=True,
+            bonus_amount=500,
         )
         db_session.add_all([avail, mult])
         db_session.commit()
@@ -520,9 +648,14 @@ class TestMultiplierIndexPopulation:
         assert result["saved"] == 1
 
         # Verify the UnifiedScoreSnapshot has multiplier_points_buyer populated
-        snap = db_session.query(UnifiedScoreSnapshot).filter_by(
-            user_id=test_user.id, month=month,
-        ).first()
+        snap = (
+            db_session.query(UnifiedScoreSnapshot)
+            .filter_by(
+                user_id=test_user.id,
+                month=month,
+            )
+            .first()
+        )
         assert snap is not None
         assert snap.multiplier_points_buyer == 23
 
@@ -536,20 +669,25 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=75,
+            rank=1,
             primary_role="buyer",
         )
         db_session.add(snap)
         db_session.commit()
 
-        results = [{
-            "user_id": test_user.id,
-            "user_name": "Test Buyer",
-            "primary_role": "buyer",
-            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-            "score": 75.0,
-            "rank": 1,
-        }]
+        results = [
+            {
+                "user_id": test_user.id,
+                "user_name": "Test Buyer",
+                "primary_role": "buyer",
+                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+                "score": 75.0,
+                "rank": 1,
+            }
+        ]
 
         blurb_return = {"strength": "Great execution!", "improvement": "Work on depth."}
         with patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return):
@@ -568,7 +706,10 @@ class TestRefreshBlurbs:
         # SQLite strips timezone info, so use naive UTC to match cutoff comparison
         stale_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=75,
+            rank=1,
             primary_role="buyer",
             ai_blurb_strength="Old strength",
             ai_blurb_improvement="Old improvement",
@@ -577,20 +718,24 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [{
-            "user_id": test_user.id,
-            "user_name": "Test Buyer",
-            "primary_role": "buyer",
-            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-            "score": 75.0,
-            "rank": 1,
-        }]
+        results = [
+            {
+                "user_id": test_user.id,
+                "user_name": "Test Buyer",
+                "primary_role": "buyer",
+                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+                "score": 75.0,
+                "rank": 1,
+            }
+        ]
 
         blurb_return = {"strength": "New strength!", "improvement": "New improvement!"}
         # Patch datetime.now inside the service so cutoff is also naive
         fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        with patch("app.services.unified_score_service.datetime") as mock_dt, \
-             patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return):
+        with (
+            patch("app.services.unified_score_service.datetime") as mock_dt,
+            patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return),
+        ):
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             _refresh_blurbs(db_session, month, results)
@@ -607,7 +752,10 @@ class TestRefreshBlurbs:
         # SQLite strips timezone info, so use naive UTC to match cutoff comparison
         fresh_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=75,
+            rank=1,
             primary_role="buyer",
             ai_blurb_strength="Keep this",
             ai_blurb_improvement="Keep this too",
@@ -616,19 +764,23 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [{
-            "user_id": test_user.id,
-            "user_name": "Test Buyer",
-            "primary_role": "buyer",
-            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-            "score": 75.0,
-            "rank": 1,
-        }]
+        results = [
+            {
+                "user_id": test_user.id,
+                "user_name": "Test Buyer",
+                "primary_role": "buyer",
+                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+                "score": 75.0,
+                "rank": 1,
+            }
+        ]
 
         # Patch datetime.now inside the service so cutoff is also naive
         fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
-        with patch("app.services.unified_score_service.datetime") as mock_dt, \
-             patch("app.services.unified_score_service._generate_blurb") as mock_gen:
+        with (
+            patch("app.services.unified_score_service.datetime") as mock_dt,
+            patch("app.services.unified_score_service._generate_blurb") as mock_gen,
+        ):
             mock_dt.now.return_value = fake_now
             mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
             _refresh_blurbs(db_session, month, results)
@@ -644,20 +796,25 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=75,
+            rank=1,
             primary_role="buyer",
         )
         db_session.add(snap)
         db_session.commit()
 
-        results = [{
-            "user_id": test_user.id,
-            "user_name": "Test Buyer",
-            "primary_role": "buyer",
-            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-            "score": 75.0,
-            "rank": 1,
-        }]
+        results = [
+            {
+                "user_id": test_user.id,
+                "user_name": "Test Buyer",
+                "primary_role": "buyer",
+                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+                "score": 75.0,
+                "rank": 1,
+            }
+        ]
 
         with patch(
             "app.services.unified_score_service._generate_blurb",
@@ -675,14 +832,16 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         # No UnifiedScoreSnapshot created — result references non-existent snap
-        results = [{
-            "user_id": test_user.id,
-            "user_name": "Test Buyer",
-            "primary_role": "buyer",
-            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-            "score": 75.0,
-            "rank": 1,
-        }]
+        results = [
+            {
+                "user_id": test_user.id,
+                "user_name": "Test Buyer",
+                "primary_role": "buyer",
+                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+                "score": 75.0,
+                "rank": 1,
+            }
+        ]
 
         with patch("app.services.unified_score_service._generate_blurb") as mock_gen:
             _refresh_blurbs(db_session, month, results)
@@ -707,8 +866,10 @@ class TestGenerateBlurbEventLoop:
 
         cats = {"execution": 60, "followthrough": 40, "closing": 30, "depth": 50}
 
-        with patch("asyncio.get_event_loop", return_value=mock_loop), \
-             patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_cls:
+        with (
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+            patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_cls,
+        ):
             # Set up the ThreadPoolExecutor context manager mock
             mock_pool = MagicMock()
             mock_executor_cls.return_value.__enter__ = MagicMock(return_value=mock_pool)
@@ -738,25 +899,53 @@ class TestLeaderboardSalesBreakdown:
         month = date(2026, 2, 1)
 
         snap = UnifiedScoreSnapshot(
-            user_id=sales_user.id, month=month, unified_score=70, rank=1,
-            primary_role="sales", execution_pct=70,
-            followthrough_pct=60, closing_pct=80, depth_pct=50,
+            user_id=sales_user.id,
+            month=month,
+            unified_score=70,
+            rank=1,
+            primary_role="sales",
+            execution_pct=70,
+            followthrough_pct=60,
+            closing_pct=80,
+            depth_pct=50,
         )
         avail = AvailScoreSnapshot(
-            user_id=sales_user.id, month=month, role_type="sales",
-            b1_score=5, b2_score=6, b3_score=7, b4_score=4, b5_score=8,
-            o1_score=9, o2_score=3, o3_score=7, o4_score=6, o5_score=5,
-            behavior_total=30, outcome_total=30, total_score=60,
+            user_id=sales_user.id,
+            month=month,
+            role_type="sales",
+            b1_score=5,
+            b2_score=6,
+            b3_score=7,
+            b4_score=4,
+            b5_score=8,
+            o1_score=9,
+            o2_score=3,
+            o3_score=7,
+            o4_score=6,
+            o5_score=5,
+            behavior_total=30,
+            outcome_total=30,
+            total_score=60,
         )
         mult = MultiplierScoreSnapshot(
-            user_id=sales_user.id, month=month, role_type="sales",
-            offer_points=20, bonus_points=10, total_points=30,
-            quotes_sent_count=15, quotes_sent_pts=30,
-            quotes_won_count=5, quotes_won_pts=40,
-            proactive_sent_count=8, proactive_sent_pts=8,
-            proactive_converted_count=3, proactive_converted_pts=12,
-            new_accounts_count=2, new_accounts_pts=6,
-            qualified=True, bonus_amount=250,
+            user_id=sales_user.id,
+            month=month,
+            role_type="sales",
+            offer_points=20,
+            bonus_points=10,
+            total_points=30,
+            quotes_sent_count=15,
+            quotes_sent_pts=30,
+            quotes_won_count=5,
+            quotes_won_pts=40,
+            proactive_sent_count=8,
+            proactive_sent_pts=8,
+            proactive_converted_count=3,
+            proactive_converted_pts=12,
+            new_accounts_count=2,
+            new_accounts_pts=6,
+            qualified=True,
+            bonus_amount=250,
         )
         db_session.add_all([snap, avail, mult])
         db_session.commit()
@@ -793,33 +982,62 @@ class TestLeaderboardTraderConvenience:
         month = date(2026, 2, 1)
 
         snap = UnifiedScoreSnapshot(
-            user_id=trader_user.id, month=month, unified_score=65, rank=1,
-            primary_role="trader", execution_pct=60,
-            followthrough_pct=50, closing_pct=70, depth_pct=40,
-            avail_score_buyer=69, avail_score_sales=55,
-            multiplier_points_buyer=23, multiplier_points_sales=30,
+            user_id=trader_user.id,
+            month=month,
+            unified_score=65,
+            rank=1,
+            primary_role="trader",
+            execution_pct=60,
+            followthrough_pct=50,
+            closing_pct=70,
+            depth_pct=40,
+            avail_score_buyer=69,
+            avail_score_sales=55,
+            multiplier_points_buyer=23,
+            multiplier_points_sales=30,
         )
         # Both buyer and sales multiplier data
         buyer_mult = MultiplierScoreSnapshot(
-            user_id=trader_user.id, month=month, role_type="buyer",
-            offer_points=18, bonus_points=5, total_points=23,
-            offers_base_count=10, offers_base_pts=2,
-            offers_quoted_count=4, offers_quoted_pts=12,
-            offers_bp_count=1, offers_bp_pts=5,
-            offers_po_count=0, offers_po_pts=0,
-            rfqs_sent_count=20, rfqs_sent_pts=5,
-            stock_lists_count=0, stock_lists_pts=0,
-            qualified=True, bonus_amount=500,
+            user_id=trader_user.id,
+            month=month,
+            role_type="buyer",
+            offer_points=18,
+            bonus_points=5,
+            total_points=23,
+            offers_base_count=10,
+            offers_base_pts=2,
+            offers_quoted_count=4,
+            offers_quoted_pts=12,
+            offers_bp_count=1,
+            offers_bp_pts=5,
+            offers_po_count=0,
+            offers_po_pts=0,
+            rfqs_sent_count=20,
+            rfqs_sent_pts=5,
+            stock_lists_count=0,
+            stock_lists_pts=0,
+            qualified=True,
+            bonus_amount=500,
         )
         sales_mult = MultiplierScoreSnapshot(
-            user_id=trader_user.id, month=month, role_type="sales",
-            offer_points=20, bonus_points=10, total_points=30,
-            quotes_sent_count=15, quotes_sent_pts=30,
-            quotes_won_count=5, quotes_won_pts=40,
-            proactive_sent_count=8, proactive_sent_pts=8,
-            proactive_converted_count=3, proactive_converted_pts=12,
-            new_accounts_count=2, new_accounts_pts=6,
-            qualified=False, bonus_amount=0,
+            user_id=trader_user.id,
+            month=month,
+            role_type="sales",
+            offer_points=20,
+            bonus_points=10,
+            total_points=30,
+            quotes_sent_count=15,
+            quotes_sent_pts=30,
+            quotes_won_count=5,
+            quotes_won_pts=40,
+            proactive_sent_count=8,
+            proactive_sent_pts=8,
+            proactive_converted_count=3,
+            proactive_converted_pts=12,
+            new_accounts_count=2,
+            new_accounts_pts=6,
+            qualified=False,
+            bonus_amount=0,
         )
         db_session.add_all([snap, buyer_mult, sales_mult])
         db_session.commit()
@@ -840,10 +1058,17 @@ class TestLeaderboardTraderConvenience:
         month = date(2026, 2, 1)
 
         snap = UnifiedScoreSnapshot(
-            user_id=trader_user.id, month=month, unified_score=55, rank=1,
-            primary_role="trader", execution_pct=50,
-            followthrough_pct=50, closing_pct=60, depth_pct=40,
-            avail_score_buyer=None, avail_score_sales=42,
+            user_id=trader_user.id,
+            month=month,
+            unified_score=55,
+            rank=1,
+            primary_role="trader",
+            execution_pct=50,
+            followthrough_pct=50,
+            closing_pct=60,
+            depth_pct=40,
+            avail_score_buyer=None,
+            avail_score_sales=42,
         )
         db_session.add(snap)
         db_session.commit()

@@ -12,6 +12,7 @@ from app.models import ApiSource
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def _make_admin_client(db_session, admin_user):
     """Return a TestClient authenticated as admin."""
     from app.database import get_db
@@ -60,9 +61,11 @@ def test_source(db_session):
 
 # ── Encryption Tests ─────────────────────────────────────────────────
 
+
 def test_encrypt_decrypt_roundtrip():
     """Encrypt then decrypt should return original value."""
     from app.services.credential_service import decrypt_value, encrypt_value
+
     original = "my-super-secret-api-key-12345"
     encrypted = encrypt_value(original)
     assert encrypted != original
@@ -72,6 +75,7 @@ def test_encrypt_decrypt_roundtrip():
 def test_encrypt_produces_different_tokens():
     """Same plaintext should produce different ciphertexts (Fernet uses random IV)."""
     from app.services.credential_service import encrypt_value
+
     a = encrypt_value("same-key")
     b = encrypt_value("same-key")
     assert a != b
@@ -79,6 +83,7 @@ def test_encrypt_produces_different_tokens():
 
 def test_mask_value_shows_last_4():
     from app.services.credential_service import mask_value
+
     assert mask_value("abcdefghijklmnop") == "●●●●●●●●mnop"
     assert mask_value("1234") == "****"
     assert mask_value("ab") == "****"
@@ -86,6 +91,7 @@ def test_mask_value_shows_last_4():
 
 
 # ── Credential API Tests ─────────────────────────────────────────────
+
 
 def test_get_credentials_empty(admin_client, test_source):
     resp = admin_client.get(f"/api/admin/sources/{test_source.id}/credentials")
@@ -149,6 +155,7 @@ def test_set_ignores_unknown_vars(admin_client, test_source):
 
 # ── Access Control Tests ─────────────────────────────────────────────
 
+
 def test_buyer_cannot_access_credentials(client, db_session):
     """Non-admin (buyer) should be denied."""
     src = _seed_source(db_session)
@@ -167,9 +174,11 @@ def test_buyer_cannot_set_credentials(client, db_session):
 
 # ── Credential Lookup Tests ──────────────────────────────────────────
 
+
 def test_get_credential_from_db(db_session, test_source):
     """DB credential takes priority over env var."""
     from app.services.credential_service import encrypt_value, get_credential
+
     # Store encrypted credential in DB
     test_source.credentials = {"TEST_API_KEY": encrypt_value("db-value")}
     db_session.commit()
@@ -181,6 +190,7 @@ def test_get_credential_from_db(db_session, test_source):
 def test_get_credential_fallback_to_env(db_session, test_source, monkeypatch):
     """Falls back to env var when DB has no credential."""
     from app.services.credential_service import get_credential
+
     monkeypatch.setenv("TEST_API_KEY", "env-value")
     result = get_credential(db_session, "test_connector", "TEST_API_KEY")
     assert result == "env-value"
@@ -188,6 +198,7 @@ def test_get_credential_fallback_to_env(db_session, test_source, monkeypatch):
 
 def test_credential_is_set_db(db_session, test_source):
     from app.services.credential_service import credential_is_set, encrypt_value
+
     test_source.credentials = {"TEST_API_KEY": encrypt_value("something")}
     db_session.commit()
     assert credential_is_set(db_session, "test_connector", "TEST_API_KEY") is True
@@ -200,6 +211,7 @@ def test_credential_is_set_db(db_session, test_source):
 def test_get_all_credentials_source_not_found(db_session):
     """Source not found returns empty dict."""
     from app.services.credential_service import get_all_credentials_for_source
+
     result = get_all_credentials_for_source(db_session, "nonexistent_source")
     assert result == {}
 
@@ -207,6 +219,7 @@ def test_get_all_credentials_source_not_found(db_session):
 def test_get_all_credentials_from_db(db_session, test_source):
     """All env_vars with DB credentials are returned decrypted."""
     from app.services.credential_service import encrypt_value, get_all_credentials_for_source
+
     test_source.credentials = {
         "TEST_API_KEY": encrypt_value("db-key-value"),
         "TEST_API_SECRET": encrypt_value("db-secret-value"),
@@ -221,6 +234,7 @@ def test_get_all_credentials_from_db(db_session, test_source):
 def test_get_all_credentials_env_fallback(db_session, test_source, monkeypatch):
     """When DB has no credential, falls back to env var."""
     from app.services.credential_service import get_all_credentials_for_source
+
     monkeypatch.setenv("TEST_API_KEY", "env-key")
     monkeypatch.setenv("TEST_API_SECRET", "env-secret")
 
@@ -232,6 +246,7 @@ def test_get_all_credentials_env_fallback(db_session, test_source, monkeypatch):
 def test_get_all_credentials_decrypt_fallback(db_session, test_source, monkeypatch):
     """If DB credential decryption fails, falls back to env var."""
     from app.services.credential_service import get_all_credentials_for_source
+
     test_source.credentials = {"TEST_API_KEY": "invalid-not-fernet-encrypted"}
     db_session.commit()
     monkeypatch.setenv("TEST_API_KEY", "env-fallback")
@@ -255,6 +270,7 @@ def test_get_all_credentials_empty_env_vars(db_session):
     db_session.commit()
 
     from app.services.credential_service import get_all_credentials_for_source
+
     result = get_all_credentials_for_source(db_session, "no_vars_source")
     assert result == {}
 
@@ -265,6 +281,7 @@ def test_get_all_credentials_empty_env_vars(db_session):
 def test_get_credential_cached_miss_and_hit(db_session, test_source, monkeypatch):
     """Cache miss fetches from DB; cache hit returns from memory."""
     from unittest.mock import MagicMock, patch
+
     from app.services.credential_service import _cred_cache, encrypt_value, get_credential_cached
 
     # Clear cache first
@@ -299,6 +316,7 @@ def test_get_credential_cached_expired(db_session, test_source, monkeypatch):
     """Expired cache entry triggers fresh DB lookup."""
     import time
     from unittest.mock import MagicMock, patch
+
     from app.services.credential_service import _CACHE_TTL, _cred_cache, encrypt_value, get_credential_cached
 
     _cred_cache.clear()
@@ -327,6 +345,7 @@ def test_get_credential_cached_expired(db_session, test_source, monkeypatch):
 def test_get_credential_decrypt_failure_falls_back(db_session, test_source, monkeypatch):
     """get_credential with corrupt ciphertext falls back to env var."""
     from app.services.credential_service import get_credential
+
     test_source.credentials = {"TEST_API_KEY": "corrupt-ciphertext-not-fernet"}
     db_session.commit()
     monkeypatch.setenv("TEST_API_KEY", "env-fallback-value")

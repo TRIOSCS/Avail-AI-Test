@@ -22,7 +22,6 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
@@ -32,10 +31,8 @@ from app.models import (
     Offer,
     Quote,
     Requisition,
-    User,
     VendorCard,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  HELPERS
@@ -274,11 +271,7 @@ async def test_stock_sale_email_inner_exception(db_session, test_user):
 
     # The exception was caught — verify the function completed successfully
     # by checking that the activity log was still created
-    logs = (
-        db_session.query(ActivityLog)
-        .filter_by(activity_type="buyplan_completed")
-        .all()
-    )
+    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
     assert len(logs) >= 1
 
 
@@ -405,9 +398,7 @@ async def test_vendor_scoring_flush_exception(db_session, test_user):
     # Make db.flush always raise — this is the flush inside the batch loop
     # at line 248. The function catches it on 249-250.
     with (
-        patch.object(
-            db_session, "flush", side_effect=Exception("Simulated flush failure")
-        ),
+        patch.object(db_session, "flush", side_effect=Exception("Simulated flush failure")),
         patch.object(db_session, "commit"),
     ):
         result = await compute_all_vendor_scores(db_session)

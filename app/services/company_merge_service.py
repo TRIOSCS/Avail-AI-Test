@@ -42,7 +42,7 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     for field in ("brand_tags", "commodity_tags"):
         existing = list(getattr(keep, field) or [])
         existing_set = set(str(v) for v in existing)
-        for v in (getattr(remove, field) or []):
+        for v in getattr(remove, field) or []:
             if str(v) not in existing_set:
                 existing.append(v)
                 existing_set.add(str(v))
@@ -55,9 +55,21 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
 
     # 3. Fill enrichment gaps
     for field in (
-        "domain", "linkedin_url", "legal_name", "employee_size",
-        "hq_city", "hq_state", "hq_country", "website", "industry",
-        "phone", "credit_terms", "tax_id", "currency", "preferred_carrier", "account_type",
+        "domain",
+        "linkedin_url",
+        "legal_name",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "website",
+        "industry",
+        "phone",
+        "credit_terms",
+        "tax_id",
+        "currency",
+        "preferred_carrier",
+        "account_type",
     ):
         if getattr(keep, field) is None and getattr(remove, field) is not None:
             setattr(keep, field, getattr(remove, field))
@@ -80,8 +92,7 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     # 7. Handle sites — move or delete empty HQs
     remove_sites = db.query(CustomerSite).filter(CustomerSite.company_id == remove.id).all()
     keep_site_names = {
-        s.site_name.strip().upper()
-        for s in db.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
+        s.site_name.strip().upper() for s in db.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
     }
 
     sites_deleted = 0
@@ -118,8 +129,10 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
         (Sighting, "source_company_id"),
     ]:
         try:
-            count = db.query(model).filter(getattr(model, col) == remove.id).update(
-                {col: keep.id}, synchronize_session="fetch"
+            count = (
+                db.query(model)
+                .filter(getattr(model, col) == remove.id)
+                .update({col: keep.id}, synchronize_session="fetch")
             )
             reassigned += count
         except Exception as e:
@@ -132,15 +145,20 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     # 10. Invalidate cache
     try:
         from ..cache.decorators import invalidate_prefix
+
         invalidate_prefix("company_list")
     except Exception as e:
         logger.warning("Company merge: cache invalidation failed: %s", e)
 
     logger.info(
-        "Company merge: kept %d (%s), removed %d (%s), "
-        "sites_moved=%d, sites_deleted=%d, reassigned=%d",
-        keep.id, keep.name, remove_id, remove.name or "?",
-        sites_moved, sites_deleted, reassigned,
+        "Company merge: kept %d (%s), removed %d (%s), sites_moved=%d, sites_deleted=%d, reassigned=%d",
+        keep.id,
+        keep.name,
+        remove_id,
+        remove.name or "?",
+        sites_moved,
+        sites_deleted,
+        reassigned,
     )
     return {
         "ok": True,

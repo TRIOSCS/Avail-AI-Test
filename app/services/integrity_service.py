@@ -107,13 +107,10 @@ def check_vendor_history_duplicates(db: Session) -> int:
     from ..vendor_utils import normalize_vendor_name
 
     # Pull all vendor histories grouped by card
-    all_vh = (
-        db.query(
-            MaterialVendorHistory.material_card_id,
-            MaterialVendorHistory.vendor_name,
-        )
-        .all()
-    )
+    all_vh = db.query(
+        MaterialVendorHistory.material_card_id,
+        MaterialVendorHistory.vendor_name,
+    ).all()
 
     # Group by (card_id, normalized_vendor_name)
     groups: dict[tuple, int] = {}
@@ -156,9 +153,15 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 r.material_card_id = card.id
                 healed["requirements"] += 1
-                log_audit(db, material_card_id=card.id, action="healed",
-                          entity_type="requirement", entity_id=r.id,
-                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
+                log_audit(
+                    db,
+                    material_card_id=card.id,
+                    action="healed",
+                    entity_type="requirement",
+                    entity_id=r.id,
+                    normalized_mpn=card.normalized_mpn,
+                    created_by="scheduler",
+                )
         except Exception as e:
             logger.warning("INTEGRITY_HEAL_FAIL: requirement id=%s mpn=%s error=%s", r.id, r.primary_mpn, e)
             db.rollback()
@@ -180,9 +183,15 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 s.material_card_id = card.id
                 healed["sightings"] += 1
-                log_audit(db, material_card_id=card.id, action="healed",
-                          entity_type="sighting", entity_id=s.id,
-                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
+                log_audit(
+                    db,
+                    material_card_id=card.id,
+                    action="healed",
+                    entity_type="sighting",
+                    entity_id=s.id,
+                    normalized_mpn=card.normalized_mpn,
+                    created_by="scheduler",
+                )
         except Exception as e:
             logger.warning("INTEGRITY_HEAL_FAIL: sighting id=%s mpn=%s error=%s", s.id, s.mpn_matched, e)
             db.rollback()
@@ -204,9 +213,15 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 o.material_card_id = card.id
                 healed["offers"] += 1
-                log_audit(db, material_card_id=card.id, action="healed",
-                          entity_type="offer", entity_id=o.id,
-                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
+                log_audit(
+                    db,
+                    material_card_id=card.id,
+                    action="healed",
+                    entity_type="offer",
+                    entity_id=o.id,
+                    normalized_mpn=card.normalized_mpn,
+                    created_by="scheduler",
+                )
         except Exception as e:
             logger.warning("INTEGRITY_HEAL_FAIL: offer id=%s mpn=%s error=%s", o.id, o.mpn, e)
             db.rollback()
@@ -285,8 +300,12 @@ def run_integrity_check(db: Session) -> dict:
     logger.info(
         "MC_METRIC: action=integrity_check orphaned_req=%d orphaned_sight=%d "
         "orphaned_offer=%d dangling_total=%d dup_cards=%d vh_dupes=%d",
-        orphaned_req, orphaned_sight, orphaned_offer,
-        total_dangling, dup_cards, vh_dupes,
+        orphaned_req,
+        orphaned_sight,
+        orphaned_offer,
+        total_dangling,
+        dup_cards,
+        vh_dupes,
     )
 
     if total_orphaned == 0 and total_dangling == 0 and dup_cards == 0:
@@ -298,9 +317,14 @@ def run_integrity_check(db: Session) -> dict:
             "dangling_req=%d dangling_sight=%d dangling_offer=%d dup_cards=%d vh_dupes=%d"
         )
         args = (
-            orphaned_req, orphaned_sight, orphaned_offer,
-            dangling["requirements"], dangling["sightings"], dangling["offers"],
-            dup_cards, vh_dupes,
+            orphaned_req,
+            orphaned_sight,
+            orphaned_offer,
+            dangling["requirements"],
+            dangling["sightings"],
+            dangling["offers"],
+            dup_cards,
+            vh_dupes,
         )
         if level == "critical":
             logger.critical(msg, *args)
@@ -321,15 +345,16 @@ def run_integrity_check(db: Session) -> dict:
     # --- Compute linkage percentages ---
     linkage = _compute_linkage_coverage(db)
     for entity, cov in linkage.items():
-        logger.info("MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
-                 entity, cov["pct"], cov["total"], cov["linked"])
+        logger.info(
+            "MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
+            entity,
+            cov["pct"],
+            cov["total"],
+            cov["linked"],
+        )
 
     # --- Determine overall status ---
-    residual_orphans = (
-        check_orphaned_requirements(db)
-        + check_orphaned_sightings(db)
-        + check_orphaned_offers(db)
-    )
+    residual_orphans = check_orphaned_requirements(db) + check_orphaned_sightings(db) + check_orphaned_offers(db)
     if residual_orphans == 0 and total_dangling == 0 and dup_cards == 0:
         status = "healthy"
     elif residual_orphans <= 50 and dup_cards == 0:
@@ -367,11 +392,7 @@ def _compute_linkage_coverage(db: Session) -> dict:
         (Sighting, Sighting.mpn_matched, "sightings"),
         (Offer, Offer.mpn, "offers"),
     ]:
-        total = (
-            db.query(func.count(model.id))
-            .filter(mpn_col.isnot(None), mpn_col != "")
-            .scalar()
-        ) or 0
+        total = (db.query(func.count(model.id)).filter(mpn_col.isnot(None), mpn_col != "").scalar()) or 0
         linked = (
             db.query(func.count(model.id))
             .filter(

@@ -56,9 +56,7 @@ async def run_customer_enrichment_batch(
 
     for gap in gaps:
         # Stop early if all credit budgets are exhausted
-        if not any(
-            can_use_credits(db, p) for p in ["apollo", "hunter_verify", "lusha"]
-        ):
+        if not any(can_use_credits(db, p) for p in ["apollo", "hunter_verify", "lusha"]):
             logger.info("All credit budgets exhausted — stopping batch early at %d/%d", processed, len(gaps))
             break
 
@@ -86,7 +84,9 @@ async def run_customer_enrichment_batch(
 
     logger.info(
         "Customer enrichment batch complete: %d processed, %d enriched, %d errors",
-        processed, enriched, len(errors),
+        processed,
+        enriched,
+        len(errors),
     )
     return {
         "status": "completed",
@@ -108,6 +108,7 @@ async def run_email_reverification(db: Session, max_contacts: int = 200) -> dict
 
     cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)  # Only re-verify contacts verified before this
     from datetime import timedelta
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=90)
 
     contacts = (

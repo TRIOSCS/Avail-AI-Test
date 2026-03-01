@@ -6,27 +6,26 @@ Covers: list_suggested, suggested_stats, get_suggested_detail,
         prospect_claim service (claim, reveal_contacts, briefing, manual add).
 """
 
-import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, User
+from app.models import Company
 from app.models.crm import CustomerSite, SiteContact
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_claim import (
+    _template_briefing,
     add_prospect_manually,
     check_enrichment_status,
     claim_prospect,
     reveal_contacts,
-    _template_briefing,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
+
 
 def _make_prospect(db: Session, **overrides) -> ProspectAccount:
     """Create a ProspectAccount with sensible defaults."""
@@ -53,8 +52,8 @@ def _make_prospect(db: Session, **overrides) -> ProspectAccount:
 
 # ── list_suggested ───────────────────────────────────────────────────────
 
-class TestListSuggested:
 
+class TestListSuggested:
     def test_empty_list(self, client, db_session):
         resp = client.get("/api/prospects/suggested")
         assert resp.status_code == 200
@@ -260,8 +259,8 @@ class TestListSuggested:
 
 # ── suggested_stats ──────────────────────────────────────────────────────
 
-class TestSuggestedStats:
 
+class TestSuggestedStats:
     def test_empty_stats(self, client, db_session):
         resp = client.get("/api/prospects/suggested/stats")
         assert resp.status_code == 200
@@ -301,8 +300,8 @@ class TestSuggestedStats:
 
 # ── get_suggested_detail ─────────────────────────────────────────────────
 
-class TestGetSuggestedDetail:
 
+class TestGetSuggestedDetail:
     def test_returns_full_detail(self, client, db_session):
         p = _make_prospect(
             db_session,
@@ -335,11 +334,13 @@ class TestGetSuggestedDetail:
 
 # ── claim_suggested ──────────────────────────────────────────────────────
 
-class TestClaimSuggested:
 
+class TestClaimSuggested:
     def test_claim_new_discovery(self, client, db_session, test_user):
         """Claiming a prospect with no company_id creates a new Company."""
-        p = _make_prospect(db_session, name="New Disc", domain="newdisc.com", website="https://newdisc.com", industry="Tech")
+        p = _make_prospect(
+            db_session, name="New Disc", domain="newdisc.com", website="https://newdisc.com", industry="Tech"
+        )
         resp = client.post(f"/api/prospects/suggested/{p.id}/claim")
         assert resp.status_code == 200
         data = resp.json()
@@ -446,8 +447,8 @@ class TestClaimSuggested:
 
 # ── dismiss_suggested ────────────────────────────────────────────────────
 
-class TestDismissSuggested:
 
+class TestDismissSuggested:
     def test_dismiss_with_reason(self, client, db_session, test_user):
         p = _make_prospect(db_session, name="Dismiss Me", domain="dismiss.com")
         resp = client.post(
@@ -493,8 +494,8 @@ class TestDismissSuggested:
 
 # ── Serialization edge cases ────────────────────────────────────────────
 
-class TestSerializationEdgeCases:
 
+class TestSerializationEdgeCases:
     def test_null_scores_default_zero(self, client, db_session):
         _make_prospect(db_session, name="Null Scores", domain="null.com", fit_score=None, readiness_score=None)
         resp = client.get("/api/prospects/suggested")
@@ -516,7 +517,9 @@ class TestSerializationEdgeCases:
 
     def test_signal_tags_intent_moderate(self, client, db_session):
         _make_prospect(
-            db_session, name="Intent", domain="intent.com",
+            db_session,
+            name="Intent",
+            domain="intent.com",
             readiness_signals={"intent": {"strength": "moderate"}},
         )
         resp = client.get("/api/prospects/suggested")
@@ -525,7 +528,9 @@ class TestSerializationEdgeCases:
 
     def test_signal_tags_weak_intent_excluded(self, client, db_session):
         _make_prospect(
-            db_session, name="Weak", domain="weak.com",
+            db_session,
+            name="Weak",
+            domain="weak.com",
             readiness_signals={"intent": {"strength": "weak"}},
         )
         resp = client.get("/api/prospects/suggested")
@@ -534,7 +539,9 @@ class TestSerializationEdgeCases:
 
     def test_signal_tags_events(self, client, db_session):
         _make_prospect(
-            db_session, name="Events", domain="events.com",
+            db_session,
+            name="Events",
+            domain="events.com",
             readiness_signals={"events": [{"type": "Acquisition"}, {"type": "Expansion"}]},
         )
         resp = client.get("/api/prospects/suggested")
@@ -578,8 +585,8 @@ class TestSerializationEdgeCases:
 
 # ── claim_prospect service ───────────────────────────────────────────
 
-class TestClaimProspectService:
 
+class TestClaimProspectService:
     def test_claim_new_company_path(self, db_session, test_user):
         p = _make_prospect(db_session, name="Svc Test", domain="svctest.com", industry="Tech")
         result = claim_prospect(p.id, test_user.id, db_session)
@@ -643,8 +650,10 @@ class TestClaimProspectService:
     def test_claim_no_domain_skips_collision_check(self, db_session, test_user):
         """If domain is empty, no collision check is done."""
         p = ProspectAccount(
-            name="No Domain", domain="nodomain.com",
-            discovery_source="manual", status="suggested",
+            name="No Domain",
+            domain="nodomain.com",
+            discovery_source="manual",
+            status="suggested",
         )
         db_session.add(p)
         db_session.commit()
@@ -655,18 +664,33 @@ class TestClaimProspectService:
 
 # ── reveal_contacts service ──────────────────────────────────────────
 
-class TestRevealContacts:
 
+class TestRevealContacts:
     def test_reveal_creates_site_and_contacts(self, db_session, test_user):
         co = Company(name="Rev Co", domain="rev.com", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.flush()
         p = _make_prospect(
-            db_session, name="Rev Co", domain="rev.com", company_id=co.id,
+            db_session,
+            name="Rev Co",
+            domain="rev.com",
+            company_id=co.id,
             enrichment_data={
                 "contacts_full": [
-                    {"name": "Jane VP", "title": "VP Procurement", "email": "jane@rev.com", "verified": True, "seniority": "decision_maker"},
-                    {"name": "Bob Buyer", "title": "Buyer", "email": "bob@rev.com", "verified": True, "seniority": "executor"},
+                    {
+                        "name": "Jane VP",
+                        "title": "VP Procurement",
+                        "email": "jane@rev.com",
+                        "verified": True,
+                        "seniority": "decision_maker",
+                    },
+                    {
+                        "name": "Bob Buyer",
+                        "title": "Buyer",
+                        "email": "bob@rev.com",
+                        "verified": True,
+                        "seniority": "executor",
+                    },
                 ],
             },
         )
@@ -711,7 +735,10 @@ class TestRevealContacts:
         db_session.commit()
 
         p = _make_prospect(
-            db_session, name="Dedup Co", domain="dedup.com", company_id=co.id,
+            db_session,
+            name="Dedup Co",
+            domain="dedup.com",
+            company_id=co.id,
             enrichment_data={
                 "contacts_full": [
                     {"name": "Jane VP", "email": "jane@dedup.com", "verified": True},
@@ -732,7 +759,10 @@ class TestRevealContacts:
         db_session.commit()
 
         p = _make_prospect(
-            db_session, name="Site Co", domain="site.com", company_id=co.id,
+            db_session,
+            name="Site Co",
+            domain="site.com",
+            company_id=co.id,
             enrichment_data={
                 "contacts_full": [{"name": "Test", "email": "test@site.com", "verified": True}],
             },
@@ -746,7 +776,10 @@ class TestRevealContacts:
         db_session.add(co)
         db_session.flush()
         p = _make_prospect(
-            db_session, name="Skip Co", domain="skip.com", company_id=co.id,
+            db_session,
+            name="Skip Co",
+            domain="skip.com",
+            company_id=co.id,
             enrichment_data={
                 "contacts_full": [
                     {"name": "No Email", "email": "", "verified": False},
@@ -762,8 +795,8 @@ class TestRevealContacts:
 
 # ── enrichment_status endpoint ───────────────────────────────────────
 
-class TestEnrichmentStatus:
 
+class TestEnrichmentStatus:
     def test_status_none(self, client, db_session):
         p = _make_prospect(db_session, name="NoEnrich", domain="noenrich.com")
         resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
@@ -775,7 +808,9 @@ class TestEnrichmentStatus:
 
     def test_status_pending(self, client, db_session, test_user):
         p = _make_prospect(
-            db_session, name="Pending", domain="pending.com",
+            db_session,
+            name="Pending",
+            domain="pending.com",
             enrichment_data={"claim_enrichment_status": "pending"},
         )
         resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
@@ -783,7 +818,9 @@ class TestEnrichmentStatus:
 
     def test_status_complete(self, client, db_session):
         p = _make_prospect(
-            db_session, name="Done", domain="done.com",
+            db_session,
+            name="Done",
+            domain="done.com",
             enrichment_data={
                 "claim_enrichment_status": "complete",
                 "contacts_created_count": 3,
@@ -798,7 +835,9 @@ class TestEnrichmentStatus:
 
     def test_status_failed(self, client, db_session):
         p = _make_prospect(
-            db_session, name="Failed", domain="failed.com",
+            db_session,
+            name="Failed",
+            domain="failed.com",
             enrichment_data={
                 "claim_enrichment_status": "failed",
                 "enrichment_error": "API timeout",
@@ -816,15 +855,17 @@ class TestEnrichmentStatus:
 
 # ── check_enrichment_status service ──────────────────────────────────
 
-class TestCheckEnrichmentStatusService:
 
+class TestCheckEnrichmentStatusService:
     def test_not_found_raises(self, db_session):
         with pytest.raises(LookupError):
             check_enrichment_status(99999, db_session)
 
     def test_returns_correct_fields(self, db_session):
         p = _make_prospect(
-            db_session, name="Check", domain="check.com",
+            db_session,
+            name="Check",
+            domain="check.com",
             enrichment_data={
                 "claim_enrichment_status": "enriching",
                 "contacts_created_count": 2,
@@ -840,8 +881,8 @@ class TestCheckEnrichmentStatusService:
 
 # ── add_prospect endpoint ────────────────────────────────────────────
 
-class TestAddProspect:
 
+class TestAddProspect:
     def test_add_new_domain(self, client, db_session):
         resp = client.post("/api/prospects/add", json={"domain": "newcompany.com"})
         assert resp.status_code == 200
@@ -882,8 +923,8 @@ class TestAddProspect:
 
 # ── add_prospect_manually service ────────────────────────────────────
 
-class TestAddProspectManuallyService:
 
+class TestAddProspectManuallyService:
     def test_creates_prospect(self, db_session, test_user):
         result = add_prospect_manually("brand-new.com", test_user.id, db_session)
         assert result["is_new"] is True
@@ -906,8 +947,8 @@ class TestAddProspectManuallyService:
 
 # ── list_batches endpoint ────────────────────────────────────────────
 
-class TestListBatches:
 
+class TestListBatches:
     def test_empty_batches(self, client, db_session):
         resp = client.get("/api/prospects/batches")
         assert resp.status_code == 200
@@ -959,13 +1000,18 @@ class TestListBatches:
 
 # ── template_briefing ────────────────────────────────────────────────
 
-class TestTemplateBriefing:
 
+class TestTemplateBriefing:
     def test_basic_briefing(self, db_session):
         p = _make_prospect(
-            db_session, name="Brief Co", domain="brief.com",
-            industry="Aerospace", employee_count_range="201-500",
-            hq_location="Phoenix, AZ", fit_score=80, readiness_score=65,
+            db_session,
+            name="Brief Co",
+            domain="brief.com",
+            industry="Aerospace",
+            employee_count_range="201-500",
+            hq_location="Phoenix, AZ",
+            fit_score=80,
+            readiness_score=65,
             ai_writeup="Good ICP match.",
         )
         signals = {"intent": {"strength": "strong"}, "hiring": {"type": "engineering"}}
@@ -985,7 +1031,9 @@ class TestTemplateBriefing:
 
     def test_briefing_with_ai_writeup(self, db_session):
         p = _make_prospect(
-            db_session, name="Writeup Co", domain="writeup.com",
+            db_session,
+            name="Writeup Co",
+            domain="writeup.com",
             ai_writeup="This is a detailed analysis.",
         )
         result = _template_briefing(p, {}, [])
@@ -994,15 +1042,19 @@ class TestTemplateBriefing:
 
 # ── generate_account_briefing (async, mocked AI) ────────────────────
 
-class TestGenerateAccountBriefing:
 
+class TestGenerateAccountBriefing:
     @pytest.mark.asyncio
     async def test_ai_briefing_success(self, db_session):
         from app.services.prospect_claim import generate_account_briefing
 
         p = _make_prospect(
-            db_session, name="AI Co", domain="aico.com",
-            industry="Electronics", fit_score=80, readiness_score=70,
+            db_session,
+            name="AI Co",
+            domain="aico.com",
+            industry="Electronics",
+            fit_score=80,
+            readiness_score=70,
         )
         with patch(
             "app.utils.claude_client.claude_text",
@@ -1017,8 +1069,12 @@ class TestGenerateAccountBriefing:
         from app.services.prospect_claim import generate_account_briefing
 
         p = _make_prospect(
-            db_session, name="Fallback Co", domain="fallback.com",
-            industry="Aerospace", fit_score=60, readiness_score=40,
+            db_session,
+            name="Fallback Co",
+            domain="fallback.com",
+            industry="Aerospace",
+            fit_score=60,
+            readiness_score=40,
         )
         with patch(
             "app.utils.claude_client.claude_text",
@@ -1032,6 +1088,7 @@ class TestGenerateAccountBriefing:
     @pytest.mark.asyncio
     async def test_ai_briefing_returns_none_for_missing(self, db_session):
         from app.services.prospect_claim import generate_account_briefing
+
         result = await generate_account_briefing(99999, db_session)
         assert result is None
 
@@ -1040,7 +1097,9 @@ class TestGenerateAccountBriefing:
         from app.services.prospect_claim import generate_account_briefing
 
         p = _make_prospect(
-            db_session, name="Null AI", domain="nullai.com",
+            db_session,
+            name="Null AI",
+            domain="nullai.com",
         )
         with patch(
             "app.utils.claude_client.claude_text",
@@ -1053,8 +1112,8 @@ class TestGenerateAccountBriefing:
 
 # ── trigger_deep_enrichment_bg (async background) ───────────────────
 
-class TestTriggerDeepEnrichmentBg:
 
+class TestTriggerDeepEnrichmentBg:
     @pytest.mark.asyncio
     async def test_enrichment_completes(self, db_session, test_user):
         from app.services.prospect_claim import trigger_deep_enrichment_bg
@@ -1063,20 +1122,32 @@ class TestTriggerDeepEnrichmentBg:
         db_session.add(co)
         db_session.flush()
         p = _make_prospect(
-            db_session, name="Deep Co", domain="deep.com", company_id=co.id,
+            db_session,
+            name="Deep Co",
+            domain="deep.com",
+            company_id=co.id,
             enrichment_data={
                 "claim_enrichment_status": "pending",
                 "contacts_full": [
-                    {"name": "Jane", "email": "jane@deep.com", "verified": True, "seniority": "decision_maker", "title": "VP"},
+                    {
+                        "name": "Jane",
+                        "email": "jane@deep.com",
+                        "verified": True,
+                        "seniority": "decision_maker",
+                        "title": "VP",
+                    },
                 ],
             },
         )
         pid = p.id
 
-        with patch(
-            "app.database.SessionLocal",
-            return_value=db_session,
-        ), patch.object(db_session, "close"):
+        with (
+            patch(
+                "app.database.SessionLocal",
+                return_value=db_session,
+            ),
+            patch.object(db_session, "close"),
+        ):
             with patch(
                 "app.utils.claude_client.claude_text",
                 new_callable=AsyncMock,
@@ -1095,15 +1166,20 @@ class TestTriggerDeepEnrichmentBg:
         from app.services.prospect_claim import trigger_deep_enrichment_bg
 
         p = _make_prospect(
-            db_session, name="Error Co", domain="error.com",
+            db_session,
+            name="Error Co",
+            domain="error.com",
             enrichment_data={"claim_enrichment_status": "pending"},
         )
         pid = p.id
 
-        with patch(
-            "app.database.SessionLocal",
-            return_value=db_session,
-        ), patch.object(db_session, "close"):
+        with (
+            patch(
+                "app.database.SessionLocal",
+                return_value=db_session,
+            ),
+            patch.object(db_session, "close"),
+        ):
             with patch(
                 "app.services.prospect_claim.reveal_contacts",
                 side_effect=Exception("DB crash"),
@@ -1119,10 +1195,13 @@ class TestTriggerDeepEnrichmentBg:
     async def test_enrichment_not_found(self, db_session):
         from app.services.prospect_claim import trigger_deep_enrichment_bg
 
-        with patch(
-            "app.database.SessionLocal",
-            return_value=db_session,
-        ), patch.object(db_session, "close"):
+        with (
+            patch(
+                "app.database.SessionLocal",
+                return_value=db_session,
+            ),
+            patch.object(db_session, "close"),
+        ):
             # Should not raise, just log
             await trigger_deep_enrichment_bg(99999)
 
@@ -1179,10 +1258,15 @@ class TestEnrichFreeEndpoint:
         assert resp.status_code == 404
 
     @patch("app.services.prospect_warm_intros.generate_one_liner", return_value="Great fit!")
-    @patch("app.services.prospect_warm_intros.detect_warm_intros",
-           return_value={"has_warm_intro": True, "shared_vendors": ["Arrow"]})
-    @patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock,
-           return_value={"sam_gov": True, "news_count": 3})
+    @patch(
+        "app.services.prospect_warm_intros.detect_warm_intros",
+        return_value={"has_warm_intro": True, "shared_vendors": ["Arrow"]},
+    )
+    @patch(
+        "app.services.prospect_free_enrichment.run_free_enrichment",
+        new_callable=AsyncMock,
+        return_value={"sam_gov": True, "news_count": 3},
+    )
     def test_enrich_free_success(self, mock_enrich, mock_warm, mock_liner, client, db_session):
         p = _make_prospect(db_session, status="claimed")
         resp = client.post(f"/api/prospects/suggested/{p.id}/enrich-free")
@@ -1197,8 +1281,7 @@ class TestEnrichFreeEndpoint:
 class TestAddProspectManualErrors:
     """Cover ValueError from add_prospect_manually (lines 334-335)."""
 
-    @patch("app.routers.prospect_suggested.add_prospect_manually",
-           side_effect=ValueError("Domain already tracked"))
+    @patch("app.routers.prospect_suggested.add_prospect_manually", side_effect=ValueError("Domain already tracked"))
     def test_add_prospect_duplicate(self, mock_fn, client):
         resp = client.post("/api/prospects/add", json={"domain": "dup.com"})
         assert resp.status_code == 400
