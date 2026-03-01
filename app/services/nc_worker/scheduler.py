@@ -17,8 +17,8 @@ from .config import NcConfig
 
 try:
     from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    from backports.zoneinfo import ZoneInfo  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

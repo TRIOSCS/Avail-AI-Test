@@ -733,3 +733,120 @@ def test_log_vendor_note_with_contact_id(client, test_vendor_card, test_vendor_c
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "logged"
+
+
+# ── Prospecting Accounts (lines 864, 866, 922, 924) ──────────────────
+
+from datetime import timedelta
+
+from app.models import CustomerSite
+
+
+class TestProspectingMyAccounts:
+    def test_no_owned_sites(self, client):
+        """No owned sites -> empty accounts list."""
+        resp = client.get("/api/prospecting/my-accounts")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_green_health_all_active(self, client, db_session, test_user, test_company, test_customer_site):
+        """All sites active in last 30d -> health=green (line 866)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        db_session.commit()
+
+        resp = client.get("/api/prospecting/my-accounts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) >= 1
+        acct = [a for a in data if a["company_id"] == test_company.id][0]
+        assert acct["health"] == "green"
+
+    def test_yellow_health_some_inactive(self, client, db_session, test_user, test_company, test_customer_site):
+        """Some sites active, some not -> health=yellow (line 868)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        db_session.flush()
+
+        # Add another site with no recent activity
+        s2 = CustomerSite(
+            company_id=test_company.id, site_name="Branch2",
+            owner_id=test_user.id, is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+        )
+        db_session.add(s2)
+        db_session.commit()
+
+        resp = client.get("/api/prospecting/my-accounts")
+        assert resp.status_code == 200
+        data = resp.json()
+        acct = [a for a in data if a["company_id"] == test_company.id][0]
+        assert acct["health"] == "yellow"
+
+    def test_red_health_all_inactive(self, client, db_session, test_user, test_company, test_customer_site):
+        """All sites inactive (no activity in 30d) -> health=red (line 870)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=90)
+        db_session.commit()
+
+        resp = client.get("/api/prospecting/my-accounts")
+        assert resp.status_code == 200
+        data = resp.json()
+        acct = [a for a in data if a["company_id"] == test_company.id][0]
+        assert acct["health"] == "red"
+
+
+class TestProspectingAccountSites:
+    def test_account_sites_not_found(self, client):
+        """Non-existent company -> 404."""
+        resp = client.get("/api/prospecting/accounts/99999/sites")
+        assert resp.status_code == 404
+
+    def test_account_sites_green_status(self, client, db_session, test_user, test_company, test_customer_site):
+        """Site with recent activity -> green status (line 922)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        db_session.commit()
+
+        resp = client.get(f"/api/prospecting/accounts/{test_company.id}/sites")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["sites"]) >= 1
+        assert data["sites"][0]["status"] == "green"
+
+    def test_account_sites_yellow_status(self, client, db_session, test_user, test_company, test_customer_site):
+        """Site with activity 31-60d ago -> yellow (line 924)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=45)
+        db_session.commit()
+
+        resp = client.get(f"/api/prospecting/accounts/{test_company.id}/sites")
+        assert resp.status_code == 200
+        assert resp.json()["sites"][0]["status"] == "yellow"
+
+    def test_account_sites_red_status(self, client, db_session, test_user, test_company, test_customer_site):
+        """Site with activity >60d ago -> red (line 924)."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=90)
+        db_session.commit()
+
+        resp = client.get(f"/api/prospecting/accounts/{test_company.id}/sites")
+        assert resp.status_code == 200
+        assert resp.json()["sites"][0]["status"] == "red"
+
+    def test_account_sites_grey_status(self, client, db_session, test_user, test_company, test_customer_site):
+        """Site with no activity -> grey."""
+        test_customer_site.owner_id = test_user.id
+        test_customer_site.is_active = True
+        test_customer_site.last_activity_at = None
+        db_session.commit()
+
+        resp = client.get(f"/api/prospecting/accounts/{test_company.id}/sites")
+        assert resp.status_code == 200
+        assert resp.json()["sites"][0]["status"] == "grey"

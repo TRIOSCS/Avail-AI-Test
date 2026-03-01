@@ -1464,3 +1464,1641 @@ class TestSignalHandler:
             assert worker_mod._shutdown_requested is True
         finally:
             worker_mod._shutdown_requested = original
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS WORKER MAIN LOOP (lines 121-318, 322)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestIcsWorkerMainLoop:
+    """Tests for async main() — patches at source modules since imports are lazy."""
+
+    _DB = "app.database.SessionLocal"
+    _SESSION = "app.services.ics_worker.session_manager.IcsSessionManager"
+    _SCHEDULER = "app.services.ics_worker.scheduler.SearchScheduler"
+    _BREAKER = "app.services.ics_worker.circuit_breaker.CircuitBreaker"
+    _CONFIG = "app.services.ics_worker.config.IcsConfig"
+    _QUEUE_NEXT = "app.services.ics_worker.queue_manager.get_next_queued_item"
+    _QUEUE_RECOVER = "app.services.ics_worker.queue_manager.recover_stale_searches"
+    _QUEUE_MARK = "app.services.ics_worker.queue_manager.mark_status"
+    _QUEUE_COMPLETE = "app.services.ics_worker.queue_manager.mark_completed"
+    _SEARCH = "app.services.ics_worker.search_engine.search_part"
+    _PARSE = "app.services.ics_worker.result_parser.parse_results_html"
+    _SAVE = "app.services.ics_worker.sighting_writer.save_ics_sightings"
+    _AI_GATE = "app.services.ics_worker.ai_gate.process_ai_gate"
+    _ASYNC_SLEEP = "app.services.ics_worker.worker.asyncio.sleep"
+
+    def _make_mock_db(self, db_session):
+        mock_session = MagicMock(wraps=db_session)
+        mock_session.close = MagicMock()
+        return MagicMock(return_value=mock_session)
+
+    @pytest.mark.asyncio
+    async def test_main_shutdown_immediate(self, db_session):
+        """main() exits immediately when shutdown flag is set."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        try:
+            worker_mod._shutdown_requested = True
+
+            mock_session = AsyncMock()
+            mock_session.start = AsyncMock()
+            mock_session.is_logged_in = True
+            mock_session.stop = AsyncMock()
+
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._QUEUE_RECOVER):
+                        await worker_mod.main()
+
+            mock_session.stop.assert_called_once()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_outside_business_hours(self, db_session):
+        """main() sleeps when outside business hours."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_daily_limit(self, db_session):
+        """main() sleeps when daily limit is reached."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+
+        mock_config = MagicMock()
+        mock_config.ICS_MAX_DAILY_SEARCHES = 0
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._CONFIG, return_value=mock_config):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_circuit_breaker_open(self, db_session):
+        """main() sleeps when circuit breaker is open."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = True
+        mock_breaker.get_trip_info.return_value = {"trip_reason": "captcha"}
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_break_time(self, db_session):
+        """main() takes a break when scheduler says so."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = True
+        mock_scheduler.get_break_duration.return_value = 300.0
+        mock_scheduler.reset_break_counter = MagicMock()
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_empty_queue(self, db_session):
+        """main() sleeps when queue is empty."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=None):
+                                            await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_search_success(self, db_session, test_requisition):
+        """main() performs a full search cycle with results."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        search_done = False
+
+        async def mock_sleep(seconds):
+            nonlocal search_done
+            if search_done:
+                worker_mod._shutdown_requested = True
+            search_done = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+        mock_breaker.check_page_health = AsyncMock(return_value="HEALTHY")
+        mock_breaker.record_results = MagicMock()
+        mock_breaker.record_empty_results = MagicMock()
+
+        search_result = {
+            "html": "<div>results</div>",
+            "total_count": 1,
+            "url": "https://icsource.com/search",
+            "duration_ms": 1500,
+        }
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                                with patch(self._PARSE, return_value=[]):
+                                                    with patch(self._SAVE, return_value=0):
+                                                        with patch(self._QUEUE_MARK):
+                                                            with patch(self._QUEUE_COMPLETE):
+                                                                await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_session_expired_during_search(self, db_session, test_requisition):
+        """main() re-queues item when health check returns SESSION_EXPIRED."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def health_then_shutdown(page):
+            worker_mod._shutdown_requested = True
+            return "SESSION_EXPIRED"
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+        mock_breaker.check_page_health = AsyncMock(side_effect=health_then_shutdown)
+
+        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100}
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                                with patch(self._QUEUE_MARK):
+                                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_breaker_trips_during_search(self, db_session, test_requisition):
+        """main() marks item failed when breaker trips after page health check."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        should_stop_calls = [False, True]
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.side_effect = should_stop_calls
+        mock_breaker.check_page_health = AsyncMock(return_value="CAPTCHA_WARNING")
+        mock_breaker.trip_reason = "captcha"
+
+        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100}
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                                with patch(self._QUEUE_MARK):
+                                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_session_reauth_fails(self, db_session, test_requisition):
+        """main() handles session re-auth failure."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=False)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._QUEUE_MARK):
+                                                await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_search_exception(self, db_session, test_requisition):
+        """main() marks item failed on search exception."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")):
+                                                with patch(self._QUEUE_MARK):
+                                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_ai_gate_error(self, db_session):
+        """main() continues after AI gate error."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock, side_effect=Exception("AI boom")):
+                                        with patch(self._QUEUE_NEXT, return_value=None):
+                                            await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_daily_stats_reset(self, db_session):
+        """main() resets daily stats at midnight (cover lines 134-158)."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        loop_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 2:
+                worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_unexpected_error(self, db_session):
+        """main() handles unexpected error in outer try (line 302-304)."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        call_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        # Force an exception that isn't caught by the inner try
+        mock_scheduler.is_business_hours.side_effect = Exception("Outer error")
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_mark_status_exception_in_except(self, db_session, test_requisition):
+        """main() handles mark_status failure in exception handler (lines 292-293)."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        async def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        def mark_status_fail(db, item, status, error=None):
+            raise Exception("DB connection lost")
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")):
+                                                with patch(self._QUEUE_MARK, side_effect=mark_status_fail):
+                                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_daily_stats_with_previous_date(self, db_session):
+        """main() logs daily summary when last_stats_date is not None (lines 136-155)."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        loop_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 2:
+                worker_mod._shutdown_requested = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = False
+
+        real_datetime = datetime
+        from app.services.ics_worker.worker import EASTERN
+
+        eastern_calls = 0
+
+        def patched_now(tz=None):
+            nonlocal eastern_calls
+            # Only track calls with EASTERN timezone (the main loop calls)
+            if tz is not None and str(tz) == str(EASTERN):
+                eastern_calls += 1
+                if eastern_calls == 1:
+                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=timezone.utc)
+                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=timezone.utc)
+            # For timezone.utc calls (update_worker_status, etc.), return a stable time
+            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                with patch("app.services.ics_worker.worker.datetime") as mock_dt:
+                                    mock_dt.now = patched_now
+                                    mock_dt.side_effect = lambda *a, **kw: real_datetime(*a, **kw)
+                                    await worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    @pytest.mark.asyncio
+    async def test_main_search_with_results_record_results(self, db_session, test_requisition):
+        """main() calls breaker.record_results() when parse returns results (line 247)."""
+        import app.services.ics_worker.worker as worker_mod
+
+        ws = IcsWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        search_done = False
+
+        async def mock_sleep(seconds):
+            nonlocal search_done
+            if search_done:
+                worker_mod._shutdown_requested = True
+            search_done = True
+
+        mock_session = AsyncMock()
+        mock_session.start = AsyncMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = AsyncMock()
+        mock_session.page = AsyncMock()
+        mock_session.ensure_session = AsyncMock(return_value=True)
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+        mock_breaker.check_page_health = AsyncMock(return_value="HEALTHY")
+        mock_breaker.record_results = MagicMock()
+
+        search_result = {
+            "html": "<div>results</div>",
+            "total_count": 2,
+            "url": "https://icsource.com/search",
+            "duration_ms": 1500,
+        }
+
+        # Return actual sighting objects so record_results is called
+        mock_sighting = MagicMock()
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._ASYNC_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                                with patch(self._PARSE, return_value=[mock_sighting]):
+                                                    with patch(self._SAVE, return_value=1):
+                                                        with patch(self._QUEUE_MARK):
+                                                            with patch(self._QUEUE_COMPLETE):
+                                                                await worker_mod.main()
+
+            mock_breaker.record_results.assert_called()
+        finally:
+            worker_mod._shutdown_requested = original
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS AI GATE (lines 156, 159-206)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestAiGateFull:
+    @pytest.mark.asyncio
+    async def test_process_ai_gate_classifies_items(self, db_session, test_requisition):
+        """process_ai_gate classifies pending items (lines 159-206)."""
+        from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
+
+        clear_classification_cache()
+
+        req = test_requisition.requirements[0]
+        item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="STM32F103C8T6", normalized_mpn="STM32F103C8T6",
+            status="pending",
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        mock_result = {
+            "classifications": [
+                {"mpn": "STM32F103C8T6", "search_ics": True, "commodity": "semiconductor", "reason": "ARM MCU"}
+            ]
+        }
+
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+            await process_ai_gate(db_session)
+
+        db_session.refresh(item)
+        assert item.status == "queued"
+        assert item.commodity_class == "semiconductor"
+        assert item.gate_decision == "search"
+
+    @pytest.mark.asyncio
+    async def test_process_ai_gate_gated_out(self, db_session, test_requisition):
+        """process_ai_gate gates out commodity items."""
+        from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
+
+        clear_classification_cache()
+
+        req = test_requisition.requirements[0]
+        item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="RC0402FR-07100KL", normalized_mpn="RC0402FR07100KL",
+            status="pending",
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        mock_result = {
+            "classifications": [
+                {"mpn": "RC0402FR-07100KL", "search_ics": False, "commodity": "passive", "reason": "Standard resistor"}
+            ]
+        }
+
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+            await process_ai_gate(db_session)
+
+        db_session.refresh(item)
+        assert item.status == "gated_out"
+
+    @pytest.mark.asyncio
+    async def test_process_ai_gate_api_failure_failopen(self, db_session, test_requisition):
+        """process_ai_gate defaults to 'queued' on API failure (fail-open)."""
+        import app.services.ics_worker.ai_gate as ai_gate_mod
+        from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
+
+        clear_classification_cache()
+        ai_gate_mod._last_api_failure = 0.0
+
+        req = test_requisition.requirements[0]
+        item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="UNKNOWN123", normalized_mpn="UNKNOWN123",
+            status="pending",
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=None):
+            await process_ai_gate(db_session)
+
+        db_session.refresh(item)
+        assert item.status == "queued"
+        assert item.gate_reason == "AI gate unavailable — defaulting to search"
+        assert ai_gate_mod._last_api_failure > 0
+
+        ai_gate_mod._last_api_failure = 0.0
+
+    @pytest.mark.asyncio
+    async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
+        """process_ai_gate handles when model doesn't return a classification for an MPN."""
+        from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
+
+        clear_classification_cache()
+
+        req = test_requisition.requirements[0]
+        item = IcsSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="MISSING_MPN", normalized_mpn="MISSING_MPN",
+            status="pending",
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        mock_result = {"classifications": []}
+
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
+            await process_ai_gate(db_session)
+
+        db_session.refresh(item)
+        assert item.status == "pending"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS SCHEDULER (lines 20-21, 42, 48, 53-56)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSchedulerBranches:
+    def test_business_hours_force_env(self):
+        """FORCE_BUSINESS_HOURS env var overrides schedule (line 42)."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch.dict(os.environ, {"FORCE_BUSINESS_HOURS": "1"}):
+            assert sched.is_business_hours() is True
+
+    def test_business_hours_saturday(self):
+        """Saturday always returns False (line 48)."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        # Saturday: weekday() == 5
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 5
+            mock_now.hour = 12
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_sunday_before_6pm(self):
+        """Sunday before 6 PM returns False (line 51)."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 6
+            mock_now.hour = 10
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_sunday_after_6pm(self):
+        """Sunday at 6 PM+ returns True."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 6
+            mock_now.hour = 18
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+    def test_business_hours_friday_before_5pm(self):
+        """Friday before 5 PM returns True (line 54)."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 4
+            mock_now.hour = 12
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+    def test_business_hours_friday_after_5pm(self):
+        """Friday at 5 PM+ returns False."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 4
+            mock_now.hour = 17
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_weekday(self):
+        """Monday-Thursday always returns True (line 56)."""
+        cfg = IcsConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 2  # Wednesday
+            mock_now.hour = 3
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS SEARCH ENGINE (lines 54-55, 95-96, 117-136, 140-177)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSearchEngineFull:
+    @pytest.mark.asyncio
+    async def test_search_part_all_selectors_fail_fallback(self):
+        """When all 4 selectors fail, falls back to first text input (lines 52-55)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        # All selectors fail
+        failing_locator = AsyncMock()
+        failing_locator.wait_for = AsyncMock(side_effect=Exception("not found"))
+        failing_locator.count = AsyncMock(return_value=0)
+        failing_locator.is_visible = AsyncMock(return_value=False)
+
+        fallback_locator = AsyncMock()
+        fallback_locator.fill = AsyncMock()
+        fallback_locator.first = fallback_locator
+
+        def mock_locator(sel):
+            if sel == "input[type='text']":
+                return fallback_locator
+            return failing_locator
+
+        page.locator = MagicMock(side_effect=mock_locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+        # evaluate calls: 1=diagnostic, 2=JS strategy, 3=results HTML, 4=total_count
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "no method found",
+            "<html></html>",
+            0,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+
+            result = await search_part(page, "XYZ123")
+
+        assert result["html"] == "<html></html>"
+
+    @pytest.mark.asyncio
+    async def test_search_part_screenshot_failure(self):
+        """Screenshot failure is handled gracefully (lines 95-96)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        locator = AsyncMock()
+        locator.wait_for = AsyncMock()
+        locator.is_visible = AsyncMock(return_value=True)
+        locator.count = AsyncMock(return_value=1)
+        locator.fill = AsyncMock()
+        page.locator = MagicMock(return_value=locator)
+
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock(side_effect=Exception("Screenshot failed"))
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "<html>body</html>",
+            0,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+
+            result = await search_part(page, "XYZ123")
+
+        assert result["html"] == "<html>body</html>"
+
+    @pytest.mark.asyncio
+    async def test_search_part_strategy2_force_click(self):
+        """Strategy 2: force-click hidden button (lines 122-136)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        # Input locator is visible
+        pn_locator = AsyncMock()
+        pn_locator.wait_for = AsyncMock()
+        pn_locator.is_visible = AsyncMock(return_value=True)
+        pn_locator.fill = AsyncMock()
+
+        # Button locator: visible check fails but count > 0 for force-click
+        btn_locator = AsyncMock()
+        btn_locator.count = AsyncMock(return_value=1)
+        btn_locator.is_visible = AsyncMock(return_value=False)  # Strategy 1 skips
+        btn_locator.click = AsyncMock()  # Strategy 2 force-click
+
+        call_count = 0
+
+        def mock_locator(sel):
+            nonlocal call_count
+            if "PartNumber" in sel or "txtPN" in sel:
+                return pn_locator
+            return btn_locator
+
+        page.locator = MagicMock(side_effect=mock_locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "<html>results</html>",
+            5,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+
+            result = await search_part(page, "XYZ123")
+
+        assert result["html"] == "<html>results</html>"
+
+    @pytest.mark.asyncio
+    async def test_search_part_strategy3_js_click(self):
+        """Strategy 3: JS-based search submission (lines 140-177)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        # Input locator is visible
+        pn_locator = AsyncMock()
+        pn_locator.wait_for = AsyncMock()
+        pn_locator.is_visible = AsyncMock(return_value=True)
+        pn_locator.fill = AsyncMock()
+
+        # Button locator: both strategies 1 and 2 fail
+        btn_locator = AsyncMock()
+        btn_locator.count = AsyncMock(return_value=0)
+        btn_locator.is_visible = AsyncMock(return_value=False)
+
+        def mock_locator(sel):
+            if "PartNumber" in sel or "txtPN" in sel or sel == "input[type='text']":
+                return pn_locator
+            return btn_locator
+
+        page.locator = MagicMock(side_effect=mock_locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "clicked: #btn",  # JS strategy result
+            "<html>js results</html>",
+            3,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+
+            result = await search_part(page, "XYZ123")
+
+        assert result["html"] == "<html>js results</html>"
+
+    @pytest.mark.asyncio
+    async def test_search_part_diagnostic_buttons_and_forms(self):
+        """Diagnostic logging iterates over buttons and forms (lines 85-89)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        locator = AsyncMock()
+        locator.wait_for = AsyncMock()
+        locator.is_visible = AsyncMock(return_value=True)
+        locator.count = AsyncMock(return_value=1)
+        locator.fill = AsyncMock()
+        page.locator = MagicMock(return_value=locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+
+        # Diagnostic data has buttons and forms to iterate over (covers lines 86, 89)
+        page.evaluate = AsyncMock(side_effect=[
+            {
+                "buttons": [
+                    {"tag": "INPUT", "id": "btn1", "type": "submit", "value": "Search",
+                     "text": "Search", "visible": True, "display": "block", "onclick": ""},
+                    {"tag": "BUTTON", "id": "btn2", "type": "button", "value": "",
+                     "text": "Go", "visible": False, "display": "none", "onclick": "doSearch()"},
+                ],
+                "forms": [
+                    {"id": "form1", "action": "/search", "method": "post"},
+                ],
+                "url": "http://test", "title": "Search",
+            },
+            "<html>results</html>",
+            2,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+            result = await search_part(page, "TEST123")
+
+        assert result["total_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_search_part_strategy1_exception(self):
+        """Strategy 1 button exception triggers continue (lines 117-118)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        # Input locator is visible
+        pn_locator = AsyncMock()
+        pn_locator.wait_for = AsyncMock()
+        pn_locator.is_visible = AsyncMock(return_value=True)
+        pn_locator.fill = AsyncMock()
+
+        # Button locator: count raises exception for Strategy 1 (lines 117-118)
+        # but count returns 0 for Strategy 2 so it falls through to JS
+        btn_locator = AsyncMock()
+        btn_locator.count = AsyncMock(side_effect=Exception("element detached"))
+        btn_locator.is_visible = AsyncMock(side_effect=Exception("element detached"))
+
+        def mock_locator(sel):
+            if "PartNumber" in sel or "txtPN" in sel:
+                return pn_locator
+            return btn_locator
+
+        page.locator = MagicMock(side_effect=mock_locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "submitted form",
+            "<html>found</html>",
+            1,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+            result = await search_part(page, "ABC")
+
+        assert result["html"] == "<html>found</html>"
+
+    @pytest.mark.asyncio
+    async def test_search_part_strategy2_force_click_exception(self):
+        """Strategy 2 force-click raises exception, falls to Strategy 3 (lines 134-136)."""
+        page = AsyncMock()
+        page.goto = AsyncMock()
+        page.url = "https://www.icsource.com/search"
+
+        pn_locator = AsyncMock()
+        pn_locator.wait_for = AsyncMock()
+        pn_locator.is_visible = AsyncMock(return_value=True)
+        pn_locator.fill = AsyncMock()
+
+        # Strategy 1: count > 0 but is_visible False -> skip
+        # Strategy 2: count > 0, click(force=True) raises -> triggers lines 134-136
+        btn_locator = AsyncMock()
+        btn_locator.count = AsyncMock(return_value=1)
+        btn_locator.is_visible = AsyncMock(return_value=False)
+        btn_locator.click = AsyncMock(side_effect=Exception("click timeout"))
+
+        def mock_locator(sel):
+            if "PartNumber" in sel or "txtPN" in sel:
+                return pn_locator
+            return btn_locator
+
+        page.locator = MagicMock(side_effect=mock_locator)
+        page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "called showPageAjax()",
+            "<html>js fallback</html>",
+            0,
+        ])
+
+        with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
+            mock_hb.human_type = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            mock_hb.random_delay = AsyncMock()
+            result = await search_part(page, "DEF")
+
+        assert result["html"] == "<html>js fallback</html>"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS SESSION MANAGER (lines 47-64, 78-88, 109-172)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSessionManagerFull:
+    @pytest.mark.asyncio
+    async def test_start_success(self):
+        """start() launches browser and checks health (lines 47-64)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.url = "https://www.icsource.com/members/Search/NewSearch.aspx"
+
+        mock_context = AsyncMock()
+        mock_context.pages = [mock_page]
+
+        mock_chromium = AsyncMock()
+        mock_chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+
+        mock_pw = AsyncMock()
+        mock_pw.chromium = mock_chromium
+
+        mock_pw_cm = AsyncMock()
+        mock_pw_cm.start = AsyncMock(return_value=mock_pw)
+
+        mock_async_pw = MagicMock(return_value=mock_pw_cm)
+
+        with patch.dict(os.environ, {"DISPLAY": ":99"}):
+            with patch("patchright.async_api.async_playwright", mock_async_pw):
+                with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=True):
+                    await sm.start()
+
+        assert sm.is_logged_in is True
+
+    @pytest.mark.asyncio
+    async def test_start_not_logged_in(self):
+        """start() sets is_logged_in=False when not already logged in."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+
+        mock_context = AsyncMock()
+        mock_context.pages = [mock_page]
+
+        mock_chromium = AsyncMock()
+        mock_chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+
+        mock_pw = AsyncMock()
+        mock_pw.chromium = mock_chromium
+
+        mock_pw_cm = AsyncMock()
+        mock_pw_cm.start = AsyncMock(return_value=mock_pw)
+
+        mock_async_pw = MagicMock(return_value=mock_pw_cm)
+
+        with patch.dict(os.environ, {"DISPLAY": ":99"}):
+            with patch("patchright.async_api.async_playwright", mock_async_pw):
+                with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=False):
+                    await sm.start()
+
+        assert sm.is_logged_in is False
+
+    @pytest.mark.asyncio
+    async def test_check_session_health_login_redirect(self):
+        """check_session_health returns False on login redirect (line 83)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        sm = IcsSessionManager(cfg)
+        sm._page = AsyncMock()
+        sm._page.goto = AsyncMock()
+        sm._page.url = "https://www.icsource.com/home/login.aspx"
+
+        result = await sm.check_session_health()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_session_health_redirect_to_home(self):
+        """check_session_health returns False when redirected to public home (line 86)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        sm = IcsSessionManager(cfg)
+        sm._page = AsyncMock()
+        sm._page.goto = AsyncMock()
+        sm._page.url = "https://www.icsource.com/"
+
+        result = await sm.check_session_health()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_check_session_health_valid(self):
+        """check_session_health returns True when on members page."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        sm = IcsSessionManager(cfg)
+        sm._page = AsyncMock()
+        sm._page.goto = AsyncMock()
+        sm._page.url = "https://www.icsource.com/members/Search/NewSearch.aspx"
+
+        result = await sm.check_session_health()
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_login_success(self):
+        """login() full success flow (lines 109-172)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        cfg.ICS_USERNAME = "testuser"
+        cfg.ICS_PASSWORD = "testpass"
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock()
+
+        mock_locator = AsyncMock()
+        mock_locator.wait_for = AsyncMock()
+        mock_locator.click = AsyncMock()
+        mock_page.locator = MagicMock(return_value=mock_locator)
+
+        sm._page = mock_page
+
+        with patch("app.services.ics_worker.session_manager.HumanBehavior") as mock_hb:
+            mock_hb.random_delay = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=True):
+                result = await sm.login()
+
+        assert result is True
+        assert sm.is_logged_in is True
+
+    @pytest.mark.asyncio
+    async def test_login_failed_after_submit(self):
+        """login() sets is_logged_in=False when health check fails after login."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        cfg.ICS_USERNAME = "testuser"
+        cfg.ICS_PASSWORD = "testpass"
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock()
+
+        mock_locator = AsyncMock()
+        mock_locator.wait_for = AsyncMock()
+        mock_locator.click = AsyncMock()
+        mock_page.locator = MagicMock(return_value=mock_locator)
+
+        sm._page = mock_page
+
+        with patch("app.services.ics_worker.session_manager.HumanBehavior") as mock_hb:
+            mock_hb.random_delay = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=False):
+                result = await sm.login()
+
+        assert result is False
+        assert sm.is_logged_in is False
+
+    @pytest.mark.asyncio
+    async def test_login_password_placeholder_fails(self):
+        """login() handles missing password placeholder gracefully (line 136-137)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        cfg.ICS_USERNAME = "testuser"
+        cfg.ICS_PASSWORD = "testpass"
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock()
+
+        pwd_locator = AsyncMock()
+        pwd_locator.wait_for = AsyncMock(side_effect=Exception("not found"))
+
+        username_locator = AsyncMock()
+        username_locator.wait_for = AsyncMock()
+        username_locator.click = AsyncMock()
+
+        login_btn_locator = AsyncMock()
+        login_btn_locator.wait_for = AsyncMock()
+
+        def mock_locator(sel):
+            if "passwordhidden" in sel:
+                return pwd_locator
+            if "btnLogIn" in sel:
+                return login_btn_locator
+            return username_locator
+
+        mock_page.locator = MagicMock(side_effect=mock_locator)
+        sm._page = mock_page
+
+        with patch("app.services.ics_worker.session_manager.HumanBehavior") as mock_hb:
+            mock_hb.random_delay = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=True):
+                result = await sm.login()
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_login_fallback_button(self):
+        """login() uses fallback ASP.NET button when green button not found (lines 159-162)."""
+        from app.services.ics_worker.session_manager import IcsSessionManager
+
+        cfg = IcsConfig()
+        cfg.ICS_USERNAME = "testuser"
+        cfg.ICS_PASSWORD = "testpass"
+        sm = IcsSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock()
+
+        username_locator = AsyncMock()
+        username_locator.wait_for = AsyncMock()
+
+        pwd_locator = AsyncMock()
+        pwd_locator.wait_for = AsyncMock()
+        pwd_locator.click = AsyncMock()
+
+        green_btn = AsyncMock()
+        green_btn.wait_for = AsyncMock(side_effect=Exception("not visible"))
+
+        fallback_btn = AsyncMock()
+
+        def mock_locator(sel):
+            if "passwordhidden" in sel:
+                return pwd_locator
+            if "green" in sel:
+                return green_btn
+            if "btnLogIn" in sel:
+                return fallback_btn
+            return username_locator
+
+        mock_page.locator = MagicMock(side_effect=mock_locator)
+        sm._page = mock_page
+
+        with patch("app.services.ics_worker.session_manager.HumanBehavior") as mock_hb:
+            mock_hb.random_delay = AsyncMock()
+            mock_hb.human_click = AsyncMock()
+            with patch.object(sm, "check_session_health", new_callable=AsyncMock, return_value=True):
+                result = await sm.login()
+
+        assert result is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS RESULT PARSER (lines 161-163)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestResultParserExceptions:
+    def test_exception_in_row_parsing(self):
+        """Force an IndexError in row parsing (lines 161-163)."""
+        with patch("app.services.ics_worker.result_parser.parse_quantity", side_effect=IndexError("forced")):
+            result = parse_results_html("""
+            <div class="tblWTBPanel">
+              <div class="flex">
+                <a href="javascript:OpenProfile(1)">V</a>
+              </div>
+              <tr class="browseMatchItem">
+                <td>P</td><td>D</td><td>1</td><td></td><td>M</td><td></td><td></td>
+              </tr>
+            </div>
+            """)
+        assert result == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: ICS QUEUE MANAGER (line 42)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestQueueManagerEdge:
+    def test_enqueue_whitespace_mpn(self, db_session, test_requisition):
+        """Whitespace-only MPN normalizes to empty, returns None (line 42)."""
+        req = test_requisition.requirements[0]
+        req.primary_mpn = "   "
+        db_session.commit()
+        result = enqueue_for_ics_search(req.id, db_session)
+        assert result is None

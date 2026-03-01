@@ -377,6 +377,28 @@ class TestAuthStatusExtended:
         assert data["user_name"] == test_user.email.split("@")[0]
 
 
+class TestMailboxSettingsError:
+    @patch("app.routers.auth.http")
+    def test_callback_mailbox_settings_exception(self, mock_http, auth_client, db_session):
+        """fetch_and_store_mailbox_settings raises -> callback still succeeds."""
+        mock_http.post = AsyncMock(return_value=_mock_token_response())
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(
+            email="mailboxerr@trioscs.com", name="Mailbox Error"
+        ))
+
+        with patch(
+            "app.services.mailbox_intelligence.fetch_and_store_mailbox_settings",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("Mailbox API unavailable"),
+        ):
+            resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+        user = db_session.query(User).filter_by(email="mailboxerr@trioscs.com").first()
+        assert user is not None
+        assert user.access_token == "mock-access-token"
+
+
 class TestIndexExtended:
     def test_index_unauthenticated(self, auth_client):
         """GET / without session still serves HTML page."""

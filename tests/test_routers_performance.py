@@ -154,3 +154,34 @@ class TestVendorScorecardSearch:
         """List vendor scorecards with search parameter."""
         resp = client.get("/api/performance/vendors?search=arrow")
         assert resp.status_code == 200
+
+
+class TestUnifiedScoresRefresh:
+    """Tests for /api/performance/unified-scores/refresh (lines 265-268)."""
+
+    def test_unified_scores_non_admin_rejected(self, client):
+        """Non-admin gets 403."""
+        resp = client.post("/api/performance/unified-scores/refresh")
+        assert resp.status_code == 403
+
+    @patch("app.services.unified_score_service.compute_all_unified_scores",
+           return_value={"computed": 3})
+    def test_unified_scores_admin_success(self, mock_compute, admin_perf_client):
+        """Admin can refresh unified scores with valid month."""
+        resp = admin_perf_client.post("/api/performance/unified-scores/refresh?month=2026-01")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        assert resp.json()["computed"] == 3
+
+    def test_unified_scores_admin_invalid_month(self, admin_perf_client):
+        """Invalid month format returns 400."""
+        resp = admin_perf_client.post("/api/performance/unified-scores/refresh?month=bad-date")
+        assert resp.status_code == 400
+
+    @patch("app.services.unified_score_service.compute_all_unified_scores",
+           return_value={"computed": 5})
+    def test_unified_scores_admin_no_month(self, mock_compute, admin_perf_client):
+        """No month defaults to current month."""
+        resp = admin_perf_client.post("/api/performance/unified-scores/refresh")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"

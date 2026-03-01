@@ -12,7 +12,7 @@ from .base import Base  # noqa: F401
 from .buy_plan import BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
 
 # System Config
-from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401
+from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401
 
 # CRM: Companies & Sites
 from .crm import Company, CustomerSite, SiteContact  # noqa: F401

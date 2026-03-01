@@ -1237,3 +1237,92 @@ class TestConnectorHealth:
         connectors = resp.json()["connectors"]
         match = [c for c in connectors if c["name"] == "ok_src"][0]
         assert match["status"] == "live"
+
+
+class TestIntegrityCheck:
+    """Tests for /api/admin/integrity (lines 323-325)."""
+
+    @patch("app.services.integrity_service.run_integrity_check",
+           return_value={"status": "healthy", "issues": []})
+    def test_integrity_check(self, mock_check, admin_client):
+        resp = admin_client.get("/api/admin/integrity")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "healthy"
+
+
+class TestMaterialAudit:
+    """Tests for /api/admin/material-audit (lines 336-350)."""
+
+    def test_material_audit_empty(self, admin_client):
+        """No audit entries returns empty list."""
+        resp = admin_client.get("/api/admin/material-audit")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["entries"] == []
+
+    def test_material_audit_with_filter(self, admin_client, db_session):
+        """Filter by card_id and action."""
+        from app.models import MaterialCardAudit
+        audit = MaterialCardAudit(
+            material_card_id=1,
+            action="merge",
+            entity_type="material_card",
+            entity_id=1,
+            normalized_mpn="lm317t",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(audit)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/material-audit?card_id=1&action=merge")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["entries"][0]["action"] == "merge"
+
+    def test_material_audit_pagination(self, admin_client):
+        """Limit and offset work."""
+        resp = admin_client.get("/api/admin/material-audit?limit=10&offset=0")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["limit"] == 10
+        assert data["offset"] == 0
+
+
+class TestCompanyMergePreview:
+    """Tests for /api/admin/company-merge-preview (lines 456, 472)."""
+
+    def test_merge_preview_not_found(self, admin_client):
+        """Missing company -> 404."""
+        resp = admin_client.get("/api/admin/company-merge-preview?keep_id=99999&remove_id=99998")
+        assert resp.status_code == 404
+
+    def test_merge_preview_success(self, admin_client, db_session):
+        """Preview merging two companies with sites."""
+        keep = Company(name="Keep Co", is_active=True)
+        remove = Company(name="Remove Co", is_active=True, domain="remove.com")
+        db_session.add_all([keep, remove])
+        db_session.flush()
+
+        # Add an empty HQ site to remove (should count as sites_to_delete)
+        empty_hq = CustomerSite(company_id=remove.id, site_name="HQ")
+        # Add a non-empty site to remove (should count as sites_to_move)
+        real_site = CustomerSite(
+            company_id=remove.id, site_name="Branch",
+            contact_name="John", contact_email="john@remove.com",
+        )
+        db_session.add_all([empty_hq, real_site])
+        db_session.commit()
+
+        resp = admin_client.get(
+            f"/api/admin/company-merge-preview?keep_id={keep.id}&remove_id={remove.id}"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["keep"]["name"] == "Keep Co"
+        assert data["remove"]["name"] == "Remove Co"
+        assert data["sites_to_delete"] == 1
+        assert data["sites_to_move"] == 1
+        assert "fields_to_fill" in data
+        assert "domain" in data["fields_to_fill"]

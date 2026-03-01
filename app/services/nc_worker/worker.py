@@ -23,8 +23,8 @@ from sqlalchemy.orm import Session
 
 try:
     from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    from backports.zoneinfo import ZoneInfo  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 
@@ -321,5 +321,5 @@ def main():
             db.close()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()

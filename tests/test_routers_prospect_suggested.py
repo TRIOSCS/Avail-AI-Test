@@ -1125,3 +1125,80 @@ class TestTriggerDeepEnrichmentBg:
         ), patch.object(db_session, "close"):
             # Should not raise, just log
             await trigger_deep_enrichment_bg(99999)
+
+
+# ── Additional router coverage (lines 76-77, 85, 210, 287-308, 334-335) ──
+
+
+class TestListSuggestedFilters:
+    """Cover employee_size and min_readiness_score filter branches."""
+
+    def test_filter_employee_size(self, client, db_session):
+        """employee_size filter uses ilike (line 76-77)."""
+        p = _make_prospect(db_session, employee_count_range="100-500")
+        resp = client.get("/api/prospects/suggested?employee_size=100")
+        assert resp.status_code == 200
+
+    def test_filter_min_readiness_score(self, client, db_session):
+        """min_readiness_score filter (line 85)."""
+        p = _make_prospect(db_session, readiness_score=80)
+        resp = client.get("/api/prospects/suggested?min_readiness_score=70")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert all(i["readiness_score"] >= 70 for i in items)
+
+
+class TestClaimSiteCap:
+    """Cover site cap check (line 210)."""
+
+    def test_claim_exceeds_site_cap(self, client, db_session, test_user, test_company):
+        """User over site cap -> 409."""
+        # Create SITE_CAP active sites owned by test_user
+        for i in range(200):
+            s = CustomerSite(
+                company_id=test_company.id,
+                site_name=f"Site{i}",
+                owner_id=test_user.id,
+                is_active=True,
+            )
+            db_session.add(s)
+        db_session.flush()
+
+        p = _make_prospect(db_session, status="suggested")
+        db_session.commit()
+
+        resp = client.post(f"/api/prospects/suggested/{p.id}/claim")
+        assert resp.status_code == 409
+
+
+class TestEnrichFreeEndpoint:
+    """Cover /api/prospects/suggested/{id}/enrich-free (lines 287-308)."""
+
+    def test_enrich_free_not_found(self, client):
+        resp = client.post("/api/prospects/suggested/99999/enrich-free")
+        assert resp.status_code == 404
+
+    @patch("app.services.prospect_warm_intros.generate_one_liner", return_value="Great fit!")
+    @patch("app.services.prospect_warm_intros.detect_warm_intros",
+           return_value={"has_warm_intro": True, "shared_vendors": ["Arrow"]})
+    @patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock,
+           return_value={"sam_gov": True, "news_count": 3})
+    def test_enrich_free_success(self, mock_enrich, mock_warm, mock_liner, client, db_session):
+        p = _make_prospect(db_session, status="claimed")
+        resp = client.post(f"/api/prospects/suggested/{p.id}/enrich-free")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sam_gov"] is True
+        assert data["news_count"] == 3
+        assert data["has_warm_intro"] is True
+        assert data["one_liner"] == "Great fit!"
+
+
+class TestAddProspectManualErrors:
+    """Cover ValueError from add_prospect_manually (lines 334-335)."""
+
+    @patch("app.routers.prospect_suggested.add_prospect_manually",
+           side_effect=ValueError("Domain already tracked"))
+    def test_add_prospect_duplicate(self, mock_fn, client):
+        resp = client.post("/api/prospects/add", json={"domain": "dup.com"})
+        assert resp.status_code == 400

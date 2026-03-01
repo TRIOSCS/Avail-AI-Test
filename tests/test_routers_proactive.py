@@ -432,3 +432,104 @@ class TestContactsExtended:
         assert data[0]["full_name"] == "Bob Jones"
         assert data[0]["title"] == "Director"
         assert data[1]["is_primary"] is False
+
+
+class TestDoNotOffer:
+    """Tests for /api/proactive/do-not-offer (lines 108-144)."""
+
+    def test_do_not_offer_empty_items(self, client):
+        """Empty items list -> 400."""
+        resp = client.post("/api/proactive/do-not-offer", json={"items": []})
+        assert resp.status_code == 400
+
+    def test_do_not_offer_success(self, client, db_session, test_company):
+        """Suppresses MPNs and returns count."""
+        resp = client.post("/api/proactive/do-not-offer", json={
+            "items": [
+                {"mpn": "LM317T", "company_id": test_company.id, "reason": "Customer dropped"},
+                {"mpn": "LM7805", "company_id": test_company.id},
+            ],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["suppressed"] == 2
+
+    def test_do_not_offer_skip_blank_mpn(self, client, db_session, test_company):
+        """Items with blank MPN or no company_id are skipped."""
+        resp = client.post("/api/proactive/do-not-offer", json={
+            "items": [
+                {"mpn": "", "company_id": test_company.id},
+                {"mpn": "LM317T", "company_id": 0},  # company_id=0 is falsy
+            ],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["suppressed"] == 0
+
+    def test_do_not_offer_duplicate_ignored(self, client, db_session, test_company):
+        """Second suppression of same MPN+company is not counted again."""
+        payload = {"items": [{"mpn": "LM317T", "company_id": test_company.id}]}
+        resp1 = client.post("/api/proactive/do-not-offer", json=payload)
+        assert resp1.json()["suppressed"] == 1
+        resp2 = client.post("/api/proactive/do-not-offer", json=payload)
+        assert resp2.json()["suppressed"] == 0
+
+    def test_do_not_offer_auto_dismisses_matches(
+        self, client, db_session, test_company, test_user, test_requisition, test_offer, test_customer_site
+    ):
+        """Suppression auto-dismisses open proactive matches."""
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            company_id=test_company.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+
+        resp = client.post("/api/proactive/do-not-offer", json={
+            "items": [{"mpn": "LM317T", "company_id": test_company.id}],
+        })
+        assert resp.status_code == 200
+        db_session.refresh(match)
+        assert match.status == "dismissed"
+
+
+class TestDraftWithContactIds:
+    """Test draft endpoint with contact_ids to cover lines 180-182."""
+
+    @patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock,
+           return_value={"subject": "Parts Available", "body": "Hi!", "html": "<p>Hi!</p>"})
+    def test_draft_with_contact_ids(self, mock_draft, client, db_session, test_user,
+                                     test_requisition, test_offer, test_customer_site):
+        """Draft with contact_ids resolves first name for the greeting."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Jane Buyer",
+            email="jane@acme.com",
+            is_primary=True,
+        )
+        db_session.add(contact)
+        db_session.flush()
+
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+
+        resp = client.post("/api/proactive/draft", json={
+            "match_ids": [match.id],
+            "contact_ids": [contact.id],
+        })
+        assert resp.status_code == 200
+        assert resp.json()["subject"] == "Parts Available"

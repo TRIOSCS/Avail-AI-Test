@@ -647,3 +647,123 @@ def test_backfill_emails_with_data(admin_client, db_session, test_vendor_card, a
     assert "activity_log_created" in data
     assert "vendor_card_created" in data
     assert "brokerbin_created" in data
+
+
+# ── Customer enrichment error return (line 678) ──────────────────────
+
+from app.models import Company, CustomerSite
+from app.models.crm import SiteContact
+
+
+class TestCustomerEnrichEndpoint:
+    @patch("app.services.customer_enrichment_service.enrich_customer_account",
+           new_callable=AsyncMock, return_value={"error": "No API keys configured"})
+    def test_enrich_customer_returns_error(self, mock_enrich, admin_client, db_session):
+        """Enrichment returns error dict -> returned as-is (line 678)."""
+        co = Company(name="Error Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = admin_client.post(
+            f"/api/enrichment/customer/{co.id}",
+            json={},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["error"] == "No API keys configured"
+
+    @patch("app.services.customer_enrichment_service.enrich_customer_account",
+           new_callable=AsyncMock, return_value={"ok": True, "contacts_added": 2})
+    def test_enrich_customer_success(self, mock_enrich, admin_client, db_session):
+        co = Company(name="Good Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = admin_client.post(f"/api/enrichment/customer/{co.id}", json={})
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+
+# ── Customer backfill (lines 721-762) ────────────────────────────────
+
+
+class TestCustomerBackfill:
+    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
+           return_value=[])
+    def test_backfill_no_gaps(self, mock_gaps, admin_client):
+        """No enrichment gaps -> early return (line 728)."""
+        resp = admin_client.post("/api/enrichment/customer-backfill", json={})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "no_gaps"
+
+    @patch("app.services.customer_enrichment_service.enrich_customer_account",
+           new_callable=AsyncMock, return_value={"ok": True, "contacts_added": 1})
+    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
+           return_value=[{"company_id": 1, "name": "Test", "account_owner_id": None}])
+    def test_backfill_processes_gaps(self, mock_gaps, mock_enrich, admin_client, db_session):
+        """Processes enrichment gaps and creates job (lines 730-762)."""
+        resp = admin_client.post("/api/enrichment/customer-backfill", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "completed"
+        assert data["processed"] == 1
+
+    @patch("app.services.customer_enrichment_service.enrich_customer_account",
+           new_callable=AsyncMock, side_effect=RuntimeError("API down"))
+    @patch("app.services.customer_enrichment_service.get_enrichment_gaps",
+           return_value=[{"company_id": 1, "name": "Test", "account_owner_id": 1}])
+    def test_backfill_exception_captured(self, mock_gaps, mock_enrich, admin_client, db_session):
+        """Exception during enrichment is captured in errors list (lines 750-752)."""
+        resp = admin_client.post("/api/enrichment/customer-backfill", json={})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["errors"] >= 1
+
+
+# ── Batch enrich exception (lines 820-822) ───────────────────────────
+
+
+class TestBatchEnrichException:
+    @patch("app.services.customer_enrichment_service.enrich_customer_account",
+           new_callable=AsyncMock, side_effect=RuntimeError("API crash"))
+    def test_batch_enrich_exception_captured(self, mock_enrich, admin_client, db_session):
+        """Exception during batch enrich captured in errors (lines 820-822)."""
+        co = Company(name="Batch Error Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+
+        resp = admin_client.post("/api/enrichment/batch", json={
+            "company_ids": [co.id],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["errors"] >= 1
+
+
+# ── Enrichment status gaps (lines 877, 881) ──────────────────────────
+
+
+class TestEnrichmentStatusGaps:
+    def test_enrichment_status_unverified_contacts(self, client, db_session):
+        """Contacts with no verified email/phone -> gaps reported (lines 877, 881)."""
+        co = Company(name="GapCo", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Unverified Contact",
+            email="unv@gapco.com",
+            is_active=True,
+            email_verified=False,
+            phone_verified=False,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/api/enrichment/status/{co.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "no_verified_emails" in data["gaps"]
+        assert "no_verified_phones" in data["gaps"]

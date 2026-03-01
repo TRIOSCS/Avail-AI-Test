@@ -2272,3 +2272,1259 @@ class TestMainModule:
         from app.services.nc_worker import worker
 
         assert callable(worker.main)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC CIRCUIT BREAKER (lines 44-45, 47-48)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCircuitBreakerGaps:
+    def test_http_429_trips(self):
+        """HTTP 429 rate-limited trips breaker immediately (lines 44-45)."""
+        breaker = CircuitBreaker()
+        result = breaker.check_response_health(429, "", "https://www.netcomponents.com/search")
+        assert result == "RATE_LIMITED"
+        assert breaker.is_open
+        assert "429" in breaker.trip_reason
+
+    def test_http_403_trips(self):
+        """HTTP 403 access denied trips breaker immediately (lines 47-48)."""
+        breaker = CircuitBreaker()
+        result = breaker.check_response_health(403, "", "https://www.netcomponents.com/search")
+        assert result == "ACCESS_DENIED"
+        assert breaker.is_open
+        assert "403" in breaker.trip_reason
+
+    def test_session_expired(self):
+        """Login redirect returns SESSION_EXPIRED (line 40)."""
+        breaker = CircuitBreaker()
+        result = breaker.check_response_health(200, "", "https://www.netcomponents.com/account/login")
+        assert result == "SESSION_EXPIRED"
+        assert not breaker.is_open
+
+    def test_captcha_detection(self):
+        """Captcha in content triggers warning then trip on second."""
+        breaker = CircuitBreaker()
+        result = breaker.check_response_health(200, "please verify you are human captcha", "https://www.netcomponents.com/search")
+        assert result == "CAPTCHA_WARNING"
+        assert breaker.captcha_count == 1
+        assert not breaker.is_open
+
+        result = breaker.check_response_health(200, "captcha detected", "https://www.netcomponents.com/search")
+        assert result == "CAPTCHA_WARNING"
+        assert breaker.is_open
+
+    def test_rate_limited_content(self):
+        """Rate limit in content trips breaker."""
+        breaker = CircuitBreaker()
+        result = breaker.check_response_health(200, "too many requests", "https://www.netcomponents.com/search")
+        assert result == "RATE_LIMITED"
+        assert breaker.is_open
+
+    def test_healthy_resets_failures(self):
+        """Healthy response resets consecutive failures."""
+        breaker = CircuitBreaker()
+        breaker.consecutive_failures = 2
+        result = breaker.check_response_health(200, "normal page content", "https://www.netcomponents.com/search")
+        assert result == "HEALTHY"
+        assert breaker.consecutive_failures == 0
+
+    def test_empty_results_streak_trips(self):
+        """10 consecutive empty results trips breaker."""
+        breaker = CircuitBreaker()
+        for _ in range(9):
+            breaker.record_empty_results()
+            assert not breaker.is_open
+        breaker.record_empty_results()
+        assert breaker.is_open
+
+    def test_record_results_resets_streak(self):
+        """Non-empty results reset the streak."""
+        breaker = CircuitBreaker()
+        breaker.empty_results_streak = 5
+        breaker.record_results()
+        assert breaker.empty_results_streak == 0
+
+    def test_get_trip_info(self):
+        """get_trip_info returns correct dict."""
+        breaker = CircuitBreaker()
+        info = breaker.get_trip_info()
+        assert "is_open" in info
+        assert "trip_reason" in info
+
+    def test_reset(self):
+        """reset() clears all state."""
+        breaker = CircuitBreaker()
+        breaker.is_open = True
+        breaker.trip_reason = "test"
+        breaker.captcha_count = 5
+        breaker.consecutive_failures = 3
+        breaker.empty_results_streak = 8
+        breaker.reset()
+        assert not breaker.is_open
+        assert breaker.trip_reason == ""
+
+    def test_should_stop_returns_is_open(self):
+        """should_stop() returns is_open value (line 93)."""
+        breaker = CircuitBreaker()
+        assert breaker.should_stop() is False
+        breaker.is_open = True
+        assert breaker.should_stop() is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC SCHEDULER (lines 20-21, 40-56, 73, 77, 81-83)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcSchedulerFull:
+    def test_business_hours_force_env(self):
+        """FORCE_BUSINESS_HOURS env var overrides schedule."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch.dict(os.environ, {"FORCE_BUSINESS_HOURS": "1"}):
+            assert sched.is_business_hours() is True
+
+    def test_business_hours_saturday(self):
+        """Saturday returns False."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 5
+            mock_now.hour = 12
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_sunday_before_6pm(self):
+        """Sunday before 6 PM returns False."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 6
+            mock_now.hour = 10
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_sunday_after_6pm(self):
+        """Sunday at 6 PM+ returns True."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 6
+            mock_now.hour = 18
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+    def test_business_hours_friday_before_5pm(self):
+        """Friday before 5 PM returns True."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 4
+            mock_now.hour = 12
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+    def test_business_hours_friday_after_5pm(self):
+        """Friday at 5 PM+ returns False."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 4
+            mock_now.hour = 17
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is False
+
+    def test_business_hours_weekday(self):
+        """Mon-Thu always returns True."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
+            mock_now = MagicMock()
+            mock_now.weekday.return_value = 2
+            mock_now.hour = 3
+            mock_dt.now.return_value = mock_now
+            with patch.dict(os.environ, {}, clear=False):
+                os.environ.pop("FORCE_BUSINESS_HOURS", None)
+                assert sched.is_business_hours() is True
+
+    def test_next_delay_bounds(self):
+        """next_delay returns value within configured bounds."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        for _ in range(20):
+            delay = sched.next_delay()
+            assert cfg.NC_MIN_DELAY_SECONDS <= delay <= cfg.NC_MAX_DELAY_SECONDS
+
+    def test_time_for_break(self):
+        """time_for_break returns True when threshold reached."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        sched.break_threshold = 3
+        assert not sched.time_for_break()
+        sched.searches_since_break = 3
+        assert sched.time_for_break()
+
+    def test_get_break_duration(self):
+        """get_break_duration returns value in range."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        duration = sched.get_break_duration()
+        assert 5 * 60 <= duration <= 25 * 60
+
+    def test_reset_break_counter(self):
+        """reset_break_counter resets counter and picks new threshold."""
+        cfg = NcConfig()
+        sched = SearchScheduler(cfg)
+        sched.searches_since_break = 10
+        sched.reset_break_counter()
+        assert sched.searches_since_break == 0
+        assert 8 <= sched.break_threshold <= 15
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC SEARCH ENGINE (lines 52-53, 80-82, 91-138, 153)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcSearchEngineFull:
+    def test_search_http_exception(self):
+        """_search_http handles exceptions gracefully (lines 80-82)."""
+        from app.services.nc_worker.search_engine import _search_http
+
+        mock_session = MagicMock()
+        mock_session.session.get = MagicMock(side_effect=Exception("Connection refused"))
+
+        result = _search_http(mock_session, "STM32F103")
+        assert result["html"] == ""
+        assert result["status_code"] == 0
+        assert result["duration_ms"] == 0
+
+    @pytest.mark.asyncio
+    async def test_search_browser_no_browser_start_fail(self):
+        """_search_browser returns None when browser cannot be started (lines 91-93)."""
+        from app.services.nc_worker.search_engine import _search_browser
+
+        mock_session = MagicMock()
+        mock_session.has_browser = False
+        mock_session.start_browser = AsyncMock()
+
+        # After start_browser, still no browser
+        type(mock_session).has_browser = PropertyMock(side_effect=[False, False])
+
+        result = await _search_browser(mock_session, "XYZ")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_search_browser_success(self):
+        """_search_browser returns results on success (lines 96-143)."""
+        from app.services.nc_worker.search_engine import _search_browser
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.wait_for_selector = AsyncMock()
+        mock_page.evaluate = AsyncMock(side_effect=[
+            True,  # auth_check returns True
+            "<html>browser results</html>",  # page HTML
+        ])
+
+        mock_session = MagicMock()
+        mock_session.has_browser = True
+        mock_session.page = mock_page
+
+        result = await _search_browser(mock_session, "STM32F103")
+        assert result is not None
+        assert result["html"] == "<html>browser results</html>"
+        assert result["status_code"] == 200
+
+    @pytest.mark.asyncio
+    async def test_search_browser_login_required(self):
+        """_search_browser handles login flow when not authorized."""
+        from app.services.nc_worker.search_engine import _search_browser
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.wait_for_selector = AsyncMock()
+        mock_page.evaluate = AsyncMock(side_effect=[
+            False,  # auth_check fails
+        ])
+
+        mock_session = MagicMock()
+        mock_session.has_browser = True
+        mock_session.page = mock_page
+        mock_session.login_browser = AsyncMock(return_value=False)
+
+        result = await _search_browser(mock_session, "STM32F103")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_search_browser_exception(self):
+        """_search_browser returns None on exception (line 146)."""
+        from app.services.nc_worker.search_engine import _search_browser
+
+        mock_session = MagicMock()
+        mock_session.has_browser = True
+        mock_session.page = AsyncMock()
+        mock_session.page.goto = AsyncMock(side_effect=Exception("Browser crashed"))
+
+        result = await _search_browser(mock_session, "XYZ")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_search_browser_selector_timeout(self):
+        """_search_browser handles selector timeout (line 123)."""
+        from app.services.nc_worker.search_engine import _search_browser
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
+        mock_page.evaluate = AsyncMock(side_effect=[
+            True,  # auth_check
+            "<html>results after timeout</html>",  # page HTML
+        ])
+
+        mock_session = MagicMock()
+        mock_session.has_browser = True
+        mock_session.page = mock_page
+
+        result = await _search_browser(mock_session, "ABC")
+        assert result is not None
+        assert "results after timeout" in result["html"]
+
+    def test_search_part_browser_fallback_success(self):
+        """search_part uses browser fallback when HTTP returns no results (line 52-53)."""
+        mock_resp = MagicMock()
+        mock_resp.text = "<html>No results</html>"
+        mock_resp.status_code = 200
+
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
+        mock_session_mgr.has_browser = True
+
+        browser_result = {"html": "<div class='searchresultstable'>data</div>", "url": "url", "duration_ms": 500, "status_code": 200}
+
+        with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
+            result = search_part(mock_session_mgr, "XYZ123")
+
+        assert result["mode"] == "browser"
+
+    def test_has_results_empty(self):
+        """_has_results returns False for empty string (line 153)."""
+        from app.services.nc_worker.search_engine import _has_results
+
+        assert _has_results("") is False
+        assert _has_results(None) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC RESULT PARSER (lines 78, 90-92, 118-197)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcResultParserFull:
+    def test_floating_block_parse(self):
+        """Parse results with proper .div-table-float-reg.floating-block structure (lines 118-197)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+            <div class="stock-type">In-Stock Inventory</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>STM32F103</td>
+                    <td><span class="nctd" data-url="https://example.com/part">link</span></td>
+                    <td class="ncdsl">dsl</td>
+                    <td>ST</td>
+                    <td>2024</td>
+                    <td>ARM MCU</td>
+                    <td>01/2026</td>
+                    <td>US</td>
+                    <td>500</td>
+                    <td><span class="ncprc" data-pbrk='{"currency":"USD","Prices":[{"price":1.5,"minQty":1}]}'></span></td>
+                    <td class="nccart">cart</td>
+                    <td class="ncsqrs">sqrs</td>
+                    <td>Arrow Electronics</td>
+                    <td></td>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        s = sightings[0]
+        assert s.part_number == "STM32F103"
+        assert s.manufacturer == "ST"
+        assert s.region == "The Americas"
+        assert s.inventory_type == "in_stock"
+        assert s.vendor_name == "Arrow Electronics"
+        assert len(s.price_breaks) == 1
+        assert s.price_breaks[0].price == 1.5
+        assert s.currency == "USD"
+        assert s.is_authorized is True
+        assert s.supplier_product_url == "https://example.com/part"
+
+    def test_floating_block_brokered(self):
+        """Brokered inventory type detection."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">Europe</div>
+            <div class="stock-type">Brokered Inventory</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>LM317T</td>
+                    <td></td><td></td><td>TI</td><td>2024</td>
+                    <td>Vreg</td><td>02/2026</td><td>DE</td>
+                    <td>100</td><td></td><td></td><td></td>
+                    <td>EuroParts</td><td></td>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        assert sightings[0].inventory_type == "brokered"
+        assert sightings[0].region == "Europe"
+
+    def test_floating_block_sponsor(self):
+        """Sponsor detection from non-empty cell 13."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">Asia</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>XC7A35T</td>
+                    <td></td><td></td><td>Xilinx</td><td>2024</td>
+                    <td>FPGA</td><td>03/2026</td><td>CN</td>
+                    <td>50</td><td></td><td></td><td></td>
+                    <td>SponsorVendor</td><td>SPONSOR</td>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        assert sightings[0].is_sponsor is True
+
+    def test_floating_block_no_data_tables(self):
+        """Container with no data tables is skipped (line 131)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 0
+
+    def test_floating_block_header_row_skipped(self):
+        """Row with 'Part Number' text is skipped (line 144)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>Part Number</td>
+                    <td></td><td></td><td></td><td></td>
+                    <td></td><td></td><td></td><td></td>
+                    <td></td><td></td><td></td><td></td>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 0
+
+    def test_floating_block_too_few_cells(self):
+        """Row with fewer than 13 cells is skipped (line 138)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+            <table class="searchresultstable">
+                <tr><td>Part</td><td>B</td><td>C</td></tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 0
+
+    def test_floating_block_nctd_fallback(self):
+        """nctd selector falls back to row-level (lines 160-162)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>STM32</td>
+                    <td>no nctd here</td><td></td><td>ST</td><td>2024</td>
+                    <td>MCU</td><td>01/26</td><td>US</td>
+                    <td>500</td><td></td><td></td><td></td>
+                    <td>Vendor</td><td></td>
+                    <span class="nctd" data-url="https://row-level.com">row</span>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+
+    def test_floating_block_ncprc_fallback(self):
+        """ncprc selector falls back to row-level (lines 166-167)."""
+        html = """
+        <div class="div-table-float-reg floating-block">
+            <div class="region-header">The Americas</div>
+            <table class="searchresultstable">
+                <tr>
+                    <td>STM32</td>
+                    <td></td><td></td><td>ST</td><td>2024</td>
+                    <td>MCU</td><td>01/26</td><td>US</td>
+                    <td>500</td><td>no ncprc</td><td></td><td></td>
+                    <td>Vendor</td><td></td>
+                    <span class="ncprc" data-pbrk='{"currency":"EUR","Prices":[{"price":2.0,"minQty":10}]}'></span>
+                </tr>
+            </table>
+        </div>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+
+    def test_malformed_row_exception(self):
+        """Force IndexError in row parsing (lines 192-194)."""
+        with patch("app.services.nc_worker.result_parser.parse_quantity", side_effect=IndexError("forced")):
+            html = """
+            <div class="div-table-float-reg floating-block">
+                <div class="region-header">The Americas</div>
+                <table class="searchresultstable">
+                    <tr>
+                        <td>STM32</td><td></td><td></td><td>ST</td>
+                        <td>2024</td><td>MCU</td><td>01/26</td><td>US</td>
+                        <td>500</td><td></td><td></td><td></td>
+                        <td>Vendor</td><td></td>
+                    </tr>
+                </table>
+            </div>
+            """
+            sightings = parse_results_html(html)
+        assert sightings == []
+
+    def test_parse_price_breaks_bad_json(self):
+        """parse_price_breaks handles invalid JSON gracefully (line 90-92)."""
+        from app.services.nc_worker.result_parser import parse_price_breaks
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup('<span class="ncprc" data-pbrk="not valid json"></span>', "html.parser")
+        el = soup.find("span")
+        breaks, currency = parse_price_breaks(el)
+        assert breaks == []
+        assert currency is None
+
+    def test_parse_price_breaks_none_element(self):
+        """parse_price_breaks handles None element (line 73-74)."""
+        from app.services.nc_worker.result_parser import parse_price_breaks
+
+        breaks, currency = parse_price_breaks(None)
+        assert breaks == []
+        assert currency is None
+
+    def test_parse_price_breaks_no_data_attr(self):
+        """parse_price_breaks handles element without data-pbrk."""
+        from app.services.nc_worker.result_parser import parse_price_breaks
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup('<span class="ncprc"></span>', "html.parser")
+        el = soup.find("span")
+        breaks, currency = parse_price_breaks(el)
+        assert breaks == []
+        assert currency is None
+
+    def test_flat_parse_europe_region(self):
+        """Flat parser detects Europe region (lines 216-217)."""
+        html = """
+        <table>
+          <tr><td colspan="10">Europe Distribution</td></tr>
+          <tr><td colspan="10">In-Stock Inventory</td></tr>
+          <tr>
+            <td>LM317</td><td></td><td></td><td>TI</td>
+            <td>2024</td><td>Vreg</td><td>01/26</td><td>DE</td>
+            <td>100</td><td></td><td></td><td></td>
+            <td>EuroParts</td><td></td>
+          </tr>
+        </table>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        assert sightings[0].region == "Europe"
+
+    def test_flat_parse_brokered(self):
+        """Flat parser detects brokered inventory type (lines 225-226)."""
+        html = """
+        <table>
+          <tr><td colspan="10">The Americas</td></tr>
+          <tr><td colspan="10">Brokered</td></tr>
+          <tr>
+            <td>XYZ123</td><td></td><td></td><td>MFR</td>
+            <td>2024</td><td>Desc</td><td>01/26</td><td>US</td>
+            <td>50</td><td></td><td></td><td></td>
+            <td>Vendor</td><td></td>
+          </tr>
+        </table>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        assert sightings[0].inventory_type == "brokered"
+
+    def test_flat_parse_empty_part_number(self):
+        """Flat parser skips rows with empty part number (line 236)."""
+        html = """
+        <table>
+          <tr>
+            <td></td><td></td><td></td><td></td>
+            <td></td><td></td><td></td><td></td>
+          </tr>
+        </table>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 0
+
+    def test_flat_parse_too_few_cells(self):
+        """Flat parser skips rows with fewer than 8 cells (line 230)."""
+        html = """
+        <table>
+          <tr><td>Americas</td></tr>
+          <tr>
+            <td>Part</td><td>B</td><td>C</td><td>D</td><td>E</td>
+          </tr>
+        </table>
+        """
+        sightings = parse_results_html(html)
+        assert len(sightings) == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC SESSION MANAGER (lines 52, 64-66, 70-91, 128-129, 161-208, 222-223, 228-239)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcSessionManagerFull:
+    def test_has_browser_property(self):
+        """has_browser returns False when not started (line 52)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        assert sm.has_browser is False
+
+    def test_page_property(self):
+        """page property returns None when not started (line 48)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        assert sm.page is None
+
+    def test_start_exception(self):
+        """start() raises on network error (lines 64-66)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+
+        with patch.object(sm.session, "get", side_effect=Exception("Network error")):
+            with pytest.raises(Exception, match="Network error"):
+                sm.start()
+
+    @pytest.mark.asyncio
+    async def test_start_browser_no_display(self):
+        """start_browser raises when DISPLAY not set (lines 73-78)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+
+        with patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("DISPLAY", None)
+            with pytest.raises(RuntimeError, match="DISPLAY"):
+                await sm.start_browser()
+
+    @pytest.mark.asyncio
+    async def test_start_browser_success(self):
+        """start_browser launches Patchright (lines 80-91)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_context = AsyncMock()
+        mock_context.pages = [mock_page]
+
+        mock_chromium = AsyncMock()
+        mock_chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
+
+        mock_pw = AsyncMock()
+        mock_pw.chromium = mock_chromium
+
+        mock_pw_cm = AsyncMock()
+        mock_pw_cm.start = AsyncMock(return_value=mock_pw)
+
+        mock_async_pw = MagicMock(return_value=mock_pw_cm)
+
+        with patch.dict(os.environ, {"DISPLAY": ":99"}):
+            with patch("patchright.async_api.async_playwright", mock_async_pw):
+                await sm.start_browser()
+
+        assert sm.has_browser is True
+        assert sm._page is mock_page
+
+    @pytest.mark.asyncio
+    async def test_start_browser_already_started(self):
+        """start_browser does nothing if already started (line 71)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        sm._browser_started = True
+
+        await sm.start_browser()  # Should return immediately
+
+    def test_login_no_csrf_token(self):
+        """login() returns False when CSRF token not found (lines 128-129)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
+        cfg.NC_USERNAME = "test@example.com"
+        cfg.NC_PASSWORD = "pass"
+        sm = NcSessionManager(cfg)
+
+        login_page_resp = MagicMock()
+        login_page_resp.status_code = 200
+        login_page_resp.text = "<html>No token here</html>"
+        login_page_resp.raise_for_status = MagicMock()
+
+        with patch.object(sm.session, "get", return_value=login_page_resp):
+            result = sm.login()
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_login_browser_success(self):
+        """login_browser full success flow (lines 161-208)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
+        cfg.NC_USERNAME = "test@example.com"
+        cfg.NC_PASSWORD = "pass"
+        sm = NcSessionManager(cfg)
+        sm._browser_started = True
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
+
+        mock_locator = AsyncMock()
+        mock_locator.wait_for = AsyncMock()
+        mock_locator.fill = AsyncMock()
+        mock_locator.click = AsyncMock()
+        mock_page.locator = MagicMock(return_value=mock_locator)
+
+        sm._page = mock_page
+
+        mock_hb = MagicMock()
+        mock_hb.human_type = AsyncMock()
+        mock_hb.random_delay = AsyncMock()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with patch("app.services.nc_worker.human_behavior.HumanBehavior", mock_hb):
+                result = await sm.login_browser()
+
+        assert result is True
+        assert sm.is_logged_in is True
+
+    @pytest.mark.asyncio
+    async def test_login_browser_failure(self):
+        """login_browser returns False when auth check fails."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
+        cfg.NC_USERNAME = "test@example.com"
+        cfg.NC_PASSWORD = "pass"
+        sm = NcSessionManager(cfg)
+        sm._browser_started = True
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value={"status": 401, "body": "false"})
+
+        mock_locator = AsyncMock()
+        mock_locator.wait_for = AsyncMock()
+        mock_locator.fill = AsyncMock()
+        mock_locator.click = AsyncMock()
+        mock_page.locator = MagicMock(return_value=mock_locator)
+
+        sm._page = mock_page
+
+        mock_hb = MagicMock()
+        mock_hb.human_type = AsyncMock()
+        mock_hb.random_delay = AsyncMock()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with patch("app.services.nc_worker.human_behavior.HumanBehavior", mock_hb):
+                result = await sm.login_browser()
+
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_login_browser_exception(self):
+        """login_browser handles exceptions gracefully."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
+        cfg.NC_USERNAME = "test@example.com"
+        cfg.NC_PASSWORD = "pass"
+        sm = NcSessionManager(cfg)
+        sm._browser_started = True
+        sm._page = AsyncMock()
+        sm._page.goto = AsyncMock(side_effect=Exception("Browser crashed"))
+
+        result = await sm.login_browser()
+        assert result is False
+        assert sm.is_logged_in is False
+
+    @pytest.mark.asyncio
+    async def test_login_browser_starts_browser_if_needed(self):
+        """login_browser calls start_browser if not started (line 163-164)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
+        cfg.NC_USERNAME = "test@example.com"
+        cfg.NC_PASSWORD = "pass"
+        sm = NcSessionManager(cfg)
+
+        mock_page = AsyncMock()
+        mock_page.goto = AsyncMock()
+        mock_page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
+        mock_locator = AsyncMock()
+        mock_locator.wait_for = AsyncMock()
+        mock_locator.fill = AsyncMock()
+        mock_locator.click = AsyncMock()
+        mock_page.locator = MagicMock(return_value=mock_locator)
+
+        async def fake_start_browser():
+            sm._browser_started = True
+            sm._page = mock_page
+
+        sm.start_browser = fake_start_browser
+
+        mock_hb = MagicMock()
+        mock_hb.human_type = AsyncMock()
+        mock_hb.random_delay = AsyncMock()
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with patch("app.services.nc_worker.human_behavior.HumanBehavior", mock_hb):
+                result = await sm.login_browser()
+
+        assert result is True
+
+    def test_stop_with_exception(self):
+        """stop() handles exception on close (lines 222-223)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        sm.is_logged_in = True
+        sm.session = MagicMock()
+        sm.session.close = MagicMock(side_effect=Exception("close error"))
+
+        sm.stop()
+        assert sm.is_logged_in is False
+
+    @pytest.mark.asyncio
+    async def test_stop_browser(self):
+        """stop_browser closes context and playwright (lines 228-239)."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        sm._context = AsyncMock()
+        sm._playwright = AsyncMock()
+        sm._page = AsyncMock()
+        sm._browser_started = True
+
+        await sm.stop_browser()
+
+        assert sm._context is None
+        assert sm._page is None
+        assert sm._playwright is None
+        assert sm._browser_started is False
+
+    @pytest.mark.asyncio
+    async def test_stop_browser_with_error(self):
+        """stop_browser handles errors gracefully."""
+        from app.services.nc_worker.session_manager import NcSessionManager
+
+        cfg = NcConfig()
+        sm = NcSessionManager(cfg)
+        sm._context = AsyncMock()
+        sm._context.close = AsyncMock(side_effect=Exception("Close error"))
+        sm._playwright = AsyncMock()
+        sm._browser_started = True
+
+        await sm.stop_browser()
+        assert sm._context is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC SIGHTING WRITER (lines 58, 66, 73, 86)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcSightingWriterGaps:
+    def test_skip_no_vendor_name(self, db_session, test_requisition):
+        """save_nc_sightings skips entries without vendor_name (line 58)."""
+        req = test_requisition.requirements[0]
+        queue_item = NcSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        nc = [NcSighting(part_number="LM317T", vendor_name="", quantity=100)]
+        result = save_nc_sightings(db_session, queue_item, nc)
+        assert result == 0
+
+    def test_dedup_skip(self, db_session, test_requisition):
+        """save_nc_sightings skips duplicate entries (line 66)."""
+        req = test_requisition.requirements[0]
+        queue_item = NcSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        nc = [NcSighting(part_number="LM317T", vendor_name="Arrow", quantity=500, inventory_type="in_stock")]
+        count1 = save_nc_sightings(db_session, queue_item, nc)
+        count2 = save_nc_sightings(db_session, queue_item, nc)
+        assert count1 == 1
+        assert count2 == 0
+
+    def test_price_breaks_in_sighting(self, db_session, test_requisition):
+        """save_nc_sightings extracts unit_price and includes price_breaks in raw_data (lines 73, 86)."""
+        from app.services.nc_worker.result_parser import PriceBreak
+
+        req = test_requisition.requirements[0]
+        queue_item = NcSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        nc = [NcSighting(
+            part_number="LM317T", vendor_name="DigiKey", quantity=500,
+            inventory_type="in_stock",
+            price_breaks=[PriceBreak(price=1.25, min_qty=1), PriceBreak(price=0.99, min_qty=100)],
+            currency="USD",
+        )]
+        save_nc_sightings(db_session, queue_item, nc)
+
+        s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
+        assert s.unit_price == 1.25
+        assert s.currency == "USD"
+        assert "price_breaks" in s.raw_data
+        assert len(s.raw_data["price_breaks"]) == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# COVERAGE: NC WORKER (lines 26-27, 60-61, 139-156, 253, 295-296, 316, 325)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNcWorkerGaps:
+    _DB = "app.database.SessionLocal"
+    _SESSION = "app.services.nc_worker.session_manager.NcSessionManager"
+    _SCHEDULER = "app.services.nc_worker.scheduler.SearchScheduler"
+    _BREAKER = "app.services.nc_worker.circuit_breaker.CircuitBreaker"
+    _CONFIG = "app.services.nc_worker.config.NcConfig"
+    _QUEUE_NEXT = "app.services.nc_worker.queue_manager.get_next_queued_item"
+    _QUEUE_RECOVER = "app.services.nc_worker.queue_manager.recover_stale_searches"
+    _QUEUE_MARK = "app.services.nc_worker.queue_manager.mark_status"
+    _QUEUE_COMPLETE = "app.services.nc_worker.queue_manager.mark_completed"
+    _SEARCH = "app.services.nc_worker.search_engine.search_part"
+    _PARSE = "app.services.nc_worker.result_parser.parse_results_html"
+    _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
+    _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
+    _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
+
+    def _make_mock_db(self, db_session):
+        mock_session = MagicMock(wraps=db_session)
+        mock_session.close = MagicMock()
+        return MagicMock(return_value=mock_session)
+
+    @pytest.mark.asyncio
+    async def test_run_ai_gate(self, db_session):
+        """run_ai_gate is a simple async wrapper (lines 60-61)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        with patch("app.services.nc_worker.ai_gate.process_ai_gate", new_callable=AsyncMock) as mock_gate:
+            await worker_mod.run_ai_gate(db_session)
+            mock_gate.assert_called_once_with(db_session)
+
+    def test_main_daily_stats_reset_with_summary(self, db_session):
+        """main() logs daily summary and resets stats on date change (lines 139-156)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        ws = NcWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        loop_count = 0
+
+        real_datetime = datetime
+
+        def mock_sleep(seconds):
+            nonlocal loop_count
+            loop_count += 1
+            if loop_count >= 2:
+                worker_mod._shutdown_requested = True
+
+        from app.services.nc_worker.worker import EASTERN
+
+        eastern_calls = 0
+
+        def patched_now(tz=None):
+            nonlocal eastern_calls
+            if tz is not None and str(tz) == str(EASTERN):
+                eastern_calls += 1
+                if eastern_calls == 1:
+                    return real_datetime(2026, 2, 28, 23, 59, 0, tzinfo=timezone.utc)
+                return real_datetime(2026, 3, 1, 0, 1, 0, tzinfo=timezone.utc)
+            return real_datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = False
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                with patch("app.services.nc_worker.worker.datetime") as mock_dt:
+                                    mock_dt.now = patched_now
+                                    mock_dt.side_effect = lambda *a, **kw: real_datetime(*a, **kw)
+                                    worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    def test_main_search_with_sightings(self, db_session, test_requisition):
+        """main() records sightings and empty results correctly (line 253)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        ws = NcWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = NcSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        search_done = False
+
+        def mock_sleep(seconds):
+            nonlocal search_done
+            if search_done:
+                worker_mod._shutdown_requested = True
+            search_done = True
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+        mock_breaker.check_response_health = MagicMock(return_value="HEALTHY")
+
+        search_result = {"html": "<table>results</table>", "total_count": 1, "url": "url", "duration_ms": 500, "status_code": 200}
+        mock_nc_sighting = MagicMock()
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._ASYNCIO_RUN):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, return_value=search_result):
+                                                with patch(self._PARSE, return_value=[mock_nc_sighting]):
+                                                    with patch(self._SAVE, return_value=1):
+                                                        with patch(self._QUEUE_MARK):
+                                                            with patch(self._QUEUE_COMPLETE):
+                                                                worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    def test_main_mark_status_fails_in_except(self, db_session, test_requisition):
+        """main() handles mark_status failure in except handler (lines 295-296)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        ws = NcWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        req = test_requisition.requirements[0]
+        queue_item = NcSearchQueue(
+            requirement_id=req.id, requisition_id=test_requisition.id,
+            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+        )
+        db_session.add(queue_item)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        def mock_sleep(seconds):
+            worker_mod._shutdown_requested = True
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.return_value = True
+        mock_scheduler.time_for_break.return_value = False
+        mock_scheduler.next_delay.return_value = 120
+
+        mock_breaker = MagicMock()
+        mock_breaker.should_stop.return_value = False
+
+        def mark_status_fail(db, item, status, error=None):
+            raise Exception("DB error")
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._BREAKER, return_value=mock_breaker):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                                with patch(self._QUEUE_RECOVER):
+                                    with patch(self._ASYNCIO_RUN):
+                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                            with patch(self._SEARCH, side_effect=Exception("crash")):
+                                                with patch(self._QUEUE_MARK, side_effect=mark_status_fail):
+                                                    worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    def test_main_has_browser_stop(self, db_session):
+        """main() calls stop_browser when has_browser is True (line 316)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        ws = NcWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = True
+        mock_session.stop_browser = AsyncMock()
+
+        try:
+            worker_mod._shutdown_requested = True
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._QUEUE_RECOVER):
+                        with patch(self._ASYNCIO_RUN) as mock_asyncio_run:
+                            worker_mod.main()
+
+            # stop_browser called via asyncio.run
+            mock_asyncio_run.assert_called()
+        finally:
+            worker_mod._shutdown_requested = original
+
+    def test_main_outer_exception(self, db_session):
+        """main() handles unexpected outer exception (line 305-307)."""
+        import app.services.nc_worker.worker as worker_mod
+
+        ws = NcWorkerStatus(id=1, is_running=False)
+        db_session.add(ws)
+        db_session.commit()
+
+        original = worker_mod._shutdown_requested
+        call_count = 0
+
+        def mock_sleep(seconds):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 1:
+                worker_mod._shutdown_requested = True
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
+        mock_session.is_logged_in = True
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
+
+        mock_scheduler = MagicMock()
+        mock_scheduler.is_business_hours.side_effect = Exception("Unexpected")
+
+        try:
+            worker_mod._shutdown_requested = False
+            with patch(self._DB, self._make_mock_db(db_session)):
+                with patch(self._SESSION, return_value=mock_session):
+                    with patch(self._SCHEDULER, return_value=mock_scheduler):
+                        with patch(self._TIME_SLEEP, side_effect=mock_sleep):
+                            with patch(self._QUEUE_RECOVER):
+                                worker_mod.main()
+        finally:
+            worker_mod._shutdown_requested = original

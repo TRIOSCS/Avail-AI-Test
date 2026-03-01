@@ -29,6 +29,10 @@ class ApiSource(Base):
     total_searches = Column(Integer, default=0)
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)
+    monthly_quota = Column(Integer, nullable=True)
+    calls_this_month = Column(Integer, default=0, server_default="0")
+    last_ping_at = Column(DateTime)
+    last_deep_test_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -71,4 +75,23 @@ class GraphSubscription(Base):
     __table_args__ = (
         Index("ix_graphsub_user", "user_id"),
         Index("ix_graphsub_expiry", "expiration_dt"),
+    )
+
+
+class ApiUsageLog(Base):
+    """Tracks individual API calls for usage monitoring and health history."""
+
+    __tablename__ = "api_usage_log"
+    id = Column(Integer, primary_key=True)
+    source_id = Column(Integer, ForeignKey("api_sources.id", ondelete="CASCADE"), nullable=False)
+    timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    endpoint = Column(String(200))
+    status_code = Column(Integer)
+    response_ms = Column(Integer)
+    success = Column(Boolean, nullable=False)
+    error_message = Column(String(500))
+    check_type = Column(String(20), nullable=False)
+
+    __table_args__ = (
+        Index("ix_usage_log_source_ts", "source_id", "timestamp"),
     )
