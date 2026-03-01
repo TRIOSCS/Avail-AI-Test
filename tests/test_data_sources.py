@@ -151,8 +151,8 @@ def test_list_sources_credential_masking(client, db_session, seed_sources):
     assert mouser_data["credentials_masked"]["MOUSER_API_KEY"].endswith("5678")
 
 
-def test_list_sources_auto_status_live(client, db_session, seed_sources):
-    """Source with all credentials set auto-promotes from pending to live."""
+def test_list_sources_no_auto_promote_to_live(client, db_session, seed_sources):
+    """Setting credentials does NOT auto-promote to live — health checks are source of truth."""
     from app.services.credential_service import encrypt_value
 
     mouser = db_session.query(ApiSource).filter_by(name="mouser").first()
@@ -163,7 +163,8 @@ def test_list_sources_auto_status_live(client, db_session, seed_sources):
     resp = client.get("/api/sources")
     sources = resp.json()["sources"]
     mouser_data = next(s for s in sources if s["name"] == "mouser")
-    assert mouser_data["status"] == "live"
+    # Status stays "pending" until a health check verifies connectivity
+    assert mouser_data["status"] == "pending"
 
 
 # ── PUT /api/sources/{id}/toggle ─────────────────────────────────────

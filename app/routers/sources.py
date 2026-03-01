@@ -408,6 +408,11 @@ async def list_api_sources(
                 "total_results": src.total_results or 0,
                 "avg_response_ms": src.avg_response_ms or 0,
                 "created_at": src.created_at.isoformat() if src.created_at else None,
+                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+                "error_count_24h": src.error_count_24h or 0,
+                "monthly_quota": src.monthly_quota,
+                "calls_this_month": src.calls_this_month or 0,
+                "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
             }
         )
 

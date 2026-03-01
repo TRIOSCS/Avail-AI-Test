@@ -2633,3 +2633,55 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .skeleton-cell{height:12px;border-radius:4px;background:linear-gradient(90deg,var(--surface) 25%,rgba(0,0,0,.04) 50%,var(--surface) 75%);background-size:200% 100%;animation:skeleton-pulse 1.8s ease-in-out infinite}
 .skeleton-cell-sm{width:60px}.skeleton-cell-md{width:120px}.skeleton-cell-lg{flex:1;min-width:140px}
 
+/* ── API Health Banner ─────────────────────────────────────────────── */
+.api-health-banner{background:var(--warning,#f59e0b);color:#000;padding:6px 16px;font-size:12px;font-weight:500;position:sticky;top:0;z-index:900}
+.api-health-banner.critical{background:var(--red,#ef4444);color:#fff}
+.api-health-banner-content{display:flex;align-items:center;gap:8px;max-width:1400px;margin:0 auto}
+.api-health-banner-content svg{flex-shrink:0}
+.api-health-banner-link{background:none;border:none;color:inherit;text-decoration:underline;cursor:pointer;font-size:12px;padding:0;margin-left:auto}
+.api-health-banner-dismiss{background:none;border:none;color:inherit;cursor:pointer;font-size:18px;line-height:1;padding:0 4px;opacity:.7}
+.api-health-banner-dismiss:hover{opacity:1}
+
+/* ── API Health Dashboard ──────────────────────────────────────────── */
+.ahd-summary{display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap}
+.ahd-stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 20px;text-align:center;min-width:100px}
+.ahd-stat-value{font-size:24px;font-weight:700;line-height:1.2}
+.ahd-stat-label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.ahd-stat.live .ahd-stat-value{color:var(--green,#22c55e)}
+.ahd-stat.error .ahd-stat-value{color:var(--red,#ef4444)}
+.ahd-stat.degraded .ahd-stat-value{color:var(--warning,#f59e0b)}
+
+.ahd-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px}
+.ahd-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.ahd-card-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ahd-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.ahd-dot.live{background:var(--green,#22c55e)}
+.ahd-dot.error{background:var(--red,#ef4444)}
+.ahd-dot.degraded{background:var(--warning,#f59e0b)}
+.ahd-dot.pending{background:var(--muted,#94a3b8)}
+.ahd-dot.disabled{background:var(--muted,#94a3b8);opacity:.4}
+.ahd-card-name{font-weight:600;font-size:13px}
+.ahd-card-status{font-size:11px;color:var(--muted);margin-left:auto;text-transform:uppercase}
+.ahd-card-meta{font-size:11px;color:var(--muted);line-height:1.8}
+.ahd-card-meta strong{color:var(--text);font-weight:500}
+.ahd-card-actions{margin-top:8px;display:flex;gap:6px}
+
+.ahd-mini-dots{display:inline-flex;gap:2px;vertical-align:middle}
+.ahd-mini-dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+.ahd-mini-dot.ok{background:var(--green,#22c55e)}
+.ahd-mini-dot.fail{background:var(--red,#ef4444)}
+
+.ahd-usage-section{margin-top:16px}
+.ahd-usage-row{display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:12px}
+.ahd-usage-name{width:100px;text-align:right;color:var(--muted)}
+.ahd-usage-bar{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden;max-width:300px}
+.ahd-usage-fill{height:100%;border-radius:4px;background:var(--blue,#3b82f6);transition:width .3s}
+.ahd-usage-fill.warn{background:var(--warning,#f59e0b)}
+.ahd-usage-fill.critical{background:var(--red,#ef4444)}
+.ahd-usage-pct{width:50px;font-size:11px;color:var(--muted)}
+
+.ahd-inactive{margin-top:20px;border-top:1px solid var(--border);padding-top:12px}
+.ahd-inactive summary{cursor:pointer;font-size:12px;color:var(--muted);font-weight:500}
+.ahd-inactive-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.ahd-inactive-chip{font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--muted)}
+

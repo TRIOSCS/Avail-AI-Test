@@ -844,6 +844,22 @@ def _seed_api_sources():
                 is_active = status == "live"
                 db.add(ApiSource(status=status, is_active=is_active, **src))
 
+        # Backfill known monthly quotas (only sets if currently NULL)
+        quota_map = {
+            "apollo_enrichment": 10000,
+            "hunter": 500,
+            "lusha": 100,
+            "clearbit": 1000,
+            "digikey": 1000,
+            "mouser": 1000,
+            "oemsecrets": 5000,
+            "nexar": 1000,
+        }
+        for name, quota in quota_map.items():
+            src = db.query(ApiSource).filter_by(name=name).first()
+            if src and not src.monthly_quota:
+                src.monthly_quota = quota
+
         db.commit()
     except Exception as e:
         logger.warning(f"API source seed error: {e}")
