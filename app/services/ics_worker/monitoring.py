@@ -16,7 +16,7 @@ from loguru import logger
 try:
     from zoneinfo import ZoneInfo
 except ImportError:
-    from backports.zoneinfo import ZoneInfo
+    from backports.zoneinfo import ZoneInfo  # pragma: no cover
 
 EASTERN = ZoneInfo("America/New_York")
 

@@ -3,6 +3,6 @@
 Usage: python -m app.services.nc_worker.worker
 """
 
-from .worker import main
+from .worker import main  # pragma: no cover
 
-main()
+main()  # pragma: no cover

@@ -3,8 +3,8 @@
 Usage: python -m app.services.ics_worker.worker
 """
 
-import asyncio
+import asyncio  # pragma: no cover
 
-from .worker import main
+from .worker import main  # pragma: no cover
 
-asyncio.run(main())
+asyncio.run(main())  # pragma: no cover
