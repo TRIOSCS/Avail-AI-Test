@@ -36,3 +36,4 @@ availai_backup.sql
 app/static/public/*_backup.png
 .env.ics-worker
 .env.nc-worker
+.worktrees/
