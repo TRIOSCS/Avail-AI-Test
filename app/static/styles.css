@@ -1869,6 +1869,10 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .cc-card-scroll{max-height:320px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 .cc-card-scroll::-webkit-scrollbar{width:4px}
 .cc-card-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.cc-team-row{align-items:flex-start}
+.cc-team-rank{min-width:22px;font-weight:700;font-size:13px;color:var(--text2);text-align:center;padding-top:2px}
+.cc-team-score{font-weight:700;font-size:15px;min-width:32px;text-align:right;padding-top:2px}
+.cc-role-badge{font-size:10px;font-weight:600;color:var(--muted);margin-left:4px}
 .cc-view-all{padding:6px 4px 2px;border-top:1px solid var(--border);margin-top:4px}
 .cc-urgency-red{color:var(--red)}.cc-urgency-amber{color:var(--amber)}.cc-urgency-blue{color:var(--blue)}
 /* Command Center perspective toggle (Sales ↔ Purchasing for multi-role) */

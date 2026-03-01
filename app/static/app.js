@@ -1341,14 +1341,12 @@ let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
 let _dashUserId = null;          // specific user to view in CC — null = current user
 let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
 let _dashPerspective = null;     // 'sales' or 'purchasing' — null = auto from role
-let _dashPerfTab = 'leaderboard'; // active scorecard sub-tab
 
 function setDashPeriod(period, btn) {
     _dashPeriod = period;
     document.querySelectorAll('#dashPeriodPills .chip').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     loadDashboard();
-    if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
 }
 
 function setDashScope(scope, btn) {
@@ -1356,14 +1354,7 @@ function setDashScope(scope, btn) {
     _buyerScope = scope;  // keep legacy in sync
     document.querySelectorAll('#dashScopePills .chip').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
-    // Show/hide scorecards section
-    const scSection = document.getElementById('dashScorecardsSection');
-    if (scSection) scSection.style.display = scope === 'team' ? '' : 'none';
-    // Show digest tab for admins
-    const digestTab = document.getElementById('dashPerfDigestTab');
-    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
     loadDashboard();
-    if (scope === 'team') _loadDashScorecard(_dashPerfTab);
 }
 
 function setBuyerScope(scope, btn) {
@@ -1381,11 +1372,7 @@ function setDashUserFilter(val) {
         _dashScope = 'team';
         _buyerScope = 'team';
     }
-    // Show scorecards when viewing team/other user
-    const scSection = document.getElementById('dashScorecardsSection');
-    if (scSection) scSection.style.display = _dashScope === 'team' ? '' : 'none';
     loadDashboard();
-    if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
 }
 
 async function _populateDashUserSelect() {
@@ -1419,25 +1406,6 @@ function _effectivePerspective() {
     if (_dashPerspective) return _dashPerspective;
     // Auto: buyer→purchasing, sales→sales, multi-role→purchasing
     return window.userRole === 'sales' ? 'sales' : 'purchasing';
-}
-
-function switchDashPerfTab(tab, btn) {
-    _dashPerfTab = tab;
-    document.querySelectorAll('#dashPerfTabs .fp').forEach(t => t.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    _loadDashScorecard(tab);
-}
-
-function _loadDashScorecard(tab) {
-    // Delegate to the existing scorecard loaders, targeting the new container
-    const el = document.getElementById('dashPerfContent');
-    if (!el) return;
-    if (tab === 'leaderboard') _loadDashTeamLeaderboard(el);
-    else if (tab === 'vendors') _loadDashVendorScorecard(el);
-    else if (tab === 'buyers') _loadDashBuyerLeaderboard(el);
-    else if (tab === 'sales') _loadDashSalesScorecard(el);
-    else if (tab === 'avail-score') _loadDashAvailScore(el);
-    else if (tab === 'digest') _loadDashDigest(el);
 }
 
 // ── Scorecard Page ──────────────────────────────────────────────────────
@@ -1953,6 +1921,36 @@ function _attnTypeBadge(type) {
     return map[type] || type;
 }
 
+function _renderTeamSummaryCard(teamLb) {
+    const entries = (teamLb && teamLb.entries) ? teamLb.entries : [];
+    let html = `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Team Performance <span class="cc-card-count">${entries.length}</span></h3>`;
+    if (entries.length) {
+        html += '<div class="cc-card-scroll">';
+        html += entries.slice(0, 8).map(e => {
+            const uScore = e.unified_score || 0;
+            const scoreColor = uScore >= 60 ? 'var(--green)' : uScore >= 40 ? 'var(--amber)' : 'var(--muted)';
+            const roleBadge = e.user_role === 'trader' ? '<span class="cc-role-badge">[T]</span>' : e.user_role === 'sales' ? '<span class="cc-role-badge">[S]</span>' : '<span class="cc-role-badge">[B]</span>';
+            let blurbs = '';
+            if (e.ai_blurb_strength) blurbs += `<span class="lb-blurb lb-blurb-strength">${esc(e.ai_blurb_strength)}</span>`;
+            if (e.ai_blurb_improvement) blurbs += `<span class="lb-blurb lb-blurb-improve">${esc(e.ai_blurb_improvement)}</span>`;
+            return `<div class="cc-row cc-team-row">
+                <span class="cc-team-rank">${e.rank || '—'}</span>
+                <div class="cc-row-body">
+                    <span class="cc-row-name">${esc(e.user_name)} ${roleBadge}</span>
+                    ${blurbs ? '<div class="lb-blurbs">' + blurbs + '</div>' : ''}
+                </div>
+                <span class="cc-team-score" style="color:${scoreColor}">${uScore.toFixed(0)}</span>
+            </div>`;
+        }).join('');
+        html += '</div>';
+        html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('scorecard',document.getElementById('navScorecard'))">View full scorecard &rarr;</a></div>`;
+    } else {
+        html += '<p class="cc-empty">No team data yet.</p>';
+    }
+    html += '</div>';
+    return html;
+}
+
 async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
@@ -1967,13 +1965,13 @@ async function loadDashboard() {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const haveReqs = _reqListData && _reqListData.length > 0;
 
-        const [brief, needsAttn, freshReqs, quotes, scorecard, hotOffers] = await Promise.all([
+        const [brief, needsAttn, freshReqs, quotes, scorecard, teamLb] = await Promise.all([
             apiFetch('/api/dashboard/morning-brief').catch(() => null),
             apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
             haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
             apiFetch('/api/quotes').catch(() => []),
             apiFetch('/api/proactive/scorecard').catch(() => null),
-            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
+            apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
         ]);
 
         const reqs = haveReqs ? _reqListData : freshReqs;
@@ -2142,26 +2140,8 @@ async function loadDashboard() {
             </div>`;
         }
 
-        // Card 6: Hot Offers
-        const hotList = Array.isArray(hotOffers) ? hotOffers : [];
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
-        if (hotList.length) {
-            html += '<div class="cc-card-scroll">';
-            html += hotList.map(o => {
-                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
-                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
-                    <span class="cc-dot" style="background:var(--green)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
-                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No new offers.</p>';
-        }
-        html += '</div>';
+        // Card 6: Team Performance
+        html += _renderTeamSummaryCard(teamLb);
 
         html += '</div>'; // close cc-cards-grid
         el.innerHTML = html;
@@ -2174,10 +2154,11 @@ async function loadDashboard() {
 async function loadBuyerDashboard(el) {
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-        const [brief, attnFeed, hotOffers] = await Promise.all([
+        const [brief, attnFeed, hotOffers, teamLb] = await Promise.all([
             apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
             apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load attention feed','warn'); return []; }),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
+            apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
         ]);
 
         if (!brief) {
@@ -2273,6 +2254,9 @@ async function loadBuyerDashboard(el) {
             }).join('');
             html += '</div></div>';
         }
+
+        // Team Performance
+        html += _renderTeamSummaryCard(teamLb);
 
         html += '</div>'; // close work-queue
         el.innerHTML = html;
@@ -11408,7 +11392,7 @@ Object.assign(window, {
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
     // Dashboard / Command Center
-    setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, switchDashPerfTab, setDashUserFilter,
+    setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
     showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
     // Scorecard
