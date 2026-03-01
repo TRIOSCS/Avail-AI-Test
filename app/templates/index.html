@@ -63,6 +63,16 @@
     </div>
 </div>
 
+<!-- API Health Warning Banner — shown when any API source is in error/degraded -->
+<div id="apiHealthBanner" class="api-health-banner" style="display:none">
+    <div class="api-health-banner-content">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span id="apiHealthBannerText"></span>
+        <button type="button" class="api-health-banner-link" onclick="sidebarNav('apihealth',document.getElementById('navApiHealth'))">View Details</button>
+        <button type="button" class="api-health-banner-dismiss" onclick="dismissApiHealthBanner()" title="Dismiss">&times;</button>
+    </div>
+</div>
+
 <!-- Notification panel — standalone so it works on both desktop and mobile -->
 <div id="notifPanel" class="notif-panel-standalone">
     <div style="font-weight:700;font-size:13px;margin-bottom:8px">Notifications</div>
@@ -154,6 +164,7 @@
         <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
             <div class="sb-section-dot"></div>
             <div class="sb-group-items" style="padding-top:4px">
+                <button type="button" class="sb-nav-btn" id="navApiHealth" data-tip="API Health" onclick="sidebarNav('apihealth',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span> API Health<span id="apiHealthBadge" class="sb-badge" style="display:none;background:var(--red);color:#fff"></span></button>
                 <button type="button" class="sb-nav-btn" id="navSettingsSidebar" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</button>
             </div>
         </div>
@@ -1162,6 +1173,14 @@
 
 
     <!-- VIEW: Settings (admin only) -->
+    <div id="view-apihealth" class="hidden" style="display:none">
+        <div class="vendor-header">
+            <h2>API Health Monitor</h2>
+            <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+        </div>
+        <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+    </div>
+
     <div id="view-settings" class="hidden">
         <div class="vendor-header">
             <h2>Admin Settings</h2>

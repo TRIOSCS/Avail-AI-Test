@@ -5924,6 +5924,15 @@ function _renderSourceCard(s, canToggle, isPlanned) {
             ${s.last_success ? `<span>Last: ${new Date(s.last_success).toLocaleDateString()}</span>` : ''}
         </div>`;
     }
+    // Health monitoring metadata
+    let healthHtml = '';
+    const healthParts = [];
+    if (s.last_ping_at) healthParts.push('Checked: ' + _timeAgo(s.last_ping_at));
+    if (s.error_count_24h > 0) healthParts.push('<span style="color:var(--red)">' + s.error_count_24h + ' errors (24h)</span>');
+    if (s.monthly_quota) healthParts.push(Number(s.calls_this_month || 0) + '/' + Number(s.monthly_quota) + ' calls');
+    if (healthParts.length) {
+        healthHtml = '<div style="font-size:11px;color:var(--muted);margin-top:4px">' + healthParts.join(' · ') + '</div>';
+    }
 
     const errorHtml = s.last_error
         ? `<div class="s-test-result s-test-err" style="margin-top:6px">Last error: ${s.last_error}</div>`
@@ -5963,7 +5972,7 @@ function _renderSourceCard(s, canToggle, isPlanned) {
         ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">' + (isPlanned ? 'More info' : 'Get API credentials') + ' ↗</a>' : ''}
         ${credsHtml ? '<div style="margin-top:10px">' + credsHtml + '</div>' : ''}
         <div id="test-result-${s.id}"></div>
-        ${statsHtml}${errorHtml}
+        ${statsHtml}${healthHtml}${errorHtml}
     </div>`;
 }
 
@@ -8120,6 +8129,137 @@ function _refreshCustPipeline() {
     if (_selectedCustId) _renderCustDrawerPipeline(_selectedCustId);
 }
 
+// ── API Health Dashboard ──────────────────────────────────────────────
+
+function _timeAgo(iso) {
+    if (!iso) return 'Never';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60000) return 'Just now';
+    if (ms < 3600000) return Math.floor(ms / 60000) + 'm ago';
+    if (ms < 86400000) return Math.floor(ms / 3600000) + 'h ago';
+    return Math.floor(ms / 86400000) + 'd ago';
+}
+
+function showApiHealth() {
+    showView('view-apihealth');
+    loadApiHealthDashboard();
+}
+
+async function loadApiHealthDashboard() {
+    const container = document.getElementById('apiHealthDashboard');
+    if (!container) return;
+    container.textContent = '';
+    const loading = document.createElement('p');
+    loading.className = 'empty';
+    loading.textContent = 'Loading...';
+    container.appendChild(loading);
+    try {
+        const data = await apiFetch('/api/admin/api-health/dashboard');
+        renderApiHealthDashboard(container, data.sources || []);
+    } catch (e) {
+        container.textContent = '';
+        const errP = document.createElement('p');
+        errP.className = 'empty';
+        errP.textContent = 'Failed to load dashboard: ' + e.message;
+        container.appendChild(errP);
+    }
+}
+
+function refreshApiHealthDashboard() { loadApiHealthDashboard(); }
+
+function renderApiHealthDashboard(container, sources) {
+    const active = sources.filter(s => s.is_active);
+    const inactive = sources.filter(s => !s.is_active);
+    const live = active.filter(s => s.status === 'live').length;
+    const errors = active.filter(s => s.status === 'error').length;
+    const degraded = active.filter(s => s.status === 'degraded').length;
+
+    // All data values are escaped via _esc() and numeric values are coerced to numbers.
+    // This follows the established innerHTML pattern used throughout crm.js (e.g. renderCompanyCards,
+    // _renderSourceCards, renderProspecting) where _esc() sanitizes all external strings.
+    let html = '<div class="ahd-summary">';
+    html += '<div class="ahd-stat live"><div class="ahd-stat-value">' + live + '</div><div class="ahd-stat-label">Live</div></div>';
+    html += '<div class="ahd-stat degraded"><div class="ahd-stat-value">' + degraded + '</div><div class="ahd-stat-label">Degraded</div></div>';
+    html += '<div class="ahd-stat error"><div class="ahd-stat-value">' + errors + '</div><div class="ahd-stat-label">Error</div></div>';
+    html += '<div class="ahd-stat"><div class="ahd-stat-value">' + active.length + '</div><div class="ahd-stat-label">Total Active</div></div>';
+    html += '</div>';
+
+    html += '<div class="ahd-grid">';
+    for (const src of active) {
+        html += _renderHealthCard(src);
+    }
+    html += '</div>';
+
+    const withQuota = active.filter(s => s.monthly_quota);
+    if (withQuota.length > 0) {
+        html += '<h3 style="font-size:14px;margin-bottom:8px">Usage Overview</h3>';
+        html += '<div class="ahd-usage-section">';
+        for (const src of withQuota) {
+            const pct = src.usage_pct || 0;
+            const cls = pct >= 90 ? 'critical' : pct >= 70 ? 'warn' : '';
+            html += '<div class="ahd-usage-row">';
+            html += '<span class="ahd-usage-name">' + _esc(src.display_name) + '</span>';
+            html += '<div class="ahd-usage-bar"><div class="ahd-usage-fill ' + cls + '" style="width:' + Math.min(Number(pct), 100) + '%"></div></div>';
+            html += '<span class="ahd-usage-pct">' + Number(src.calls_this_month || 0) + '/' + Number(src.monthly_quota) + '</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    if (inactive.length > 0) {
+        html += '<details class="ahd-inactive"><summary>' + inactive.length + ' inactive sources</summary>';
+        html += '<div class="ahd-inactive-list">';
+        for (const src of inactive) {
+            html += '<span class="ahd-inactive-chip">' + _esc(src.display_name) + ' (' + _esc(src.status) + ')</span>';
+        }
+        html += '</div></details>';
+    }
+
+    container.innerHTML = html;  // nosec: all dynamic values escaped via _esc() or coerced to Number
+}
+
+function _renderHealthCard(src) {
+    // All dynamic string values escaped via _esc(); numeric values coerced to Number
+    let html = '<div class="ahd-card">';
+    html += '<div class="ahd-card-header">';
+    html += '<span class="ahd-dot ' + _esc(src.status) + '"></span>';
+    html += '<span class="ahd-card-name">' + _esc(src.display_name) + '</span>';
+    html += '<span class="ahd-card-status">' + _esc(src.status) + '</span>';
+    html += '</div>';
+    html += '<div class="ahd-card-meta">';
+    if (src.last_success) html += '<div>Last success: <strong>' + _esc(_timeAgo(src.last_success)) + '</strong></div>';
+    if (src.last_error) html += '<div>Last error: <strong>' + _esc(String(src.last_error).substring(0, 80)) + '</strong></div>';
+    if (src.avg_response_ms) html += '<div>Avg response: <strong>' + Number(src.avg_response_ms) + 'ms</strong></div>';
+    if (src.last_ping_at) html += '<div>Last check: <strong>' + _esc(_timeAgo(src.last_ping_at)) + '</strong></div>';
+    if (src.recent_checks > 0) {
+        html += '<div>24h checks: ';
+        const successes = Number(src.recent_checks) - Number(src.recent_failures || 0);
+        for (let i = 0; i < Math.min(Number(src.recent_checks), 20); i++) {
+            html += '<span class="ahd-mini-dot ' + (i < successes ? 'ok' : 'fail') + '"></span>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    html += '<div class="ahd-card-actions">';
+    html += '<button class="btn btn-xs" onclick="testSourceNow(' + Number(src.id) + ',this)">Test Now</button>';
+    html += '</div>';
+    html += '</div>';
+    return html;
+}
+
+async function testSourceNow(sourceId, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Testing...'; }
+    try {
+        const data = await apiFetch('/api/sources/' + Number(sourceId) + '/test', { method: 'POST' });
+        showToast(data.status === 'live' ? 'API is live!' : 'Test result: ' + (data.error || data.status), data.status === 'live' ? 'success' : 'error');
+        loadApiHealthDashboard();
+    } catch (e) {
+        showToast('Test failed: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Test Now'; }
+    }
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     _refreshCustPipeline,
@@ -8201,4 +8341,7 @@ Object.assign(window, {
     loadProactiveScorecard,
     loadAvailScores,
     invalidateCompanyCache,
+    // API Health Dashboard
+    showApiHealth, loadApiHealthDashboard, refreshApiHealthDashboard,
+    renderApiHealthDashboard, testSourceNow,
 });

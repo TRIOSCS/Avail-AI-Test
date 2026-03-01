@@ -770,12 +770,52 @@ window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
 // ── API Health Polling ──────────────────────────────────────────────────
 window._apiHealthErrors = [];
+const _dismissedAlerts = new Set();
+function dismissApiHealthBanner() {
+    const banner = document.getElementById('apiHealthBanner');
+    if (banner) banner.style.display = 'none';
+    // Remember dismissed alerts for this session
+    (window._apiHealthAlerts || []).forEach(a => _dismissedAlerts.add(a.source_name));
+}
 async function pollApiHealth() {
     try {
-        const data = await apiFetch('/api/sources/health-summary');
-        window._apiHealthErrors = data.errored_sources || [];
+        const data = await apiFetch('/api/system/alerts');
+        const alerts = data.alerts || [];
+        window._apiHealthAlerts = alerts;
+        window._apiHealthErrors = alerts; // backward compat
+
+        // Update sidebar badge
+        const badge = document.getElementById('apiHealthBadge');
+        if (badge) {
+            if (alerts.length > 0) {
+                badge.textContent = alerts.length;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        // Update subbar icon (backward compat)
         const icon = document.getElementById('subbarHealthWarn');
-        if (icon) icon.style.display = window._apiHealthErrors.length > 0 ? 'inline-flex' : 'none';
+        if (icon) icon.style.display = alerts.length > 0 ? 'inline-flex' : 'none';
+
+        // Update banner
+        const banner = document.getElementById('apiHealthBanner');
+        const bannerText = document.getElementById('apiHealthBannerText');
+        if (banner && bannerText) {
+            const newAlerts = alerts.filter(a => !_dismissedAlerts.has(a.source_name));
+            if (newAlerts.length > 0) {
+                const hasError = newAlerts.some(a => a.status === 'error');
+                banner.className = 'api-health-banner' + (hasError ? ' critical' : '');
+                const names = newAlerts.map(a => a.display_name).join(', ');
+                bannerText.textContent = newAlerts.length === 1
+                    ? _esc(names) + ' is ' + newAlerts[0].status
+                    : newAlerts.length + ' API sources need attention: ' + _esc(names);
+                banner.style.display = '';
+            } else {
+                banner.style.display = 'none';
+            }
+        }
     } catch(e) { /* silent */ }
 }
 pollApiHealth();
@@ -870,7 +910,7 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-apihealth'];
 
 // Hash-based routing for browser back/forward
 const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting'};
@@ -6841,7 +6881,8 @@ export function sidebarNav(page, el) {
         contacts: () => showContacts(),
         dashboard: () => showDashboard(),
         prospecting: () => window.showProspecting(),
-        suggested: () => window.showSuggested()
+        suggested: () => window.showSuggested(),
+        apihealth: () => window.showApiHealth()
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); showToast('Navigation error: ' + e.message, 'error'); }
