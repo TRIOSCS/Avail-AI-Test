@@ -168,9 +168,15 @@ async def process_ai_gate(db: Session):
 
             results = await classify_parts_batch(batch)
             if results is None:
-                # API failure — leave items as pending for retry, activate cooldown
+                # API failure — fail-open: default to search so items aren't stuck
                 _last_api_failure = time.monotonic()
-                logger.warning("AI gate: API failure, {} items left pending (cooldown {}s)", len(batch_items), _GATE_COOLDOWN_SECONDS)
+                logger.warning("AI gate: API failure, defaulting {} items to 'queued' (fail-open)", len(batch_items))
+                for item in batch_items:
+                    item.commodity_class = "unknown"
+                    item.gate_decision = "search"
+                    item.gate_reason = "AI gate unavailable — defaulting to search"
+                    item.status = "queued"
+                    item.updated_at = datetime.now(timezone.utc)
                 break  # Stop processing further batches during this cycle
 
             # Build a lookup by MPN

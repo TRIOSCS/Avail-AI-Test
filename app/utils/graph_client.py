@@ -26,9 +26,11 @@ class GraphSyncStateExpired(Exception):
 # H1: Immutable IDs — prevents ID changes when messages are moved between folders
 IMMUTABLE_ID_HEADER = {"Prefer": 'IdType="ImmutableId"'}
 
-# H6: Retry config
-MAX_RETRIES = 3
-BACKOFF_BASE = 2  # seconds — exponential: 2, 4, 8
+# H6: Retry config — in TESTING mode, fail fast (no retries, no sleep)
+import os as _os
+
+MAX_RETRIES = 0 if _os.environ.get("TESTING") else 3
+BACKOFF_BASE = 0 if _os.environ.get("TESTING") else 2  # seconds — exponential: 2, 4, 8
 
 
 class GraphClient:

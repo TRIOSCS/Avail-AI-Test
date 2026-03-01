@@ -12,7 +12,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..models import (
-    Activity,
+    ActivityLog,
     Company,
     CustomerSite,
     Requirement,
@@ -76,9 +76,9 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
 
     # Recent activities
     activities = (
-        db.query(Activity)
-        .filter(Activity.company_id == company_id)
-        .order_by(Activity.created_at.desc())
+        db.query(ActivityLog)
+        .filter(ActivityLog.company_id == company_id)
+        .order_by(ActivityLog.created_at.desc())
         .limit(20)
         .all()
     )
