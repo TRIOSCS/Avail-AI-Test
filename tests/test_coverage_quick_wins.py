@@ -454,7 +454,6 @@ class TestSearchCacheHit:
              patch("app.search_service.OEMSecretsConnector"), \
              patch("app.search_service.SourcengineConnector"), \
              patch("app.search_service.Element14Connector"), \
-             patch("app.search_service.TMEConnector"), \
              patch("app.search_service._get_search_cache", return_value=(cached_results, cached_stats)):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
             # Verify cached results were returned

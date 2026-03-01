@@ -71,10 +71,6 @@ class Settings:
     # element14 / Newark API
     element14_api_key: str = os.getenv("ELEMENT14_API_KEY", "")
 
-    # TME API
-    tme_api_token: str = os.getenv("TME_API_TOKEN", "")
-    tme_api_secret: str = os.getenv("TME_API_SECRET", "")
-
     # AI parsing
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")

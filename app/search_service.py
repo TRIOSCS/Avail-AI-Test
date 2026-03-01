@@ -24,7 +24,6 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
-from .connectors.tme import TMEConnector
 from .models import (
     ApiSource,
     MaterialCard,
@@ -57,7 +56,6 @@ _CONNECTOR_SOURCE_MAP = {
     "OEMSecretsConnector": "oemsecrets",
     "SourcengineConnector": "sourcengine",
     "Element14Connector": "element14",
-    "TMEConnector": "tme",
 }
 
 
@@ -360,11 +358,6 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key,
                  lambda: Element14Connector(e14_key))
-
-    tme_token = _cred("tme", "TME_API_TOKEN")
-    tme_secret = _cred("tme", "TME_API_SECRET")
-    _add_or_skip("tme", tme_token and tme_secret,
-                 lambda: TMEConnector(tme_token, tme_secret))
 
     if not connectors:
         return [], list(source_stats_map.values())

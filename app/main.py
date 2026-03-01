@@ -671,16 +671,6 @@ def _seed_api_sources():
                 "setup_notes": "PENDING: Contact Avnet for API partnership. May require business relationship.",
             },
             {
-                "name": "tme",
-                "display_name": "TME (Transfer Multisort)",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "European authorized distributor with public REST API. 500K+ products.",
-                "signup_url": "https://developers.tme.eu",
-                "env_vars": [],
-                "setup_notes": "PENDING: Register at developers.tme.eu for API token. Well-documented REST API.",
-            },
-            {
                 "name": "lcsc",
                 "display_name": "LCSC Electronics",
                 "category": "scraper",

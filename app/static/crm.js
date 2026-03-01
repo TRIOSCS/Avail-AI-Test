@@ -4132,7 +4132,7 @@ function _contactRoleBadge(role) {
 
 function _enrichSourceBadge(source) {
     if (!source) return '';
-    const colors = { lusha: '#7c3aed', clay: '#2563eb', apollo: '#f97316', hunter: '#10b981', manual: '#64748b' };
+    const colors = { lusha: '#7c3aed', apollo: '#f97316', hunter: '#10b981', manual: '#64748b' };
     const color = colors[source] || '#94a3b8';
     return `<span style="color:${color};font-size:9px;margin-left:3px">via ${source}</span>`;
 }

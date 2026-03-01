@@ -226,7 +226,7 @@ class TestSeedApiSources:
                 "explorium_enrichment", "hunter_enrichment",
                 "rocketreach_enrichment", "clearbit_enrichment", "netcomponents",
                 "icsource", "thebrokersite", "findchips", "arrow", "avnet",
-                "tme", "lcsc", "partfuse", "stock_list_import", "element14",
+                "lcsc", "partfuse", "stock_list_import", "element14",
                 "rs_components", "future", "rochester", "verical", "heilind",
                 "winsource", "siliconexpert", "aliexpress",
             ]

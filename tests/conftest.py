@@ -114,13 +114,13 @@ _delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TAB
 def _reset_ai_gate_state():
     """Clear AI gate module state between tests to prevent order-dependent failures."""
     yield
-    try:
-        from app.services.nc_worker.ai_gate import clear_classification_cache
-        from app.services.nc_worker import ai_gate
-        clear_classification_cache()
-        ai_gate._last_api_failure = 0.0
-    except ImportError:
-        pass
+    for module_path in ("app.services.nc_worker", "app.services.ics_worker"):
+        try:
+            gate = __import__(f"{module_path}.ai_gate", fromlist=["ai_gate"])
+            gate.clear_classification_cache()
+            gate._last_api_failure = 0.0
+        except (ImportError, AttributeError):
+            pass
 
 
 @pytest.fixture(autouse=True)

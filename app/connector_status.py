@@ -19,7 +19,6 @@ def log_connector_status() -> dict[str, bool]:
         "OEMSecrets": bool(settings.oemsecrets_api_key),
         "Sourcengine": bool(settings.sourcengine_api_key),
         "Element14": bool(settings.element14_api_key),
-        "TME": bool(settings.tme_api_token and settings.tme_api_secret),
         "Anthropic AI": bool(settings.anthropic_api_key),
         "Azure OAuth": bool(
             settings.azure_client_id

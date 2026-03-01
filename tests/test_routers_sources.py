@@ -905,51 +905,6 @@ def test_get_connector_newark():
             assert result is not None
 
 
-def test_get_connector_tme():
-    """TME source returns TMEConnector when both token and secret are set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
-        "ELEMENT14_API_KEY": None,
-        "TME_API_TOKEN": "tme_tok", "TME_API_SECRET": "tme_sec",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.tme.TMEConnector"):
-            result = _get_connector_for_source("tme", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_tme_missing_secret():
-    """TME source returns None if only token is set (secret missing)."""
-    creds = {
-        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
-        "ELEMENT14_API_KEY": None,
-        "TME_API_TOKEN": "tme_tok", "TME_API_SECRET": None,
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    mock_settings = SimpleNamespace(email_mining_enabled=False, azure_tenant_id=None)
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred), \
-         patch("app.routers.sources.settings", mock_settings):
-        result = _get_connector_for_source("tme", db=MagicMock())
-        assert result is None
-
-
 def test_get_connector_anthropic_ai():
     """Anthropic AI returns _AnthropicTestConnector (no env_vars needed)."""
     from app.routers.sources import _AnthropicTestConnector
