@@ -14,6 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
 # ═══════════════════════════════════════════════════════════════════════
 #  CONTACT MATCHING — email or phone → company or vendor
@@ -575,27 +576,6 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
         },
         synchronize_session=False,
     )
-
-
-# Skip generic email providers for domain matching
-_GENERIC_DOMAINS = frozenset(
-    {
-        "gmail.com",
-        "yahoo.com",
-        "hotmail.com",
-        "outlook.com",
-        "aol.com",
-        "icloud.com",
-        "live.com",
-        "msn.com",
-        "protonmail.com",
-        "mail.com",
-        "yandex.com",
-        "zoho.com",
-        "gmx.com",
-        "fastmail.com",
-    }
-)
 
 
 # ═══════════════════════════════════════════════════════════════════════

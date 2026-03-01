@@ -2,6 +2,27 @@
 
 import re
 
+# Generic email domains — not useful for vendor enrichment or domain matching.
+# Shared by: app.routers.vendors, app.services.activity_service
+GENERIC_EMAIL_DOMAINS: frozenset[str] = frozenset(
+    {
+        "gmail.com",
+        "yahoo.com",
+        "hotmail.com",
+        "outlook.com",
+        "aol.com",
+        "icloud.com",
+        "live.com",
+        "msn.com",
+        "protonmail.com",
+        "mail.com",
+        "yandex.com",
+        "zoho.com",
+        "gmx.com",
+        "fastmail.com",
+    }
+)
+
 # Legal entity suffixes only — conservative to avoid stripping name parts
 # Ordered longest-first to avoid partial matches (e.g. "s.a.s." before "s.a.")
 _SUFFIXES = [

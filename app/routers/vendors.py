@@ -67,30 +67,10 @@ from ..services.credential_service import get_credential_cached
 from ..services.vendor_analysis_service import _analyze_vendor_materials
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
+from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
-
-# Generic email domains — not useful for vendor enrichment
-_GENERIC_EMAIL_DOMAINS = frozenset(
-    {
-        "gmail.com",
-        "yahoo.com",
-        "hotmail.com",
-        "outlook.com",
-        "aol.com",
-        "icloud.com",
-        "live.com",
-        "msn.com",
-        "protonmail.com",
-        "mail.com",
-        "yandex.com",
-        "zoho.com",
-        "gmx.com",
-        "fastmail.com",
-    }
-)
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
