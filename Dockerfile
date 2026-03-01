@@ -5,6 +5,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY vite.config.js ./
 COPY app/static/ app/static/
+COPY app/templates/ app/templates/
 RUN npm run build
 
 # Stage 2: Python application

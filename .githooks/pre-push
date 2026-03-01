@@ -1,0 +1,22 @@
+#!/bin/sh
+# Pre-push hook: run frontend build checks before allowing push.
+# Catches dangling refs, broken imports, and runtime crashes.
+#
+# Setup (one-time): git config core.hooksPath .githooks
+
+echo "Running frontend build checks..."
+
+# Only run if JS/HTML/CSS files changed in the commits being pushed
+CHANGED=$(git diff --name-only @{push}..HEAD 2>/dev/null || git diff --name-only origin/main..HEAD 2>/dev/null || echo "")
+if echo "$CHANGED" | grep -qE '\.(js|html|css)$|vite\.config|package\.json'; then
+    npm run build 2>&1
+    if [ $? -ne 0 ]; then
+        echo ""
+        echo "PUSH BLOCKED: Frontend build checks failed."
+        echo "Fix the errors above, then try again."
+        exit 1
+    fi
+    echo "Frontend checks passed."
+else
+    echo "No frontend files changed, skipping build checks."
+fi
