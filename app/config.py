@@ -105,7 +105,7 @@ class Settings:
     rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
     lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
-    lusha_monthly_credit_limit: int = int(os.getenv("LUSHA_MONTHLY_CREDIT_LIMIT", "300"))
+    lusha_monthly_credit_limit: int = int(os.getenv("LUSHA_MONTHLY_CREDIT_LIMIT", "6400"))
 
     # Customer enrichment waterfall (Lusha → Clay → Hunter → Apollo)
     customer_enrichment_enabled: bool = (

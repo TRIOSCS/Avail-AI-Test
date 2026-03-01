@@ -328,7 +328,7 @@ class EmailMiner:
                     )
 
             # AI classification for ambiguous emails (0-1 regex matches)
-            if self.db and self.user_id and regex_matches < 2:
+            if self.db and self.user_id:
                 try:
                     from app.services.email_intelligence_service import (
                         process_email_intelligence,

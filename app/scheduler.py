@@ -137,6 +137,14 @@ def configure_scheduler():
     scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
                       id="cache_cleanup", name="Cache cleanup")
 
+    # Email health scoring (nightly at 1am UTC)
+    scheduler.add_job(_job_email_health_update, CronTrigger(hour=1, minute=0),
+                      id="email_health_update", name="Vendor email health scores")
+
+    # Calendar vendor meeting scan (daily at 6am UTC)
+    scheduler.add_job(_job_calendar_scan, CronTrigger(hour=6, minute=0),
+                      id="calendar_scan", name="Calendar vendor meeting scan")
+
     # Monthly full enrichment refresh — runs on 1st when API credits reset
     # Uses all available providers (Clay, Apollo, Gradient, Hunter, AI)
     if settings.deep_enrichment_enabled:
@@ -990,6 +998,88 @@ async def _job_cache_cleanup():
         cleanup_expired()
     except Exception as e:
         logger.error(f"Cache cleanup error: {e}")
+
+
+# ── Email Health & Calendar ────────────────────────────────────────────
+
+
+@_traced_job
+async def _job_email_health_update():
+    """Daily: recompute email health scores for active vendors."""
+    from .database import SessionLocal
+    from .services.response_analytics import batch_update_email_health
+
+    db = SessionLocal()
+    try:
+        result = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(
+                None, batch_update_email_health, db
+            ),
+            timeout=300,
+        )
+        logger.info(
+            f"Email health update: {result.get('updated', 0)} vendors scored"
+        )
+    except asyncio.TimeoutError:
+        logger.error("Email health update timed out after 300s")
+        db.rollback()
+    except Exception as e:
+        logger.error(f"Email health update error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_calendar_scan():
+    """Daily: scan calendar events for vendor meetings and trade shows."""
+    from .database import SessionLocal
+    from .models import User
+    from .services.calendar_intelligence import scan_calendar_events
+
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        users_to_scan = [
+            u for u in users if u.access_token and u.m365_connected
+        ]
+    except Exception as e:
+        logger.error(f"Calendar scan user query error: {e}")
+        return
+    finally:
+        db.close()
+
+    sem = asyncio.Semaphore(3)
+
+    async def _safe_cal_scan(user_id):
+        async with sem:
+            scan_db = SessionLocal()
+            try:
+                user = scan_db.get(User, user_id)
+                if not user:
+                    return
+                token = await get_valid_token(user, scan_db)
+                if not token:
+                    logger.warning(f"Calendar scan: no token for user {user.email}")
+                    return
+                result = await asyncio.wait_for(
+                    scan_calendar_events(token, user.id, scan_db, lookback_days=30),
+                    timeout=60,
+                )
+                logger.info(
+                    f"Calendar scan [{user.email}]: {result.get('events_found', 0)} events"
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Calendar scan TIMEOUT for user {user_id}")
+                scan_db.rollback()
+            except Exception as e:
+                logger.error(f"Calendar scan error for user {user_id}: {e}")
+                scan_db.rollback()
+            finally:
+                scan_db.close()
+
+    if users_to_scan:
+        await asyncio.gather(*[_safe_cal_scan(u.id) for u in users_to_scan])
 
 
 # ── Inbox Scanning ──────────────────────────────────────────────────────

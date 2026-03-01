@@ -10,8 +10,14 @@ from sqlalchemy import Text, TypeDecorator
 
 
 
+_fernet_instance = None
+
+
 def _get_fernet():
-    """Derive a Fernet key from the app secret key."""
+    """Derive a Fernet key from the app secret key (cached after first call)."""
+    global _fernet_instance
+    if _fernet_instance is not None:
+        return _fernet_instance
     from ..config import settings
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
@@ -20,7 +26,8 @@ def _get_fernet():
         iterations=100_000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(settings.secret_key.encode()))
-    return Fernet(key)
+    _fernet_instance = Fernet(key)
+    return _fernet_instance
 
 
 class EncryptedText(TypeDecorator):

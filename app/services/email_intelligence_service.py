@@ -146,10 +146,15 @@ def store_email_intelligence(
     # Determine review/auto-apply status
     auto_applied = False
     needs_review = False
-    if parsed_quotes and conf >= 0.8:
-        auto_applied = True
-    elif conf >= 0.5:
-        needs_review = True
+    cls_type = classification.get("classification", "general")
+    no_review = {"spam", "ooo", "general"}
+
+    if cls_type not in no_review:
+        if conf >= 0.8:
+            if parsed_quotes:
+                auto_applied = True
+        elif conf >= 0.5:
+            needs_review = True
 
     record = EmailIntelligence(
         message_id=message_id,
