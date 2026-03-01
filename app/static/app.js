@@ -11305,7 +11305,7 @@ Object.assign(window, {
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
     showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
     // Scorecard
-    showScorecard, setScPeriod, setScPerspective,
+    showScorecard, setScPeriod,
     // Unified state helpers
     stateLoading, stateEmpty, stateError,
     // Mobile navigation & drill-down
