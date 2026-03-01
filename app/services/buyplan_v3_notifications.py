@@ -208,23 +208,23 @@ async def notify_v3_approved(plan: BuyPlanV3, db: Session):
     rows, total = _lines_html(plan)
 
     # Collect unique buyers
-    buyer_ids = {l.buyer_id for l in (plan.lines or []) if l.buyer_id}
+    buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     buyers = [db.get(User, bid) for bid in buyer_ids]
     buyers = [b for b in buyers if b]
 
     # Email each buyer with their assigned lines
     for buyer in buyers:
-        my_lines = [l for l in (plan.lines or []) if l.buyer_id == buyer.id]
+        my_lines = [ln for ln in (plan.lines or []) if ln.buyer_id == buyer.id]
         buyer_rows = ""
-        for l in my_lines:
-            offer = l.offer
+        for ln in my_lines:
+            offer = ln.offer
             mpn = offer.mpn if offer else "—"
             vendor = offer.vendor_name if offer else "—"
             buyer_rows += (
                 f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(mpn))}</td>'
                 f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(vendor))}</td>'
-                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{l.quantity:,}</td>'
-                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(l.unit_cost or 0):.4f}</td></tr>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{ln.quantity:,}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(ln.unit_cost or 0):.4f}</td></tr>'
             )
         body = (
             f'<p>Buy plan #{plan.id} has been approved. Please create POs for your assigned lines:</p>'
@@ -261,7 +261,7 @@ async def notify_v3_approved(plan: BuyPlanV3, db: Session):
         f"Buyers notified: {', '.join(b.name or b.email for b in buyers)}"
     )
     await asyncio.gather(*[
-        _teams_dm(b, f"Buy Plan #{plan.id} approved — {len([l for l in plan.lines if l.buyer_id == b.id])} POs needed", db)
+        _teams_dm(b, f"Buy Plan #{plan.id} approved — {len([ln for ln in plan.lines if ln.buyer_id == b.id])} POs needed", db)
         for b in buyers
     ])
 
@@ -297,7 +297,7 @@ async def notify_v3_rejected(plan: BuyPlanV3, db: Session):
 
 async def notify_v3_so_verified(plan: BuyPlanV3, db: Session):
     """Notify buyers that SO has been verified — they can proceed."""
-    buyer_ids = {l.buyer_id for l in (plan.lines or []) if l.buyer_id}
+    buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     for bid in buyer_ids:
         db.add(ActivityLog(
             user_id=bid, activity_type="buyplan_approved", channel="system",

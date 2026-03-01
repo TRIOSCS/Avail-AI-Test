@@ -453,7 +453,7 @@ def generate_ai_summary(plan: BuyPlanV3) -> str:
     vendor_count = len(vendor_names) or len(vendor_ids)
 
     # Average margin
-    margins = [float(l.margin_pct) for l in lines if l.margin_pct is not None]
+    margins = [float(ln.margin_pct) for ln in lines if ln.margin_pct is not None]
     avg_margin = round(sum(margins) / len(margins), 1) if margins else None
 
     # Flag count
@@ -1016,7 +1016,7 @@ def _apply_line_edits(plan: BuyPlanV3, edits: list[dict], db: Session):
         edits_by_req.setdefault(edit["requirement_id"], []).append(edit)
 
     affected = set(edits_by_req.keys())
-    to_remove = [l for l in plan.lines if l.requirement_id in affected]
+    to_remove = [ln for ln in plan.lines if ln.requirement_id in affected]
     for line in to_remove:
         plan.lines.remove(line)
 
@@ -1067,7 +1067,7 @@ def _apply_line_edits(plan: BuyPlanV3, edits: list[dict], db: Session):
 def _apply_line_overrides(plan: BuyPlanV3, overrides: list[dict], db: Session):
     """Apply manager's line-level overrides (vendor swap, quantity, notes)."""
     for ovr in overrides:
-        line = next((l for l in plan.lines if l.id == ovr["line_id"]), None)
+        line = next((ln for ln in plan.lines if ln.id == ovr["line_id"]), None)
         if not line:
             logger.warning(
                 "Override line_id %d not found in plan %d", ovr["line_id"], plan.id
@@ -1228,8 +1228,8 @@ def generate_case_report(plan: BuyPlanV3, db: Session) -> str:
 
     vendor_summary = []
     for vendor, vlines in vendor_lines.items():
-        v_cost = sum(float(l.unit_cost or 0) * (l.quantity or 0) for l in vlines)
-        v_qty = sum(l.quantity or 0 for l in vlines)
+        v_cost = sum(float(ln.unit_cost or 0) * (ln.quantity or 0) for ln in vlines)
+        v_qty = sum(ln.quantity or 0 for ln in vlines)
         vendor_summary.append(f"  - {vendor}: {len(vlines)} lines, {v_qty:,} pcs, ${v_cost:,.2f}")
 
     # ── Timeline

@@ -116,8 +116,8 @@ def _line_to_dict(line: BuyPlanLine) -> dict:
 
 def _plan_to_dict(plan: BuyPlanV3) -> dict:
     """Serialize a BuyPlanV3 for API response."""
-    lines = [_line_to_dict(l) for l in (plan.lines or [])]
-    vendor_names = {l.get("vendor_name") for l in lines if l.get("vendor_name")}
+    lines = [_line_to_dict(ln) for ln in (plan.lines or [])]
+    vendor_names = {ln.get("vendor_name") for ln in lines if ln.get("vendor_name")}
 
     quote = plan.quote
     req = plan.requisition
@@ -635,8 +635,8 @@ async def offer_comparison_v3(
 
     # Current selections
     selected_ids = {
-        l.offer_id for l in (plan.lines or [])
-        if l.requirement_id == requirement_id and l.offer_id
+        ln.offer_id for ln in (plan.lines or [])
+        if ln.requirement_id == requirement_id and ln.offer_id
     }
 
     offers = (
