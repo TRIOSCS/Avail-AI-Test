@@ -306,3 +306,49 @@ def test_best_email_with_confidence():
 def test_best_email_empty():
     from app.connectors.lusha_client import _best_email
     assert _best_email([]) == (None, 0)
+
+
+# ── search_contacts: isSuccess=False (line 204) ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_search_contacts_isSuccess_false_skipped(_mock_http):
+    """Line 204: contacts with isSuccess=False are skipped."""
+    search_resp = MagicMock(
+        status_code=201,
+        json=lambda: {
+            "requestId": "req-skip",
+            "data": [
+                {"contactId": "c1", "name": "Fail Contact", "jobTitle": "Manager"},
+            ],
+        },
+    )
+    enrich_resp = MagicMock(
+        status_code=201,
+        json=lambda: {
+            "contacts": [
+                {
+                    "id": "c1",
+                    "isSuccess": False,
+                    "data": None,
+                },
+            ],
+        },
+    )
+    _mock_http.post = AsyncMock(side_effect=[search_resp, enrich_resp])
+
+    from app.connectors.lusha_client import search_contacts
+    result = await search_contacts("acme.com")
+    assert result == []
+
+
+# ── enrich_company: exception path (lines 263-265) ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enrich_company_exception(_mock_http):
+    """Lines 263-265: network exception returns None."""
+    _mock_http.get = AsyncMock(side_effect=Exception("Network timeout"))
+    from app.connectors.lusha_client import enrich_company
+    result = await enrich_company("error.com")
+    assert result is None

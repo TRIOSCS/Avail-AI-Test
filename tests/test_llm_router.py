@@ -249,3 +249,14 @@ class TestRoutedJson:
         mock_claude.return_value = None
         result = await routed_json("test")
         assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.llm_router.claude_json", new_callable=AsyncMock)
+    @patch("app.utils.llm_router.gradient_json", new_callable=AsyncMock)
+    async def test_gradient_exception_falls_back_to_claude(self, mock_gradient, mock_claude):
+        """Lines 174-175: Gradient exception triggers Claude fallback."""
+        mock_gradient.side_effect = Exception("Gradient timeout")
+        mock_claude.return_value = {"fallback": True}
+        result = await routed_json("test")
+        assert result == {"fallback": True}
+        mock_claude.assert_called_once()

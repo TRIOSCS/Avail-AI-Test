@@ -258,3 +258,22 @@ class TestSeedApiSources:
 
             mock_db.rollback.assert_called_once()
             mock_db.close.assert_called_once()
+
+
+# ── Static file Cache-Control headers (lines 320-323) ────────────────────
+
+
+class TestStaticCacheControl:
+    def test_vite_hashed_asset_immutable(self, client):
+        """Lines 320-321: /static/assets/* gets immutable cache header."""
+        # This path may not exist, but the middleware should still set the header
+        resp = client.get("/static/assets/app-abc123.js")
+        cc = resp.headers.get("Cache-Control", "")
+        assert "immutable" in cc
+        assert "31536000" in cc
+
+    def test_static_non_asset_short_cache(self, client):
+        """Lines 322-323: /static/* (not /assets/) gets 1h cache."""
+        resp = client.get("/static/app.js")
+        cc = resp.headers.get("Cache-Control", "")
+        assert "3600" in cc

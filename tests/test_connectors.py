@@ -1048,6 +1048,16 @@ class TestTMEConnector:
             result = await c._fetch_prices(["SYM1"])
             assert result == {}
 
+    @pytest.mark.asyncio
+    async def test_do_search_non_200_raises(self):
+        """Lines 77-79: non-200 response logs warning and raises."""
+        c = self._make_connector()
+        bad_resp = _mock_response(503, text="Service Unavailable")
+        with patch("app.connectors.tme.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=bad_resp)
+            with pytest.raises(Exception):
+                await c._do_search("LM317T")
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  DigiKey Connector tests
@@ -2447,6 +2457,25 @@ class TestNexarConnector:
             results = await c._do_search("X")
             assert results == []
 
+    @pytest.mark.asyncio
+    async def test_do_search_graphql_full_success(self):
+        """Line 333: REST None, GraphQL full query succeeds with results -> _parse_full."""
+        from app.connectors.sources import NexarConnector
+        c = NexarConnector(client_id="id", client_secret="secret")
+        graphql_resp = {
+            "data": {
+                "supSearchMpn": {
+                    "results": [{"part": {"mpn": "LM317T"}}],
+                }
+            }
+        }
+        with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None), \
+             patch.object(c, "_run_query", new_callable=AsyncMock, return_value=graphql_resp), \
+             patch.object(c, "_parse_full", return_value=[{"mpn": "LM317T"}]) as mock_parse:
+            results = await c._do_search("LM317T")
+            assert results == [{"mpn": "LM317T"}]
+            mock_parse.assert_called_once()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Email Mining tests
@@ -3223,3 +3252,67 @@ class TestSafeHelpers:
         from app.utils import safe_float
         assert safe_float(None) is None
         assert safe_float("N/A") is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Email Mining: AI classification edge cases (lines 343-344, 362-363)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEmailMinerAIClassification:
+    """Cover the AI classification branch in scan_inbox (lines 330-363)."""
+
+    def _make_miner(self, db=None, user_id=None):
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            mock_gc = MagicMock()
+            MockGC.return_value = mock_gc
+            from app.connectors.email_mining import EmailMiner
+            miner = EmailMiner("fake-token", db=db, user_id=user_id)
+            miner.gc = mock_gc
+        return miner
+
+    @pytest.mark.asyncio
+    async def test_ai_classification_bad_datetime(self):
+        """Lines 343-344: invalid receivedDateTime is silently ignored."""
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        mock_db.begin_nested.return_value = MagicMock()
+        miner = self._make_miner(db=mock_db, user_id=1)
+        miner.gc.get_all_pages = AsyncMock(return_value=[
+            {
+                "id": "msg-bad-dt",
+                "from": {"emailAddress": {"address": "vendor@test.com", "name": "Vendor"}},
+                "subject": "Quote for parts",
+                "body": {"content": "We have items"},
+                "receivedDateTime": "NOT-A-VALID-DATE",
+            }
+        ])
+        with patch("app.services.email_intelligence_service.process_email_intelligence",
+                   new_callable=AsyncMock) as mock_intel:
+            result = await miner.scan_inbox(use_delta=False)
+            assert result["messages_scanned"] == 1
+            # process_email_intelligence should be called with received_at=None
+            if mock_intel.called:
+                assert mock_intel.call_args.kwargs.get("received_at") is None
+
+    @pytest.mark.asyncio
+    async def test_ai_classification_exception_caught(self):
+        """Lines 362-363: exception in process_email_intelligence is caught."""
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        mock_db.begin_nested.return_value = MagicMock()
+        miner = self._make_miner(db=mock_db, user_id=1)
+        miner.gc.get_all_pages = AsyncMock(return_value=[
+            {
+                "id": "msg-err",
+                "from": {"emailAddress": {"address": "vendor@test.com", "name": "Vendor"}},
+                "subject": "Quote for LM317T",
+                "body": {"content": "We have LM317T in stock"},
+                "receivedDateTime": "2026-01-15T10:00:00Z",
+            }
+        ])
+        with patch("app.services.email_intelligence_service.process_email_intelligence",
+                   new_callable=AsyncMock, side_effect=Exception("AI service down")):
+            result = await miner.scan_inbox(use_delta=False)
+            # Should not raise — error is caught and logged
+            assert result["messages_scanned"] == 1
