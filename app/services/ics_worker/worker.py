@@ -128,7 +128,6 @@ async def main():
 
             try:
                 now_eastern = datetime.now(EASTERN)
-                now_utc = datetime.now(timezone.utc)
 
                 # Reset daily stats at midnight
                 today_date = now_eastern.date()

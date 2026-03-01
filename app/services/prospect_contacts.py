@@ -384,7 +384,7 @@ async def enrich_prospect_contacts(
             continue  # Already verified, skip API call
 
         if tracker.can_use_hunter_verify():
-            result = await verify_email_hunter(email, verification_cache)
+            await verify_email_hunter(email, verification_cache)
             tracker.use_hunter_verify(1)
         else:
             verification_cache[email] = {

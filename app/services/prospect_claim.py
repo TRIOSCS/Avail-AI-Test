@@ -234,7 +234,6 @@ async def generate_account_briefing(prospect_id: int, db: Session) -> str | None
     if not prospect:
         return None
 
-    ed = prospect.enrichment_data or {}
     signals = prospect.readiness_signals or {}
     similar = prospect.similar_customers or []
 

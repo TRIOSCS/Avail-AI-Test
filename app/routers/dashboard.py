@@ -211,7 +211,6 @@ def attention_feed(
     from ..models.sourcing import Requisition
 
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=days)
 
     def _user_filter(col):
         if scope == "my":

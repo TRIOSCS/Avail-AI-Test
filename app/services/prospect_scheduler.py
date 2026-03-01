@@ -337,7 +337,6 @@ async def job_expire_and_resurface() -> dict:
         now = datetime.now(timezone.utc)
         expire_cutoff = now - timedelta(days=settings.prospecting_expire_days)
         enrich_cutoff = now - timedelta(days=60)
-        resurface_cutoff = now - timedelta(days=settings.prospecting_resurface_days)
 
         # EXPIRE: old, stale, low-readiness prospects
         candidates = (

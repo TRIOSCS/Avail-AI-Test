@@ -654,7 +654,7 @@ async def run_signal_enrichment_batch(min_fit_score: int = 40) -> dict:
             if prospect.similar_customers:
                 continue
             try:
-                result = find_similar_customers(prospect, db)
+                find_similar_customers(prospect, db)
                 summary["similar_computed"] += 1
             except Exception as e:
                 logger.error("Similar customer error for {}: {}", prospect.id, e)
