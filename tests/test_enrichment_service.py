@@ -465,11 +465,6 @@ class TestEnrichEntity:
                 assert result["domain"] == "test.com"
                 assert result["legal_name"] is None
 
-
-    def _no_creds(self):
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            yield
-
     def test_all_providers_no_keys_returns_empty(self):
         from app.enrichment_service import find_suggested_contacts
         result = asyncio.run(
@@ -897,40 +892,35 @@ class TestEnrichEntityAIFillsGaps:
                 return_value=("Only AI", "onlyai.com"),
             ):
                 with patch(
-                    "app.enrichment_service._safe_clearbit",
+                    "app.enrichment_service._explorium_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
                     with patch(
-                        "app.enrichment_service._explorium_find_company",
+                        "app.enrichment_service._gradient_find_company",
                         new_callable=AsyncMock,
                         return_value=None,
                     ):
                         with patch(
-                            "app.enrichment_service._gradient_find_company",
+                            "app.enrichment_service._ai_find_company",
                             new_callable=AsyncMock,
-                            return_value=None,
+                            return_value=ai_data,
                         ):
-                            with patch(
-                                "app.enrichment_service._ai_find_company",
-                                new_callable=AsyncMock,
-                                return_value=ai_data,
-                            ):
-                                # Also patch inner safe wrappers to ensure no other source
-                                import builtins
-                                original_import = builtins.__import__
-                                def mock_import(name, *args, **kwargs):
-                                    if "apollo_client" in name:
-                                        raise ImportError("no apollo")
-                                    if "clearbit_client" in name:
-                                        raise ImportError("no clearbit")
-                                    return original_import(name, *args, **kwargs)
-                                with patch("builtins.__import__", side_effect=mock_import):
-                                    result = asyncio.run(
-                                        enrich_entity("onlyai.com")
-                                    )
-                                    assert result["source"] == "ai"
-                                    assert result["legal_name"] == "Only Ai CORP"
+                            # Patch inner safe wrappers to ensure no other source
+                            import builtins
+                            original_import = builtins.__import__
+                            def mock_import(name, *args, **kwargs):
+                                if "apollo_client" in name:
+                                    raise ImportError("no apollo")
+                                if "clearbit_client" in name:
+                                    raise ImportError("no clearbit")
+                                return original_import(name, *args, **kwargs)
+                            with patch("builtins.__import__", side_effect=mock_import):
+                                result = asyncio.run(
+                                    enrich_entity("onlyai.com")
+                                )
+                                assert result["source"] == "ai"
+                                assert result["legal_name"] == "Only Ai CORP"
 
 
 class TestEnrichEntitySafeProviderExceptions:
@@ -953,31 +943,25 @@ class TestEnrichEntitySafeProviderExceptions:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._safe_clearbit",
+                    "app.enrichment_service._explorium_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
                     with patch(
-                        "app.enrichment_service._explorium_find_company",
+                        "app.enrichment_service._gradient_find_company",
                         new_callable=AsyncMock,
                         return_value=None,
                     ):
                         with patch(
-                            "app.enrichment_service._gradient_find_company",
+                            "app.enrichment_service._ai_find_company",
                             new_callable=AsyncMock,
                             return_value=None,
                         ):
-                            # Patch Apollo and Clearbit to raise ImportError
-                            with patch(
-                                "app.enrichment_service._ai_find_company",
-                                new_callable=AsyncMock,
-                                return_value=None,
-                            ):
-                                result = asyncio.run(
-                                    enrich_entity("test.com")
-                                )
-                                # Should still return a result even if Apollo/Clearbit fail
-                                assert result["domain"] == "test.com"
+                            result = asyncio.run(
+                                enrich_entity("test.com")
+                            )
+                            # Should still return a result even if Apollo/Clearbit fail
+                            assert result["domain"] == "test.com"
 
     def test_apollo_and_clearbit_exceptions_in_gather(self):
         """When Apollo and Clearbit raise exceptions during gather, they're handled as return_exceptions=True."""
@@ -989,34 +973,25 @@ class TestEnrichEntitySafeProviderExceptions:
                 new_callable=AsyncMock,
                 return_value=("Test", "test.com"),
             ):
-                # We need to test that exceptions from gather are handled properly.
-                # The _safe_apollo_company and _safe_clearbit wrappers catch exceptions
-                # internally. But if the import itself fails they'd be caught by the try/except.
-                # Let's force the inner imports to fail by patching at connector level.
                 with patch(
-                    "app.enrichment_service._safe_clearbit",
+                    "app.enrichment_service._explorium_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
                     with patch(
-                        "app.enrichment_service._explorium_find_company",
+                        "app.enrichment_service._gradient_find_company",
                         new_callable=AsyncMock,
                         return_value=None,
                     ):
                         with patch(
-                            "app.enrichment_service._gradient_find_company",
+                            "app.enrichment_service._ai_find_company",
                             new_callable=AsyncMock,
                             return_value=None,
                         ):
-                            with patch(
-                                "app.enrichment_service._ai_find_company",
-                                new_callable=AsyncMock,
-                                return_value=None,
-                            ):
-                                result = asyncio.run(
-                                    enrich_entity("test.com")
-                                )
-                                assert result["domain"] == "test.com"
+                            result = asyncio.run(
+                                enrich_entity("test.com")
+                            )
+                            assert result["domain"] == "test.com"
 
 
 class TestFindSuggestedContactsProviderExceptions:
@@ -1077,10 +1052,10 @@ class TestFindSuggestedContactsProviderExceptions:
         from app.enrichment_service import find_suggested_contacts
 
         good_contacts = [
-            {"full_name": "Good Contact", "title": "Sales Manager", "email": "good@example.com", "source": "explorium"},
+            {"full_name": "Good Contact", "title": "Sales Manager", "email": "good@example.com", "source": "ai"},
         ]
         with patch(
-            "app.enrichment_service._explorium_find_contacts",
+            "app.enrichment_service._ai_find_contacts",
             new_callable=AsyncMock,
             return_value=good_contacts,
         ):
@@ -1092,7 +1067,7 @@ class TestFindSuggestedContactsProviderExceptions:
                 result = asyncio.run(
                     find_suggested_contacts("example.com")
                 )
-                # Should still return the good contact
+                # Should still return the good contact despite explorium failing
                 assert len(result) == 1
                 assert result[0]["full_name"] == "Good Contact"
 
@@ -1128,30 +1103,25 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._safe_clearbit",
+                    "app.enrichment_service._explorium_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
                     with patch(
-                        "app.enrichment_service._explorium_find_company",
+                        "app.enrichment_service._gradient_find_company",
                         new_callable=AsyncMock,
                         return_value=None,
                     ):
                         with patch(
-                            "app.enrichment_service._gradient_find_company",
+                            "app.enrichment_service._ai_find_company",
                             new_callable=AsyncMock,
                             return_value=None,
                         ):
-                            with patch(
-                                "app.enrichment_service._ai_find_company",
-                                new_callable=AsyncMock,
-                                return_value=None,
-                            ):
-                                with patch("builtins.__import__", side_effect=mock_import):
-                                    result = asyncio.run(
-                                        enrich_entity("test.com")
-                                    )
-                                    assert result["domain"] == "test.com"
+                            with patch("builtins.__import__", side_effect=mock_import):
+                                result = asyncio.run(
+                                    enrich_entity("test.com")
+                                )
+                                assert result["domain"] == "test.com"
 
 
 class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:

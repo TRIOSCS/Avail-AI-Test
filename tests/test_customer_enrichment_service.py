@@ -329,11 +329,16 @@ async def test_lusha_phone_enrichment_skips_existing_direct_dials(db_session, _m
 
 @pytest.mark.asyncio
 async def test_apollo_exception_handled_gracefully(db_session, company_with_domain, _mock_settings):
-    """If Apollo raises an exception, waterfall continues with fallbacks."""
+    """If Apollo raises an exception, Lusha discovery fills the gap."""
     with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
+         patch("app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock) as mock_lusha_disc, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
          patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
         mock_apollo.side_effect = Exception("Apollo API timeout")
+        mock_lusha_disc.return_value = [
+            {"full_name": "Lusha Person", "email": "lusha@testcorp.com", "title": "Buyer",
+             "source": "lusha", "confidence": 85},
+        ]
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
@@ -351,6 +356,7 @@ async def test_apollo_exception_handled_gracefully(db_session, company_with_doma
         assert result["ok"] is True
         assert result["contacts_added"] == 1
         assert "apollo" not in result["sources_used"]
+        assert "lusha" in result["sources_used"]
 
 
 @pytest.mark.asyncio
@@ -432,10 +438,16 @@ async def test_step_lusha_phones_credits_exhausted(db_session, _mock_settings):
 
 @pytest.mark.asyncio
 async def test_apollo_zero_results_falls_through(db_session, company_with_domain, _mock_settings):
+    """When Apollo returns 0 results, Lusha discovery fills the gap."""
     with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
+         patch("app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock) as mock_lusha_disc, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
          patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
         mock_apollo.return_value = []
+        mock_lusha_disc.return_value = [
+            {"full_name": "Lusha Buyer", "email": "buyer@testcorp.com", "title": "Purchasing Manager",
+             "source": "lusha", "confidence": 85},
+        ]
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
@@ -453,6 +465,7 @@ async def test_apollo_zero_results_falls_through(db_session, company_with_domain
         assert result["ok"] is True
         assert result["contacts_added"] == 1
         assert "apollo" not in result["sources_used"]
+        assert "lusha" in result["sources_used"]
 
 
 @pytest.mark.asyncio
