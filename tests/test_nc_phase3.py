@@ -164,8 +164,8 @@ def test_process_ai_gate_no_pending(db_session):
     mock_claude.assert_not_called()
 
 
-def test_process_ai_gate_api_failure_leaves_pending(db_session, test_user):
-    """If API fails, items stay as pending for retry."""
+def test_process_ai_gate_api_failure_fail_open(db_session, test_user):
+    """If API fails, items are set to 'queued' (fail-open so items aren't stuck)."""
     q1 = _make_queue_item(db_session, test_user, "AD8232ACPZ", index=0)
 
     with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
@@ -173,4 +173,4 @@ def test_process_ai_gate_api_failure_leaves_pending(db_session, test_user):
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
 
     db_session.refresh(q1)
-    assert q1.status == "pending"  # Still pending, will retry next cycle
+    assert q1.status == "queued"  # Fail-open: defaults to search

@@ -111,12 +111,10 @@ def test_session_manager_login_no_credentials():
     cfg = NcConfig()
     cfg.NC_USERNAME = ""
     cfg.NC_PASSWORD = ""
+    cfg.NC_ACCOUNT_NUMBER = ""
     mgr = NcSessionManager(cfg)
-    mgr._page = MagicMock()
 
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(mgr.login())
-    loop.close()
+    result = mgr.login()
 
     assert result is False
     assert mgr.is_logged_in is False
@@ -126,12 +124,13 @@ def test_session_manager_ensure_session_healthy():
     """ensure_session returns True if session is already healthy."""
     cfg = NcConfig()
     mgr = NcSessionManager(cfg)
-    mgr._page = MagicMock()
-    mgr._page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
 
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(mgr.ensure_session())
-    loop.close()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "true"
+
+    with patch.object(mgr.session, "get", return_value=mock_resp):
+        result = mgr.ensure_session()
 
     assert result is True
     assert mgr.is_logged_in is True
@@ -141,17 +140,8 @@ def test_session_manager_stop():
     """stop() cleans up state."""
     cfg = NcConfig()
     mgr = NcSessionManager(cfg)
-    mgr._context = MagicMock()
-    mgr._context.close = AsyncMock()
-    mgr._playwright = MagicMock()
-    mgr._playwright.stop = AsyncMock()
     mgr.is_logged_in = True
 
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(mgr.stop())
-    loop.close()
+    mgr.stop()
 
-    assert mgr._context is None
-    assert mgr._page is None
-    assert mgr._playwright is None
     assert mgr.is_logged_in is False

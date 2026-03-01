@@ -2209,8 +2209,13 @@ class TestNexarConnector:
 
     @pytest.mark.asyncio
     async def test_do_search_aggregate_query_success(self):
-        """_do_search goes directly to aggregate query (DISTRIBUTOR role)."""
+        """_do_search falls back to aggregate query when sellers not authorized."""
         c = self._make_connector()
+        # First call (FULL_QUERY) returns error about sellers not authorized
+        error_resp = {
+            "errors": [{"message": "not authorized to access field 'sellers'"}],
+            "data": {"supSearchMpn": {"results": []}},
+        }
         agg_resp = {
             "data": {
                 "supSearchMpn": {
@@ -2230,7 +2235,7 @@ class TestNexarConnector:
             }
         }
         with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None), \
-             patch.object(c, "_run_query", new_callable=AsyncMock, return_value=agg_resp):
+             patch.object(c, "_run_query", new_callable=AsyncMock, side_effect=[error_resp, agg_resp]):
             results = await c._do_search("LM317T")
             assert len(results) == 1
             assert results[0]["vendor_name"] == "Octopart (aggregate)"

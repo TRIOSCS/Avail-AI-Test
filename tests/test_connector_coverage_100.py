@@ -159,6 +159,11 @@ class TestSourcesGaps:
         """_do_search skips full sellers query (DISTRIBUTOR role) and goes to aggregate."""
         from app.connectors.sources import NexarConnector
         c = NexarConnector(client_id="id", client_secret="secret")
+        # First call (FULL_QUERY) returns error about sellers not authorized
+        error_resp = {
+            "errors": [{"message": "not authorized to access field 'sellers'"}],
+            "data": {"supSearchMpn": {"results": []}},
+        }
         agg_resp = {
             "data": {
                 "supSearchMpn": {
@@ -176,7 +181,7 @@ class TestSourcesGaps:
             }
         }
         with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None):
-            with patch.object(c, "_run_query", new_callable=AsyncMock, return_value=agg_resp):
+            with patch.object(c, "_run_query", new_callable=AsyncMock, side_effect=[error_resp, agg_resp]):
                 results = await c._do_search("LM317T")
                 assert len(results) == 1
                 assert results[0]["vendor_name"] == "Octopart (aggregate)"

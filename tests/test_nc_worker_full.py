@@ -186,12 +186,14 @@ class TestResultParser:
         assert isinstance(sightings, list)
 
     def test_sponsor_badge_detected(self):
+        """Sponsor detected when cell 13 has non-empty text (14 cells via flat parser)."""
         html = """
         <table>
           <tr>
-            <td>STM32</td><td></td><td>ST</td><td></td>
-            <td>MCU</td><td>01/26</td><td>US</td><td>500</td>
-            <td><span class="sponsor-badge">S</span></td><td>SponsorCo</td>
+            <td>STM32</td><td></td><td></td><td>ST</td>
+            <td>2024</td><td>MCU</td><td>01/26</td><td>US</td>
+            <td>500</td><td></td><td></td><td></td>
+            <td>SponsorCo</td><td>S</td>
           </tr>
         </table>
         """
@@ -200,12 +202,14 @@ class TestResultParser:
         assert sightings[0].is_sponsor is True
 
     def test_authorized_badge_detected(self):
+        """Authorized detected when price breaks exist (via .ncprc data-pbrk)."""
         html = """
         <table>
           <tr>
-            <td>STM32</td><td></td><td>ST</td><td></td>
-            <td>MCU</td><td>01/26</td><td>US</td><td>500</td>
-            <td><img alt="Authorized Distributor" /></td><td>AuthCo</td>
+            <td>STM32</td><td></td><td></td><td>ST</td>
+            <td>2024</td><td>MCU</td><td>01/26</td><td>US</td>
+            <td>500</td><td><span class="ncprc" data-pbrk='{"currency":"USD","Prices":[{"price":1.5,"minQty":1}]}'></span></td><td></td><td></td>
+            <td>AuthCo</td><td></td>
           </tr>
         </table>
         """
@@ -251,34 +255,33 @@ class TestSearchEngine:
         url = build_search_url("LM 317T")
         assert "LM%20317T" in url
 
-    @pytest.mark.asyncio
-    async def test_search_part(self):
-        """Exercise the search_part async function with a mocked page."""
-        page = AsyncMock()
-        page.goto = AsyncMock()
-        page.wait_for_selector = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            "<table><tr><td>result</td></tr></table>",  # HTML content
-            42,  # total_count
-        ])
+    def test_search_part(self):
+        """Exercise the search_part function with a mocked session_manager."""
+        mock_resp = MagicMock()
+        mock_resp.text = '<div class="searchresultstable">result</div>'
+        mock_resp.status_code = 200
 
-        result = await search_part(page, "STM32F103C8T6")
-        assert result["html"] == "<table><tr><td>result</td></tr></table>"
-        assert result["total_count"] == 42
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
+
+        result = search_part(mock_session_mgr, "STM32F103C8T6")
+        assert "searchresultstable" in result["html"]
         assert result["duration_ms"] >= 0
         assert "STM32F103C8T6" in result["url"]
+        assert result["mode"] == "http"
 
-    @pytest.mark.asyncio
-    async def test_search_part_selector_timeout(self):
-        """Cover the timeout warning branch when selector not found."""
-        page = AsyncMock()
-        page.goto = AsyncMock()
-        page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
-        page.evaluate = AsyncMock(side_effect=["<html>body</html>", 0])
+    def test_search_part_empty_result(self):
+        """search_part returns empty HTML when HTTP returns no results."""
+        mock_resp = MagicMock()
+        mock_resp.text = "<html>No results</html>"
+        mock_resp.status_code = 200
 
-        result = await search_part(page, "XYZ123")
-        assert result["html"] == "<html>body</html>"
-        assert result["total_count"] == 0
+        mock_session_mgr = MagicMock()
+        mock_session_mgr.session.get = MagicMock(return_value=mock_resp)
+        mock_session_mgr.has_browser = False
+
+        result = search_part(mock_session_mgr, "XYZ123")
+        assert result["mode"] == "http_empty"
 
 
 
@@ -288,45 +291,39 @@ class TestSearchEngine:
 
 
 class TestCircuitBreakerFull:
-    @pytest.mark.asyncio
-    async def test_consecutive_failures_trip(self):
-        """3 consecutive page health check failures trip the breaker (lines 41-45)."""
+    def test_consecutive_failures_trip(self):
+        """3 consecutive server error health checks trip the breaker."""
         breaker = CircuitBreaker()
-        page = AsyncMock()
-        page.url = "https://www.netcomponents.com/search"
-        page.evaluate = AsyncMock(side_effect=Exception("page crashed"))
 
         for i in range(2):
-            result = await breaker.check_page_health(page)
-            assert result == "CHECK_FAILED"
+            result = breaker.check_response_health(500, "", "https://www.netcomponents.com/search")
+            assert result == "SERVER_ERROR"
             assert not breaker.is_open
 
-        result = await breaker.check_page_health(page)
-        assert result == "CHECK_FAILED"
+        result = breaker.check_response_health(500, "", "https://www.netcomponents.com/search")
+        assert result == "SERVER_ERROR"
         assert breaker.is_open
         assert "3 consecutive" in breaker.trip_reason
 
-    @pytest.mark.asyncio
-    async def test_access_denied(self):
-        """Access denied trips breaker immediately (lines 72-73)."""
+    def test_access_denied(self):
+        """Access denied trips breaker immediately."""
         breaker = CircuitBreaker()
-        page = AsyncMock()
-        page.url = "https://www.netcomponents.com/error"
-        page.evaluate = AsyncMock(return_value="access denied - your account has been blocked")
 
-        result = await breaker.check_page_health(page)
+        result = breaker.check_response_health(
+            200, "access denied - your account has been blocked",
+            "https://www.netcomponents.com/error",
+        )
         assert result == "ACCESS_DENIED"
         assert breaker.is_open
 
-    @pytest.mark.asyncio
-    async def test_unusual_activity(self):
+    def test_unusual_activity(self):
         """Unusual activity message trips the breaker."""
         breaker = CircuitBreaker()
-        page = AsyncMock()
-        page.url = "https://www.netcomponents.com/warning"
-        page.evaluate = AsyncMock(return_value="we detected unusual activity on your account")
 
-        result = await breaker.check_page_health(page)
+        result = breaker.check_response_health(
+            200, "we detected unusual activity on your account",
+            "https://www.netcomponents.com/warning",
+        )
         assert result == "ACCESS_DENIED"
         assert breaker.is_open
 
@@ -1079,9 +1076,9 @@ class TestAiGate:
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=None):
             await process_ai_gate(db_session)
 
-        # Item should remain pending after API failure
+        # Item should be 'queued' after API failure (fail-open)
         db_session.refresh(item)
-        assert item.status == "pending"
+        assert item.status == "queued"
         assert ai_gate_module._last_api_failure > 0
 
     @pytest.mark.asyncio
@@ -1152,277 +1149,191 @@ class TestAiGate:
 
 
 class TestSessionManager:
-    @pytest.mark.asyncio
-    async def test_start_no_display(self):
-        """start() raises RuntimeError when DISPLAY is not set."""
-        from app.services.nc_worker.session_manager import NcSessionManager
-
-        cfg = NcConfig()
-        session = NcSessionManager(cfg)
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ.pop("DISPLAY", None)
-            with pytest.raises(RuntimeError, match="DISPLAY"):
-                await session.start()
-
-    @pytest.mark.asyncio
-    async def test_start_success(self):
-        """start() launches browser and checks session health."""
+    def test_start_success(self):
+        """start() loads homepage and checks session health via HTTP."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        mock_page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
 
-        mock_context = AsyncMock()
-        mock_context.pages = [mock_page]
-        mock_context.close = AsyncMock()
-
-        mock_pw_instance = MagicMock()
-        mock_pw_instance.chromium = MagicMock()
-        mock_pw_instance.chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
-
-        # Mock the async context manager: async_playwright().start() returns the pw instance
-        mock_async_pw = MagicMock()
-        mock_async_pw.start = AsyncMock(return_value=mock_pw_instance)
-
-        # Create a mock module for patchright.async_api
-        mock_patchright_module = MagicMock()
-        mock_patchright_module.async_playwright = MagicMock(return_value=mock_async_pw)
-
-        with patch.dict(os.environ, {"DISPLAY": ":99"}):
-            with patch.dict("sys.modules", {"patchright": MagicMock(), "patchright.async_api": mock_patchright_module}):
-                with patch("asyncio.sleep", new_callable=AsyncMock):
-                    await session.start()
+        with patch.object(session.session, "get", return_value=mock_resp):
+            with patch.object(session, "check_session_health", return_value=True):
+                session.start()
 
         assert session.is_logged_in is True
-        assert session.page == mock_page
 
-    @pytest.mark.asyncio
-    async def test_check_session_health_true(self):
+    def test_check_session_health_true(self):
         """check_session_health returns True on authorized response."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._page = AsyncMock()
-        session._page.evaluate = AsyncMock(return_value={"status": 200, "body": "True"})
 
-        result = await session.check_session_health()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.text = "true"
+
+        with patch.object(session.session, "get", return_value=mock_resp):
+            result = session.check_session_health()
         assert result is True
 
-    @pytest.mark.asyncio
-    async def test_check_session_health_false(self):
+    def test_check_session_health_false(self):
         """check_session_health returns False on non-authorized response."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._page = AsyncMock()
-        session._page.evaluate = AsyncMock(return_value={"status": 401, "body": "false"})
 
-        result = await session.check_session_health()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = "false"
+
+        with patch.object(session.session, "get", return_value=mock_resp):
+            result = session.check_session_health()
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_check_session_health_exception(self):
+    def test_check_session_health_exception(self):
         """check_session_health returns False on exception."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._page = AsyncMock()
-        session._page.evaluate = AsyncMock(side_effect=Exception("network error"))
 
-        result = await session.check_session_health()
+        with patch.object(session.session, "get", side_effect=Exception("network error")):
+            result = session.check_session_health()
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_login_no_credentials(self):
+    def test_login_no_credentials(self):
         """login() returns False when credentials are not configured."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         cfg.NC_USERNAME = ""
         cfg.NC_PASSWORD = ""
+        cfg.NC_ACCOUNT_NUMBER = ""
         session = NcSessionManager(cfg)
 
-        result = await session.login()
+        result = session.login()
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_login_success(self):
-        """login() types credentials and returns True on success."""
+    def test_login_success(self):
+        """login() posts credentials and returns True on success."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
         cfg.NC_USERNAME = "test@example.com"
         cfg.NC_PASSWORD = "password123"
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        mock_page.keyboard = AsyncMock()
+        # Mock the login form page (returns CSRF token)
+        login_page_resp = MagicMock()
+        login_page_resp.status_code = 200
+        login_page_resp.text = '<input name="__RequestVerificationToken" value="token123" />'
+        login_page_resp.raise_for_status = MagicMock()
 
-        mock_locator = AsyncMock()
-        mock_locator.wait_for = AsyncMock()
-        mock_locator.fill = AsyncMock()
-        mock_locator.click = AsyncMock()
-        mock_page.locator = MagicMock(return_value=mock_locator)
+        # Mock the POST response
+        post_resp = MagicMock()
+        post_resp.status_code = 200
 
-        session._page = mock_page
-
-        with patch("app.services.nc_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
-            with patch.object(HumanBehavior, "human_type", new_callable=AsyncMock):
-                with patch.object(HumanBehavior, "random_delay", new_callable=AsyncMock):
-                    # After submit, session is authorized
-                    mock_page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
-                    result = await session.login()
+        with patch.object(session.session, "get", return_value=login_page_resp):
+            with patch.object(session.session, "post", return_value=post_resp):
+                with patch.object(session, "check_session_health", return_value=True):
+                    result = session.login()
 
         assert result is True
         assert session.is_logged_in is True
 
-    @pytest.mark.asyncio
-    async def test_login_failure(self):
+    def test_login_failure(self):
         """login() returns False when session not authorized after submit."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
         cfg.NC_USERNAME = "test@example.com"
         cfg.NC_PASSWORD = "wrongpassword"
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        mock_page.keyboard = AsyncMock()
-        mock_locator = AsyncMock()
-        mock_locator.wait_for = AsyncMock()
-        mock_locator.fill = AsyncMock()
-        mock_locator.click = AsyncMock()
-        mock_page.locator = MagicMock(return_value=mock_locator)
-        session._page = mock_page
+        login_page_resp = MagicMock()
+        login_page_resp.status_code = 200
+        login_page_resp.text = '<input name="__RequestVerificationToken" value="token123" />'
+        login_page_resp.raise_for_status = MagicMock()
 
-        with patch("app.services.nc_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
-            with patch.object(HumanBehavior, "human_type", new_callable=AsyncMock):
-                with patch.object(HumanBehavior, "random_delay", new_callable=AsyncMock):
-                    mock_page.evaluate = AsyncMock(return_value={"status": 401, "body": "false"})
-                    result = await session.login()
+        post_resp = MagicMock()
+        post_resp.status_code = 200
+
+        with patch.object(session.session, "get", return_value=login_page_resp):
+            with patch.object(session.session, "post", return_value=post_resp):
+                with patch.object(session, "check_session_health", return_value=False):
+                    result = session.login()
 
         assert result is False
         assert session.is_logged_in is False
 
-    @pytest.mark.asyncio
-    async def test_login_exception(self):
+    def test_login_exception(self):
         """login() handles exceptions gracefully."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
         cfg.NC_USERNAME = "test@example.com"
         cfg.NC_PASSWORD = "pass"
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock(side_effect=Exception("Connection refused"))
-        session._page = mock_page
-
-        result = await session.login()
+        with patch.object(session.session, "get", side_effect=Exception("Connection refused")):
+            result = session.login()
         assert result is False
         assert session.is_logged_in is False
 
-    @pytest.mark.asyncio
-    async def test_ensure_session_already_valid(self):
+    def test_ensure_session_already_valid(self):
         """ensure_session returns True when session is already healthy."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._page = AsyncMock()
-        session._page.evaluate = AsyncMock(return_value={"status": 200, "body": "true"})
 
-        result = await session.ensure_session()
+        with patch.object(session, "check_session_health", return_value=True):
+            result = session.ensure_session()
         assert result is True
         assert session.is_logged_in is True
 
-    @pytest.mark.asyncio
-    async def test_ensure_session_re_login(self):
+    def test_ensure_session_re_login(self):
         """ensure_session re-authenticates when session expired."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
+        cfg.NC_ACCOUNT_NUMBER = "12345"
         cfg.NC_USERNAME = "test@example.com"
         cfg.NC_PASSWORD = "pass"
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        mock_page.keyboard = AsyncMock()
-        mock_locator = AsyncMock()
-        mock_locator.wait_for = AsyncMock()
-        mock_locator.fill = AsyncMock()
-        mock_locator.click = AsyncMock()
-        mock_page.locator = MagicMock(return_value=mock_locator)
-        session._page = mock_page
-
-        # First health check fails, then login succeeds
-        call_count = 0
-
-        async def check_side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count <= 1:
-                return {"status": 401, "body": "false"}
-            return {"status": 200, "body": "true"}
-
-        mock_page.evaluate = AsyncMock(side_effect=check_side_effect)
-
-        with patch("app.services.nc_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
-            with patch.object(HumanBehavior, "human_type", new_callable=AsyncMock):
-                with patch.object(HumanBehavior, "random_delay", new_callable=AsyncMock):
-                    result = await session.ensure_session()
-
+        with patch.object(session, "check_session_health", return_value=False):
+            with patch.object(session, "login", return_value=True):
+                result = session.ensure_session()
         assert result is True
 
-    @pytest.mark.asyncio
-    async def test_stop(self):
-        """stop() closes context and playwright."""
+    def test_stop(self):
+        """stop() closes HTTP session."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._context = AsyncMock()
-        session._playwright = AsyncMock()
         session.is_logged_in = True
 
-        await session.stop()
-        assert session._context is None
-        assert session._page is None
-        assert session._playwright is None
+        session.stop()
         assert session.is_logged_in is False
 
-    @pytest.mark.asyncio
-    async def test_stop_exception(self):
-        """stop() handles exceptions gracefully."""
+    def test_stop_none_context(self):
+        """stop() with no active session doesn't crash."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
-        session._context = AsyncMock()
-        session._context.close = AsyncMock(side_effect=Exception("close error"))
-        session._playwright = AsyncMock()
-
-        await session.stop()  # Should not raise
-        assert session._context is None
-
-    @pytest.mark.asyncio
-    async def test_stop_none_context(self):
-        """stop() with None context doesn't crash."""
-        from app.services.nc_worker.session_manager import NcSessionManager
-
-        cfg = NcConfig()
-        session = NcSessionManager(cfg)
-        await session.stop()  # No-op
+        session.stop()  # No-op
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1642,37 +1553,20 @@ class TestQueueManagerEdge:
 
 
 class TestSessionManagerNotLoggedIn:
-    @pytest.mark.asyncio
-    async def test_start_not_logged_in(self):
-        """start() sets is_logged_in=False and logs message (line 60)."""
+    def test_start_not_logged_in(self):
+        """start() sets is_logged_in=False when session is not authorized."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
         session = NcSessionManager(cfg)
 
-        mock_page = AsyncMock()
-        mock_page.goto = AsyncMock()
-        # Session check returns NOT authorized
-        mock_page.evaluate = AsyncMock(return_value={"status": 401, "body": "false"})
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
 
-        mock_context = AsyncMock()
-        mock_context.pages = [mock_page]
-        mock_context.close = AsyncMock()
-
-        mock_pw_instance = MagicMock()
-        mock_pw_instance.chromium = MagicMock()
-        mock_pw_instance.chromium.launch_persistent_context = AsyncMock(return_value=mock_context)
-
-        mock_async_pw = MagicMock()
-        mock_async_pw.start = AsyncMock(return_value=mock_pw_instance)
-
-        mock_patchright_module = MagicMock()
-        mock_patchright_module.async_playwright = MagicMock(return_value=mock_async_pw)
-
-        with patch.dict(os.environ, {"DISPLAY": ":99"}):
-            with patch.dict("sys.modules", {"patchright": MagicMock(), "patchright.async_api": mock_patchright_module}):
-                with patch("asyncio.sleep", new_callable=AsyncMock):
-                    await session.start()
+        with patch.object(session.session, "get", return_value=mock_resp):
+            with patch.object(session, "check_session_health", return_value=False):
+                session.start()
 
         assert session.is_logged_in is False
 

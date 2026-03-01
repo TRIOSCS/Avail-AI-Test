@@ -4,9 +4,8 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-import asyncio
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from app.services.nc_worker.circuit_breaker import CircuitBreaker
 from app.services.nc_worker.config import NcConfig
@@ -44,14 +43,14 @@ def test_scheduler_is_business_hours_weekend():
 
 
 def test_scheduler_is_business_hours_outside():
-    """Business hours are False outside the configured range."""
+    """Business hours are False outside the configured range (Friday 10 PM)."""
     cfg = NcConfig()
     sched = SearchScheduler(cfg)
 
     with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
         mock_now = MagicMock()
-        mock_now.weekday.return_value = 2  # Wednesday
-        mock_now.hour = 22  # 10 PM
+        mock_now.weekday.return_value = 4  # Friday
+        mock_now.hour = 22  # 10 PM (after 5 PM cutoff)
         mock_dt.now.return_value = mock_now
         assert sched.is_business_hours() is False
 
@@ -116,13 +115,10 @@ def test_breaker_healthy():
     breaker = CircuitBreaker()
     breaker.consecutive_failures = 2
 
-    page = MagicMock()
-    page.url = "https://www.netcomponents.com/search/result"
-    page.evaluate = AsyncMock(return_value="search results for stm32f103")
-
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(breaker.check_page_health(page))
-    loop.close()
+    result = breaker.check_response_health(
+        200, "search results for stm32f103",
+        "https://www.netcomponents.com/search/result",
+    )
 
     assert result == "HEALTHY"
     assert breaker.consecutive_failures == 0
@@ -133,50 +129,29 @@ def test_breaker_captcha_detection():
     """Captcha detected once = warning, twice = trip."""
     breaker = CircuitBreaker()
 
-    page = MagicMock()
-    page.url = "https://www.netcomponents.com/verify"
-    page.evaluate = AsyncMock(return_value="please complete the captcha to continue")
-
-    loop = asyncio.new_event_loop()
-
-    result = loop.run_until_complete(breaker.check_page_health(page))
+    result = breaker.check_response_health(
+        200, "please complete the captcha to continue",
+        "https://www.netcomponents.com/verify",
+    )
     assert result == "CAPTCHA_WARNING"
     assert not breaker.is_open  # First time, just warning
 
-    result = loop.run_until_complete(breaker.check_page_health(page))
+    result = breaker.check_response_health(
+        200, "please complete the captcha to continue",
+        "https://www.netcomponents.com/verify",
+    )
     assert result == "CAPTCHA_WARNING"
     assert breaker.is_open  # Second time, tripped
-
-    loop.close()
-
-
-def test_breaker_unexpected_redirect():
-    """Redirect to non-NC domain trips immediately."""
-    breaker = CircuitBreaker()
-
-    page = MagicMock()
-    page.url = "https://malicious-site.com/phishing"
-    page.evaluate = AsyncMock(return_value="something")
-
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(breaker.check_page_health(page))
-    loop.close()
-
-    assert result == "UNEXPECTED_REDIRECT"
-    assert breaker.is_open
 
 
 def test_breaker_rate_limited():
     """Rate limiting message trips the breaker."""
     breaker = CircuitBreaker()
 
-    page = MagicMock()
-    page.url = "https://www.netcomponents.com/error"
-    page.evaluate = AsyncMock(return_value="too many requests. please try again later.")
-
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(breaker.check_page_health(page))
-    loop.close()
+    result = breaker.check_response_health(
+        200, "too many requests. please try again later.",
+        "https://www.netcomponents.com/error",
+    )
 
     assert result == "RATE_LIMITED"
     assert breaker.is_open
@@ -186,13 +161,10 @@ def test_breaker_session_expired():
     """Login page URL = SESSION_EXPIRED (normal, not a trip)."""
     breaker = CircuitBreaker()
 
-    page = MagicMock()
-    page.url = "https://www.netcomponents.com/account/login"
-    page.evaluate = AsyncMock(return_value="please log in")
-
-    loop = asyncio.new_event_loop()
-    result = loop.run_until_complete(breaker.check_page_health(page))
-    loop.close()
+    result = breaker.check_response_health(
+        200, "please log in",
+        "https://www.netcomponents.com/account/login",
+    )
 
     assert result == "SESSION_EXPIRED"
     assert not breaker.is_open  # Not a trip

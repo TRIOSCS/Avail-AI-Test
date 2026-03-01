@@ -70,11 +70,12 @@ def test_parse_quantity_invalid():
 
 SAMPLE_HTML = """
 <table>
-  <tr><td colspan="10" class="region-header">The Americas</td></tr>
-  <tr><td colspan="10">In-Stock Inventory</td></tr>
-  <tr><td>Part Number</td><td></td><td>Mfr</td><td>DC</td><td>Description</td><td>Uploaded</td><td>Ctr</td><td>Qty</td><td></td><td>Supplier</td></tr>
+  <tr><td colspan="14" class="region-header">The Americas</td></tr>
+  <tr><td colspan="14">In-Stock Inventory</td></tr>
+  <tr><td>Part Number</td><td></td><td></td><td>Mfr</td><td>DC</td><td>Description</td><td>Uploaded</td><td>Ctr</td><td>Qty</td><td></td><td></td><td></td><td>Supplier</td><td></td></tr>
   <tr>
     <td>STM32F103C8T6</td>
+    <td></td>
     <td></td>
     <td>STMicroelectronics</td>
     <td>2024+</td>
@@ -83,10 +84,14 @@ SAMPLE_HTML = """
     <td>US</td>
     <td>10,000</td>
     <td></td>
+    <td></td>
+    <td></td>
     <td>Arrow Electronics</td>
+    <td></td>
   </tr>
   <tr>
     <td>STM32F103C8T6</td>
+    <td></td>
     <td></td>
     <td>STMicroelectronics</td>
     <td>2023+</td>
@@ -95,12 +100,16 @@ SAMPLE_HTML = """
     <td>CN</td>
     <td>5,000+</td>
     <td></td>
+    <td></td>
+    <td></td>
     <td>Shenzhen Parts Co</td>
+    <td></td>
   </tr>
-  <tr><td colspan="10" class="region-header">Europe</td></tr>
-  <tr><td colspan="10">Brokered Inventory Listings</td></tr>
+  <tr><td colspan="14" class="region-header">Europe</td></tr>
+  <tr><td colspan="14">Brokered Inventory Listings</td></tr>
   <tr>
     <td>STM32F103C8T6</td>
+    <td></td>
     <td></td>
     <td>ST</td>
     <td></td>
@@ -109,7 +118,10 @@ SAMPLE_HTML = """
     <td>IL</td>
     <td>208</td>
     <td></td>
+    <td></td>
+    <td></td>
     <td>Euro Broker GmbH</td>
+    <td></td>
   </tr>
 </table>
 """
