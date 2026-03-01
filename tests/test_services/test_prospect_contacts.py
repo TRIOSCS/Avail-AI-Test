@@ -722,3 +722,169 @@ class TestRunContactEnrichmentBatch:
             )
 
         assert result["errors"] == 1
+
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+class TestDomainPatternCoverageGaps:
+    """Cover email pattern detection branches."""
+
+    @pytest.mark.asyncio
+    async def test_pattern_f_last(self):
+        """Line 315-318: {f}{last} and {f}.{last} patterns."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "jsmith@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{f}{last}"
+
+    @pytest.mark.asyncio
+    async def test_pattern_f_dot_last(self):
+        """Lines 318-319: {f}.{last} pattern."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "j.smith@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{f}.{last}"
+
+    @pytest.mark.asyncio
+    async def test_pattern_first_underscore_last(self):
+        """Lines 320-321: {first}_{last} pattern."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "john_smith@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{first}_{last}"
+
+    @pytest.mark.asyncio
+    async def test_pattern_last_dot_first(self):
+        """Lines 322-323: {last}.{first} pattern."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "smith.john@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{last}.{first}"
+
+    @pytest.mark.asyncio
+    async def test_pattern_first_only(self):
+        """Lines 324-325: {first} pattern."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "john@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{first}"
+
+    @pytest.mark.asyncio
+    async def test_no_pattern_detected(self):
+        """Line 333: returns None when no pattern detected."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": "xq7@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern is None
+
+    @pytest.mark.asyncio
+    async def test_missing_email_or_name_skipped(self):
+        """Line 308: contacts without email/first/last are skipped."""
+        from app.services.prospect_contacts import get_domain_pattern_hunter
+
+        contacts = [
+            {"email": None, "first_name": "John", "last_name": "Smith"},
+            {"email": "john@corp.com", "first_name": "", "last_name": "Smith"},
+            {"email": "john.smith@corp.com", "first_name": "John", "last_name": "Smith"},
+        ]
+
+        with patch("app.connectors.hunter_client.find_domain_emails",
+                   new_callable=AsyncMock, return_value=contacts):
+            pattern = await get_domain_pattern_hunter("corp.com")
+
+        assert pattern == "{first}.{last}"
+
+
+class TestEnrichContactsCoverageGaps:
+    """Cover enrichment orchestration gaps."""
+
+    @pytest.mark.asyncio
+    async def test_new_hire_counted(self, db_session):
+        """Line 427: new_hires counter incremented."""
+        from app.services.prospect_contacts import enrich_prospect_contacts, CreditTracker
+
+        recent_start = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        prospect = _make_prospect(db_session, domain="newhire.com")
+
+        contacts = [
+            {
+                "name": "New Hire",
+                "email": "new@newhire.com", "title": "Buyer",
+                "linkedin_url": None,
+                "seniority_level": "executor",
+                "started_current_role_at": recent_start,
+            },
+        ]
+
+        tracker = CreditTracker(apollo_limit=100, hunter_search_limit=25, hunter_verify_limit=50)
+
+        with patch("app.services.prospect_contacts.search_contacts_apollo",
+                   new_callable=AsyncMock, return_value=contacts):
+            with patch("app.services.prospect_contacts.verify_email_hunter",
+                       new_callable=AsyncMock):
+                with patch("app.services.prospect_contacts.get_domain_pattern_hunter",
+                           new_callable=AsyncMock, return_value=None):
+                    stats = await enrich_prospect_contacts(prospect.id, db_session, credit_tracker=tracker)
+
+        assert stats["new_hires"] >= 1
+
+    @pytest.mark.asyncio
+    async def test_credit_limit_stops_batch(self, db_session):
+        """Lines 517-519: Apollo credit exhaustion stops the batch."""
+        from app.services.prospect_contacts import run_contact_enrichment_batch, CreditTracker
+
+        _make_prospect(db_session, domain="credit1.com", fit_score=80)
+        _make_prospect(db_session, domain="credit2.com", fit_score=80)
+
+        tracker = CreditTracker(apollo_limit=0, hunter_search_limit=25, hunter_verify_limit=50)
+
+        with patch("app.database.SessionLocal", return_value=db_session):
+            with patch("app.services.prospect_contacts.CreditTracker", return_value=tracker):
+                result = asyncio.get_event_loop().run_until_complete(
+                    run_contact_enrichment_batch(min_fit_score=60)
+                )
+
+        assert result["skipped_credit_limit"] > 0

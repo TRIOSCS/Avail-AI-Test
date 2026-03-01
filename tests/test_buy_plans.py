@@ -1543,3 +1543,715 @@ class TestV1DeprecationFlag:
             json={"offer_ids": [test_offer.id]},
         )
         assert resp.status_code == 200
+
+
+# ── 18. V1 Draft Endpoint (POST /api/quotes/{qid}/buy-plan/draft) ───
+
+
+class TestCreateBuyPlanDraft:
+    """Cover lines 176-203: create_buy_plan_draft success when V1 enabled."""
+
+    def test_draft_success(self, db_session, sales_client, sales_user, test_quote, test_offer):
+        """Create a draft buy plan when V1 is enabled."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = True
+            mock_settings.stock_sale_vendor_names = []
+            r = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan/draft",
+                json={"offer_ids": [test_offer.id]},
+            )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["status"] == "draft"
+        assert data["buy_plan_id"] is not None
+        plan = db_session.get(BuyPlan, data["buy_plan_id"])
+        assert plan.status == "draft"
+        assert plan.submitted_by_id == sales_user.id
+
+    def test_draft_nonexistent_quote(self, sales_client):
+        """Draft against nonexistent quote → 404."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = True
+            mock_settings.stock_sale_vendor_names = []
+            r = sales_client.post(
+                "/api/quotes/99999/buy-plan/draft",
+                json={"offer_ids": [1]},
+            )
+        assert r.status_code == 404
+
+    def test_draft_no_offers(self, sales_client, test_quote):
+        """Draft with empty offer_ids → 400."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = True
+            mock_settings.stock_sale_vendor_names = []
+            r = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan/draft",
+                json={"offer_ids": []},
+            )
+        assert r.status_code == 400
+
+    def test_draft_invalid_offer_ids(self, db_session, sales_client, test_quote):
+        """Draft with non-existent offer IDs → 400 (no valid offers)."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = True
+            mock_settings.stock_sale_vendor_names = []
+            r = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan/draft",
+                json={"offer_ids": [99999]},
+            )
+        assert r.status_code == 400
+
+    def test_draft_with_notes(self, db_session, sales_client, sales_user, test_quote, test_offer):
+        """Draft with salesperson notes."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = True
+            mock_settings.stock_sale_vendor_names = []
+            r = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan/draft",
+                json={"offer_ids": [test_offer.id], "salesperson_notes": "Urgent"},
+            )
+        assert r.status_code == 200
+        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
+        assert plan.salesperson_notes == "Urgent"
+
+
+# ── 19. Submit Draft (PUT /api/buy-plans/{id}/submit) ────────────────
+
+
+class TestSubmitDraftBuyPlan:
+    """Cover lines 213-248: submit_draft_buy_plan success path."""
+
+    def test_submit_draft_by_creator(
+        self, db_session, sales_client, sales_user, test_quote, test_requisition,
+        test_offer,
+    ):
+        """Creator can submit their own draft plan → pending_approval."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="draft",
+            line_items=[
+                {
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow Electronics",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
+                    "lead_time": "2 weeks",
+                    "condition": "new",
+                    "entered_by_id": None,
+                    "po_number": None,
+                    "po_entered_at": None,
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
+                }
+            ],
+        )
+        r = sales_client.put(f"/api/buy-plans/{plan.id}/submit")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ok"] is True
+        assert data["status"] == "pending_approval"
+        db_session.refresh(plan)
+        assert plan.status == "pending_approval"
+        assert plan.approval_token is not None
+        assert plan.submitted_at is not None
+        # Quote and req statuses updated
+        db_session.refresh(test_quote)
+        assert test_quote.result == "won"
+        assert test_quote.status == "won"
+        # Offer status also updated
+        db_session.refresh(test_offer)
+        assert test_offer.status == "won"
+
+    def test_submit_draft_by_admin(
+        self, db_session, admin_client, admin_user, sales_user,
+        test_quote, test_requisition,
+    ):
+        """Admin can submit any draft plan."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="draft",
+        )
+        r = admin_client.put(f"/api/buy-plans/{plan.id}/submit")
+        assert r.status_code == 200
+        assert r.json()["status"] == "pending_approval"
+
+    def test_submit_draft_not_found(self, sales_client):
+        """Submit nonexistent draft → 404."""
+        r = sales_client.put("/api/buy-plans/99999/submit")
+        assert r.status_code == 404
+
+    def test_submit_draft_wrong_status(
+        self, db_session, sales_client, sales_user, test_requisition, test_quote,
+    ):
+        """Submit a non-draft plan → 400."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="pending_approval",
+        )
+        r = sales_client.put(f"/api/buy-plans/{plan.id}/submit")
+        assert r.status_code == 400
+
+    def test_submit_draft_forbidden(
+        self, db_session, trader_client, sales_user, test_requisition, test_quote,
+    ):
+        """Non-creator, non-admin/manager cannot submit."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="draft",
+        )
+        r = trader_client.put(f"/api/buy-plans/{plan.id}/submit")
+        assert r.status_code == 403
+
+
+# ── 20. Submit V1 Disabled — no valid offers path (line 271) ─────────
+
+
+class TestSubmitNoValidOffers:
+    def test_submit_no_valid_offers_v1_enabled(
+        self, db_session, sales_client, test_quote,
+    ):
+        """Submit with non-existent offer IDs → 400 (no valid offers)."""
+        r = sales_client.post(
+            f"/api/quotes/{test_quote.id}/buy-plan",
+            json={"offer_ids": [99999]},
+        )
+        assert r.status_code == 400
+        assert "No valid offers" in r.json()["error"]
+
+
+# ── 21. List with non-approved status filter (line 344) ──────────────
+
+
+class TestListNonApprovedFilter:
+    def test_filter_pending(
+        self, db_session, admin_client, test_requisition, test_quote, test_user,
+    ):
+        """Filter by pending_approval status returns only pending plans."""
+        _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            status="pending_approval",
+        )
+        _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            status="approved",
+        )
+        r = admin_client.get("/api/buy-plans?status=pending_approval")
+        assert r.status_code == 200
+        plans = r.json()
+        assert len(plans) == 1
+        assert plans[0]["status"] == "pending_approval"
+
+    def test_filter_draft(
+        self, db_session, admin_client, test_requisition, test_quote, test_user,
+    ):
+        """Filter by draft status returns only draft plans."""
+        _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            status="draft",
+        )
+        _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            status="approved",
+        )
+        r = admin_client.get("/api/buy-plans?status=draft")
+        assert r.status_code == 200
+        plans = r.json()
+        assert len(plans) == 1
+        assert plans[0]["status"] == "draft"
+
+
+# ── 22. Complete — non-admin, non-buyer user → 403 (line 658) ────────
+
+
+class TestCompleteNonBuyerNonAdmin:
+    def test_sales_cannot_complete(
+        self, db_session, sales_client, sales_user, test_requisition, test_quote,
+    ):
+        """Sales user (not admin, not buyer) → 403."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="po_entered",
+        )
+        r = sales_client.put(f"/api/buy-plans/{plan.id}/complete")
+        assert r.status_code == 403
+        assert "Only admin, manager, or buyer" in r.json()["error"]
+
+
+# ── 23. _record_purchase_history coverage (lines 966-1003) ───────────
+
+
+class TestRecordPurchaseHistory:
+    """Direct tests for the _record_purchase_history helper function."""
+
+    def test_no_req(self, db_session):
+        """No requisition → returns early."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        quote = Quote(id=1, line_items=[])
+        _record_purchase_history(db_session, None, quote, [])
+        # No exception — just returns
+
+    def test_req_no_site_id(self, db_session, test_requisition):
+        """Requisition with no customer_site_id → returns early."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = None
+        db_session.commit()
+        quote = Quote(id=1, line_items=[])
+        _record_purchase_history(db_session, test_requisition, quote, [])
+
+    def test_site_no_company(self, db_session, test_requisition, test_customer_site):
+        """Site with no company_id → returns at line 972."""
+        from unittest.mock import MagicMock
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        # Mock db.get to return a site with company_id=None (can't set NULL on real column)
+        fake_site = MagicMock()
+        fake_site.company_id = None
+        original_get = db_session.get
+
+        def patched_get(model, pk, **kw):
+            from app.models import CustomerSite as CS
+            if model is CS and pk == test_customer_site.id:
+                return fake_site
+            return original_get(model, pk, **kw)
+
+        with patch.object(db_session, "get", side_effect=patched_get):
+            quote = Quote(id=1, line_items=[])
+            _record_purchase_history(db_session, test_requisition, quote, [])
+
+    def test_offer_no_material_card(
+        self, db_session, test_requisition, test_customer_site, test_offer,
+    ):
+        """Offer with no material_card_id → skip (line 978)."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        test_offer.material_card_id = None
+        db_session.commit()
+        quote = Quote(id=1, line_items=[])
+        _record_purchase_history(db_session, test_requisition, quote, [test_offer])
+
+    def test_offer_with_material_card(
+        self, db_session, test_requisition, test_customer_site, test_offer,
+        test_material_card,
+    ):
+        """Offer with material_card_id → calls upsert_purchase."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        test_offer.material_card_id = test_material_card.id
+        db_session.commit()
+        quote = Quote(id=1, line_items=[])
+        _record_purchase_history(db_session, test_requisition, quote, [test_offer])
+
+    def test_quote_line_items_with_card(
+        self, db_session, test_requisition, test_customer_site, test_material_card,
+    ):
+        """Quote line items with material_card_id → calls upsert_purchase."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        quote = Quote(
+            id=1,
+            line_items=[
+                {"material_card_id": test_material_card.id, "sell_price": 0.75, "qty": 500},
+            ],
+        )
+        _record_purchase_history(db_session, test_requisition, quote, [])
+
+    def test_quote_line_items_without_card(
+        self, db_session, test_requisition, test_customer_site,
+    ):
+        """Quote line items without material_card_id → skipped (line 991)."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        quote = Quote(
+            id=1,
+            line_items=[
+                {"mpn": "LM317T", "sell_price": 0.75, "qty": 500},
+            ],
+        )
+        _record_purchase_history(db_session, test_requisition, quote, [])
+
+    def test_exception_logged_not_raised(
+        self, db_session, test_requisition, test_customer_site,
+    ):
+        """Exception in purchase history → logged but not raised (lines 1002-1003)."""
+        from app.routers.crm.buy_plans import _record_purchase_history
+        from app.models import Quote
+
+        test_requisition.customer_site_id = test_customer_site.id
+        db_session.commit()
+        quote = Quote(
+            id=1,
+            line_items=[
+                {"material_card_id": 99999, "sell_price": 0.75, "qty": 500},
+            ],
+        )
+        # Force an error by patching upsert_purchase at the source
+        with patch(
+            "app.services.purchase_history_service.upsert_purchase",
+            side_effect=Exception("Forced test error"),
+        ):
+            # Should not raise — exception is caught and logged
+            _record_purchase_history(db_session, test_requisition, quote, [])
+
+
+# ── 24. Token Expired Edge Cases ────────────────────────────────────
+
+
+class TestTokenExpired:
+    """Cover expired token paths: lines 363, 379, 436."""
+
+    @staticmethod
+    def _expired_plan(db_session, test_requisition, test_quote, submitted_by_id):
+        """Create a plan with an expired token_expires_at (naive, in the past)."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=submitted_by_id,
+            token_expires_at=datetime(2020, 1, 1),
+        )
+        return plan
+
+    def _mock_now(self):
+        """Mock datetime.now(tz) to return naive UTC so it matches SQLite storage."""
+        return patch(
+            "app.routers.crm.buy_plans.datetime",
+            wraps=datetime,
+            **{"now.return_value": datetime(2025, 6, 1)},
+        )
+
+    def test_get_by_expired_token(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """GET token endpoint → 410 when token expired."""
+        plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
+        with self._mock_now():
+            r = noauth_client.get(f"/api/buy-plans/token/{plan.approval_token}")
+        assert r.status_code == 410
+
+    def test_approve_expired_token(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """PUT approve via token → 410 when token expired."""
+        plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
+        with self._mock_now():
+            r = noauth_client.put(
+                f"/api/buy-plans/token/{plan.approval_token}/approve",
+                json={"sales_order_number": "SO-EXPIRED"},
+            )
+        assert r.status_code == 410
+
+    def test_reject_expired_token(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """PUT reject via token → 410 when token expired."""
+        plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
+        with self._mock_now():
+            r = noauth_client.put(
+                f"/api/buy-plans/token/{plan.approval_token}/reject",
+                json={"reason": "test"},
+            )
+        assert r.status_code == 410
+
+
+# ── 25. Token Approve Edge Cases ────────────────────────────────────
+
+
+class TestTokenApproveEdgeCases:
+    """Cover lines 377, 385, 389: invalid token approve, blank SO, notes."""
+
+    def test_approve_invalid_token(self, noauth_client):
+        """Approve with invalid token → 404."""
+        r = noauth_client.put(
+            "/api/buy-plans/token/nonexistent-token/approve",
+            json={"sales_order_number": "SO-X"},
+        )
+        assert r.status_code == 404
+
+    def test_approve_blank_so(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """Approve via token with blank SO → 400."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+        )
+        r = noauth_client.put(
+            f"/api/buy-plans/token/{plan.approval_token}/approve",
+            json={"sales_order_number": "   "},
+        )
+        assert r.status_code == 400
+
+    def test_approve_with_notes(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """Approve via token with manager_notes → notes stored."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+        )
+        r = noauth_client.put(
+            f"/api/buy-plans/token/{plan.approval_token}/approve",
+            json={"sales_order_number": "SO-NOTES", "manager_notes": "Looks good"},
+        )
+        assert r.status_code == 200
+        db_session.refresh(plan)
+        assert plan.manager_notes == "Looks good"
+
+
+# ── 26. Token Reject Edge Cases ────────────────────────────────────
+
+
+class TestTokenRejectEdgeCases:
+    """Cover lines 434, 436, 438: invalid token reject, expired, wrong status."""
+
+    def test_reject_invalid_token(self, noauth_client):
+        """Reject with invalid token → 404."""
+        r = noauth_client.put(
+            "/api/buy-plans/token/nonexistent-token/reject",
+            json={"reason": "test"},
+        )
+        assert r.status_code == 404
+
+    def test_reject_wrong_status(
+        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+    ):
+        """Reject via token on non-pending plan → 400."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            status="approved",
+        )
+        r = noauth_client.put(
+            f"/api/buy-plans/token/{plan.approval_token}/reject",
+            json={"reason": "test"},
+        )
+        assert r.status_code == 400
+
+
+# ── 27. Approve Not Found & Blank SO ────────────────────────────────
+
+
+class TestApproveNotFoundAndBlankSO:
+    """Cover lines 486, 492."""
+
+    def test_approve_not_found(self, manager_client):
+        """Approve nonexistent plan → 404."""
+        r = manager_client.put(
+            "/api/buy-plans/99999/approve",
+            json={"sales_order_number": "SO-X"},
+        )
+        assert r.status_code == 404
+
+    def test_approve_blank_so(
+        self, db_session, manager_client, test_requisition, test_quote, sales_user,
+    ):
+        """Approve with blank SO → 400."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+        )
+        r = manager_client.put(
+            f"/api/buy-plans/{plan.id}/approve",
+            json={"sales_order_number": "   "},
+        )
+        assert r.status_code == 400
+
+    def test_approve_with_line_items_override(
+        self, db_session, manager_client, test_requisition, test_quote, sales_user,
+    ):
+        """Approve with line_items override → line_items stored (line 496)."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+        )
+        new_items = [{"offer_id": 1, "mpn": "UPDATED", "qty": 200}]
+        r = manager_client.put(
+            f"/api/buy-plans/{plan.id}/approve",
+            json={"sales_order_number": "SO-LI", "line_items": new_items},
+        )
+        assert r.status_code == 200
+        db_session.refresh(plan)
+        assert plan.line_items[0]["mpn"] == "UPDATED"
+
+
+# ── 28. Reject Not Found ─────────────────────────────────────────────
+
+
+class TestRejectNotFound:
+    """Cover line 546."""
+
+    def test_reject_not_found(self, manager_client):
+        """Reject nonexistent plan → 404."""
+        r = manager_client.put(
+            "/api/buy-plans/99999/reject",
+            json={"reason": "test"},
+        )
+        assert r.status_code == 404
+
+
+# ── 29. PO Entry Not Found & Empty PO ────────────────────────────────
+
+
+class TestPOEntryNotFoundEmptyPO:
+    """Cover lines 580, 587."""
+
+    def test_po_not_found(self, buyer_client):
+        """PO entry on nonexistent plan → 404."""
+        r = buyer_client.put(
+            "/api/buy-plans/99999/po",
+            json={"line_index": 0, "po_number": "PO-X"},
+        )
+        assert r.status_code == 404
+
+    def test_po_blank_number(
+        self, db_session, buyer_client, test_requisition, test_quote, sales_user,
+    ):
+        """PO entry with blank po_number → 400."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="approved",
+        )
+        r = buyer_client.put(
+            f"/api/buy-plans/{plan.id}/po",
+            json={"line_index": 0, "po_number": "   "},
+        )
+        assert r.status_code == 400
+
+
+# ── 30. Complete Not Found ────────────────────────────────────────────
+
+
+class TestCompleteNotFound:
+    """Cover line 644."""
+
+    def test_complete_not_found(self, admin_client):
+        """Complete nonexistent plan → 404."""
+        r = admin_client.put("/api/buy-plans/99999/complete")
+        assert r.status_code == 404
+
+
+# ── 31. Cancel Not Found ─────────────────────────────────────────────
+
+
+class TestCancelNotFound:
+    """Cover line 691."""
+
+    def test_cancel_not_found(self, admin_client):
+        """Cancel nonexistent plan → 404."""
+        r = admin_client.put(
+            "/api/buy-plans/99999/cancel",
+            json={"reason": "test"},
+        )
+        assert r.status_code == 404
+
+
+# ── 32. Resubmit Not Found ───────────────────────────────────────────
+
+
+class TestResubmitNotFound:
+    """Cover line 767."""
+
+    def test_resubmit_not_found(self, sales_client):
+        """Resubmit nonexistent plan → 404."""
+        r = sales_client.put(
+            "/api/buy-plans/99999/resubmit",
+            json={"salesperson_notes": "test"},
+        )
+        assert r.status_code == 404
+
+
+# ── 33. Bulk PO Not Found & Invalid Index ────────────────────────────
+
+
+class TestBulkPONotFoundAndInvalidIndex:
+    """Cover lines 859, 881."""
+
+    def test_bulk_po_not_found(self, buyer_client):
+        """Bulk PO on nonexistent plan → 404."""
+        r = buyer_client.put(
+            "/api/buy-plans/99999/po-bulk",
+            json={"entries": [{"line_index": 0, "po_number": "PO-X"}]},
+        )
+        assert r.status_code == 404
+
+    def test_bulk_po_invalid_index_skipped(
+        self, db_session, buyer_client, test_requisition, test_quote, sales_user,
+    ):
+        """Bulk PO with invalid line_index is skipped (line 881)."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="approved",
+        )
+        r = buyer_client.put(
+            f"/api/buy-plans/{plan.id}/po-bulk",
+            json={"entries": [{"line_index": 99, "po_number": "PO-INVALID"}]},
+        )
+        assert r.status_code == 200
+        # Status stays approved since no valid entries were processed
+        assert r.json()["status"] == "approved"

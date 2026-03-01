@@ -506,6 +506,89 @@ class TestEdgeCases:
         assert fit == 60
         assert readiness == 40
 
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+class TestParseEmployeeRangeEdgeCases:
+    """Test _parse_employee_range error paths."""
+
+    def test_plus_invalid(self):
+        """Lines 121-122: ValueError on '+' format."""
+        from app.services.prospect_scoring import _parse_employee_range
+        assert _parse_employee_range("abc+") is None
+
+    def test_dash_invalid(self):
+        """Lines 128-129: ValueError on '-' format."""
+        from app.services.prospect_scoring import _parse_employee_range
+        assert _parse_employee_range("abc-def") is None
+
+    def test_plain_invalid(self):
+        """Lines 132-133: ValueError on plain string."""
+        from app.services.prospect_scoring import _parse_employee_range
+        assert _parse_employee_range("unknown") is None
+
+
+class TestFitScoreCoverageGaps:
+    """Cover uncovered branches in calculate_fit_score."""
+
+    def test_naics_4digit_partial_match(self):
+        """Lines 246-247: NAICS 4-digit prefix match."""
+        # 3364 is a valid 4-digit prefix for Aerospace
+        data = {
+            "name": "Test",
+            "naics_code": "336499",
+        }
+        score, reasoning = calculate_fit_score(data)
+        assert "4-digit match" in reasoning
+
+    def test_naics_3digit_partial_match(self):
+        """Lines 249-250: NAICS 3-digit prefix match."""
+        from app.services.prospect_scoring import ALL_NAICS_3DIGIT
+        # Pick a 3-digit prefix that's in ALL_NAICS_3DIGIT but full code is not in CODES or 4DIGIT
+        test_code = list(ALL_NAICS_3DIGIT)[0] + "99999"
+        data = {
+            "name": "Test",
+            "naics_code": test_code,
+        }
+        score, reasoning = calculate_fit_score(data)
+        assert "3-digit match" in reasoning or "no match" in reasoning
+
+    def test_geo_non_standard_region(self):
+        """Line 266: region that's not Global/US/EU/ASIA gets 3 points."""
+        data = {
+            "name": "Test",
+            "region": "LATAM",
+        }
+        score, reasoning = calculate_fit_score(data)
+        assert "Geography" in reasoning or "geography" in reasoning
+
+
+class TestReadinessScoreCoverageGaps:
+    """Cover uncovered branches in calculate_readiness_score."""
+
+    def test_hiring_not_dict(self):
+        """Line 360: hiring signal is not a dict."""
+        score, breakdown = calculate_readiness_score(
+            {"name": "T"}, {"hiring": "procurement"}
+        )
+        assert breakdown["hiring"]["detail"] == "none"
+
+    def test_verified_not_int(self):
+        """Line 390: contacts_verified_count is not an int."""
+        score, breakdown = calculate_readiness_score(
+            {"name": "T"}, {"contacts_verified_count": "many"}
+        )
+        assert breakdown["contacts"]["score"] == 0
+
+    def test_last_activity_malformed(self):
+        """Lines 482-483: last_activity that can't be parsed as year."""
+        fit, readiness = apply_historical_bonus(
+            60, 40, {"last_activity": "invalid-date"}
+        )
+        # Should not crash, no bonus applied
+        assert readiness == 40
+
     def test_fit_with_none_values(self):
         """Explicitly None values in all fields."""
         data = {

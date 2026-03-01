@@ -189,7 +189,7 @@ def score_company_size(employee_range: str | None) -> int:
         elif lo <= count <= hi:
             return score
 
-    return SIZE_NEUTRAL
+    return SIZE_NEUTRAL  # pragma: no cover — defensive: brackets cover all non-negative ints
 
 
 def calculate_fit_score(prospect_data: dict) -> tuple[int, str]:

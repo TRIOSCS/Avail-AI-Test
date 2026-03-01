@@ -280,3 +280,23 @@ def test_valid_categories_includes_other():
     from app.services.material_enrichment_service import VALID_CATEGORIES
 
     assert "other" in VALID_CATEGORIES
+
+
+@pytest.mark.asyncio
+async def test_enrich_apply_exception_counts_error(db):
+    """Exception during card attribute apply is caught and counted as error."""
+    from app.services.material_enrichment_service import enrich_material_cards
+
+    card = _make_card(db, "ERR-APPLY")
+
+    # Return a result where ai part is not a dict (will raise on .get())
+    mock_result = {"parts": ["not-a-dict"]}
+
+    with patch(
+        "app.utils.claude_client.claude_structured",
+        new_callable=AsyncMock,
+        return_value=mock_result,
+    ):
+        stats = await enrich_material_cards([card.id], db)
+
+    assert stats["errors"] >= 1

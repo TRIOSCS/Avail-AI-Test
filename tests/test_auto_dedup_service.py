@@ -643,3 +643,77 @@ class TestAskClaudeMerge:
             )
 
         assert result is True
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Coverage gap tests for _dedup_vendors edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+class TestDedupVendorsCoverageGaps:
+    def test_thefuzz_import_error(self, db_session):
+        """Lines 54-56: when thefuzz is not installed, returns 0."""
+        import builtins
+        original_import = builtins.__import__
+
+        def mock_import(name, *args, **kwargs):
+            if name == "thefuzz":
+                raise ImportError("No module named 'thefuzz'")
+            return original_import(name, *args, **kwargs)
+
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        with patch("builtins.__import__", side_effect=mock_import):
+            result = _dedup_vendors(db_session)
+
+        assert result == 0
+
+    def test_skip_merged_b_in_inner_loop(self, db_session):
+        """Line 77: inner loop skips b whose id was merged in an earlier outer iteration."""
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        # A (idx 0) and C (idx 2) are similar (will merge, C removed).
+        # B (idx 1) has inner loop that includes C — should skip it.
+        # A and C are similar (score=98), B is unrelated
+        _make_vendor(db_session, "Xyzzy Electronics Corporation Inc",
+                     normalized_name="xyzzy electronics corporation inc", sighting_count=100)
+        _make_vendor(db_session, "Totally Different Vendor",
+                     normalized_name="totally different vendor", sighting_count=50)
+        _make_vendor(db_session, "Xyzzy Electronics Corporation In",
+                     normalized_name="xyzzy electronics corporation in", sighting_count=10)
+        db_session.commit()
+
+        merged = _dedup_vendors(db_session)
+        # A merges C. Then B's inner loop encounters C (in merged_ids) -> line 77 skip
+        assert merged >= 1
+
+    def test_merge_exception_rolls_back(self, db_session):
+        """Lines 112-114: merge exception is caught and rolled back."""
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        _make_vendor(db_session, "Fail Merge Corp",
+                     normalized_name="fail merge corp", sighting_count=20)
+        _make_vendor(db_session, "Fail Merge Cor",
+                     normalized_name="fail merge cor", sighting_count=10)
+        db_session.commit()
+
+        with patch("app.services.vendor_merge_service.merge_vendor_cards",
+                   side_effect=RuntimeError("merge exploded")):
+            merged = _dedup_vendors(db_session)
+
+        assert merged == 0
+
+    def test_cap_at_20_breaks_both_loops(self, db_session):
+        """Lines 117 and 119: both inner and outer loops break at 20 merges."""
+        from app.services.auto_dedup_service import _dedup_vendors
+
+        # Create >40 vendor pairs that will auto-merge (score>=98)
+        # "corp000 electronics inc" vs "corp000 electronics in" = score 98
+        for i in range(25):
+            _make_vendor(db_session, f"Corp{i:03d} Electronics Inc",
+                         normalized_name=f"corp{i:03d} electronics inc", sighting_count=100)
+            _make_vendor(db_session, f"Corp{i:03d} Electronics In",
+                         normalized_name=f"corp{i:03d} electronics in", sighting_count=50)
+        db_session.commit()
+
+        merged = _dedup_vendors(db_session)
+        assert merged == 20

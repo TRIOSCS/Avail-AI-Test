@@ -990,3 +990,119 @@ class TestApolloBatchEdgeCases:
                     result = await run_people_check_batch([pa.id], db_session)
 
         assert result["no_staff"] == 1
+
+
+# ── Explorium Coverage Gap Tests ────────────────────────────────────
+
+
+class TestExploriumCoverageGaps:
+    """Tests for uncovered branches in prospect_discovery_explorium."""
+
+    def test_get_api_key_returns_empty(self):
+        """Line 78: _get_api_key returns empty when attribute is missing."""
+        from app.services.prospect_discovery_explorium import _get_api_key
+
+        with patch("app.services.prospect_discovery_explorium.settings") as mock_s:
+            del mock_s.explorium_api_key  # make getattr return ""
+            result = _get_api_key()
+        assert result == ""
+
+    def test_businesses_not_list(self):
+        """Line 133: businesses is not a list, gets reset to []."""
+        from app.services.prospect_discovery_explorium import discover_companies_with_signals
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"businesses": "not-a-list"}
+
+        async def run():
+            with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
+                with patch("app.services.prospect_discovery_explorium.http") as mock_http:
+                    mock_http.post = AsyncMock(return_value=mock_resp)
+                    return await discover_companies_with_signals("aerospace_defense", "US")
+
+        import asyncio
+        results = asyncio.get_event_loop().run_until_complete(run())
+        assert results == []
+
+    def test_intent_moderate_strength(self):
+        """Lines 185-186: component_topics between 1 and 3 gives moderate."""
+        from app.services.prospect_discovery_explorium import normalize_explorium_result
+
+        raw = {
+            "name": "Test",
+            "domain": "test.com",
+            "business_intent_topics": ["electronic components", "unrelated stuff"],
+        }
+        result = normalize_explorium_result(raw, "ems_electronics")
+        assert result["intent"]["strength"] == "moderate"
+
+    def test_intent_weak_strength(self):
+        """Lines 187-188: no component_topics gives weak."""
+        from app.services.prospect_discovery_explorium import normalize_explorium_result
+
+        raw = {
+            "name": "Test",
+            "domain": "test.com",
+            "business_intent_topics": ["food delivery", "retail", "fashion"],
+        }
+        result = normalize_explorium_result(raw, "ems_electronics")
+        assert result["intent"]["strength"] == "weak"
+
+    def test_hiring_engineering_type(self):
+        """Line 212: engineering growth path."""
+        from app.services.prospect_discovery_explorium import normalize_explorium_result
+
+        raw = {
+            "name": "Test",
+            "domain": "test.com",
+            "workforce_trends": {"engineering": 10, "procurement": 0},
+        }
+        result = normalize_explorium_result(raw, "ems_electronics")
+        assert result["hiring"]["type"] == "engineering"
+
+    def test_hiring_workforce_not_dict(self):
+        """Line 216: workforce_trends is not a dict."""
+        from app.services.prospect_discovery_explorium import normalize_explorium_result
+
+        raw = {
+            "name": "Test",
+            "domain": "test.com",
+            "workforce_trends": "not-a-dict",
+        }
+        result = normalize_explorium_result(raw, "ems_electronics")
+        assert result["hiring"] == {}
+
+    def test_normalize_size_all_ranges(self):
+        """Lines 246-258: all size bracket paths in _normalize_size."""
+        from app.services.prospect_discovery_explorium import _normalize_size
+
+        assert _normalize_size({"company_size": 30}) == "1-50"
+        assert _normalize_size({"company_size": 100}) == "51-200"
+        assert _normalize_size({"company_size": 300}) == "201-500"
+        assert _normalize_size({"company_size": 800}) == "501-1000"
+        assert _normalize_size({"company_size": 3000}) == "1001-5000"
+        assert _normalize_size({"company_size": 7000}) == "5001-10000"
+        assert _normalize_size({"company_size": 20000}) == "10001+"
+
+    @pytest.mark.asyncio
+    async def test_batch_skips_empty_domain(self):
+        """Line 320: results with empty domain are skipped."""
+        from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
+
+        no_domain_result = {
+            "company_name": "No Domain Corp",
+            "industry": "Unknown",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"businesses": [no_domain_result]}
+
+        with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_explorium.http") as mock_http:
+                mock_http.post = AsyncMock(return_value=mock_resp)
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    results = await run_explorium_discovery_batch("test-batch", set())
+
+        assert len(results) == 0

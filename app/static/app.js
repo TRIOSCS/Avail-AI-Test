@@ -7948,8 +7948,8 @@ function renderRfqVendors() {
         }
 
         // Source indicator with tooltips
-        const srcLabels = { cached: '💾 Cached', past_rfq: '📬 Past RFQ', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', clay: '🧱 Clay', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
-        const srcTitles = { cached: 'Contact from local database cache', past_rfq: 'Email reused from a previous RFQ', website_scrape: 'Email scraped from vendor website', ai_lookup: 'Contact found via AI search', apollo: 'Enriched via Apollo.io', hunter: 'Found via Hunter.io email finder', rocketreach: 'Found via RocketReach', clay: 'Enriched via Clay.com', explorium: 'Enriched via Explorium', ai: 'Contact found via AI search', enrichment: 'Auto-enriched from multiple sources' };
+        const srcLabels = { cached: '💾 Cached', past_rfq: '📬 Past RFQ', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
+        const srcTitles = { cached: 'Contact from local database cache', past_rfq: 'Email reused from a previous RFQ', website_scrape: 'Email scraped from vendor website', ai_lookup: 'Contact found via AI search', apollo: 'Enriched via Apollo.io', hunter: 'Found via Hunter.io email finder', rocketreach: 'Found via RocketReach', explorium: 'Enriched via Explorium', ai: 'Contact found via AI search', enrichment: 'Auto-enriched from multiple sources' };
         const srcKey = (v.contact_source || '').split('+')[0];
         const srcBadge = v.contact_source ? `<span class="rfq-src-badge" title="${escAttr(srcTitles[srcKey] || 'Contact source: ' + v.contact_source)}">${srcLabels[srcKey] || v.contact_source}</span>` : '';
 

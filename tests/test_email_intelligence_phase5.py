@@ -314,3 +314,424 @@ class TestDashboardEndpoint:
         # 30-day window should include it
         resp30 = client.get("/api/email-intelligence/dashboard?days=30")
         assert resp30.json()["offers_detected_7d"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: vendor_name filter when vendor has no domain (line 83, 87-89)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestVendorResponseMetricsNoDomain:
+    def test_metrics_no_domain_uses_vendor_name(self, db_session):
+        """When vendor has no domain, responses are matched by vendor_name."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import compute_vendor_response_metrics
+
+        now = datetime.now(timezone.utc)
+
+        # Vendor with NO domain set
+        vendor = VendorCard(
+            normalized_name="no domain vendor",
+            display_name="No Domain Vendor",
+            domain=None,
+            emails=[],
+            sighting_count=1,
+            total_outreach=5,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # Responses matched by vendor_name (not email domain)
+        for i in range(2):
+            db_session.add(VendorResponse(
+                vendor_name="No Domain Vendor",
+                vendor_email=f"rep{i}@unknown.com",
+                subject=f"RE: RFQ {i}",
+                received_at=now - timedelta(hours=i * 5),
+                created_at=now - timedelta(hours=i * 5 + 6),
+                classification="offer",
+                confidence=0.9,
+            ))
+        db_session.commit()
+
+        result = compute_vendor_response_metrics(db_session, vendor.id)
+
+        assert result["response_count"] == 2
+        assert result["outreach_count"] == 5
+        assert result["response_rate"] == 0.4  # 2/5
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: median with even count (line 121)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestMedianEvenCount:
+    def test_median_even_count(self, db_session):
+        """Median is average of two middle values when response count is even."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import compute_vendor_response_metrics
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="median test vendor",
+            display_name="Median Test Vendor",
+            domain="mediantest.com",
+            emails=["sales@mediantest.com"],
+            sighting_count=1,
+            total_outreach=10,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # 4 responses with known response times: 2h, 4h, 6h, 8h
+        # Median of even count = (4+6)/2 = 5.0
+        response_times = [2, 4, 6, 8]
+        for i, hours in enumerate(response_times):
+            db_session.add(VendorResponse(
+                vendor_name="Median Test Vendor",
+                vendor_email=f"rep{i}@mediantest.com",
+                subject=f"RE: RFQ {i}",
+                received_at=now - timedelta(hours=i * 20),
+                created_at=now - timedelta(hours=i * 20 + hours),
+                classification="offer",
+                confidence=0.9,
+            ))
+        db_session.commit()
+
+        result = compute_vendor_response_metrics(db_session, vendor.id)
+
+        assert result["response_count"] == 4
+        assert result["median_response_hours"] == 5.0  # (4+6)/2
+        assert result["avg_response_hours"] == 5.0  # (2+4+6+8)/4
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: response time interpolation (lines 182-188)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestResponseTimeInterpolation:
+    def test_response_time_between_ideal_and_max(self, db_session):
+        """Response time between 4h and 168h yields interpolated score."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import (
+            RESPONSE_IDEAL_HOURS,
+            RESPONSE_MAX_HOURS,
+            compute_email_health_score,
+        )
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="interp vendor",
+            display_name="Interp Vendor",
+            domain="interp.com",
+            emails=["sales@interp.com"],
+            sighting_count=1,
+            total_outreach=2,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # Response with 48h response time (between 4h ideal and 168h max)
+        db_session.add(VendorResponse(
+            vendor_name="Interp Vendor",
+            vendor_email="sales@interp.com",
+            subject="RE: RFQ 1",
+            received_at=now,
+            created_at=now - timedelta(hours=48),
+            classification="offer",
+            confidence=0.9,
+        ))
+        db_session.commit()
+
+        result = compute_email_health_score(db_session, vendor.id)
+
+        # Expected: 100 * (1 - (48-4)/(168-4)) = 100 * (1 - 44/164) ≈ 73.2
+        expected_time_score = 100.0 * (1.0 - (48.0 - RESPONSE_IDEAL_HOURS) / (RESPONSE_MAX_HOURS - RESPONSE_IDEAL_HOURS))
+        assert result["response_time_score"] == round(expected_time_score, 1)
+        # Verify it's between 0 and 100 (interpolated, not at boundaries)
+        assert 0 < result["response_time_score"] < 100
+
+    def test_response_time_at_or_below_ideal(self, db_session):
+        """Response time <= 4h gives perfect 100.0 score (line 184)."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import compute_email_health_score
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="fast vendor",
+            display_name="Fast Vendor",
+            domain="fast.com",
+            emails=["sales@fast.com"],
+            sighting_count=1,
+            total_outreach=2,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # Response with 2h response time (<= 4h ideal)
+        db_session.add(VendorResponse(
+            vendor_name="Fast Vendor",
+            vendor_email="sales@fast.com",
+            subject="RE: RFQ 1",
+            received_at=now,
+            created_at=now - timedelta(hours=2),
+            classification="offer",
+            confidence=0.9,
+        ))
+        db_session.commit()
+
+        result = compute_email_health_score(db_session, vendor.id)
+        assert result["response_time_score"] == 100.0
+
+    def test_response_time_at_or_above_max(self, db_session):
+        """Response time >= 168h gives 0.0 score (line 186)."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import compute_email_health_score
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="slow vendor",
+            display_name="Slow Vendor",
+            domain="slow.com",
+            emails=["sales@slow.com"],
+            sighting_count=1,
+            total_outreach=2,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # Response with 200h response time (>= 168h max)
+        db_session.add(VendorResponse(
+            vendor_name="Slow Vendor",
+            vendor_email="sales@slow.com",
+            subject="RE: RFQ 1",
+            received_at=now,
+            created_at=now - timedelta(hours=200),
+            classification="offer",
+            confidence=0.9,
+        ))
+        db_session.commit()
+
+        result = compute_email_health_score(db_session, vendor.id)
+        assert result["response_time_score"] == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: thread resolution scoring (lines 228-254)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestThreadResolutionScoring:
+    def test_thread_resolution_with_closed_threads(self, db_session, test_user):
+        """Thread resolution score counts closed/quoted threads correctly."""
+        from app.models import EmailIntelligence, VendorCard
+        from app.services.response_analytics import compute_email_health_score
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="thread vendor",
+            display_name="Thread Vendor",
+            domain="threadvendor.com",
+            emails=["sales@threadvendor.com"],
+            sighting_count=1,
+            total_outreach=5,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # 4 threads: 2 closed, 1 quoted, 1 open → 3/4 = 75% resolution
+        thread_statuses = [
+            {"thread_status": "closed"},
+            {"thread_status": "closed"},
+            {"thread_status": "quoted"},
+            {"thread_status": "open"},
+        ]
+        for i, summary in enumerate(thread_statuses):
+            db_session.add(EmailIntelligence(
+                message_id=f"thread-{i}",
+                user_id=test_user.id,
+                sender_email=f"rep@threadvendor.com",
+                sender_domain="threadvendor.com",
+                classification="offer",
+                confidence=0.9,
+                thread_summary=summary,
+                created_at=now,
+            ))
+        db_session.commit()
+
+        result = compute_email_health_score(db_session, vendor.id)
+
+        # 3 of 4 threads resolved → 75.0
+        assert result["thread_resolution_score"] == 75.0
+
+    def test_thread_resolution_non_dict_summary_skipped(self, db_session, test_user):
+        """Non-dict thread_summary entries are skipped (not counted as resolved)."""
+        from app.models import EmailIntelligence, VendorCard
+        from app.services.response_analytics import compute_email_health_score
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="nondict vendor",
+            display_name="NonDict Vendor",
+            domain="nondict.com",
+            emails=["sales@nondict.com"],
+            sighting_count=1,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # 2 threads: 1 with a dict (closed), 1 with a string (not a dict)
+        db_session.add(EmailIntelligence(
+            message_id="nd-1",
+            user_id=test_user.id,
+            sender_email="rep@nondict.com",
+            sender_domain="nondict.com",
+            classification="offer",
+            confidence=0.9,
+            thread_summary={"thread_status": "closed"},
+            created_at=now,
+        ))
+        db_session.add(EmailIntelligence(
+            message_id="nd-2",
+            user_id=test_user.id,
+            sender_email="rep@nondict.com",
+            sender_domain="nondict.com",
+            classification="offer",
+            confidence=0.9,
+            thread_summary="just a string",
+            created_at=now,
+        ))
+        db_session.commit()
+
+        result = compute_email_health_score(db_session, vendor.id)
+
+        # 1 of 2 resolved → 50.0
+        assert result["thread_resolution_score"] == 50.0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: avg_response_hours updated on vendor (line 298)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestUpdateVendorAvgResponseHours:
+    def test_update_persists_avg_response_hours(self, db_session):
+        """update_vendor_email_health sets avg_response_hours on VendorCard."""
+        from app.models import VendorCard
+        from app.models.offers import VendorResponse
+        from app.services.response_analytics import update_vendor_email_health
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="avg hrs vendor",
+            display_name="Avg Hrs Vendor",
+            domain="avghrs.com",
+            emails=["sales@avghrs.com"],
+            sighting_count=1,
+            total_outreach=3,
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        # Add response with 12h response time
+        db_session.add(VendorResponse(
+            vendor_name="Avg Hrs Vendor",
+            vendor_email="sales@avghrs.com",
+            subject="RE: RFQ 1",
+            received_at=now,
+            created_at=now - timedelta(hours=12),
+            classification="offer",
+            confidence=0.9,
+        ))
+        db_session.commit()
+
+        result = update_vendor_email_health(db_session, vendor.id)
+
+        assert result is not None
+        assert vendor.avg_response_hours == 12.0
+        assert vendor.email_health_score is not None
+        assert vendor.response_rate is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Coverage Gap: batch_update exception in loop (lines 333-335)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBatchUpdateErrors:
+    def test_batch_update_individual_error(self, db_session):
+        """Individual vendor update failure increments errors count."""
+        from app.models import VendorCard
+        from app.services.response_analytics import batch_update_email_health
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="error vendor",
+            display_name="Error Vendor",
+            domain="error.com",
+            emails=[],
+            sighting_count=1,
+            last_contact_at=now - timedelta(days=5),
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.commit()
+
+        with patch(
+            "app.services.response_analytics.update_vendor_email_health",
+            side_effect=RuntimeError("DB error"),
+        ):
+            result = batch_update_email_health(db_session, lookback_days=90)
+
+        assert result["errors"] == 1
+        assert result["updated"] == 0
+
+    def test_batch_update_commit_failure(self, db_session):
+        """Commit failure triggers rollback and returns error info."""
+        from app.models import VendorCard
+        from app.services.response_analytics import batch_update_email_health
+
+        now = datetime.now(timezone.utc)
+
+        vendor = VendorCard(
+            normalized_name="commit fail vendor",
+            display_name="Commit Fail Vendor",
+            domain="commitfail.com",
+            emails=[],
+            sighting_count=1,
+            last_contact_at=now - timedelta(days=5),
+            created_at=now,
+        )
+        db_session.add(vendor)
+        db_session.commit()
+
+        # The update succeeds (updated=1) but commit fails
+        with patch.object(db_session, "commit", side_effect=RuntimeError("Commit failed")):
+            with patch.object(db_session, "rollback") as mock_rollback:
+                result = batch_update_email_health(db_session, lookback_days=90)
+
+        assert result["updated"] >= 1
+        mock_rollback.assert_called_once()

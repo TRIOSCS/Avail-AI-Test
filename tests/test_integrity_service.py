@@ -958,3 +958,54 @@ class TestSoftDelete:
         # The total should count both since the query uses func.count(MaterialCard.id)
         # without soft-delete filter. We'll keep it counting all for transparency.
         assert report["material_cards_total"] >= 1
+
+
+# ── Exception paths in heal_orphaned_records ────────────────────────
+
+
+class TestHealExceptionPaths:
+    def test_sighting_heal_exception_rolls_back(self, db_session):
+        """Lines 186-188: exception healing a sighting is caught and rolled back."""
+        from unittest.mock import patch
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn, card_id=None)
+        _make_sighting(db_session, req, mpn="FAIL-SIGHT", card_id=None)
+
+        # Make resolve_material_card raise only for sightings by tracking calls
+        original = resolve_material_card
+        call_count = [0]
+
+        def failing_resolve(mpn, db_arg):
+            call_count[0] += 1
+            if mpn == "FAIL-SIGHT":
+                raise RuntimeError("sighting heal fail")
+            return original(mpn, db_arg)
+
+        with patch("app.search_service.resolve_material_card", side_effect=failing_resolve):
+            result = heal_orphaned_records(db_session)
+
+        # Sighting should not have been healed
+        assert result["sightings"] == 0
+
+    def test_offer_heal_exception_rolls_back(self, db_session):
+        """Lines 210-212: exception healing an offer is caught and rolled back."""
+        from unittest.mock import patch
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn, card_id=None)
+        _make_offer(db_session, reqn, req, mpn="FAIL-OFFER", card_id=None)
+
+        original = resolve_material_card
+        def failing_resolve(mpn, db_arg):
+            if mpn == "FAIL-OFFER":
+                raise RuntimeError("offer heal fail")
+            return original(mpn, db_arg)
+
+        with patch("app.search_service.resolve_material_card", side_effect=failing_resolve):
+            result = heal_orphaned_records(db_session)
+
+        # Offer should not have been healed
+        assert result["offers"] == 0

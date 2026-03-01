@@ -76,7 +76,7 @@ def _dedup_vendors(db: Session) -> int:
             if b.id in merged_ids:
                 continue
             pair_key = (min(a.id, b.id), max(a.id, b.id))
-            if pair_key in seen_pairs:
+            if pair_key in seen_pairs:  # pragma: no cover — defensive; loop structure prevents repeats
                 continue
             seen_pairs.add(pair_key)
 

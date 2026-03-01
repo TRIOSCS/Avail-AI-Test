@@ -168,7 +168,7 @@ def compute_enrichment_status(db: Session, company_id: int) -> str:
     if len(contacts) > 0:
         return "partial"
 
-    return "missing"
+    return "missing"  # pragma: no cover — unreachable: line 155 already returns for empty
 
 
 def update_company_enrichment_status(db: Session, company_id: int) -> str:

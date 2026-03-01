@@ -287,6 +287,54 @@ class TestAIMatchBatch:
 
         assert result == {}
 
+    def test_runtime_error_event_loop_conflict(self, db_session):
+        """Lines 155-165: RuntimeError from run_until_complete triggers event-loop-conflict path."""
+        from app.services.auto_attribution_service import _ai_match_batch
+
+        user = _make_user(db_session)
+        act = _make_unmatched_activity(db_session, user, contact_email="rt@test.com")
+        db_session.commit()
+
+        # Make run_until_complete raise RuntimeError (simulating already-running loop)
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = RuntimeError("running loop")
+        with patch("asyncio.get_event_loop", return_value=mock_loop), \
+             patch("asyncio.get_running_loop", return_value=MagicMock()):
+            result = _ai_match_batch([act], db_session)
+
+        assert result == {}
+
+    def test_generic_exception_returns_empty(self, db_session):
+        """Lines 168-170: generic Exception from run_until_complete returns {}."""
+        from app.services.auto_attribution_service import _ai_match_batch
+
+        user = _make_user(db_session)
+        act = _make_unmatched_activity(db_session, user, contact_email="err@test.com")
+        db_session.commit()
+
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = ValueError("bad value")
+        with patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = _ai_match_batch([act], db_session)
+
+        assert result == {}
+
+    def test_runtime_error_nested_exception(self, db_session):
+        """Line 167: nested exception inside the RuntimeError handler returns {}."""
+        from app.services.auto_attribution_service import _ai_match_batch
+
+        user = _make_user(db_session)
+        act = _make_unmatched_activity(db_session, user, contact_email="nest@test.com")
+        db_session.commit()
+
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = RuntimeError("loop")
+        with patch("asyncio.get_event_loop", return_value=mock_loop), \
+             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+            result = _ai_match_batch([act], db_session)
+
+        assert result == {}
+
     def test_builds_company_and_vendor_lists(self, db_session):
         """Should query companies and vendors for Claude context."""
         from app.services.auto_attribution_service import _ai_match_batch

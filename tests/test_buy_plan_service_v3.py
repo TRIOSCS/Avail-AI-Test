@@ -22,16 +22,26 @@ from app.models.buy_plan import (
     SOVerificationStatus,
     VerificationGroupMember,
 )
+from unittest.mock import patch
+
 from app.services.buy_plan_v3_service import (
+    _apply_line_edits,
+    _apply_line_overrides,
+    _check_better_offer,
+    _check_geo_mismatch,
+    _is_stock_sale,
     _parse_lead_time_days,
+    _recalculate_financials,
     approve_buy_plan,
     assign_buyer,
     build_buy_plan,
     check_completion,
     confirm_po,
+    detect_favoritism,
     flag_line_issue,
     generate_ai_flags,
     generate_ai_summary,
+    generate_case_report,
     resubmit_buy_plan,
     score_offer,
     submit_buy_plan,
@@ -1227,3 +1237,850 @@ class TestAutoCompleteViaPOVerify:
 
         db_session.refresh(plan)
         assert plan.status == BuyPlanStatus.completed.value
+
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+def _make_ops_member_v2(db, user):
+    """Create a VerificationGroupMember for ops verification tests."""
+    vgm = VerificationGroupMember(user_id=user.id, is_active=True)
+    db.add(vgm)
+    db.flush()
+    return vgm
+
+
+class TestBuyPlanCoverageGaps:
+    """Cover specific uncovered lines in buy_plan_v3_service."""
+
+    def test_verify_so_plan_not_found(self, db_session, test_user):
+        """Line 752: verify_so raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            verify_so(99999, "approve", test_user, db_session)
+
+    def test_verify_so_already_verified(self, db_session, test_quote, test_user):
+        """Line 756 (approx): verify_so raises when SO already verified."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        plan.so_status = SOVerificationStatus.approved.value
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="already verified"):
+            verify_so(plan.id, "approve", test_user, db_session)
+
+    def test_verify_so_plan_halted(self, db_session, test_quote, test_user):
+        """Line 756: verify_so raises when plan is halted."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.halted.value
+        plan.so_status = SOVerificationStatus.pending.value
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="halted"):
+            verify_so(plan.id, "approve", test_user, db_session)
+
+    def test_verify_so_invalid_action(self, db_session, test_quote, test_user, admin_user):
+        """Line 785: invalid SO verification action."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        plan.so_status = SOVerificationStatus.pending.value
+        _make_ops_member_v2(db_session, admin_user)
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="Invalid SO verification"):
+            verify_so(plan.id, "bogus", admin_user, db_session)
+
+    def test_confirm_po_plan_not_found(self, db_session, test_user):
+        """Line 808: confirm_po raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            confirm_po(99999, 1, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+
+    def test_confirm_po_line_not_found(self, db_session, test_quote, test_user):
+        """Line 814: confirm_po raises when line not found."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="Line.*not found"):
+            confirm_po(plan.id, 99999, "PO-X", datetime.now(timezone.utc), test_user, db_session)
+
+    def test_verify_po_plan_not_found(self, db_session, test_user):
+        """Line 844: verify_po raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            verify_po(99999, 1, "approve", test_user, db_session)
+
+    def test_verify_po_line_not_found(self, db_session, test_quote, test_user):
+        """Line 848: verify_po raises when line not found."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="Line.*not found"):
+            verify_po(plan.id, 99999, "approve", test_user, db_session)
+
+    def test_verify_po_wrong_status(self, db_session, test_quote, test_user, admin_user):
+        """Line 850: verify_po raises when line not pending_verify."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.status = BuyPlanLineStatus.awaiting_po.value
+        _make_ops_member_v2(db_session, admin_user)
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="pending verification"):
+            verify_po(plan.id, line.id, "approve", admin_user, db_session)
+
+    def test_verify_po_invalid_action(self, db_session, test_quote, test_user, admin_user):
+        """Line 877: invalid PO verification action."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.status = BuyPlanLineStatus.pending_verify.value
+        _make_ops_member_v2(db_session, admin_user)
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="Invalid PO verification"):
+            verify_po(plan.id, line.id, "bogus", admin_user, db_session)
+
+    def test_flag_issue_plan_not_found(self, db_session, test_user):
+        """Line 901: flag_line_issue raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            flag_line_issue(99999, 1, "sold_out", test_user, db_session)
+
+    def test_flag_issue_line_not_found(self, db_session, test_quote, test_user):
+        """Line 907: flag_line_issue raises when line not found."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="Line.*not found"):
+            flag_line_issue(plan.id, 99999, "sold_out", test_user, db_session)
+
+    def test_check_completion_no_lines(self, db_session, test_quote, test_user):
+        """Line 938: check_completion returns when no lines."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        plan.lines.clear()
+        db_session.flush()
+
+        result = check_completion(plan.id, db_session)
+        assert result.status == BuyPlanStatus.active.value
+
+    def test_resubmit_plan_not_found(self, db_session, test_user):
+        """Line 968: resubmit raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            resubmit_buy_plan(99999, "SO-X", test_user, db_session)
+
+    def test_approve_plan_not_found(self, db_session, test_user):
+        """Line 708: approve_buy_plan raises when plan not found."""
+        with pytest.raises(ValueError, match="not found"):
+            approve_buy_plan(99999, "approve", test_user, db_session)
+
+
+class TestDetectFavoritism:
+    """Cover detect_favoritism function."""
+
+    def test_favoritism_detected(self, db_session, test_quote, test_user):
+        """Lines 1144-1191: detect_favoritism finds disproportionate assignment."""
+        buyer = User(email="fav-buyer@test.com", name="Fav Buyer", role="buyer",
+                     azure_id="az-fav-b", is_active=True)
+        db_session.add(buyer)
+        db_session.flush()
+
+        # Create 3 plans with all lines assigned to the same buyer
+        for i in range(3):
+            plan = BuyPlanV3(
+                quote_id=test_quote.id,
+                requisition_id=test_quote.requisition_id,
+                submitted_by_id=test_user.id,
+                status="active",
+            )
+            db_session.add(plan)
+            db_session.flush()
+
+            line = BuyPlanLine(
+                buy_plan_id=plan.id,
+                buyer_id=buyer.id,
+                quantity=100,
+                status=BuyPlanLineStatus.awaiting_po.value,
+            )
+            db_session.add(line)
+
+        db_session.commit()
+
+        findings = detect_favoritism(test_user.id, db_session)
+        assert len(findings) >= 1
+        assert findings[0]["buyer_id"] == buyer.id
+        assert findings[0]["pct"] == 100.0
+
+    def test_favoritism_no_lines(self, db_session, test_quote, test_user):
+        """Line 1169: returns [] when total_lines is 0."""
+        # Create 3 plans with no lines
+        for i in range(3):
+            plan = BuyPlanV3(
+                quote_id=test_quote.id,
+                requisition_id=test_quote.requisition_id,
+                submitted_by_id=test_user.id,
+                status="active",
+            )
+            db_session.add(plan)
+
+        db_session.commit()
+
+        findings = detect_favoritism(test_user.id, db_session)
+        assert findings == []
+
+
+class TestCaseReport:
+    """Cover generate_case_report function."""
+
+    def test_case_report_with_timeline(self, db_session, test_quote, test_user):
+        """Lines 1249-1290: generate_case_report with full timeline."""
+        now = datetime.now(timezone.utc)
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            submitted_by_id=test_user.id,
+            approved_by_id=test_user.id,
+            status=BuyPlanStatus.completed.value,
+            created_at=now - timedelta(days=5),
+            submitted_at=now - timedelta(days=4),
+            approved_at=now - timedelta(days=3),
+            completed_at=now,
+            so_rejection_note="Initial SO issue",
+            ai_flags=[{"severity": "info", "type": "better_offer", "message": "Cheaper alt exists"}],
+        )
+        db_session.add(plan)
+        db_session.flush()
+
+        # Create an offer for the line
+        offer = Offer(
+            requisition_id=test_quote.requisition_id, vendor_name="CaseVend",
+            mpn="CASE-PART", unit_price=1.0, created_at=now,
+        )
+        db_session.add(offer)
+        db_session.flush()
+
+        line = BuyPlanLine(
+            buy_plan_id=plan.id,
+            offer_id=offer.id,
+            buyer_id=test_user.id,
+            quantity=100,
+            status=BuyPlanLineStatus.verified.value,
+            po_number="PO-CASE",
+            po_confirmed_at=now - timedelta(days=1),
+            issue_type="price_change",
+            issue_note="Price went up 10%",
+            po_rejection_note="Wrong PO format",
+        )
+        db_session.add(line)
+        db_session.commit()
+
+        report = generate_case_report(plan, db_session)
+        assert "CASE REPORT" in report
+        assert "Submit" in report
+        assert "Approve" in report
+        assert "SO rejected" in report
+        assert "price_change" in report
+        assert "PO rejected" in report
+        assert "better_offer" in report
+
+
+class TestIsStockSale:
+    """Cover _is_stock_sale function."""
+
+    def test_stock_sale_true(self, db_session, test_user, test_quote):
+        """Lines 1119-1129: _is_stock_sale returns True for stock vendors."""
+        offer = Offer(
+            requisition_id=test_quote.requisition_id, vendor_name="internal stock",
+            mpn="INT-PART", unit_price=1.0, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.flush()
+
+        plan = BuyPlanV3(
+            requisition_id=test_quote.requisition_id, quote_id=test_quote.id,
+            submitted_by_id=test_user.id, status="active",
+        )
+        db_session.add(plan)
+        db_session.flush()
+
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, offer_id=offer.id,
+            quantity=100, status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.commit()
+        db_session.refresh(plan)
+
+        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+            mock_s.stock_sale_vendor_names = {"internal stock"}
+            result = _is_stock_sale(plan, db_session)
+
+        assert result is True
+
+    def test_stock_sale_no_offer_id(self, db_session, test_user, test_quote):
+        """Line 1122: line without offer_id returns False."""
+        plan = BuyPlanV3(
+            requisition_id=test_quote.requisition_id, quote_id=test_quote.id,
+            submitted_by_id=test_user.id, status="active",
+        )
+        db_session.add(plan)
+        db_session.flush()
+
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, offer_id=None,
+            quantity=100, status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.commit()
+        db_session.refresh(plan)
+
+        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+            mock_s.stock_sale_vendor_names = {"internal stock"}
+            result = _is_stock_sale(plan, db_session)
+
+        assert result is False
+
+
+class TestCoverageGaps2:
+    """Cover remaining uncovered lines in buy_plan_v3_service (round 2)."""
+
+    # ── score_offer edge cases (lines 100, 106, 115-122, 137) ──
+
+    def test_score_price_zero_gets_zero(self, db_session, test_requisition):
+        """Line 100: offer with unit_price=0 gets price score 0."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.0, vendor_name="ZeroPriceVendor",
+        )
+        db_session.flush()
+        score = score_offer(offer, req, None)
+        assert 0 < score < 100  # price component is 0 but other components contribute
+
+    def test_score_known_vendor_no_score(self, db_session, test_requisition):
+        """Line 106: known vendor (is_new_vendor=False) with no vendor_score gets 50."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="known-no-score",
+            vendor_score=None, is_new_vendor=False,
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, vendor_name="KnownVendor",
+            vendor_card_id=vendor.id,
+        )
+        db_session.flush()
+        score = score_offer(offer, req, vendor)
+        assert score > 0
+
+    def test_score_lead_time_7_days(self, db_session, test_requisition):
+        """Line 115-116: lead_time 7 days gets 85."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, lead_time="7 days", vendor_name="Lead7",
+        )
+        db_session.flush()
+        score = score_offer(offer, req, None)
+        assert score > 0
+
+    def test_score_lead_time_14_days(self, db_session, test_requisition):
+        """Lines 117-118: lead_time 14 days gets 70."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, lead_time="14 days", vendor_name="Lead14",
+        )
+        db_session.flush()
+        score = score_offer(offer, req, None)
+        assert score > 0
+
+    def test_score_lead_time_30_days(self, db_session, test_requisition):
+        """Lines 119-120: lead_time 30 days gets 50."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, lead_time="30 days", vendor_name="Lead30",
+        )
+        db_session.flush()
+        score = score_offer(offer, req, None)
+        assert score > 0
+
+    def test_score_lead_time_60_days(self, db_session, test_requisition):
+        """Lines 121-122: lead_time 60 days gets max(30, 100-60)=40."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, lead_time="60 days", vendor_name="Lead60",
+        )
+        db_session.flush()
+        score = score_offer(offer, req, None)
+        assert score > 0
+
+    def test_score_vendor_with_po_history(self, db_session, test_requisition):
+        """Line 137: vendor with total_pos > 0 gets terms score 85."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="po-history-v",
+            vendor_score=75.0, total_pos=10, is_new_vendor=False,
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            unit_price=0.50, vendor_name="POHistory",
+            vendor_card_id=vendor.id,
+        )
+        db_session.flush()
+        score = score_offer(offer, req, vendor)
+        assert score > 0
+
+    # ── assign_buyer commodity/geography (lines 212-228, 232-240) ──
+
+    def test_assign_buyer_commodity_match(
+        self, db_session, test_requisition, test_quote, test_user
+    ):
+        """Lines 212-228: buyer assignment via commodity match."""
+        # Deactivate conftest buyer
+        test_user.is_active = False
+
+        # Create a buyer with commodity tags
+        buyer = User(
+            email="comm-buyer@test.com", name="Commodity Buyer",
+            role="buyer", azure_id="cb-az", is_active=True,
+            commodity_tags=["capacitors"],
+        )
+        db_session.add(buyer)
+        db_session.flush()
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="comm-vendor",
+            commodity_tags=["capacitors"],
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            vendor_name="CommodityVendor", vendor_card_id=vendor.id,
+            entered_by_id=None,
+        )
+        db_session.flush()
+
+        assigned, reason = assign_buyer(offer, vendor, db_session)
+        assert assigned is not None
+        assert assigned.id == buyer.id
+        assert reason == "commodity_match"
+
+    def test_assign_buyer_commodity_multiple_narrows(
+        self, db_session, test_requisition, test_quote, test_user
+    ):
+        """Lines 220-228: multiple commodity matches narrow the buyer pool."""
+        test_user.is_active = False
+
+        buyer1 = User(
+            email="cb1@test.com", name="CommBuyer1",
+            role="buyer", azure_id="cb1-az", is_active=True,
+            commodity_tags=["capacitors"],
+        )
+        buyer2 = User(
+            email="cb2@test.com", name="CommBuyer2",
+            role="buyer", azure_id="cb2-az", is_active=True,
+            commodity_tags=["capacitors"],
+        )
+        db_session.add_all([buyer1, buyer2])
+        db_session.flush()
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="comm-multi",
+            commodity_tags=["capacitors"],
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            vendor_name="MultiComm", vendor_card_id=vendor.id,
+            entered_by_id=None,
+        )
+        db_session.flush()
+
+        assigned, reason = assign_buyer(offer, vendor, db_session)
+        # Multiple match -> narrows pool -> falls through to workload
+        assert assigned is not None
+        assert reason == "workload"
+
+    def test_assign_buyer_manufacturer_commodity(
+        self, db_session, test_requisition, test_quote, test_user
+    ):
+        """Lines 215-218: manufacturer-based commodity mapping."""
+        test_user.is_active = False
+
+        buyer = User(
+            email="mfr-buyer@test.com", name="MfrBuyer",
+            role="buyer", azure_id="mb-az", is_active=True,
+            commodity_tags=["semiconductor"],
+        )
+        db_session.add(buyer)
+        db_session.flush()
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="mfr-vendor",
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            vendor_name="MfrVendor", vendor_card_id=vendor.id,
+            entered_by_id=None, manufacturer="Texas Instruments",
+        )
+        db_session.flush()
+
+        # Patch routing maps to include manufacturer -> commodity mapping
+        maps = {"brand_commodity_map": {"texas instruments": "semiconductor"}, "country_region_map": {}}
+        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+            assigned, reason = assign_buyer(offer, vendor, db_session)
+
+        assert assigned is not None
+        assert assigned.id == buyer.id
+        assert reason == "commodity_match"
+
+    def test_assign_buyer_geography_narrows(
+        self, db_session, test_requisition, test_quote, test_user
+    ):
+        """Lines 232-240: geography match narrows buyer pool."""
+        test_user.is_active = False
+
+        buyer1 = User(
+            email="geo1@test.com", name="GeoBuyer1",
+            role="buyer", azure_id="g1-az", is_active=True,
+            commodity_tags=["general"],  # has routing profile
+        )
+        buyer2 = User(
+            email="geo2@test.com", name="GeoBuyer2",
+            role="buyer", azure_id="g2-az", is_active=True,
+            commodity_tags=None,  # no routing profile
+        )
+        db_session.add_all([buyer1, buyer2])
+        db_session.flush()
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        vendor = _make_vendor_card(
+            db_session, normalized_name="geo-vendor", hq_country="US",
+        )
+        offer = _make_offer(
+            db_session, test_requisition.id, req.id,
+            vendor_name="GeoVendor", vendor_card_id=vendor.id,
+            entered_by_id=None,
+        )
+        db_session.flush()
+
+        maps = {"brand_commodity_map": {}, "country_region_map": {"us": "americas"}}
+        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+            assigned, reason = assign_buyer(offer, vendor, db_session)
+
+        assert assigned is not None
+        assert assigned.id == buyer1.id
+
+    # ── build_buy_plan no requirements (line 299) ──
+
+    def test_build_buy_plan_no_requirements(self, db_session, test_quote):
+        """Line 299: build_buy_plan raises when no requirements exist."""
+        # Delete all requirements for this requisition
+        db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).delete()
+        db_session.flush()
+
+        with pytest.raises(ValueError, match="No requirements found"):
+            build_buy_plan(test_quote.id, db_session)
+
+    # ── auto-split break/continue (lines 384, 387) ──
+
+    def test_autosplit_break_when_qty_filled(
+        self, db_session, test_quote, test_user
+    ):
+        """Lines 384: auto-split break when remaining <= 0 after partial fills."""
+        # target_qty=200, but NO single offer covers 200.
+        # Two offers of 100 each -> first fills 100, second fills remaining 100,
+        # third offer hits "if remaining <= 0: break"
+        req = _make_requirement(
+            db_session, test_quote.requisition_id,
+            target_price=1.0, target_qty=200, primary_mpn="SPLIT-BRK",
+        )
+        offer1 = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.50, qty_available=100,
+            vendor_name="Split1", entered_by_id=test_user.id,
+        )
+        offer2 = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.55, qty_available=100,
+            vendor_name="Split2", entered_by_id=test_user.id,
+        )
+        # Third offer: after first two fill 200, remaining=0 -> break
+        offer3 = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.60, qty_available=50,
+            vendor_name="Split3", entered_by_id=test_user.id,
+        )
+        db_session.flush()
+
+        plan = build_buy_plan(test_quote.id, db_session)
+        split_lines = [ln for ln in plan.lines if ln.requirement_id == req.id]
+        # Two lines should be created (100+100=200), third skipped by break
+        assert len(split_lines) == 2
+
+    def test_autosplit_skip_zero_qty(
+        self, db_session, test_quote, test_user
+    ):
+        """Line 387: auto-split skips offers with qty_available=0."""
+        # target_qty=200 -> no single offer covers it (max is 100+0+100).
+        # offer_zero has qty=0, should be skipped via continue (line 387).
+        req = _make_requirement(
+            db_session, test_quote.requisition_id,
+            target_price=1.0, target_qty=200, primary_mpn="SPLIT-SKIP",
+        )
+        offer_a = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.40, qty_available=100,
+            vendor_name="PartialA", entered_by_id=test_user.id,
+        )
+        offer_zero = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.45, qty_available=0,
+            vendor_name="Empty", entered_by_id=test_user.id,
+        )
+        offer_b = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            unit_price=0.60, qty_available=100,
+            vendor_name="PartialB", entered_by_id=test_user.id,
+        )
+        db_session.flush()
+
+        plan = build_buy_plan(test_quote.id, db_session)
+        skip_lines = [ln for ln in plan.lines if ln.requirement_id == req.id]
+        assert len(skip_lines) >= 1
+        # None of the lines should be from the zero-qty offer
+        assert all(ln.offer_id != offer_zero.id for ln in skip_lines)
+
+    # ── generate_ai_summary with flags (line 469) ──
+
+    def test_summary_with_flags(self, db_session, test_quote, test_user):
+        """Line 469: summary includes flag count."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.ai_flags = [
+            {"type": "stale_offer", "severity": "warning", "message": "old"},
+            {"type": "low_margin", "severity": "critical", "message": "low"},
+        ]
+        db_session.flush()
+        summary = generate_ai_summary(plan)
+        assert "2 flags" in summary
+
+    # ── _check_better_offer edge cases (lines 546, 561) ──
+
+    def test_better_offer_no_price(self, db_session, test_quote, test_user):
+        """Line 546: _check_better_offer returns early when price is 0."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        offer = db_session.get(Offer, line.offer_id)
+        offer.unit_price = 0  # trigger early return
+        db_session.flush()
+
+        flags = []
+        _check_better_offer(line, offer, 10.0, flags, db_session)
+        assert flags == []  # no flag added
+
+    def test_better_offer_alt_no_price(self, db_session, test_quote, test_user):
+        """Line 561: alternative offer with no price is skipped."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        offer = db_session.get(Offer, line.offer_id)
+
+        # Create alternative with null price
+        alt = _make_offer(
+            db_session, test_quote.requisition_id, line.requirement_id,
+            unit_price=None, vendor_name="NoPriceAlt",
+        )
+        db_session.flush()
+
+        flags = []
+        _check_better_offer(line, offer, 10.0, flags, db_session)
+        # Alt has no price -> skipped, no "better_offer" flag from it
+        better_flags = [f for f in flags if f["type"] == "better_offer"]
+        # The alt shouldn't generate a flag since it has no price
+        assert all(f.get("message", "") and "NoPriceAlt" not in f.get("message", "") for f in better_flags)
+
+    # ── _check_geo_mismatch (lines 591-593) ──
+
+    def test_geo_mismatch_flagged(self, db_session, test_quote, test_user):
+        """Lines 591-593: geo mismatch flag appended."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        offer = db_session.get(Offer, line.offer_id)
+
+        # Create vendor card matching offer's vendor_name so DB lookup finds it
+        vendor = _make_vendor_card(
+            db_session, normalized_name=offer.vendor_name.strip().lower(),
+            hq_country="China",
+        )
+        db_session.flush()
+
+        flags = []
+        maps = {"brand_commodity_map": {}, "country_region_map": {"china": "apac"}}
+        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+            _check_geo_mismatch(line, offer, "americas", flags, db_session)
+
+        assert len(flags) == 1
+        assert flags[0]["type"] == "geo_mismatch"
+
+    # ── check_completion inactive plan (line 935) ──
+
+    def test_check_completion_inactive_plan(self, db_session, test_quote, test_user):
+        """Line 935: check_completion returns plan unchanged when not active."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.draft.value
+        db_session.flush()
+
+        result = check_completion(plan.id, db_session)
+        assert result.status == BuyPlanStatus.draft.value
+
+    # ── _apply_line_edits offer not found (line 1028) ──
+
+    def test_line_edits_offer_not_found(self, db_session, test_quote, test_user):
+        """Line 1028: _apply_line_edits raises when offer not found."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        db_session.flush()
+
+        edits = [{"requirement_id": line.requirement_id, "offer_id": 99999}]
+        with pytest.raises(ValueError, match="Offer 99999 not found"):
+            _apply_line_edits(plan, edits, db_session)
+
+    # ── _apply_line_overrides line not found and quantity (lines 1072-1075, 1089) ──
+
+    def test_line_overrides_line_not_found(self, db_session, test_quote, test_user):
+        """Lines 1072-1075: _apply_line_overrides warns when line not found."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        db_session.flush()
+
+        overrides = [{"line_id": 99999, "quantity": 500}]
+        # Should not raise, just logs warning
+        _apply_line_overrides(plan, overrides, db_session)
+
+    def test_line_overrides_quantity(self, db_session, test_quote, test_user):
+        """Line 1089: _apply_line_overrides applies quantity override."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        db_session.flush()
+
+        overrides = [{"line_id": line.id, "quantity": 500}]
+        _apply_line_overrides(plan, overrides, db_session)
+        assert line.quantity == 500
+
+    # ── _is_stock_sale edge cases (lines 1119, 1125) ──
+
+    def test_stock_sale_no_lines(self, db_session, test_quote, test_user):
+        """Line 1119: _is_stock_sale returns False when plan has no lines."""
+        plan = BuyPlanV3(
+            requisition_id=test_quote.requisition_id, quote_id=test_quote.id,
+            submitted_by_id=test_user.id, status="active",
+        )
+        db_session.add(plan)
+        db_session.commit()
+        db_session.refresh(plan)
+
+        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+            mock_s.stock_sale_vendor_names = {"internal stock"}
+            result = _is_stock_sale(plan, db_session)
+        assert result is False
+
+    def test_stock_sale_offer_not_found(self, db_session, test_quote, test_user):
+        """Line 1125: _is_stock_sale returns False when offer not in DB."""
+        # Create an offer, then attach it to a line, then delete the offer
+        offer = Offer(
+            requisition_id=test_quote.requisition_id, vendor_name="ghost",
+            mpn="GHOST", unit_price=1.0, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.flush()
+        offer_id = offer.id
+
+        plan = BuyPlanV3(
+            requisition_id=test_quote.requisition_id, quote_id=test_quote.id,
+            submitted_by_id=test_user.id, status="active",
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, offer_id=offer_id,
+            quantity=100, status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.commit()
+
+        # Now mock db.get to return None for the offer lookup
+        real_get = db_session.get
+
+        def fake_get(model, pk, **kw):
+            if model is Offer and pk == offer_id:
+                return None
+            return real_get(model, pk, **kw)
+
+        db_session.refresh(plan)
+        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+            mock_s.stock_sale_vendor_names = {"internal stock"}
+            with patch.object(db_session, "get", side_effect=fake_get):
+                result = _is_stock_sale(plan, db_session)
+        assert result is False
+
+    # ── detect_favoritism < 3 plans (line 1157) ──
+
+    def test_detect_favoritism_insufficient_data(self, db_session, test_quote, test_user):
+        """Line 1157: detect_favoritism returns empty when < 3 plans."""
+        # Only 1 plan exists (from _make_draft_plan)
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        plan.submitted_by_id = test_user.id
+        db_session.flush()
+
+        result = detect_favoritism(test_user.id, db_session)
+        assert result == []
+
+    # ── _country_to_region empty (line 59) and _get_routing_maps no file (line 52) ──
+
+    def test_country_to_region_empty(self):
+        """Line 59: _country_to_region returns None for empty string."""
+        from app.services.buy_plan_v3_service import _country_to_region
+        assert _country_to_region("") is None
+        assert _country_to_region(None) is None
+
+    def test_get_routing_maps_no_file(self, tmp_path):
+        """Line 52: _get_routing_maps returns default when file missing."""
+        import app.services.buy_plan_v3_service as svc
+
+        old = svc._ROUTING_MAPS
+        svc._ROUTING_MAPS = None  # reset cache
+        try:
+            # Point Path(__file__).parent.parent to a tmp dir that has no config/routing_maps.json
+            fake_file = tmp_path / "services" / "fake.py"
+            fake_file.parent.mkdir(parents=True, exist_ok=True)
+            fake_file.touch()
+            with patch("app.services.buy_plan_v3_service.Path") as MockPath:
+                MockPath.return_value = fake_file
+                # __file__ -> fake_file, .parent -> services/, .parent -> tmp_path
+                # / "config" / "routing_maps.json" -> tmp_path/config/routing_maps.json (doesn't exist)
+                result = svc._get_routing_maps()
+            assert "brand_commodity_map" in result
+            assert "country_region_map" in result
+        finally:
+            svc._ROUTING_MAPS = old

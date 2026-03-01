@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy.orm import Session
+from unittest.mock import patch
 
 from app.models import (
     BuyPlan,
@@ -763,3 +764,131 @@ class TestEdgeCases:
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)
         # Only the Feb offer counts (Jan one is outside grace period too)
         assert result["offers_total"] == 1
+
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+class TestMultiplierCoverageGaps:
+    """Cover specific uncovered lines."""
+
+    def test_december_month_boundary(self, db_session):
+        """Line 73: December month boundary."""
+        buyer = _make_user(db_session, "Dec Buyer", "buyer", "dec-mult")
+        db_session.commit()
+
+        dec_month = date(2025, 12, 1)
+        result = compute_buyer_multiplier(db_session, buyer.id, dec_month)
+        assert result["total_points"] == 0
+
+    def test_compute_all_buyer_exception(self, db_session):
+        """Lines 369-370: exception in buyer multiplier is caught."""
+        buyer = _make_user(db_session, "Err Buyer", "buyer", "err-mult-b")
+        db_session.commit()
+
+        with patch("app.services.multiplier_score_service.compute_buyer_multiplier",
+                   side_effect=RuntimeError("buyer exploded")):
+            result = compute_all_multiplier_scores(db_session, MONTH)
+
+        assert isinstance(result, dict)
+
+    def test_compute_all_sales_exception(self, db_session):
+        """Lines 374-379: exception in sales multiplier is caught."""
+        sales = _make_user(db_session, "Err Sales", "sales", "err-mult-s")
+        db_session.commit()
+
+        with patch("app.services.multiplier_score_service.compute_sales_multiplier",
+                   side_effect=RuntimeError("sales exploded")):
+            result = compute_all_multiplier_scores(db_session, MONTH)
+
+        assert isinstance(result, dict)
+
+    def test_bonus_winners_break_at_2(self, db_session):
+        """Lines 515-516: loop breaks when 2 winners found."""
+        from app.models.performance import MultiplierScoreSnapshot
+
+        # Create 3 qualified users
+        for i in range(3):
+            u = _make_user(db_session, f"W{i}", "buyer", f"winner{i}")
+            snap = MultiplierScoreSnapshot(
+                user_id=u.id, month=MONTH, role_type="buyer",
+                total_points=100 - i * 10, offer_points=80 - i * 10,
+                bonus_points=20, qualified=True, avail_score=90 - i * 5,
+            )
+            db_session.add(snap)
+        db_session.commit()
+
+        winners = determine_bonus_winners(db_session, "buyer", MONTH)
+        assert len(winners) <= 2
+
+    def test_get_multiplier_scores_sales_breakdown(self, db_session):
+        """Line 600: sales breakdown branch in get_multiplier_scores."""
+        from app.models.performance import MultiplierScoreSnapshot
+
+        sales = _make_user(db_session, "Sales Rep", "sales", "sales-bd")
+        snap = MultiplierScoreSnapshot(
+            user_id=sales.id, month=MONTH, role_type="sales",
+            total_points=50, offer_points=0, bonus_points=50,
+            rank=1, avail_score=80, qualified=True, bonus_amount=0,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = get_multiplier_scores(db_session, "sales", MONTH)
+        assert len(results) == 1
+        assert "quotes_sent" in results[0]["breakdown"]
+
+    def test_upsert_multiplier_sales_columns(self, db_session):
+        """Line 481: setattr for sales-specific columns."""
+        from app.services.multiplier_score_service import _upsert_multiplier
+
+        sales = _make_user(db_session, "Sales Upsert", "sales", "sales-up")
+        db_session.commit()
+
+        result = {
+            "user_id": sales.id,
+            "role_type": "sales",
+            "total_points": 100,
+            "offer_points": 0,
+            "bonus_points": 100,
+            "rank": 1,
+            "avail_score": 85,
+            "qualified": True,
+            "bonus_amount": 500,
+            "quotes_sent_count": 10,
+            "quotes_sent_pts": 50,
+            "quotes_won_count": 3,
+            "quotes_won_pts": 30,
+            "proactive_sent_count": 5,
+            "proactive_sent_pts": 10,
+            "proactive_converted_count": 1,
+            "proactive_converted_pts": 5,
+            "new_accounts_count": 2,
+            "new_accounts_pts": 5,
+        }
+
+        saved = _upsert_multiplier(db_session, result, MONTH)
+        assert saved == 1
+
+    def test_buyer_qualification_with_offers(self, db_session):
+        """Line 418: buyer qualification requires min offers."""
+        from app.services.multiplier_score_service import _attach_avail_scores_and_rank
+        from app.models.performance import AvailScoreSnapshot
+
+        buyer = _make_user(db_session, "Qual Buyer", "buyer", "qual-b")
+        # Create avail score snapshot to pass threshold
+        snap = AvailScoreSnapshot(
+            user_id=buyer.id, month=MONTH, role_type="buyer",
+            total_score=90,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = [{
+            "user_id": buyer.id,
+            "total_points": 50,
+            "offers_total": 0,  # Below MIN_OFFERS_BUYER
+        }]
+
+        _attach_avail_scores_and_rank(db_session, results, MONTH, "buyer")
+        assert results[0]["qualified"] is False  # not enough offers

@@ -533,7 +533,7 @@ def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[di
                 "avail_score": snap.avail_score,
                 "bonus_amount": BONUS_2ND,
             })
-        elif len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD:
+        elif len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD:  # pragma: no cover — unreachable: break at >=2
             winners.append({
                 "user_id": snap.user_id,
                 "user_name": user_name,

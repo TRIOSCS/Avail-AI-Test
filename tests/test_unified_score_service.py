@@ -464,3 +464,394 @@ class TestUnifiedScoreSnapshotModel:
         db_session.add(snap2)
         with pytest.raises(Exception):  # IntegrityError
             db_session.commit()
+
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+class TestSafePctEdge:
+    """Cover line 93: _safe_pct when max_raw <= 0."""
+
+    def test_max_raw_zero_returns_zero(self):
+        from app.services.unified_score_service import _safe_pct
+
+        assert _safe_pct(10, 0) == 0.0
+
+    def test_max_raw_negative_returns_zero(self):
+        from app.services.unified_score_service import _safe_pct
+
+        assert _safe_pct(5, -3) == 0.0
+
+
+class TestMultiplierIndexPopulation:
+    """Cover line 148: mult_idx population and multiplier_points in result."""
+
+    def test_compute_with_multiplier_data(self, db_session, test_user):
+        from app.services.unified_score_service import compute_all_unified_scores
+
+        month = date(2026, 2, 1)
+
+        # Create AvailScoreSnapshot
+        avail = AvailScoreSnapshot(
+            user_id=test_user.id, month=month, role_type="buyer",
+            b1_score=8, b2_score=7, b3_score=6, b4_score=9, b5_score=5,
+            o1_score=7, o2_score=8, o3_score=6, o4_score=9, o5_score=4,
+            behavior_total=35, outcome_total=34, total_score=69,
+        )
+        # Create MultiplierScoreSnapshot
+        mult = MultiplierScoreSnapshot(
+            user_id=test_user.id, month=month, role_type="buyer",
+            offer_points=18, bonus_points=5, total_points=23,
+            offers_base_count=10, offers_base_pts=2,
+            offers_quoted_count=4, offers_quoted_pts=12,
+            offers_bp_count=1, offers_bp_pts=5,
+            offers_po_count=0, offers_po_pts=0,
+            rfqs_sent_count=20, rfqs_sent_pts=5,
+            stock_lists_count=0, stock_lists_pts=0,
+            qualified=True, bonus_amount=500,
+        )
+        db_session.add_all([avail, mult])
+        db_session.commit()
+
+        with patch("app.services.unified_score_service._refresh_blurbs"):
+            result = compute_all_unified_scores(db_session, month)
+
+        assert result["computed"] == 1
+        assert result["saved"] == 1
+
+        # Verify the UnifiedScoreSnapshot has multiplier_points_buyer populated
+        snap = db_session.query(UnifiedScoreSnapshot).filter_by(
+            user_id=test_user.id, month=month,
+        ).first()
+        assert snap is not None
+        assert snap.multiplier_points_buyer == 23
+
+
+class TestRefreshBlurbs:
+    """Cover lines 242-267: _refresh_blurbs iteration, fresh check, blurb save, exception."""
+
+    def test_sets_blurb_fields(self, db_session, test_user):
+        """Verify _refresh_blurbs calls _generate_blurb and sets snap fields."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        month = date(2026, 2, 1)
+        snap = UnifiedScoreSnapshot(
+            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            primary_role="buyer",
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = [{
+            "user_id": test_user.id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }]
+
+        blurb_return = {"strength": "Great execution!", "improvement": "Work on depth."}
+        with patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return):
+            _refresh_blurbs(db_session, month, results)
+
+        db_session.refresh(snap)
+        assert snap.ai_blurb_strength == "Great execution!"
+        assert snap.ai_blurb_improvement == "Work on depth."
+        assert snap.ai_blurb_generated_at is not None
+
+    def test_stale_blurb_gets_refreshed(self, db_session, test_user):
+        """Verify blurb is refreshed when blurb_generated_at is older than 2 hours."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        month = date(2026, 2, 1)
+        # SQLite strips timezone info, so use naive UTC to match cutoff comparison
+        stale_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
+        snap = UnifiedScoreSnapshot(
+            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            primary_role="buyer",
+            ai_blurb_strength="Old strength",
+            ai_blurb_improvement="Old improvement",
+            ai_blurb_generated_at=stale_time,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = [{
+            "user_id": test_user.id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }]
+
+        blurb_return = {"strength": "New strength!", "improvement": "New improvement!"}
+        # Patch datetime.now inside the service so cutoff is also naive
+        fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        with patch("app.services.unified_score_service.datetime") as mock_dt, \
+             patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return):
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            _refresh_blurbs(db_session, month, results)
+
+        db_session.refresh(snap)
+        assert snap.ai_blurb_strength == "New strength!"
+        assert snap.ai_blurb_improvement == "New improvement!"
+
+    def test_fresh_blurb_not_refreshed(self, db_session, test_user):
+        """Verify blurb is NOT refreshed when ai_blurb_generated_at < 2 hours old."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        month = date(2026, 2, 1)
+        # SQLite strips timezone info, so use naive UTC to match cutoff comparison
+        fresh_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+        snap = UnifiedScoreSnapshot(
+            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            primary_role="buyer",
+            ai_blurb_strength="Keep this",
+            ai_blurb_improvement="Keep this too",
+            ai_blurb_generated_at=fresh_time,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = [{
+            "user_id": test_user.id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }]
+
+        # Patch datetime.now inside the service so cutoff is also naive
+        fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        with patch("app.services.unified_score_service.datetime") as mock_dt, \
+             patch("app.services.unified_score_service._generate_blurb") as mock_gen:
+            mock_dt.now.return_value = fake_now
+            mock_dt.side_effect = lambda *a, **k: datetime(*a, **k)
+            _refresh_blurbs(db_session, month, results)
+            mock_gen.assert_not_called()
+
+        db_session.refresh(snap)
+        assert snap.ai_blurb_strength == "Keep this"
+        assert snap.ai_blurb_improvement == "Keep this too"
+
+    def test_generate_blurb_exception_caught(self, db_session, test_user):
+        """Verify _refresh_blurbs catches exception from _generate_blurb, snap unchanged."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        month = date(2026, 2, 1)
+        snap = UnifiedScoreSnapshot(
+            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            primary_role="buyer",
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        results = [{
+            "user_id": test_user.id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }]
+
+        with patch(
+            "app.services.unified_score_service._generate_blurb",
+            side_effect=RuntimeError("AI service down"),
+        ):
+            _refresh_blurbs(db_session, month, results)
+
+        db_session.refresh(snap)
+        assert snap.ai_blurb_strength is None
+        assert snap.ai_blurb_improvement is None
+
+    def test_snap_not_found_skips(self, db_session, test_user):
+        """Verify _refresh_blurbs skips when UnifiedScoreSnapshot not found for user."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        month = date(2026, 2, 1)
+        # No UnifiedScoreSnapshot created — result references non-existent snap
+        results = [{
+            "user_id": test_user.id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }]
+
+        with patch("app.services.unified_score_service._generate_blurb") as mock_gen:
+            _refresh_blurbs(db_session, month, results)
+            mock_gen.assert_not_called()
+
+
+class TestGenerateBlurbEventLoop:
+    """Cover lines 314-320: ThreadPoolExecutor path when event loop is running."""
+
+    @patch("app.utils.claude_client.claude_structured")
+    def test_running_event_loop_uses_thread_pool(self, mock_claude):
+        from app.services.unified_score_service import _generate_blurb
+
+        mock_claude.return_value = {
+            "strength": "Thread pool strength.",
+            "improvement": "Thread pool improvement.",
+        }
+
+        # Create a mock loop that reports as running
+        mock_loop = MagicMock()
+        mock_loop.is_running.return_value = True
+
+        cats = {"execution": 60, "followthrough": 40, "closing": 30, "depth": 50}
+
+        with patch("asyncio.get_event_loop", return_value=mock_loop), \
+             patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_cls:
+            # Set up the ThreadPoolExecutor context manager mock
+            mock_pool = MagicMock()
+            mock_executor_cls.return_value.__enter__ = MagicMock(return_value=mock_pool)
+            mock_executor_cls.return_value.__exit__ = MagicMock(return_value=False)
+            mock_future = MagicMock()
+            mock_future.result.return_value = {
+                "strength": "Thread pool strength.",
+                "improvement": "Thread pool improvement.",
+            }
+            mock_pool.submit.return_value = mock_future
+
+            result = _generate_blurb("Test User", "buyer", cats, 55.0, 2, 5)
+
+        assert result is not None
+        assert result["strength"] == "Thread pool strength."
+        assert result["improvement"] == "Thread pool improvement."
+        mock_pool.submit.assert_called_once()
+        mock_future.result.assert_called_once_with(timeout=30)
+
+
+class TestLeaderboardSalesBreakdown:
+    """Cover lines 425-426: sales role MultiplierScoreSnapshot breakdown (else branch)."""
+
+    def test_sales_breakdown_fields(self, db_session, sales_user):
+        from app.services.unified_score_service import get_unified_leaderboard
+
+        month = date(2026, 2, 1)
+
+        snap = UnifiedScoreSnapshot(
+            user_id=sales_user.id, month=month, unified_score=70, rank=1,
+            primary_role="sales", execution_pct=70,
+            followthrough_pct=60, closing_pct=80, depth_pct=50,
+        )
+        avail = AvailScoreSnapshot(
+            user_id=sales_user.id, month=month, role_type="sales",
+            b1_score=5, b2_score=6, b3_score=7, b4_score=4, b5_score=8,
+            o1_score=9, o2_score=3, o3_score=7, o4_score=6, o5_score=5,
+            behavior_total=30, outcome_total=30, total_score=60,
+        )
+        mult = MultiplierScoreSnapshot(
+            user_id=sales_user.id, month=month, role_type="sales",
+            offer_points=20, bonus_points=10, total_points=30,
+            quotes_sent_count=15, quotes_sent_pts=30,
+            quotes_won_count=5, quotes_won_pts=40,
+            proactive_sent_count=8, proactive_sent_pts=8,
+            proactive_converted_count=3, proactive_converted_pts=12,
+            new_accounts_count=2, new_accounts_pts=6,
+            qualified=True, bonus_amount=250,
+        )
+        db_session.add_all([snap, avail, mult])
+        db_session.commit()
+
+        result = get_unified_leaderboard(db_session, month)
+        entry = result["entries"][0]
+
+        # Verify sales breakdown (else branch at line 425)
+        assert "sales_breakdown" in entry
+        bd = entry["sales_breakdown"]
+        assert bd["quotes_sent"] == 15
+        assert bd["pts_quote_sent"] == 30
+        assert bd["quotes_won"] == 5
+        assert bd["pts_quote_won"] == 40
+        assert bd["proactive_sent"] == 8
+        assert bd["pts_proactive_sent"] == 8
+        assert bd["proactive_converted"] == 3
+        assert bd["pts_proactive_converted"] == 12
+        assert bd["new_accounts"] == 2
+        assert bd["pts_accounts"] == 6
+
+        # Verify sales convenience fields
+        assert entry["total_points"] == 30
+        assert entry["avail_score"] == 60  # behavior_total + outcome_total
+        assert entry["avail_qualified"] is True
+
+
+class TestLeaderboardTraderConvenience:
+    """Cover lines 444-446: trader total_points sums both roles, avail_score from snap."""
+
+    def test_trader_sums_both_roles_points(self, db_session, trader_user):
+        from app.services.unified_score_service import get_unified_leaderboard
+
+        month = date(2026, 2, 1)
+
+        snap = UnifiedScoreSnapshot(
+            user_id=trader_user.id, month=month, unified_score=65, rank=1,
+            primary_role="trader", execution_pct=60,
+            followthrough_pct=50, closing_pct=70, depth_pct=40,
+            avail_score_buyer=69, avail_score_sales=55,
+            multiplier_points_buyer=23, multiplier_points_sales=30,
+        )
+        # Both buyer and sales multiplier data
+        buyer_mult = MultiplierScoreSnapshot(
+            user_id=trader_user.id, month=month, role_type="buyer",
+            offer_points=18, bonus_points=5, total_points=23,
+            offers_base_count=10, offers_base_pts=2,
+            offers_quoted_count=4, offers_quoted_pts=12,
+            offers_bp_count=1, offers_bp_pts=5,
+            offers_po_count=0, offers_po_pts=0,
+            rfqs_sent_count=20, rfqs_sent_pts=5,
+            stock_lists_count=0, stock_lists_pts=0,
+            qualified=True, bonus_amount=500,
+        )
+        sales_mult = MultiplierScoreSnapshot(
+            user_id=trader_user.id, month=month, role_type="sales",
+            offer_points=20, bonus_points=10, total_points=30,
+            quotes_sent_count=15, quotes_sent_pts=30,
+            quotes_won_count=5, quotes_won_pts=40,
+            proactive_sent_count=8, proactive_sent_pts=8,
+            proactive_converted_count=3, proactive_converted_pts=12,
+            new_accounts_count=2, new_accounts_pts=6,
+            qualified=False, bonus_amount=0,
+        )
+        db_session.add_all([snap, buyer_mult, sales_mult])
+        db_session.commit()
+
+        result = get_unified_leaderboard(db_session, month)
+        entry = result["entries"][0]
+
+        # Trader total_points sums both roles (line 445)
+        assert entry["total_points"] == 23 + 30  # buyer + sales
+
+        # Trader avail_score uses avail_score_buyer (line 446)
+        assert entry["avail_score"] == 69
+
+    def test_trader_avail_score_falls_back_to_sales(self, db_session, trader_user):
+        """When avail_score_buyer is None, falls back to avail_score_sales."""
+        from app.services.unified_score_service import get_unified_leaderboard
+
+        month = date(2026, 2, 1)
+
+        snap = UnifiedScoreSnapshot(
+            user_id=trader_user.id, month=month, unified_score=55, rank=1,
+            primary_role="trader", execution_pct=50,
+            followthrough_pct=50, closing_pct=60, depth_pct=40,
+            avail_score_buyer=None, avail_score_sales=42,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        result = get_unified_leaderboard(db_session, month)
+        entry = result["entries"][0]
+
+        # Falls back to avail_score_sales
+        assert entry["avail_score"] == 42
+        # No multiplier data, so total_points = 0+0
+        assert entry["total_points"] == 0

@@ -858,3 +858,378 @@ class TestCaseReport:
         c = _make_client(db_session, test_user)
         r = c.post(f"/api/buy-plans-v3/{plan.id}/case-report")
         assert r.status_code == 400
+
+    def test_case_report_not_found(
+        self, db_session: Session, test_user: User,
+    ):
+        """Case report for nonexistent plan → 404 (line 307)."""
+        c = _make_client(db_session, test_user)
+        r = c.post("/api/buy-plans-v3/99999/case-report")
+        assert r.status_code == 404
+
+
+# ── Verification Group Edge Cases ──────────────────────────────────
+
+
+class TestVerificationGroupEdgeCases:
+    """Cover lines 244 (user not found) and 253 (reactivate existing member)."""
+
+    def test_add_nonexistent_user(self, db_session: Session, admin_user: User):
+        """Add user_id that doesn't exist → 404 (line 244)."""
+        c = _make_client(db_session, admin_user)
+        r = c.post(
+            "/api/buy-plans-v3/verification-group",
+            json={"user_id": 99999, "action": "add"},
+        )
+        assert r.status_code == 404
+
+    def test_reactivate_existing_member(
+        self, db_session: Session, admin_user: User, test_user: User,
+    ):
+        """Add a user who was previously removed → reactivates (line 253)."""
+        member = _make_ops_member(db_session, test_user)
+        member.is_active = False
+        db_session.commit()
+
+        c = _make_client(db_session, admin_user)
+        r = c.post(
+            "/api/buy-plans-v3/verification-group",
+            json={"user_id": test_user.id, "action": "add"},
+        )
+        assert r.status_code == 200
+        assert r.json()["action"] == "added"
+        db_session.refresh(member)
+        assert member.is_active is True
+
+
+# ── Favoritism Edge Cases ──────────────────────────────────────────
+
+
+class TestFavoritismEdgeCases:
+    def test_favoritism_user_not_found(
+        self, db_session: Session, admin_user: User,
+    ):
+        """Favoritism report for nonexistent user → 404 (line 285)."""
+        c = _make_client(db_session, admin_user)
+        r = c.get("/api/buy-plans-v3/favoritism/99999")
+        assert r.status_code == 404
+
+
+# ── List V3 Filter Edge Cases ──────────────────────────────────────
+
+
+class TestListV3Filters:
+    """Cover lines 366, 368, 374: status, so_status, buyer_id filters."""
+
+    def test_filter_by_so_status(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Filter by so_status (line 366)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.so_status = "approved"
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get("/api/buy-plans-v3?so_status=approved")
+        assert r.status_code == 200
+        assert r.json()["count"] >= 1
+
+    def test_filter_by_buyer_id(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Filter by buyer_id (line 368)."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans-v3?buyer_id={test_user.id}")
+        assert r.status_code == 200
+        assert r.json()["count"] >= 1
+
+    def test_sales_user_sees_own(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, sales_user,
+    ):
+        """Sales user only sees own plans (line 374)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.submitted_by_id = test_user.id
+        db_session.commit()
+
+        # Sales user with different id should see 0 plans
+        from app.models import User as UserModel
+        sales = sales_user
+        c = _make_client(db_session, sales)
+        r = c.get("/api/buy-plans-v3")
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+
+
+# ── Submit V3 Edge Cases ──────────────────────────────────────────
+
+
+class TestSubmitV3EdgeCases:
+    """Cover lines 419, 428-429: line_edits, ValueError."""
+
+    def test_submit_with_line_edits(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Submit with line_edits provided (line 419)."""
+        plan, line, offer, req = _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/submit",
+            json={
+                "sales_order_number": "SO-EDIT",
+                "line_edits": [
+                    {
+                        "requirement_id": req.id,
+                        "offer_id": offer.id,
+                        "quantity": 500,
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+
+    def test_submit_value_error(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Submit on non-draft plan → ValueError → 400 (lines 428-429)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/submit",
+            json={"sales_order_number": "SO-FAIL"},
+        )
+        assert r.status_code == 400
+
+
+# ── Approve V3 Edge Cases ──────────────────────────────────────────
+
+
+class TestApproveV3EdgeCases:
+    """Cover lines 457, 464-465: line_overrides, ValueError."""
+
+    def test_approve_with_line_overrides(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, manager_user: User,
+    ):
+        """Approve with line_overrides (line 457)."""
+        plan, line, offer, req = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.pending.value
+        db_session.commit()
+
+        c = _make_client(db_session, manager_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/approve",
+            json={
+                "action": "approve",
+                "line_overrides": [
+                    {
+                        "line_id": line.id,
+                        "quantity": 750,
+                        "manager_note": "Adjusted quantity",
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "active"
+
+    def test_approve_value_error(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, manager_user: User,
+    ):
+        """Approve non-pending plan → ValueError → 400 (lines 464-465)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        # Status is draft, not pending
+        c = _make_client(db_session, manager_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/approve",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 400
+
+
+# ── Resubmit V3 Edge Cases ────────────────────────────────────────
+
+
+class TestResubmitV3EdgeCases:
+    """Cover lines 492-493, 499: ValueError, auto_approved=False."""
+
+    def test_resubmit_value_error(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Resubmit non-draft plan → ValueError → 400 (lines 492-493)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/resubmit",
+            json={"sales_order_number": "SO-FAIL"},
+        )
+        assert r.status_code == 400
+
+    def test_resubmit_needs_approval(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Resubmit where cost > threshold → auto_approved=False (line 499)."""
+        plan, _, _, _ = _make_draft_plan(
+            db_session, test_quote, test_user, total_cost=10000.0,
+        )
+        # Plan stays in draft for resubmit
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/resubmit",
+            json={"sales_order_number": "SO-BIG-RESUB"},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["auto_approved"] is False
+        assert data["status"] == "pending"
+
+
+# ── Verify SO V3 Edge Cases ───────────────────────────────────────
+
+
+class TestVerifySOV3EdgeCases:
+    """Cover line 521: ValueError handling."""
+
+    def test_verify_so_value_error(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, admin_user: User,
+    ):
+        """Verify SO on non-active plan → ValueError → 400 (line 521)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        # Plan is draft, not active — but SO is "pending", so the service
+        # may raise for plan not in correct status. Let's use already-verified SO.
+        plan.status = BuyPlanStatus.active.value
+        plan.so_status = "approved"  # Already verified
+        _make_ops_member(db_session, admin_user)
+
+        c = _make_client(db_session, admin_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/verify-so",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 400
+
+
+# ── Verify PO V3 Edge Cases ───────────────────────────────────────
+
+
+class TestVerifyPOV3EdgeCases:
+    """Cover lines 577-580, 586-587: ValueError/PermissionError, auto-complete."""
+
+    def test_verify_po_value_error(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, admin_user: User,
+    ):
+        """Verify PO on line not in pending_verify → ValueError → 400 (lines 577-578)."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.status = BuyPlanLineStatus.awaiting_po.value  # not pending_verify
+        _make_ops_member(db_session, admin_user)
+
+        c = _make_client(db_session, admin_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 400
+
+    def test_verify_po_permission_error(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Verify PO by non-ops user → PermissionError → 403 (lines 579-580)."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.status = BuyPlanLineStatus.pending_verify.value
+        line.po_number = "PO-001"
+        db_session.commit()
+        # No ops member for test_user
+
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 403
+
+    def test_verify_po_triggers_auto_complete(
+        self, db_session: Session, test_quote: Quote,
+        test_user: User, admin_user: User,
+    ):
+        """Verify last PO → auto-complete plan (lines 586-587)."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        plan.so_status = SOVerificationStatus.approved.value
+        plan.submitted_by_id = test_user.id
+        plan.submitted_at = datetime.now(timezone.utc)
+        plan.sales_order_number = "SO-COMPLETE"
+        plan.total_cost = 500.0
+        plan.total_revenue = 750.0
+        line.status = BuyPlanLineStatus.pending_verify.value
+        line.po_number = "PO-DONE"
+        _make_ops_member(db_session, admin_user)
+
+        c = _make_client(db_session, admin_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 200
+        assert r.json()["status"] == "verified"
+        # Plan should auto-complete
+        db_session.refresh(plan)
+        assert plan.status == "completed"
+
+
+# ── Flag Issue V3 Edge Cases ──────────────────────────────────────
+
+
+class TestFlagIssueV3EdgeCases:
+    """Cover lines 608-609: ValueError handling."""
+
+    def test_flag_issue_value_error(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Flag issue on non-active plan → ValueError → 400."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        # Plan is draft, not active
+
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            json={"issue_type": "sold_out"},
+        )
+        assert r.status_code == 400
+
+
+# ── Offer Comparison Edge Cases ───────────────────────────────────
+
+
+class TestOfferComparisonEdgeCases:
+    """Cover lines 630, 634: plan/requirement not found."""
+
+    def test_offer_comparison_plan_not_found(
+        self, db_session: Session, test_user: User,
+    ):
+        """Offer comparison for nonexistent plan → 404 (line 630)."""
+        c = _make_client(db_session, test_user)
+        r = c.get("/api/buy-plans-v3/99999/offers/1")
+        assert r.status_code == 404
+
+    def test_offer_comparison_requirement_not_found(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Offer comparison for nonexistent requirement → 404 (line 634)."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans-v3/{plan.id}/offers/99999")
+        assert r.status_code == 404

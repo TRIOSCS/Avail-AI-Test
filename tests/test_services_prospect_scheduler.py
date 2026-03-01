@@ -670,3 +670,61 @@ class TestFindContactsJob:
 
         assert result["prospects_processed"] == 5
         assert result["total_verified"] == 12
+
+
+# ── Coverage Gap Tests ──────────────────────────────────────────────
+
+
+class TestSchedulerCoverageGaps:
+    """Cover exception paths and edge cases."""
+
+    def test_ensure_utc_with_tz(self):
+        """Line 35: _ensure_utc returns dt unchanged when it already has tzinfo."""
+        from app.services.prospect_scheduler import _ensure_utc
+
+        dt = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        result = _ensure_utc(dt)
+        assert result is dt  # same object, unchanged
+
+    @pytest.mark.asyncio
+    async def test_discover_prospects_exception_path(self):
+        """Inner try blocks catch errors; function returns summary with 0 counts."""
+        with (
+            patch("app.database.SessionLocal") as mock_sl,
+            patch("app.services.prospect_scheduler.get_next_discovery_slice",
+                   return_value={"segment": "Test", "regions": ["US"]}),
+        ):
+            mock_db = MagicMock()
+            mock_sl.return_value = mock_db
+            mock_db.query.side_effect = RuntimeError("DB exploded")
+
+            result = await job_discover_prospects()
+
+        # Inner try/except blocks handle errors gracefully — returns success
+        # summary with zero counts, not an error dict.
+        assert result["explorium_count"] == 0
+        assert result["email_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_refresh_scores_exception_path(self):
+        """Lines 313-317: job_refresh_scores returns error on exception."""
+        with patch("app.database.SessionLocal") as mock_sl:
+            mock_db = MagicMock()
+            mock_sl.return_value = mock_db
+            mock_db.query.side_effect = RuntimeError("Score refresh exploded")
+
+            result = await job_refresh_scores()
+
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_expire_and_resurface_exception_path(self):
+        """Lines 403-407: job_expire_and_resurface returns error on exception."""
+        with patch("app.database.SessionLocal") as mock_sl:
+            mock_db = MagicMock()
+            mock_sl.return_value = mock_db
+            mock_db.query.side_effect = RuntimeError("Expire job exploded")
+
+            result = await job_expire_and_resurface()
+
+        assert "error" in result

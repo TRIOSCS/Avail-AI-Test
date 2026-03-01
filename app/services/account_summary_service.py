@@ -47,7 +47,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
     if site_ids:
         contacts = (
             db.query(SiteContact)
-            .filter(SiteContact.site_id.in_(site_ids), SiteContact.is_active == True)  # noqa: E712
+            .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active == True)  # noqa: E712
             .all()
         )
 

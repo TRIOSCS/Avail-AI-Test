@@ -433,6 +433,46 @@ class TestCalendarIntelligenceEdgeCases:
 
         assert result["activities_logged"] >= 1
 
+    @pytest.mark.asyncio
+    async def test_commit_exception_triggers_rollback(self, db_session):
+        """Lines 115-117: commit raises on first call, triggering rollback."""
+        from app.services.calendar_intelligence import scan_calendar_events
+
+        user = _make_user(db_session, "cal-rollback@trioscs.com")
+        db_session.commit()
+
+        event = {
+            "subject": "APEC conference",
+            "attendees": [
+                {"emailAddress": {"address": "vendor@ext.com", "name": "V"}},
+            ],
+            "start": {"dateTime": "2026-02-20T10:00:00"},
+            "end": {"dateTime": "2026-02-20T11:00:00"},
+        }
+
+        mock_gc = MagicMock()
+        mock_gc.get_all_pages = AsyncMock(return_value=[event])
+
+        original_rollback = db_session.rollback
+
+        def always_fail_commit():
+            raise Exception("DB commit exploded")
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.config.settings") as mock_settings,
+        ):
+            mock_settings.own_domains = ["trioscs.com"]
+            db_session.commit = always_fail_commit
+            db_session.rollback = MagicMock(side_effect=original_rollback)
+            result = await scan_calendar_events(
+                "fake-token", user.id, db_session, lookback_days=30
+            )
+
+        # The result should still be returned (commit failed but was handled)
+        assert result["events_scanned"] == 1
+        assert result["trade_shows"] == 1
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 8. company_merge_service.py — lines 125-126, 136-137
