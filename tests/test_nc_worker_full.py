@@ -1683,7 +1683,11 @@ class TestSessionManagerNotLoggedIn:
 
 
 class TestWorkerMainLoop:
-    """Tests for worker.main() — patches at source modules since imports are lazy."""
+    """Tests for worker.main() — patches at source modules since imports are lazy.
+
+    worker.main() is a sync function using time.sleep(), so tests patch
+    time.sleep (not asyncio.sleep) and call main() directly (no await).
+    """
 
     # Patch targets: lazy imports inside main() resolve from source modules
     _DB = "app.database.SessionLocal"
@@ -1691,7 +1695,6 @@ class TestWorkerMainLoop:
     _SCHEDULER = "app.services.nc_worker.scheduler.SearchScheduler"
     _BREAKER = "app.services.nc_worker.circuit_breaker.CircuitBreaker"
     _CONFIG = "app.services.nc_worker.config.NcConfig"
-    _AI_GATE = "app.services.nc_worker.ai_gate.process_ai_gate"
     _QUEUE_NEXT = "app.services.nc_worker.queue_manager.get_next_queued_item"
     _QUEUE_RECOVER = "app.services.nc_worker.queue_manager.recover_stale_searches"
     _QUEUE_MARK = "app.services.nc_worker.queue_manager.mark_status"
@@ -1699,6 +1702,8 @@ class TestWorkerMainLoop:
     _SEARCH = "app.services.nc_worker.search_engine.search_part"
     _PARSE = "app.services.nc_worker.result_parser.parse_results_html"
     _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
+    _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
+    _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
 
     def _make_mock_db(self, db_session):
         """Create a mock SessionLocal that returns a proxy session that won't actually close."""
@@ -1706,8 +1711,7 @@ class TestWorkerMainLoop:
         mock_session.close = MagicMock()  # Prevent actual close
         return MagicMock(return_value=mock_session)
 
-    @pytest.mark.asyncio
-    async def test_main_shutdown_requested(self, db_session):
+    def test_main_shutdown_requested(self, db_session):
         """main() exits immediately when shutdown is requested."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1719,21 +1723,21 @@ class TestWorkerMainLoop:
         try:
             worker_mod._shutdown_requested = True
 
-            mock_session = AsyncMock()
-            mock_session.start = AsyncMock()
-            mock_session.stop = AsyncMock()
+            mock_session = MagicMock()
+            mock_session.start = MagicMock()
+            mock_session.stop = MagicMock()
             mock_session.is_logged_in = True
+            mock_session.has_browser = False
 
             with patch(self._DB, self._make_mock_db(db_session)):
                 with patch(self._SESSION, return_value=mock_session):
-                    await worker_mod.main()
+                    worker_mod.main()
 
             mock_session.stop.assert_called_once()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_browser_start_fails(self, db_session):
+    def test_main_browser_start_fails(self, db_session):
         """main() exits when browser session fails to start."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1741,19 +1745,18 @@ class TestWorkerMainLoop:
         db_session.add(ws)
         db_session.commit()
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock(side_effect=Exception("Chrome not found"))
+        mock_session = MagicMock()
+        mock_session.start = MagicMock(side_effect=Exception("Chrome not found"))
 
         with patch(self._DB, self._make_mock_db(db_session)):
             with patch(self._SESSION, return_value=mock_session):
-                await worker_mod.main()
+                worker_mod.main()
 
         # Worker should not be running
         db_session.refresh(ws)
         assert ws.is_running is False
 
-    @pytest.mark.asyncio
-    async def test_main_login_fails(self, db_session):
+    def test_main_login_fails(self, db_session):
         """main() exits when initial login fails."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1761,22 +1764,22 @@ class TestWorkerMainLoop:
         db_session.add(ws)
         db_session.commit()
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = False
-        mock_session.login = AsyncMock(return_value=False)
-        mock_session.stop = AsyncMock()
+        mock_session.login = MagicMock(return_value=False)
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         with patch(self._DB, self._make_mock_db(db_session)):
             with patch(self._SESSION, return_value=mock_session):
-                await worker_mod.main()
+                worker_mod.main()
 
         mock_session.stop.assert_called_once()
         db_session.refresh(ws)
         assert ws.is_running is False
 
-    @pytest.mark.asyncio
-    async def test_main_outside_business_hours(self, db_session):
+    def test_main_outside_business_hours(self, db_session):
         """main() sleeps when outside business hours then shuts down."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1787,17 +1790,17 @@ class TestWorkerMainLoop:
         original_shutdown = worker_mod._shutdown_requested
         loop_count = 0
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             nonlocal loop_count
             loop_count += 1
             if loop_count >= 1:
                 worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = False
@@ -1808,14 +1811,13 @@ class TestWorkerMainLoop:
             with patch(self._DB, self._make_mock_db(db_session)):
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
-                        with patch("asyncio.sleep", side_effect=mock_sleep):
+                        with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                             with patch(self._QUEUE_RECOVER):
-                                await worker_mod.main()
+                                worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_daily_limit_reached(self, db_session):
+    def test_main_daily_limit_reached(self, db_session):
         """main() sleeps when daily limit is reached."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1825,13 +1827,14 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -1846,14 +1849,13 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._CONFIG, return_value=mock_config):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    await worker_mod.main()
+                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_circuit_breaker_open(self, db_session):
+    def test_main_circuit_breaker_open(self, db_session):
         """main() sleeps when circuit breaker is open."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1863,13 +1865,14 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -1885,14 +1888,13 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    await worker_mod.main()
+                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_break_time(self, db_session):
+    def test_main_break_time(self, db_session):
         """main() takes a break when scheduler says it's time."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1902,13 +1904,14 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -1926,15 +1929,14 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
-                                        await worker_mod.main()
+                                    with patch(self._ASYNCIO_RUN):
+                                        worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_empty_queue(self, db_session):
+    def test_main_empty_queue(self, db_session):
         """main() sleeps when queue is empty."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1944,13 +1946,14 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -1966,16 +1969,15 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=None):
-                                            await worker_mod.main()
+                                            worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_search_success(self, db_session, test_requisition):
+    def test_main_search_success(self, db_session, test_requisition):
         """main() performs a full search cycle."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -1997,18 +1999,19 @@ class TestWorkerMainLoop:
         original_shutdown = worker_mod._shutdown_requested
         search_done = False
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             nonlocal search_done
             if search_done:
                 worker_mod._shutdown_requested = True
             search_done = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
-        mock_session.ensure_session = AsyncMock(return_value=True)
+        mock_session.stop = MagicMock()
+        mock_session.page = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -2017,7 +2020,7 @@ class TestWorkerMainLoop:
 
         mock_breaker = MagicMock()
         mock_breaker.should_stop.return_value = False
-        mock_breaker.check_page_health = AsyncMock(return_value="HEALTHY")
+        mock_breaker.check_response_health = MagicMock(return_value="HEALTHY")
         mock_breaker.record_results = MagicMock()
 
         search_result = {
@@ -2025,6 +2028,7 @@ class TestWorkerMainLoop:
             "total_count": 1,
             "url": "https://netcomponents.com/search/result",
             "duration_ms": 1500,
+            "status_code": 200,
         }
 
         try:
@@ -2034,21 +2038,20 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(self._SEARCH, return_value=search_result):
                                                 with patch(self._PARSE, return_value=[]):
                                                     with patch(self._SAVE, return_value=0):
                                                         with patch(self._QUEUE_MARK):
                                                             with patch(self._QUEUE_COMPLETE):
-                                                                await worker_mod.main()
+                                                                worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_session_reauth_fails(self, db_session, test_requisition):
+    def test_main_session_reauth_fails(self, db_session, test_requisition):
         """main() handles session re-auth failure."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -2069,15 +2072,16 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
-        mock_session.ensure_session = AsyncMock(return_value=False)  # Re-auth fails
+        mock_session.stop = MagicMock()
+        mock_session.page = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=False)  # Re-auth fails
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -2093,18 +2097,17 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
                                             with patch(self._QUEUE_MARK) as mock_mark:
-                                                await worker_mod.main()
+                                                worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_session_expired_during_search(self, db_session, test_requisition):
-        """main() re-queues item when page health returns SESSION_EXPIRED."""
+    def test_main_session_expired_during_search(self, db_session, test_requisition):
+        """main() re-queues item when health check returns SESSION_EXPIRED."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2124,30 +2127,31 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        # SESSION_EXPIRED uses `continue` without sleeping — trigger shutdown from health check
+        def health_then_shutdown(status_code, html, url):
+            worker_mod._shutdown_requested = True
+            return "SESSION_EXPIRED"
+
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
-        mock_session.ensure_session = AsyncMock(return_value=True)
+        mock_session.stop = MagicMock()
+        mock_session.page = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
         mock_scheduler.time_for_break.return_value = False
 
-        # SESSION_EXPIRED uses `continue` without sleeping — trigger shutdown from health check
-        async def health_then_shutdown(*args, **kwargs):
-            worker_mod._shutdown_requested = True
-            return "SESSION_EXPIRED"
-
         mock_breaker = MagicMock()
         mock_breaker.should_stop.return_value = False
-        mock_breaker.check_page_health = AsyncMock(side_effect=health_then_shutdown)
+        mock_breaker.check_response_health = MagicMock(side_effect=health_then_shutdown)
 
-        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100}
+        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100, "status_code": 200}
 
         try:
             worker_mod._shutdown_requested = False
@@ -2156,18 +2160,17 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", new_callable=AsyncMock):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(self._SEARCH, return_value=search_result):
                                                 with patch(self._QUEUE_MARK):
-                                                    await worker_mod.main()
+                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_search_exception(self, db_session, test_requisition):
+    def test_main_search_exception(self, db_session, test_requisition):
         """main() marks item failed on search exception."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -2188,15 +2191,16 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
-        mock_session.ensure_session = AsyncMock(return_value=True)
+        mock_session.stop = MagicMock()
+        mock_session.page = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -2213,18 +2217,17 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")):
+                                            with patch(self._SEARCH, side_effect=Exception("crash")):
                                                 with patch(self._QUEUE_MARK) as mock_mark:
-                                                    await worker_mod.main()
+                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_ai_gate_error(self, db_session):
+    def test_main_ai_gate_error(self, db_session):
         """main() continues after AI gate error."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -2234,13 +2237,14 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -2256,16 +2260,15 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock, side_effect=Exception("AI gate boom")):
+                                    with patch(self._ASYNCIO_RUN, side_effect=Exception("AI gate boom")):
                                         with patch(self._QUEUE_NEXT, return_value=None):
-                                            await worker_mod.main()
+                                            worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_daily_reset(self, db_session):
+    def test_main_daily_reset(self, db_session):
         """main() resets daily stats on date change."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -2276,16 +2279,17 @@ class TestWorkerMainLoop:
         original_shutdown = worker_mod._shutdown_requested
         loop_count = 0
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             nonlocal loop_count
             loop_count += 1
             if loop_count >= 2:
                 worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
+        mock_session.stop = MagicMock()
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = False  # Skip to sleep quickly
@@ -2300,14 +2304,13 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    await worker_mod.main()
+                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
-    @pytest.mark.asyncio
-    async def test_main_breaker_trips_during_search(self, db_session, test_requisition):
+    def test_main_breaker_trips_during_search(self, db_session, test_requisition):
         """main() marks item failed when breaker trips after health check."""
         import app.services.nc_worker.worker as worker_mod
 
@@ -2328,15 +2331,16 @@ class TestWorkerMainLoop:
 
         original_shutdown = worker_mod._shutdown_requested
 
-        async def mock_sleep(seconds):
+        def mock_sleep(seconds):
             worker_mod._shutdown_requested = True
 
-        mock_session = AsyncMock()
-        mock_session.start = AsyncMock()
+        mock_session = MagicMock()
+        mock_session.start = MagicMock()
         mock_session.is_logged_in = True
-        mock_session.stop = AsyncMock()
-        mock_session.page = AsyncMock()
-        mock_session.ensure_session = AsyncMock(return_value=True)
+        mock_session.stop = MagicMock()
+        mock_session.page = MagicMock()
+        mock_session.ensure_session = MagicMock(return_value=True)
+        mock_session.has_browser = False
 
         mock_scheduler = MagicMock()
         mock_scheduler.is_business_hours.return_value = True
@@ -2345,10 +2349,10 @@ class TestWorkerMainLoop:
         should_stop_calls = [False, True]  # First check OK, after health check trips
         mock_breaker = MagicMock()
         mock_breaker.should_stop.side_effect = should_stop_calls
-        mock_breaker.check_page_health = AsyncMock(return_value="CAPTCHA_WARNING")
+        mock_breaker.check_response_health = MagicMock(return_value="CAPTCHA_WARNING")
         mock_breaker.trip_reason = "captcha"
 
-        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100}
+        search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100, "status_code": 200}
 
         try:
             worker_mod._shutdown_requested = False
@@ -2357,13 +2361,13 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._AI_GATE, new_callable=AsyncMock):
+                                    with patch(self._ASYNCIO_RUN):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(self._SEARCH, return_value=search_result):
                                                 with patch(self._QUEUE_MARK) as mock_mark:
-                                                    await worker_mod.main()
+                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 

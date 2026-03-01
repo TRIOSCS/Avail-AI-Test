@@ -12,7 +12,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import app.utils.graph_client as _gc_mod
 from app.utils.graph_client import GraphClient, GraphSyncStateExpired
+
+
+@pytest.fixture(autouse=True)
+def _restore_retry_constants():
+    """Restore production retry constants for graph client tests."""
+    orig_retries, orig_backoff = _gc_mod.MAX_RETRIES, _gc_mod.BACKOFF_BASE
+    _gc_mod.MAX_RETRIES = 3
+    _gc_mod.BACKOFF_BASE = 2
+    yield
+    _gc_mod.MAX_RETRIES, _gc_mod.BACKOFF_BASE = orig_retries, orig_backoff
 
 
 # ── Helpers ─────────────────────────────────────────────────────────

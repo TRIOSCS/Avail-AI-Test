@@ -577,7 +577,7 @@ class TestBackfillSightingVendorNormalized:
             r = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
             assert r[0] is None
 
-    def test_logs_total_when_rows_updated(self, caplog):
+    def test_logs_total_when_rows_updated(self):
         """When rows are updated, the total is logged."""
         from app.startup import _backfill_sighting_vendor_normalized
 

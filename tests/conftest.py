@@ -98,6 +98,17 @@ def _enable_fk(dbapi_conn, _):
 # These are excluded from the test DB; tests needing them require PostgreSQL.
 _PG_ONLY_TABLES = {"buyer_profiles"}
 
+# Create tables once at import time — NOT per test.
+_sqlite_safe = [
+    t for name, t in Base.metadata.tables.items()
+    if name not in _PG_ONLY_TABLES
+]
+Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
+
+# Pre-compute delete order (respects FK dependencies via reversed create order).
+_delete_order = list(reversed(Base.metadata.sorted_tables))
+_delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TABLES]
+
 
 @pytest.fixture(autouse=True)
 def _reset_ai_gate_state():
@@ -114,18 +125,17 @@ def _reset_ai_gate_state():
 
 @pytest.fixture(autouse=True)
 def db_session():
-    """Create all tables, yield a session, then tear down."""
-    _sqlite_safe = [
-        t for name, t in Base.metadata.tables.items()
-        if name not in _PG_ONLY_TABLES
-    ]
-    Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
+    """Yield a session, then DELETE all rows (fast) instead of drop/create tables."""
     session = TestSessionLocal()
     try:
         yield session
     finally:
+        session.rollback()
+        # Delete all rows in FK-safe order — much faster than drop_all/create_all
+        with engine.begin() as conn:
+            for stmt in _delete_stmts:
+                conn.execute(stmt)
         session.close()
-        Base.metadata.drop_all(bind=engine, tables=_sqlite_safe)
 
 
 @pytest.fixture()

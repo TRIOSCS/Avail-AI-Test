@@ -97,7 +97,7 @@ def test_key_params_none_uses_all_kwargs():
     mock_get.assert_called_once()
 
 
-def test_cache_read_error_handled(caplog):
+def test_cache_read_error_handled():
     """get_cached exception is caught, function still runs (lines 56-57)."""
     from app.cache.decorators import cached_endpoint
 
@@ -112,7 +112,7 @@ def test_cache_read_error_handled(caplog):
     assert result == {"value": 1}
 
 
-def test_cache_write_error_handled(caplog):
+def test_cache_write_error_handled():
     """set_cached exception is caught, result still returned (lines 67-68)."""
     from app.cache.decorators import cached_endpoint
 
