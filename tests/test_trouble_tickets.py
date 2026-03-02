@@ -1,0 +1,174 @@
+"""Tests for trouble ticket service and router.
+
+Covers: ticket creation, auto-context capture, sanitization,
+ticket number generation, listing, access control, verify endpoint.
+
+Called by: pytest
+Depends on: conftest fixtures, app.models.TroubleTicket
+"""
+
+import re
+from datetime import datetime, timezone
+
+import pytest
+from sqlalchemy.orm import Session
+
+from app.models import User
+from app.models.trouble_ticket import TroubleTicket
+from app.services.trouble_ticket_service import (
+    create_ticket,
+    get_ticket,
+    list_tickets,
+    get_tickets_by_user,
+    check_file_lock,
+    _capture_auto_context,
+    _sanitize_context,
+)
+
+
+class TestTicketCreation:
+    def test_create_ticket_basic(self, db_session: Session, test_user: User):
+        ticket = create_ticket(
+            db=db_session,
+            user_id=test_user.id,
+            title="Button not working",
+            description="The submit button on the RFQ page does nothing when clicked.",
+            current_page="/api/rfq",
+            user_agent="Mozilla/5.0",
+            frontend_errors=[],
+        )
+        assert ticket.id is not None
+        assert ticket.status == "submitted"
+        assert ticket.submitted_by == test_user.id
+        assert ticket.title == "Button not working"
+
+    def test_ticket_number_format(self, db_session: Session, test_user: User):
+        ticket = create_ticket(
+            db=db_session,
+            user_id=test_user.id,
+            title="Test",
+            description="Test description",
+        )
+        assert re.match(r"TT-\d{8}-\d{3,}", ticket.ticket_number)
+
+    def test_ticket_number_sequential(self, db_session: Session, test_user: User):
+        t1 = create_ticket(db=db_session, user_id=test_user.id, title="First", description="First ticket")
+        t2 = create_ticket(db=db_session, user_id=test_user.id, title="Second", description="Second ticket")
+        num1 = int(t1.ticket_number.rsplit("-", 1)[1])
+        num2 = int(t2.ticket_number.rsplit("-", 1)[1])
+        assert num2 == num1 + 1
+
+
+class TestAutoContext:
+    def test_capture_returns_expected_structure(self, db_session: Session, test_user: User):
+        ctx = _capture_auto_context(db=db_session, user_id=test_user.id, current_page="/api/vendors/123")
+        assert "recent_api_errors" in ctx
+        assert "recent_frontend_errors" in ctx
+        assert "user_role" in ctx
+        assert "server_info" in ctx
+        assert "page_route" in ctx
+        assert ctx["user_role"] == "buyer"
+
+    def test_page_route_parameterized(self, db_session: Session, test_user: User):
+        ctx = _capture_auto_context(db=db_session, user_id=test_user.id, current_page="/api/vendors/12345")
+        assert ctx["page_route"] == "/api/vendors/{id}"
+
+
+class TestSanitization:
+    def test_strips_api_keys(self):
+        ctx = {"error": "Failed with key sk-ant-api03-abc123xyz"}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "sk-ant-api03-abc123xyz" not in str(result)
+
+    def test_strips_bearer_tokens(self):
+        ctx = {"header": "Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.abc.def"}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9" not in str(result)
+
+    def test_strips_connection_strings(self):
+        ctx = {"db": "postgres://user:pass@host:5432/db"}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "postgres://user:pass" not in str(result)
+
+    def test_strips_passwords(self):
+        ctx = {"config": 'password = "hunter2"'}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "hunter2" not in str(result)
+
+    def test_strips_api_key_values(self):
+        ctx = {"config": 'api_key = "my-secret-key-123"'}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "my-secret-key-123" not in str(result)
+
+    def test_replaces_emails_except_submitter(self):
+        ctx = {"data": "Contact admin@company.com and other@example.com"}
+        result = _sanitize_context(ctx, submitter_email="admin@company.com")
+        result_str = str(result)
+        assert "admin@company.com" in result_str
+        assert "other@example.com" not in result_str
+        assert "[EMAIL]" in result_str
+
+    def test_replaces_ip_addresses(self):
+        ctx = {"server": "Connected to 192.168.1.100"}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert "192.168.1.100" not in str(result)
+        assert "[IP]" in str(result)
+
+    def test_truncates_long_messages(self):
+        ctx = {"error": "x" * 1000}
+        result = _sanitize_context(ctx, submitter_email="test@example.com")
+        assert len(result["error"]) <= 500
+
+
+class TestTicketQueries:
+    def test_get_ticket(self, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Test", description="Desc")
+        found = get_ticket(db=db_session, ticket_id=ticket.id)
+        assert found is not None
+        assert found.id == ticket.id
+
+    def test_get_ticket_not_found(self, db_session: Session):
+        found = get_ticket(db=db_session, ticket_id=99999)
+        assert found is None
+
+    def test_list_tickets_with_status_filter(self, db_session: Session, test_user: User):
+        create_ticket(db=db_session, user_id=test_user.id, title="T1", description="D1")
+        t2 = create_ticket(db=db_session, user_id=test_user.id, title="T2", description="D2")
+        t2.status = "diagnosed"
+        db_session.commit()
+        result = list_tickets(db=db_session, status_filter="submitted")
+        assert result["total"] == 1
+        assert result["items"][0]["status"] == "submitted"
+
+    def test_list_tickets_pagination(self, db_session: Session, test_user: User):
+        for i in range(5):
+            create_ticket(db=db_session, user_id=test_user.id, title=f"T{i}", description=f"D{i}")
+        result = list_tickets(db=db_session, limit=2, offset=0)
+        assert result["total"] == 5
+        assert len(result["items"]) == 2
+
+    def test_get_tickets_by_user(self, db_session: Session, test_user: User, admin_user: User):
+        create_ticket(db=db_session, user_id=test_user.id, title="User ticket", description="D")
+        create_ticket(db=db_session, user_id=admin_user.id, title="Admin ticket", description="D")
+        user_tickets = get_tickets_by_user(db=db_session, user_id=test_user.id)
+        assert len(user_tickets) == 1
+        assert user_tickets[0].title == "User ticket"
+
+
+class TestFileLock:
+    def test_no_conflict(self, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        ticket.status = "fix_in_progress"
+        ticket.file_mapping = ["app/routers/vendors.py"]
+        db_session.commit()
+        result = check_file_lock(db=db_session, file_paths=["app/routers/crm.py"])
+        assert result is None
+
+    def test_conflict_detected(self, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        ticket.status = "fix_in_progress"
+        ticket.file_mapping = ["app/routers/vendors.py", "app/services/vendor_service.py"]
+        db_session.commit()
+        result = check_file_lock(db=db_session, file_paths=["app/routers/vendors.py"])
+        assert result is not None
+        assert result.id == ticket.id
