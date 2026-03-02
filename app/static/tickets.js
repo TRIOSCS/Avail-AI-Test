@@ -517,3 +517,144 @@ async function updateTicketStatus(ticketId, newStatus, container) {
         showToast('Update failed: ' + e.message, 'error');
     }
 }
+
+// ── System Notifications (self-heal pipeline) ────────────────────────────
+var _sysNotifTimer = null;
+
+var SYS_EVENT_COLORS = {
+    diagnosed: '#2563eb', prompt_ready: '#7c3aed', escalated: '#f59e0b',
+    fixed: '#16a34a', failed: '#ef4444',
+};
+
+var SYS_EVENT_LABELS = {
+    diagnosed: 'Diagnosed', prompt_ready: 'Prompt Ready', escalated: 'Escalated',
+    fixed: 'Fixed', failed: 'Failed',
+};
+
+function toggleSysNotifs() {
+    var panel = document.getElementById('sysNotifPanel');
+    if (!panel) return;
+    var open = panel.style.display !== 'none';
+    panel.style.display = open ? 'none' : 'block';
+    if (!open) loadSysNotifs();
+}
+
+async function loadSysNotifs() {
+    var el = document.getElementById('sysNotifList');
+    if (!el) return;
+    try {
+        var data = await apiFetch('/api/notifications/unread');
+        var items = data.items || [];
+        if (!items.length) {
+            el.textContent = '';
+            var p = document.createElement('p');
+            p.style.cssText = 'color:#94a3b8;font-size:12px;text-align:center;padding:16px 0';
+            p.textContent = 'No alerts';
+            el.appendChild(p);
+            return;
+        }
+        el.textContent = '';
+        items.forEach(function(n) {
+            var color = SYS_EVENT_COLORS[n.event_type] || '#6b7280';
+            var label = SYS_EVENT_LABELS[n.event_type] || n.event_type;
+            var row = document.createElement('div');
+            row.style.cssText = 'padding:8px 10px;border-radius:8px;margin-bottom:4px;cursor:pointer;border-left:3px solid ' + color + ';background:#f8fafc;transition:background .15s';
+            row.onmouseover = function() { row.style.background = '#f1f5f9'; };
+            row.onmouseout = function() { row.style.background = '#f8fafc'; };
+            row.onclick = function() {
+                markSysNotifRead(n.id);
+                if (n.ticket_id) {
+                    document.getElementById('sysNotifPanel').style.display = 'none';
+                    sidebarNav('tickets', document.getElementById('troublePill'));
+                    setTimeout(function() { showTicketDetail(n.ticket_id); }, 300);
+                }
+            };
+
+            var badge = document.createElement('span');
+            badge.style.cssText = 'display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700;color:#fff;background:' + color + ';margin-right:6px';
+            badge.textContent = label;
+
+            var title = document.createElement('span');
+            title.style.cssText = 'font-weight:600;font-size:12px;color:#1e293b';
+            title.textContent = n.title;
+
+            var header = document.createElement('div');
+            header.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:2px';
+            header.appendChild(badge);
+            header.appendChild(title);
+            row.appendChild(header);
+
+            if (n.body) {
+                var body = document.createElement('div');
+                body.style.cssText = 'font-size:11px;color:#64748b;line-height:1.3';
+                body.textContent = n.body.length > 120 ? n.body.slice(0, 120) + '...' : n.body;
+                row.appendChild(body);
+            }
+
+            var time = document.createElement('div');
+            time.style.cssText = 'font-size:10px;color:#94a3b8;margin-top:2px';
+            time.textContent = _sysNotifTimeAgo(n.created_at);
+            row.appendChild(time);
+
+            el.appendChild(row);
+        });
+    } catch (e) {
+        el.textContent = '';
+        var err = document.createElement('p');
+        err.style.cssText = 'color:#ef4444;font-size:12px;text-align:center';
+        err.textContent = 'Failed to load alerts';
+        el.appendChild(err);
+    }
+}
+
+async function markSysNotifRead(id) {
+    try { await apiFetch('/api/notifications/' + id + '/read', { method: 'POST' }); } catch (e) { /* silent */ }
+    loadSysNotifBadge();
+}
+
+async function markAllSysNotifsRead() {
+    try { await apiFetch('/api/notifications/read-all', { method: 'POST' }); } catch (e) { /* silent */ }
+    loadSysNotifBadge();
+    loadSysNotifs();
+}
+
+async function loadSysNotifBadge() {
+    var badge = document.getElementById('sysNotifCount');
+    if (!badge) return;
+    try {
+        var data = await apiFetch('/api/notifications/unread?limit=1');
+        var count = data.count || 0;
+        badge.textContent = count > 99 ? '99+' : String(count);
+        badge.style.display = count > 0 ? '' : 'none';
+        // Pulse animation on bell when there are unread
+        var bell = document.getElementById('sysNotifBell');
+        if (bell) bell.style.animation = count > 0 ? 'sysNotifPulse 2s ease-in-out infinite' : 'none';
+    } catch (e) { /* silent */ }
+}
+
+function _sysNotifTimeAgo(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    var s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+}
+
+function startSysNotifPolling() {
+    if (_sysNotifTimer || !document.getElementById('sysNotifBell')) return;
+    loadSysNotifBadge();
+    _sysNotifTimer = setInterval(loadSysNotifBadge, 30000);
+}
+
+// Expose to window for onclick handlers in HTML
+window.toggleSysNotifs = toggleSysNotifs;
+window.markAllSysNotifsRead = markAllSysNotifsRead;
+
+// Start polling when DOM is ready (admin only — bell exists)
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', startSysNotifPolling);
+} else {
+    startSysNotifPolling();
+}
