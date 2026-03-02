@@ -955,3 +955,7 @@ app.include_router(notifications_router)
 from .routers.tagging_admin import router as tagging_admin_router
 
 app.include_router(tagging_admin_router)
+
+from .routers.tags import router as tags_router
+
+app.include_router(tags_router)
