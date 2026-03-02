@@ -437,6 +437,13 @@ async function showTicketDetail(ticketId) {
                     onclick: function() { updateTicketStatus(ticketId, 'triaging', container); },
                 }));
             }
+            if (!t.diagnosis && (t.status === 'submitted' || t.status === 'triaging')) {
+                adminRow.appendChild(el('button', {
+                    className: 'btn btn-sm', textContent: 'AI Diagnose',
+                    style: 'background:var(--blue);color:#fff;',
+                    onclick: function() { diagnoseTicket(ticketId, container); },
+                }));
+            }
             adminRow.appendChild(el('button', {
                 className: 'btn btn-sm btn-ghost', textContent: 'Reject',
                 style: 'color:var(--red);',
@@ -485,6 +492,17 @@ async function verifyTicket(ticketId, verdict, container) {
         showTicketDetail(ticketId);
     } catch (e) {
         showToast('Verify failed: ' + e.message, 'error');
+    }
+}
+
+async function diagnoseTicket(ticketId, container) {
+    try {
+        showToast('Running AI diagnosis...', 'info');
+        var result = await apiFetch('/api/trouble-tickets/' + ticketId + '/diagnose', { method: 'POST' });
+        showToast('Diagnosis complete — risk: ' + (result.risk_tier || 'unknown'), 'success');
+        showTicketDetail(ticketId);
+    } catch (e) {
+        showToast('Diagnosis failed: ' + e.message, 'error');
     }
 }
 
