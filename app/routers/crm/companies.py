@@ -20,6 +20,22 @@ from ...utils.sql_helpers import escape_like
 router = APIRouter()
 
 
+def _load_company_tags(company_id: int, db: Session) -> list[dict]:
+    """Load visible entity tags for a company."""
+    from ...models.tags import EntityTag
+
+    tags = (
+        db.query(EntityTag)
+        .filter(EntityTag.entity_type == "company", EntityTag.entity_id == company_id, EntityTag.is_visible.is_(True))
+        .order_by(EntityTag.interaction_count.desc())
+        .all()
+    )
+    return [
+        {"tag_name": et.tag.name, "tag_type": et.tag.tag_type, "count": et.interaction_count, "is_visible": et.is_visible}
+        for et in tags
+    ]
+
+
 # ── Companies ────────────────────────────────────────────────────────────
 
 
@@ -306,6 +322,7 @@ async def get_company(
             "is_strategic": company.is_strategic,
             "brand_tags": company.brand_tags or [],
             "commodity_tags": company.commodity_tags or [],
+            "tags": _load_company_tags(company.id, db),
             "account_owner_id": company.account_owner_id,
             "account_owner_name": (company.account_owner.name if company.account_owner else None)
             if company.account_owner_id

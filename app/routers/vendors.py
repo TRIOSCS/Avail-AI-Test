@@ -184,6 +184,27 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
             logger.exception("Background material analysis failed for vendor card %d", card_id)
 
 
+def _load_entity_tags(entity_type: str, entity_id: int, db: Session) -> list[dict]:
+    """Load visible tags for any entity. Shared by vendor + company detail."""
+    from ..models.tags import EntityTag
+
+    tags = (
+        db.query(EntityTag)
+        .filter(EntityTag.entity_type == entity_type, EntityTag.entity_id == entity_id, EntityTag.is_visible.is_(True))
+        .order_by(EntityTag.interaction_count.desc())
+        .all()
+    )
+    return [
+        {
+            "tag_name": et.tag.name,
+            "tag_type": et.tag.tag_type,
+            "count": et.interaction_count,
+            "is_visible": et.is_visible,
+        }
+        for et in tags
+    ]
+
+
 def card_to_dict(card: VendorCard, db: Session) -> dict:
     """Serialize a VendorCard with reviews, brand profile, and engagement metrics.
 
@@ -306,6 +327,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         "material_tags_updated_at": card.material_tags_updated_at.isoformat()
         if card.material_tags_updated_at
         else None,
+        "tags": _load_entity_tags("vendor_card", card.id, db),
         "created_at": card.created_at.isoformat() if card.created_at else None,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }

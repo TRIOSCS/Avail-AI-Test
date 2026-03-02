@@ -665,6 +665,21 @@ async def add_requirements(
         created.append(r)
     db.commit()
 
+    # Tag propagation: propagate material card tags to customer entity
+    try:
+        from ..services.tagging import propagate_tags_to_entity
+
+        for r in created:
+            if r.material_card_id and req.customer_site_id:
+                propagate_tags_to_entity("customer_site", req.customer_site_id, r.material_card_id, 1.0, db)
+                site = db.get(CustomerSite, req.customer_site_id)
+                if site and site.company_id:
+                    propagate_tags_to_entity("company", site.company_id, r.material_card_id, 1.0, db)
+        if created:
+            db.commit()
+    except Exception:
+        logger.debug("Tag propagation failed for requirements", exc_info=True)
+
     # NetComponents: queue parts for automated search (background, separate DB session)
     def _nc_enqueue_batch(requirement_ids: list[int]):
         from ..database import SessionLocal
@@ -850,6 +865,28 @@ async def upload_requirements(
         db.add(r)
         created += 1
     db.commit()
+
+    # Tag propagation: propagate material card tags to customer entity (uploaded requirements)
+    try:
+        from ..services.tagging import propagate_tags_to_entity
+
+        uploaded_reqs = (
+            db.query(Requirement)
+            .filter(Requirement.requisition_id == req_id)
+            .order_by(Requirement.id.desc())
+            .limit(created)
+            .all()
+        )
+        for r_item in uploaded_reqs:
+            if r_item.material_card_id and req.customer_site_id:
+                propagate_tags_to_entity("customer_site", req.customer_site_id, r_item.material_card_id, 1.0, db)
+                site = db.get(CustomerSite, req.customer_site_id)
+                if site and site.company_id:
+                    propagate_tags_to_entity("company", site.company_id, r_item.material_card_id, 1.0, db)
+        if uploaded_reqs:
+            db.commit()
+    except Exception:
+        logger.debug("Tag propagation failed for uploaded requirements", exc_info=True)
 
     # NetComponents: queue uploaded requirements for automated search (background)
     def _nc_enqueue_uploaded(requisition_id: int, count: int):

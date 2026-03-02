@@ -102,6 +102,9 @@ from .sourcing import (  # noqa: F401
 # Sync
 from .sync import SyncLog  # noqa: F401
 
+# Tagging (AI classification + entity propagation)
+from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
+
 # Unified Score (cross-role leaderboard)
 from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 

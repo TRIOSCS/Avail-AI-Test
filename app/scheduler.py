@@ -2209,3 +2209,20 @@ async def _job_self_heal_auto_close():
         logger.exception("Self-heal auto-close failed")
     finally:
         db.close()
+
+
+@_traced_job
+async def _job_tagging_backfill():
+    """One-shot: classify untagged material cards via prefix lookup."""
+    from .database import SessionLocal
+    from .services.tagging_backfill import run_prefix_backfill, seed_from_existing_manufacturers
+
+    db = SessionLocal()
+    try:
+        seed_from_existing_manufacturers(db)
+        run_prefix_backfill(db)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

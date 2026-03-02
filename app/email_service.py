@@ -160,6 +160,26 @@ async def send_batch_rfq(
                 contact.graph_conversation_id = sent_msg.get("conversationId")
 
     db.commit()
+
+    # Tag propagation: propagate tags for RFQ'd parts to vendor entities
+    try:
+        from .services.tagging import propagate_tags_to_entity
+
+        req_obj = db.get(Requisition, requisition_id)
+        if req_obj:
+            reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
+            card_ids = [r.material_card_id for r in reqs if r.material_card_id]
+            if card_ids:
+                for contact_obj, _ in contacts_to_lookup:
+                    if contact_obj.vendor_name_normalized:
+                        vc = db.query(VendorCard).filter_by(normalized_name=contact_obj.vendor_name_normalized).first()
+                        if vc:
+                            for cid in card_ids:
+                                propagate_tags_to_entity("vendor_card", vc.id, cid, 0.5, db)
+                db.commit()
+    except Exception:
+        logger.debug("Tag propagation failed for RFQ batch", exc_info=True)
+
     return results
 
 
@@ -876,6 +896,17 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 )
                 db.add(offer)
                 db.flush()
+
+                # Tag propagation: propagate material card tags to vendor
+                try:
+                    if offer.material_card_id and offer.vendor_name_normalized:
+                        from .services.tagging import propagate_tags_to_entity
+
+                        vc = db.query(VendorCard).filter_by(normalized_name=offer.vendor_name_normalized).first()
+                        if vc:
+                            propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
+                except Exception:
+                    logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)
 
                 # Deduplicated notification — update existing if unread, else create new
                 if owner_id:
