@@ -14,11 +14,13 @@ Depends on: services/trouble_ticket_service.py, dependencies.py
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import require_admin, require_user
 from app.models import User
 from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
+from app.services.diagnosis_service import diagnose_full
 
 router = APIRouter(tags=["trouble-tickets"])
 
@@ -134,6 +136,11 @@ async def update_ticket(
     if not ticket:
         raise HTTPException(404, "Ticket not found")
     return {"ok": True}
+
+
+
+# NOTE: diagnose endpoint will be added in self-heal phase 2
+# when diagnosis_service.py is created
 
 
 @router.post("/api/trouble-tickets/{ticket_id}/verify")
