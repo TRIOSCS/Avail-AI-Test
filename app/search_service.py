@@ -643,6 +643,24 @@ def _save_sightings(
     # Propagate vendor emails from search results to VendorContact records
     _propagate_vendor_emails(sightings, db)
 
+    # Tag propagation: propagate material card tags to vendor entities
+    try:
+        from .services.tagging import propagate_tags_to_entity
+        from .models import VendorCard
+
+        for s in sightings:
+            if not s.material_card_id or not s.vendor_name:
+                continue
+            vn_norm = normalize_vendor_name(s.vendor_name)
+            if not vn_norm:
+                continue
+            vc = db.query(VendorCard).filter_by(normalized_name=vn_norm).first()
+            if vc:
+                propagate_tags_to_entity("vendor_card", vc.id, s.material_card_id, 1.0, db)
+        db.commit()
+    except Exception:
+        logger.debug("Tag propagation failed for sightings", exc_info=True)
+
     return sightings
 
 
@@ -965,6 +983,27 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
             s.normalized_mpn = normalize_mpn_key(s.mpn_matched)
 
     db.commit()
+
+    # Tag classification: if manufacturer is now set, classify and tag the card
+    try:
+        if card.manufacturer:
+            from .services.tagging import classify_material_card, get_or_create_brand_tag, get_or_create_commodity_tag, tag_material_card
+
+            result = classify_material_card(card.normalized_mpn, card.manufacturer, card.category)
+            tags_to_apply = []
+            if result.get("brand"):
+                brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
+                tags_to_apply.append({"tag_id": brand_tag.id, "source": result["brand"]["source"], "confidence": result["brand"]["confidence"]})
+            if result.get("commodity"):
+                commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
+                if commodity_tag:
+                    tags_to_apply.append({"tag_id": commodity_tag.id, "source": result["commodity"]["source"], "confidence": result["commodity"]["confidence"]})
+            if tags_to_apply:
+                tag_material_card(card.id, tags_to_apply, db)
+                db.commit()
+    except Exception:
+        logger.debug("Tag classification failed for card %s", card.id, exc_info=True)
+
     return card
 
 
