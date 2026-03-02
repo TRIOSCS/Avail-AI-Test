@@ -38,6 +38,9 @@ from .error_report import ErrorReport  # noqa: F401
 from .self_heal_log import SelfHealLog  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
+# Notifications (self-heal pipeline)
+from .notification import Notification  # noqa: F401
+
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
