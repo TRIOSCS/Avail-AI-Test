@@ -159,13 +159,7 @@
                 <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
             </div>
         </div>
-        <!-- Trouble Tickets — visible to all users -->
-        <div class="sb-nav-group sb-settings-group" data-section="support" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
-            <div class="sb-section-dot"></div>
-            <div class="sb-group-items" style="padding-top:4px">
-                <button type="button" class="sb-nav-btn" id="navTickets" data-tip="Tickets" onclick="sidebarNav('tickets',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"/></svg></span> Tickets</button>
-            </div>
-        </div>
+        <!-- Trouble Tickets pill is the floating red button (bottom-right) -->
         <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
         {% if is_admin %}
         <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
@@ -1467,6 +1461,12 @@
         </div>
     </div>
 </div>
+
+<!-- Floating trouble ticket pill — always visible -->
+<button type="button" id="troublePill" onclick="sidebarNav('tickets',this);document.getElementById('troublePill').querySelector('.tp-label').textContent='Report Issue'" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s;letter-spacing:.3px" onmouseover="this.style.transform='scale(1.06)';this.style.boxShadow='0 6px 20px rgba(239,68,68,.5),0 2px 6px rgba(0,0,0,.2)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15)'">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"/></svg>
+    <span class="tp-label">Report Issue</span>
+</button>
 
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
