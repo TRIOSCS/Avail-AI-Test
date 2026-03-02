@@ -3,15 +3,15 @@
 Old values 'vendor'/'customer' never matched actual entity types 'vendor_card'/
 'customer_site', causing all EntityTags to silently get is_visible=False.
 
-Revision ID: 043_fix_threshold_entity_types
-Revises: 042_add_tagging_tables
+Revision ID: 046_fix_threshold_entity_types
+Revises: 045
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "043_fix_threshold_entity_types"
-down_revision = "042_add_tagging_tables"
+revision = "046_fix_threshold_entity_types"
+down_revision = "045"
 branch_labels = None
 depends_on = None
 
