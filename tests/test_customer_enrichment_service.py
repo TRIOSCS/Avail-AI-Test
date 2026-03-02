@@ -777,7 +777,7 @@ async def test_step_lusha_discovery_success(db_session, _mock_settings):
 
         assert len(result) == 1
         assert result[0]["email"] == "lusha@test.com"
-        mock_record.assert_called_once_with(db_session, "lusha", 1)
+        mock_record.assert_called_once_with(db_session, "lusha_discovery", 1)
 
 
 @pytest.mark.asyncio

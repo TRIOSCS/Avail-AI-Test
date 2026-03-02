@@ -25,6 +25,8 @@ def _default_limit(provider: str) -> int:
     """Get the configured monthly credit limit for a provider."""
     limits = {
         "lusha": settings.lusha_monthly_credit_limit,
+        "lusha_phone": settings.lusha_phone_credit_limit,
+        "lusha_discovery": settings.lusha_discovery_credit_limit,
         "hunter_search": settings.hunter_monthly_search_limit,
         "hunter_verify": settings.hunter_monthly_verify_limit,
         "apollo": settings.apollo_monthly_credit_limit,
@@ -77,6 +79,18 @@ def record_credit_usage(db: Session, provider: str, count: int = 1) -> None:
 
 
 def get_all_budgets(db: Session) -> list[dict]:
-    """Get credit usage for all providers this month."""
-    providers = ["lusha", "hunter_search", "hunter_verify", "apollo"]
-    return [get_monthly_usage(db, p) for p in providers]
+    """Get credit usage for all providers this month, including split Lusha pools."""
+    providers = ["lusha_phone", "lusha_discovery", "hunter_search", "hunter_verify", "apollo"]
+    budgets = [get_monthly_usage(db, p) for p in providers]
+
+    # Add aggregate "lusha" entry summing both split pools
+    phone = next(b for b in budgets if b["provider"] == "lusha_phone")
+    discovery = next(b for b in budgets if b["provider"] == "lusha_discovery")
+    budgets.append({
+        "provider": "lusha",
+        "month": phone["month"],
+        "used": phone["used"] + discovery["used"],
+        "limit": phone["limit"] + discovery["limit"],
+        "remaining": phone["remaining"] + discovery["remaining"],
+    })
+    return budgets

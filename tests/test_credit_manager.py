@@ -14,6 +14,8 @@ from tests.conftest import engine  # noqa: F401 — use test SQLite engine
 def _mock_settings():
     with patch("app.services.credit_manager.settings") as mock_s:
         mock_s.lusha_monthly_credit_limit = 300
+        mock_s.lusha_phone_credit_limit = 210
+        mock_s.lusha_discovery_credit_limit = 90
         mock_s.hunter_monthly_search_limit = 500
         mock_s.hunter_monthly_verify_limit = 500
         mock_s.apollo_monthly_credit_limit = 1000
@@ -60,8 +62,10 @@ def test_get_all_budgets(db_session, _mock_settings):
     from app.services.credit_manager import get_all_budgets
 
     budgets = get_all_budgets(db_session)
-    assert len(budgets) == 4
+    assert len(budgets) == 6  # lusha_phone, lusha_discovery, hunter_search, hunter_verify, apollo, lusha (aggregate)
     providers = [b["provider"] for b in budgets]
+    assert "lusha_phone" in providers
+    assert "lusha_discovery" in providers
     assert "lusha" in providers
     assert "hunter_search" in providers
     assert "hunter_verify" in providers

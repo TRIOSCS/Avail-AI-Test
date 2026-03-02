@@ -294,6 +294,32 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 # Secret key validation moved to lifespan (fail-fast)
 
 
+# L0: CSP middleware — generates a per-request nonce for inline scripts
+import secrets
+
+
+@app.middleware("http")
+async def csp_middleware(request: Request, call_next):
+    """Add Content-Security-Policy header with a per-request nonce.
+
+    The nonce is stored on request.state so templates can embed it in
+    <script> tags, replacing the old 'unsafe-inline' directive.
+    """
+    nonce = secrets.token_urlsafe(16)
+    request.state.csp_nonce = nonce
+    response = await call_next(request)
+    csp = (
+        f"default-src 'self'; "
+        f"script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        f"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        f"font-src 'self' https://fonts.gstatic.com; "
+        f"img-src 'self' data:; "
+        f"connect-src 'self'"
+    )
+    response.headers["Content-Security-Policy"] = csp
+    return response
+
+
 # L1: Request/response middleware — request ID, timing, structured logging
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
@@ -593,6 +619,16 @@ def _seed_api_sources():
                 "setup_notes": "Contact Explorium for API access. Enterprise-grade enrichment with intent data and predictive signals.",
             },
             {
+                "name": "lusha_enrichment",
+                "display_name": "Lusha",
+                "category": "enrichment",
+                "source_type": "enrichment",
+                "description": "Contact enrichment — direct dial phone numbers, verified emails, and contact discovery. Primary enrichment source for high-value phone data.",
+                "signup_url": "https://www.lusha.com",
+                "env_vars": ["LUSHA_API_KEY"],
+                "setup_notes": "Sign up at lusha.com → API → Get API key. 6,400 credits/month. Phone pool (70%): 4,480 credits. Discovery pool (30%): 1,920 credits.",
+            },
+            {
                 "name": "hunter_enrichment",
                 "display_name": "Hunter.io",
                 "category": "enrichment",
@@ -847,7 +883,7 @@ def _seed_api_sources():
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter": 500,
-            "lusha": 100,
+            "lusha_enrichment": 6400,
             "clearbit": 1000,
             "digikey": 1000,
             "mouser": 1000,
@@ -935,6 +971,10 @@ app.include_router(prospect_suggested_router)
 from .routers.apollo_sync import router as apollo_sync_router
 
 app.include_router(apollo_sync_router)
+
+from .routers.explorium import router as explorium_router
+
+app.include_router(explorium_router)
 
 from .routers.nc_admin import router as nc_admin_router
 

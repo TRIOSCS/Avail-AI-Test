@@ -166,12 +166,12 @@ async def _step_lusha_phones(db: Session, contacts: list[dict], domain: str) -> 
 
     enriched = []
     for contact in contacts:
-        # Skip if already has a direct dial or mobile
-        if contact.get("phone") and contact.get("phone_type") in ("direct_dial", "mobile"):
+        # Skip only if already has a direct dial or mobile phone
+        if contact.get("phone_type") in ("direct_dial", "mobile"):
             enriched.append(contact)
             continue
 
-        if not can_use_credits(db, "lusha", 1):
+        if not can_use_credits(db, "lusha_phone", 1):
             logger.info("Lusha credits exhausted during phone enrichment, stopping")
             enriched.append(contact)
             continue
@@ -189,7 +189,7 @@ async def _step_lusha_phones(db: Session, contacts: list[dict], domain: str) -> 
                 last_name=last_name,
                 company_domain=domain,
             )
-            record_credit_usage(db, "lusha", 1)
+            record_credit_usage(db, "lusha_phone", 1)
 
             if result and result.get("phone"):
                 contact["phone"] = result["phone"]
@@ -212,7 +212,7 @@ async def _step_lusha_discovery(db: Session, domain: str, company_name: str, nee
     Uses search_contacts to find new contacts at the company domain.
     Only runs if Lusha credits are available and we still need contacts.
     """
-    if needed <= 0 or not can_use_credits(db, "lusha", 1):
+    if needed <= 0 or not can_use_credits(db, "lusha_discovery", 1):
         logger.info("Lusha discovery skipped — needed=%d or credits exhausted", needed)
         return []
 
@@ -225,7 +225,7 @@ async def _step_lusha_discovery(db: Session, domain: str, company_name: str, nee
             limit=needed,
         )
         if contacts:
-            record_credit_usage(db, "lusha", 1)
+            record_credit_usage(db, "lusha_discovery", 1)
         return contacts
     except Exception as e:
         logger.debug("Lusha discovery failed for %s: %s", domain, e)

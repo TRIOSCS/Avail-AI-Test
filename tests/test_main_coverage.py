@@ -227,6 +227,7 @@ class TestSeedApiSources:
                 "anthropic_ai",
                 "teams_notifications",
                 "apollo_enrichment",
+                "lusha_enrichment",
                 "explorium_enrichment",
                 "hunter_enrichment",
                 "rocketreach_enrichment",

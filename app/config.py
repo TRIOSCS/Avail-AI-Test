@@ -95,6 +95,8 @@ class Settings:
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
     lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
     lusha_monthly_credit_limit: int = int(os.getenv("LUSHA_MONTHLY_CREDIT_LIMIT", "6400"))
+    lusha_phone_credit_limit: int = int(os.getenv("LUSHA_PHONE_CREDIT_LIMIT", "4480"))
+    lusha_discovery_credit_limit: int = int(os.getenv("LUSHA_DISCOVERY_CREDIT_LIMIT", "1920"))
 
     # Customer enrichment waterfall (Apollo → Hunter → Lusha phones → Other)
     customer_enrichment_enabled: bool = os.getenv("CUSTOMER_ENRICHMENT_ENABLED", "true").lower() == "true"

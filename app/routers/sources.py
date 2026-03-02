@@ -110,6 +110,8 @@ def _get_connector_for_source(name: str, db: Session = None):
         return _TeamsTestConnector()
     if name == "apollo_enrichment":
         return _ApolloTestConnector()
+    if name == "lusha_enrichment":
+        return _LushaTestConnector()
     if name == "explorium_enrichment":
         return _ExploriumTestConnector()
     if name == "azure_oauth":
@@ -202,15 +204,37 @@ class _ApolloTestConnector:
         if not api_key:
             raise ValueError("APOLLO_API_KEY not configured")
         resp = await http.post(
-            "https://api.apollo.io/v1/mixed_people/search",
-            headers={"Content-Type": "application/json"},
-            json={"api_key": api_key, "q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
+            "https://api.apollo.io/v1/mixed_people/api_search",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json={"q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
             timeout=15,
         )
         if resp.status_code != 200:
             raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
         count = len(resp.json().get("people", []))
         return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
+
+
+class _LushaTestConnector:
+    """Test Lusha API key with a lightweight person lookup."""
+
+    async def search(self, mpn: str) -> list[dict]:
+        from ..http_client import http
+
+        api_key = get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
+        if not api_key:
+            raise ValueError("LUSHA_API_KEY not configured")
+        resp = await http.get(
+            "https://api.lusha.com/v2/person",
+            headers={"api_key": api_key, "Content-Type": "application/json"},
+            params={"email": "test@example.com"},
+            timeout=15,
+        )
+        # 200 = found, 404 = unknown person but API key works — both mean live
+        if resp.status_code not in (200, 404):
+            raise ValueError(f"Lusha API returned {resp.status_code}: {resp.text[:200]}")
+        status_msg = "Person found" if resp.status_code == 200 else "API key valid (no match)"
+        return [{"vendor_name": "Lusha", "mpn_matched": status_msg, "status": "ok"}]
 
 
 class _ExploriumTestConnector:

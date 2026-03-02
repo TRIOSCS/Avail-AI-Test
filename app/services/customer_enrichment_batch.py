@@ -56,7 +56,7 @@ async def run_customer_enrichment_batch(
 
     for gap in gaps:
         # Stop early if all credit budgets are exhausted
-        if not any(can_use_credits(db, p) for p in ["apollo", "hunter_verify", "lusha"]):
+        if not any(can_use_credits(db, p) for p in ["apollo", "hunter_verify", "lusha_phone", "lusha_discovery"]):
             logger.info("All credit budgets exhausted — stopping batch early at %d/%d", processed, len(gaps))
             break
 
