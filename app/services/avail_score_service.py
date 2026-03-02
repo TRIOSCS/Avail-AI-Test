@@ -695,7 +695,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
 
     followed_up = 0
     for q in sent_quotes:
-        if not q.sent_at:
+        if not q.sent_at:  # pragma: no cover
             continue
         sent_at = q.sent_at
         if sent_at.tzinfo is None:

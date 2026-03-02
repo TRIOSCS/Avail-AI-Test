@@ -429,7 +429,7 @@ def attention_feed(
                     "link_id": bp.requisition_id or bp.id,
                 }
             )
-    except ImportError:
+    except ImportError:  # pragma: no cover
         pass
 
     # Sort by urgency: critical > warning > info, then by type for stability

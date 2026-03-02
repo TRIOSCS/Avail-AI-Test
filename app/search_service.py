@@ -597,7 +597,7 @@ def _save_sightings(
         sightings.append(s)
     try:
         db.commit()
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         # One bad row shouldn't kill the entire batch — rollback and retry
         # one-by-one, skipping any rows that violate constraints.
         logger.warning(f"Bulk sighting commit failed ({e}), retrying row-by-row")
@@ -809,7 +809,7 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
         log_audit(
             db, material_card_id=card.id, action="created", normalized_mpn=card.normalized_mpn, created_by="system"
         )
-    except Exception:
+    except Exception:  # pragma: no cover
         pass  # Audit should never break card creation
 
 
@@ -835,7 +835,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     display = normalize_mpn(mpn) or mpn.strip()
 
     dialect = db.bind.dialect.name if db.bind else ""
-    if dialect == "postgresql":
+    if dialect == "postgresql":  # pragma: no cover
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         stmt = (

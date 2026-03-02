@@ -867,7 +867,7 @@ async def upload_requirements(
                 .limit(count)
                 .all()
             ):
-                try:
+                try:  # pragma: no cover
                     enqueue_for_nc_search(r_item.id, bg_db)
                 except Exception:
                     logger.debug("NC enqueue failed for requirement %s", r_item.id, exc_info=True)

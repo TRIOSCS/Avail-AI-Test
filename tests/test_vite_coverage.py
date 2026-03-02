@@ -190,11 +190,13 @@ class TestViteJsTags:
             assert "crm.js" in str(result)
 
     def test_production_with_manifest(self):
-        """With manifest, returns script tags with hashed URLs."""
+        """With manifest, returns script tags with hashed URLs including tickets.js."""
         _clear_manifest_cache()
         manifest = {
             "app.js": {"file": "assets/app-abc.js"},
             "crm.js": {"file": "assets/crm-def.js"},
+            "tickets.js": {"file": "assets/tickets-ghi.js"},
+            "touch.js": {"file": "assets/touch-jkl.js"},
         }
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VITE_DEV", None)
@@ -202,6 +204,8 @@ class TestViteJsTags:
                 result = vite_js_tags()
                 assert "assets/app-abc.js" in str(result)
                 assert "assets/crm-def.js" in str(result)
+                assert "assets/tickets-ghi.js" in str(result)
+                assert "assets/touch-jkl.js" in str(result)
                 assert "<script" in str(result)
 
     def test_fallback_importmap(self):
@@ -224,6 +228,22 @@ class TestViteJsTags:
                 result = vite_js_tags()
                 assert "/static/app.js" in str(result)
                 assert "?v=" not in str(result)
+
+    def test_manifest_with_tickets_and_touch(self):
+        """With manifest including tickets.js and touch.js, all script tags emitted."""
+        _clear_manifest_cache()
+        manifest = {
+            "app.js": {"file": "assets/app-abc.js"},
+            "crm.js": {"file": "assets/crm-def.js"},
+            "tickets.js": {"file": "assets/tickets-ghi.js"},
+            "touch.js": {"file": "assets/touch-jkl.js"},
+        }
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VITE_DEV", None)
+            with patch.object(vite_mod, "_load_manifest", return_value=manifest):
+                result = vite_js_tags()
+                assert "assets/tickets-ghi.js" in str(result)
+                assert "assets/touch-jkl.js" in str(result)
 
     def test_partial_manifest_falls_back(self):
         """If only one entry in manifest, falls back to importmap."""

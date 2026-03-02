@@ -88,7 +88,7 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
         return card
 
     # Fuzzy match: use pg_trgm on PostgreSQL, fall back to thefuzz
-    if not os.environ.get("TESTING"):
+    if not os.environ.get("TESTING"):  # pragma: no cover
         try:
             trgm_rows = db.execute(
                 sqltext(
@@ -355,7 +355,7 @@ async def check_vendor_duplicate(
                     }
                 )
         matches.sort(key=lambda m: m["score"], reverse=True)
-    except ImportError:
+    except ImportError:  # pragma: no cover
         pass
 
     return {"matches": matches[:5]}

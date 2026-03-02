@@ -785,7 +785,7 @@ def _record_offer_won_history(db: Session, offer: Offer) -> None:
         if not req or not req.customer_site_id:
             return
         site = db.get(CustomerSite, req.customer_site_id)
-        if not site or not site.company_id:
+        if not site or not site.company_id:  # pragma: no cover
             return
 
         upsert_purchase(

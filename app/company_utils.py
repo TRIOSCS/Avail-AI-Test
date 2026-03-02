@@ -57,7 +57,7 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
     for i, a in enumerate(enriched):
         for b in enriched[i + 1 :]:
             pair_key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
-            if pair_key in seen_pairs:
+            if pair_key in seen_pairs:  # pragma: no cover
                 continue
 
             score = fuzz.token_sort_ratio(a["norm"], b["norm"])

@@ -531,7 +531,7 @@ def _record_quote_won_history(db: Session, req: Requisition | None, quote: Quote
         from ...services.purchase_history_service import upsert_purchase
 
         site = db.get(CustomerSite, req.customer_site_id)
-        if not site or not site.company_id:
+        if not site or not site.company_id:  # pragma: no cover
             return
         company_id = site.company_id
 

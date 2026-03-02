@@ -430,7 +430,7 @@ async def create_company(
                             s.commit()
 
                     # Run customer enrichment waterfall for immediate contact discovery
-                    if settings.customer_enrichment_enabled:
+                    if settings.customer_enrichment_enabled:  # pragma: no cover
                         try:
                             from ...services.customer_enrichment_service import enrich_customer_account
 

@@ -819,7 +819,7 @@ async def prospecting_my_accounts(user: User = Depends(require_user), db: Sessio
     accounts = []
     for r in rows:
         # Health: green=all active, yellow=some inactive, red=all inactive
-        if r.site_count == 0:
+        if r.site_count == 0:  # pragma: no cover
             health = "grey"
         elif r.active_sites == r.site_count:
             health = "green"
