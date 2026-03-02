@@ -150,6 +150,11 @@ class Settings:
     # Self-heal pipeline
     self_heal_enabled: bool = os.getenv("SELF_HEAL_ENABLED", "false").lower() == "true"
     self_heal_auto_diagnose: bool = os.getenv("SELF_HEAL_AUTO_DIAGNOSE", "false").lower() == "true"
+    self_heal_auto_execute_low: bool = os.getenv("SELF_HEAL_AUTO_EXECUTE_LOW", "false").lower() == "true"
+    self_heal_ticket_budget: float = float(os.getenv("SELF_HEAL_TICKET_BUDGET", "2.00"))
+    self_heal_weekly_budget: float = float(os.getenv("SELF_HEAL_WEEKLY_BUDGET", "50.00"))
+    self_heal_max_iterations_low: int = int(os.getenv("SELF_HEAL_MAX_ITERATIONS_LOW", "5"))
+    self_heal_max_iterations_medium: int = int(os.getenv("SELF_HEAL_MAX_ITERATIONS_MEDIUM", "10"))
 
     # Proactive offers
     proactive_matching_enabled: bool = os.getenv("PROACTIVE_MATCHING_ENABLED", "true").lower() == "true"
