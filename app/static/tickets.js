@@ -222,8 +222,8 @@ async function renderAdminDashboard(container) {
 
     // Filter pills
     var pills = el('div', { className: 'fpills fpills-sm', style: 'margin-bottom:12px;' });
-    var filters = ['', 'submitted', 'diagnosed', 'fix_in_progress', 'awaiting_verification', 'resolved', 'escalated'];
-    var labels = ['All', 'Submitted', 'Diagnosed', 'Fixing', 'Verify', 'Resolved', 'Escalated'];
+    var filters = ['', 'submitted', 'diagnosed', 'prompt_ready', 'fix_in_progress', 'awaiting_verification', 'resolved', 'escalated'];
+    var labels = ['All', 'Submitted', 'Diagnosed', 'Review Queue', 'Fixing', 'Verify', 'Resolved', 'Escalated'];
     filters.forEach(function(f, i) {
         var btn = el('button', {
             type: 'button',
@@ -442,6 +442,22 @@ async function showTicketDetail(ticketId) {
                     className: 'btn btn-sm', textContent: 'AI Diagnose',
                     style: 'background:var(--blue);color:#fff;',
                     onclick: function() { diagnoseTicket(ticketId, container); },
+                }));
+            }
+            if (t.generated_prompt && (t.status === 'diagnosed' || t.status === 'prompt_ready')) {
+                adminRow.appendChild(el('button', {
+                    className: 'btn btn-sm', textContent: 'Approve Fix',
+                    style: 'background:#16a34a;color:#fff;',
+                    onclick: function() { updateTicketStatus(ticketId, 'fix_in_progress', container); },
+                }));
+            }
+            if (t.status !== 'escalated') {
+                adminRow.appendChild(el('button', {
+                    className: 'btn btn-sm', textContent: 'Escalate',
+                    style: 'background:#f59e0b;color:#fff;',
+                    onclick: function() {
+                        if (confirm('Escalate this ticket to human review?')) updateTicketStatus(ticketId, 'escalated', container);
+                    },
                 }));
             }
             adminRow.appendChild(el('button', {

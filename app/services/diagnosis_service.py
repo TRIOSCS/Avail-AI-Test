@@ -17,6 +17,7 @@ from app.models.self_heal_log import SelfHealLog
 from app.models.trouble_ticket import TroubleTicket
 from app.services.file_mapper import get_relevant_files, has_stable_files, STABLE_FILES
 from app.services.prompt_generator import generate_fix_prompt
+from app.services.notification_service import create_notification
 from app.services.trouble_ticket_service import update_ticket
 from app.utils.claude_client import claude_structured
 
@@ -290,6 +291,20 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
     )
     db.add(log_entry)
     db.commit()
+
+    # Emit notifications
+    event = "diagnosed" if risk_tier != "high" else "escalated"
+    notif_title = f"Ticket #{ticket_id}: {classification.get('summary', ticket.title)}"
+    notif_body = f"Category: {classification.get('category', 'unknown')}, Risk: {risk_tier}"
+    if generated_prompt:
+        event = "prompt_ready"
+        notif_body += " — fix prompt generated"
+
+    if ticket.submitted_by:
+        create_notification(
+            db, user_id=ticket.submitted_by, event_type=event,
+            title=notif_title, body=notif_body, ticket_id=ticket_id,
+        )
 
     logger.info(
         "Ticket {} diagnosed: category={}, risk={}",

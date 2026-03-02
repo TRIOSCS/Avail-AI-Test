@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.models.notification import Notification
 from app.models.trouble_ticket import TroubleTicket
 from app.models.self_heal_log import SelfHealLog
 from app.services.trouble_ticket_service import create_ticket
@@ -204,3 +205,33 @@ class TestDiagnoseFull:
         assert len(logs) == 1
         assert logs[0].category == "ui"
         assert logs[0].risk_tier == "low"
+
+    @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
+    def test_emits_notification(self, mock_claude, db_session, test_user):
+        mock_claude.side_effect = [
+            {"category": "api", "risk_tier": "low", "confidence": 0.9, "summary": "API bug"},
+            {"root_cause": "Query error", "affected_files": [], "fix_approach": "Fix SQL",
+             "test_strategy": "Test it", "estimated_complexity": "simple",
+             "requires_migration": False},
+        ]
+        ticket = _make_ticket(db_session, test_user)
+        _run(diagnose_full(ticket.id, db_session))
+        notifs = db_session.query(Notification).filter_by(
+            user_id=test_user.id, ticket_id=ticket.id,
+        ).all()
+        assert len(notifs) == 1
+        assert notifs[0].event_type == "prompt_ready"
+        assert "API bug" in notifs[0].title
+
+    @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
+    def test_high_risk_emits_escalated_notification(self, mock_claude, db_session, test_user):
+        mock_claude.return_value = {
+            "category": "data", "risk_tier": "high", "confidence": 0.95, "summary": "DB issue",
+        }
+        ticket = _make_ticket(db_session, test_user)
+        _run(diagnose_full(ticket.id, db_session))
+        notifs = db_session.query(Notification).filter_by(
+            user_id=test_user.id, ticket_id=ticket.id,
+        ).all()
+        assert len(notifs) == 1
+        assert notifs[0].event_type == "escalated"
