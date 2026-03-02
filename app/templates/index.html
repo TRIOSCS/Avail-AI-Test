@@ -1468,6 +1468,22 @@
     <span class="tp-label">Report Issue</span>
 </button>
 
+{% if is_admin %}
+<!-- System notification bell — admin only, self-heal pipeline alerts -->
+<style>@keyframes sysNotifPulse{0%,100%{box-shadow:0 4px 14px rgba(99,102,241,.4),0 1px 3px rgba(0,0,0,.15)}50%{box-shadow:0 4px 20px rgba(99,102,241,.7),0 0 8px rgba(99,102,241,.4)}}</style>
+<button type="button" id="sysNotifBell" onclick="window.toggleSysNotifs()" style="position:fixed;bottom:24px;right:180px;z-index:9999;display:flex;align-items:center;justify-content:center;width:44px;height:44px;background:linear-gradient(135deg,#6366f1,#4f46e5);color:#fff;border:none;border-radius:50%;cursor:pointer;box-shadow:0 4px 14px rgba(99,102,241,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s" onmouseover="this.style.transform='scale(1.08)'" onmouseout="this.style.transform='scale(1)'">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    <span id="sysNotifCount" style="display:none;position:absolute;top:-4px;right:-4px;background:#ef4444;color:#fff;font-size:10px;font-weight:700;min-width:18px;height:18px;border-radius:9px;text-align:center;line-height:18px;padding:0 4px">0</span>
+</button>
+<div id="sysNotifPanel" style="display:none;position:fixed;bottom:76px;right:140px;z-index:10000;width:340px;max-height:400px;overflow-y:auto;background:#fff;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);padding:12px;font-size:13px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;font-size:14px;color:#1e293b">System Alerts</span>
+        <button type="button" onclick="window.markAllSysNotifsRead()" style="background:none;border:none;color:#6366f1;font-size:12px;cursor:pointer;font-weight:600">Mark all read</button>
+    </div>
+    <div id="sysNotifList"><p style="color:#94a3b8;font-size:12px;text-align:center;padding:16px 0">No alerts</p></div>
+</div>
+{% endif %}
+
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
