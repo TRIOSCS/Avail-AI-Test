@@ -10,7 +10,6 @@ Depends on: conftest fixtures, app.models.TroubleTicket
 import re
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-
 import pytest
 from sqlalchemy.orm import Session
 
