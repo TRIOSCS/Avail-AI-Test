@@ -186,6 +186,14 @@ document.addEventListener('DOMContentLoaded', function() {
         var syncSearch = function() { var active = mql.matches ? ds.value : ms.value; ds.value = active; ms.value = active; };
         if (mql.addEventListener) mql.addEventListener('change', syncSearch);
         else if (mql.addListener) mql.addListener(syncSearch);
+        // Also sync on window resize to catch edge cases (e.g. split-screen changes)
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                ds.value = ms.value || ds.value;
+            } else {
+                ms.value = ds.value || ms.value;
+            }
+        });
     }
     var nb = document.getElementById('notifBadge');
     var mb = document.getElementById('mobileNotifBadge');
