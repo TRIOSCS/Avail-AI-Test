@@ -12,6 +12,8 @@ Revision ID: 042_add_tagging_tables
 Revises: 041_add_notifications
 """
 
+from datetime import datetime, timezone
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -141,7 +143,7 @@ def upgrade() -> None:
     op.bulk_insert(
         tags_table,
         [
-            {"name": name, "tag_type": "commodity", "created_at": sa.func.now()}
+            {"name": name, "tag_type": "commodity", "created_at": datetime.now(timezone.utc)}
             for name in COMMODITY_TAGS
         ],
     )
