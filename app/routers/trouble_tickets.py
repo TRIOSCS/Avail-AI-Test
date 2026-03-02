@@ -6,6 +6,7 @@ GET  /api/trouble-tickets/my-tickets -- current user's tickets
 GET  /api/trouble-tickets/{id}       -- single ticket (admin or submitter)
 PATCH /api/trouble-tickets/{id}      -- update (admin only)
 POST /api/trouble-tickets/{id}/verify -- user confirms fix or reports still broken
+POST /api/trouble-tickets/{id}/diagnose -- trigger AI diagnosis (planned, not yet implemented)
 
 Called by: main.py (app.include_router)
 Depends on: services/trouble_ticket_service.py, dependencies.py
@@ -14,13 +15,11 @@ Depends on: services/trouble_ticket_service.py, dependencies.py
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
 from app.dependencies import require_admin, require_user
 from app.models import User
 from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
-from app.services.diagnosis_service import diagnose_full
 
 router = APIRouter(tags=["trouble-tickets"])
 
@@ -137,26 +136,6 @@ async def update_ticket(
         raise HTTPException(404, "Ticket not found")
     return {"ok": True}
 
-
-
-@router.post("/api/trouble-tickets/{ticket_id}/diagnose")
-async def diagnose_ticket(
-    ticket_id: int,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Trigger AI diagnosis on a ticket (admin only)."""
-    if not settings.self_heal_enabled:
-        raise HTTPException(403, "Self-heal pipeline is disabled")
-    ticket = svc.get_ticket(db=db, ticket_id=ticket_id)
-    if not ticket:
-        raise HTTPException(404, "Ticket not found")
-    if ticket.diagnosis:
-        raise HTTPException(400, "Ticket already diagnosed")
-    result = await diagnose_full(ticket_id, db)
-    if "error" in result:
-        raise HTTPException(500, result["error"])
-    return result
 
 @router.post("/api/trouble-tickets/{ticket_id}/verify")
 async def verify_ticket(
