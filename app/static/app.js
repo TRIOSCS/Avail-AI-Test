@@ -110,9 +110,9 @@ function mobileTabNav(page, btn) {
     // Push to nav stack
     _mobileNavStack = [page];
     // Map tab to sidebar nav route
-    var navMap = { reqs:'reqs', customers:'customers', vendors:'vendors', suggested:'suggested' };
+    var navMap = { reqs:'reqs', customers:'customers', vendors:'vendors', prospecting:'prospecting' };
     if (navMap[page]) {
-        var navBtn = document.getElementById({reqs:'navReqs',customers:'navCustomers',vendors:'navVendors',suggested:'navSuggested'}[page]);
+        var navBtn = document.getElementById({reqs:'navReqs',customers:'navCustomers',vendors:'navVendors',prospecting:'navProspecting'}[page]);
         sidebarNav(navMap[page], navBtn);
     }
 }
@@ -125,7 +125,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {materials:'navMaterials',buyplans:'navBuyPlans',proactive:'navProactive',dashboard:'navCmdCenter',prospecting:'navSuggested',settings:'navSettings'};
+    var navBtnMap = {materials:'navMaterials',buyplans:'navBuyPlans',proactive:'navProactive',dashboard:'navCmdCenter',prospecting:'navProspecting',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -664,6 +664,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const effectiveView = shouldDefaultDashboard ? 'view-dashboard' : initView;
     if (effectiveView && effectiveView !== 'view-list') {
         _navFromPopstate = true;
+        try {
         const initRoutes = {
             'view-vendors': () => showVendors(),
             'view-materials': () => showMaterials(),
@@ -673,15 +674,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-scorecard': () => showScorecard(),
             'view-settings': () => window.showSettings(),
             'view-prospecting': () => window.showProspecting(),
+            'view-suggested': () => window.showSuggested(),
             'view-dashboard': () => showDashboard(),
             'view-contacts': () => showContacts(),
-            'view-tickets': () => window.showTickets(),
+            'view-tickets': () => { if (typeof window.showTickets === 'function') window.showTickets(); },
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-prospecting':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts','view-tickets':'navTickets'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts','view-tickets':'navTickets'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
-        _navFromPopstate = false;
+        } catch(e) { console.error('init route error:', e); }
+        finally { _navFromPopstate = false; }
     }
     // Set initial section gradient color from active nav button
     var _initActiveBtn = document.querySelector('.sb-nav-btn.active');
@@ -771,13 +774,6 @@ window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
 // ── API Health Polling ──────────────────────────────────────────────────
 window._apiHealthErrors = [];
-const _dismissedAlerts = new Set();
-function dismissApiHealthBanner() {
-    const banner = document.getElementById('apiHealthBanner');
-    if (banner) banner.style.display = 'none';
-    // Remember dismissed alerts for this session
-    (window._apiHealthAlerts || []).forEach(a => _dismissedAlerts.add(a.source_name));
-}
 async function pollApiHealth() {
     try {
         const data = await apiFetch('/api/system/alerts');
@@ -799,29 +795,33 @@ async function pollApiHealth() {
         // Update subbar icon (backward compat)
         const icon = document.getElementById('subbarHealthWarn');
         if (icon) icon.style.display = alerts.length > 0 ? 'inline-flex' : 'none';
-
-        // Update banner
-        const banner = document.getElementById('apiHealthBanner');
-        const bannerText = document.getElementById('apiHealthBannerText');
-        if (banner && bannerText) {
-            const newAlerts = alerts.filter(a => !_dismissedAlerts.has(a.source_name));
-            if (newAlerts.length > 0) {
-                const hasError = newAlerts.some(a => a.status === 'error');
-                banner.className = 'api-health-banner' + (hasError ? ' critical' : '');
-                const names = newAlerts.map(a => a.display_name).join(', ');
-                bannerText.textContent = newAlerts.length === 1
-                    ? _esc(names) + ' is ' + newAlerts[0].status
-                    : newAlerts.length + ' API sources need attention: ' + _esc(names);
-                banner.style.display = '';
-            } else {
-                banner.style.display = 'none';
-            }
-        }
     } catch(e) { /* silent */ }
 }
 pollApiHealth();
 const _healthTimer = setInterval(pollApiHealth, 60000);
 window.addEventListener('beforeunload', () => clearInterval(_healthTimer));
+
+// Health tooltip for subbar warning icon
+let _healthTooltipEl = null;
+function showHealthTooltip(evt) {
+    const errors = window._apiHealthErrors || [];
+    if (!errors.length) return;
+    if (_healthTooltipEl) _healthTooltipEl.remove();
+    const tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;z-index:9999;background:#1e293b;color:#f1f5f9;font-size:11px;padding:8px 12px;border-radius:6px;max-width:320px;box-shadow:0 4px 12px rgba(0,0,0,.25);pointer-events:none';
+    // All values escaped via esc() to prevent XSS
+    tip.innerHTML = '<b style="color:#f59e0b">API Issues</b><br>' + errors.map(a => esc(a.source || a.name || 'Unknown') + ': ' + esc(a.status || a.error || 'error')).join('<br>');  // nosec: all dynamic values escaped via esc()
+    document.body.appendChild(tip);
+    const rect = (evt.target || evt.currentTarget).getBoundingClientRect();
+    tip.style.top = (rect.bottom + 6) + 'px';
+    tip.style.left = Math.max(8, rect.left - tip.offsetWidth / 2) + 'px';
+    _healthTooltipEl = tip;
+}
+function hideHealthTooltip() {
+    if (_healthTooltipEl) { _healthTooltipEl.remove(); _healthTooltipEl = null; }
+}
+window.showHealthTooltip = showHealthTooltip;
+window.hideHealthTooltip = hideHealthTooltip;
 
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
@@ -914,7 +914,7 @@ export async function refreshProactiveBadge() {
 const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-apihealth', 'view-tickets'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-tickets':'tickets'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested','view-apihealth':'apihealth','view-tickets':'tickets'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 let _navFromPopstate = false;
@@ -947,6 +947,7 @@ window.addEventListener('popstate', (e) => {
     }
     const viewId = _hashToView[baseHash] || 'view-list';
     _navFromPopstate = true;
+    try {
     // Close any open modals first
     document.querySelectorAll('.modal-bg.open').forEach(m => m.classList.remove('open'));
     // Route to the correct view
@@ -954,8 +955,9 @@ window.addEventListener('popstate', (e) => {
         'view-list': () => {
             showView('view-list');
             setMainPill('rfq');
-            _reqFullyLoaded = false; // re-fetch fresh on next nav
+            _reqFullyLoaded = false;
             _collapseAllDrillDowns();
+            loadRequisitions(); // re-fetch requirements list
             if (drillId) setTimeout(() => toggleDrillDown(drillId), 100);
         },
         'view-vendors': () => showVendors(),
@@ -968,14 +970,16 @@ window.addEventListener('popstate', (e) => {
         'view-contacts': () => showContacts(),
         'view-dashboard': () => showDashboard(),
         'view-prospecting': () => window.showProspecting(),
-        'view-tickets': () => window.showTickets(),
+        'view-suggested': () => window.showSuggested(),
+        'view-tickets': () => { if (typeof window.showTickets === 'function') window.showTickets(); },
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting','view-tickets':'navTickets'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-tickets':'navTickets'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
-    _navFromPopstate = false;
+    } catch(e) { console.error('popstate error:', e); }
+    finally { _navFromPopstate = false; }
 });
 
 const _viewScrollPos = {};  // viewId → scrollTop
@@ -1949,7 +1953,7 @@ function _ccUrgencyClass(score) {
 function _ccTrend(curr, prev) {
     if (curr > prev) return '<span style="color:var(--green);font-size:10px;margin-left:4px">&#9650;</span>';
     if (curr < prev) return '<span style="color:var(--red);font-size:10px;margin-left:4px">&#9660;</span>';
-    return '<span style="color:var(--muted);font-size:10px;margin-left:4px">&mdash;</span>';
+    return '';
 }
 
 function _attnTypeBadge(type) {
@@ -2196,9 +2200,8 @@ async function loadDashboard() {
 async function loadBuyerDashboard(el) {
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-        const [brief, attnFeed, hotOffers, teamLb] = await Promise.all([
+        const [brief, hotOffers, teamLb] = await Promise.all([
             apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
-            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load attention feed','warn'); return []; }),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
             apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
         ]);
@@ -2211,96 +2214,155 @@ async function loadBuyerDashboard(el) {
         const kpis = brief.kpis || {};
         const pipeline = brief.pipeline || {};
         const reviewOffers = brief.offers_to_review || [];
+        const reqsAtRisk = brief.reqs_at_risk || [];
+        const quotesDue = brief.quotes_due_soon || [];
+        const needsResp = brief.needs_response || [];
         const bpPending = brief.buyplans_pending || [];
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
-        const feedItems = Array.isArray(attnFeed) ? attnFeed : [];
+        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
 
         let html = '';
 
-        // ── Zone 1: Status Bar ──
-        html += `<div class="status-bar">
-            <span class="status-bar-item">Sourcing: <b style="color:var(--sourcing-color)">${kpis.sourcing_ratio || 0}%</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Offer&rarr;Quote: <b style="color:var(--blue)">${kpis.offer_quote_rate || 0}%</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Win Rate: <b style="color:var(--green)">${kpis.quote_win_rate || 0}%</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Pipeline: <b>${pipeline.active_reqs || 0}</b> active</span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Active: <b>${(pipeline.active_reqs || 0) + (pipeline.quotes_out || 0)}</b></span>
-        </div>`;
+        // ── Stat Row (matches sales layout) ──
+        html += '<div class="cc-stat-row cc-stat-row-buyer">'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer&rarr;Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">BP&rarr;PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans</div></div>'
+            + '</div>';
 
-        // ── Zone 2: Needs Attention (unified prioritized list) ──
-        html += `<div class="card-v2 attention-feed">
-            <h3 class="cc-card-title">Needs Attention <span class="cc-card-count">${feedItems.length}</span></h3>`;
-        if (feedItems.length) {
-            html += feedItems.map(item => {
-                const dotColor = item.urgency === 'critical' ? 'var(--red)' : item.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
-                const typeBadge = _attnTypeBadge(item.type);
-                const onclick = item.link_type === 'company' ? `goToCompany(${item.link_id})` : `goToReq(${item.link_id})`;
-                return `<div class="cc-row" onclick="${onclick}">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(item.title)}</span>
-                        <span class="cc-row-detail">${esc(item.detail)}</span>
-                    </div>
-                    <span class="cc-row-badge">${typeBadge}</span>
-                </div>`;
-            }).join('');
-        } else {
-            html += '<p class="cc-empty">Nothing urgent right now.</p>';
-        }
-        html += '</div>';
+        // ── Pipeline Bar ──
+        html += '<div class="cc-pipeline-bar">'
+            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
+            + '<span class="cc-pipe-sep">&rarr;</span>'
+            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
+            + '<span class="cc-pipe-sep">&rarr;</span>'
+            + '<span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
+            + '<span class="cc-pipe-sep">/</span>'
+            + '<span class="cc-pipe-item" style="color:var(--red)"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
+            + '<span class="cc-pipe-sep">&rarr;</span>'
+            + '<span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
+            + '</div>';
 
-        // ── Zone 3: Work Queue ──
-        html += '<div class="work-queue">';
-        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
+        // ── 6-Tile Cards Grid (mirrors sales layout) ──
+        html += '<div class="cc-cards-grid">';
 
-        // New Offers (merge Offers to Review + Hot Offers)
-        const allOffers = [...reviewOffers.map(o => ({...o, _src: 'review'})), ...hotList.map(o => ({...o, _src: 'hot'}))];
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> New Offers <span class="cc-card-count">${allOffers.length}</span></h3>`;
-        if (allOffers.length) {
+        // Card 1: Reqs at Risk (red) — like sales "Needs Attention"
+        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Reqs at Risk <span class="cc-card-count">' + reqsAtRisk.length + '</span></h3>';
+        if (reqsAtRisk.length) {
             html += '<div class="cc-card-scroll">';
-            html += allOffers.slice(0, 10).map(o => {
-                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
-                const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
-                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
-                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label || o.source || ''}</span>
-                    </div>
-                    <span class="cc-row-badge">${o._src === 'review' ? 'review' : 'hot'}</span>
-                </div>`;
-            }).join('');
+            for (let i = 0; i < Math.min(reqsAtRisk.length, 15); i++) {
+                const r = reqsAtRisk[i];
+                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
+                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
+                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
+                    + '<div class="cc-row-body">'
+                    + '<span class="cc-row-name">' + esc(r.name || 'REQ #' + r.id) + '</span>'
+                    + '<span class="cc-row-detail">' + (r.customer_name ? esc(r.customer_name) + ' &middot; ' : '') + esc(r.risk) + '</span>'
+                    + '</div>'
+                    + '<span class="cc-row-badge">' + r.num_offers + ' offer' + (r.num_offers !== 1 ? 's' : '') + '</span>'
+                    + '</div>';
+            }
             html += '</div>';
         } else {
-            html += '<p class="cc-empty">No new offers.</p>';
+            html += '<p class="cc-empty">No requisitions at risk.</p>';
         }
         html += '</div>';
 
-        // Buy Plans Pending
-        if (bpPending.length) {
-            html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">${bpPending.length}</span></h3>`;
+        // Card 2: Offers to Review (amber) — like sales "Quotes Awaiting Response"
+        const allOffers = [];
+        for (let i = 0; i < reviewOffers.length; i++) allOffers.push(Object.assign({}, reviewOffers[i], {_src: 'review'}));
+        for (let i = 0; i < hotList.length; i++) allOffers.push(Object.assign({}, hotList[i], {_src: 'hot'}));
+        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Offers to Review <span class="cc-card-count">' + allOffers.length + '</span></h3>';
+        if (allOffers.length) {
             html += '<div class="cc-card-scroll">';
-            html += bpPending.slice(0, 8).map(bp => {
+            for (let i = 0; i < Math.min(allOffers.length, 10); i++) {
+                const o = allOffers[i];
+                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
+                const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
+                html += '<div class="cc-row" onclick="goToReq(' + o.requisition_id + ')">'
+                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
+                    + '<div class="cc-row-body">'
+                    + '<span class="cc-row-name">' + esc(o.vendor_name) + '</span>'
+                    + '<span class="cc-row-detail"><span class="mono">' + esc(o.mpn) + '</span> &middot; ' + price + ' &middot; ' + (o.age_label || o.source || '') + '</span>'
+                    + '</div>'
+                    + '<span class="cc-row-badge">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
+                    + '</div>';
+            }
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No offers pending review.</p>';
+        }
+        html += '</div>';
+
+        // Card 3: Ready to Quote (blue) — like sales "Ready to Quote"
+        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">' + needsResp.length + '</span></h3>';
+        if (needsResp.length) {
+            html += '<div class="cc-card-scroll">';
+            for (let i = 0; i < Math.min(needsResp.length, 10); i++) {
+                const r = needsResp[i];
+                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
+                    + '<span class="cc-dot" style="background:var(--blue)"></span>'
+                    + '<div class="cc-row-body">'
+                    + '<span class="cc-row-name">' + esc(r.customer_name || r.name || 'REQ #' + r.id) + '</span>'
+                    + '<span class="cc-row-detail">' + r.offer_count + ' offer' + (r.offer_count !== 1 ? 's' : '') + ' ready &middot; ' + (r.age_label || '') + '</span>'
+                    + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">All offers have been quoted.</p>';
+        }
+        html += '</div>';
+
+        // Card 4: Upcoming Deadlines (purple) — like sales "Upcoming Deadlines"
+        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">' + quotesDue.length + '</span></h3>';
+        if (quotesDue.length) {
+            html += '<div class="cc-card-scroll">';
+            for (let i = 0; i < Math.min(quotesDue.length, 10); i++) {
+                const r = quotesDue[i];
+                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
+                const dlLabel = r.deadline === 'ASAP' ? 'ASAP' : r.days_left <= 0 ? Math.abs(r.days_left) + 'd overdue' : r.days_left + 'd left';
+                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
+                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
+                    + '<div class="cc-row-body">'
+                    + '<span class="cc-row-name">' + esc(r.name || 'REQ #' + r.id) + '</span>'
+                    + '<span class="cc-row-detail">' + dlLabel + '</span>'
+                    + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No upcoming deadlines.</p>';
+        }
+        html += '</div>';
+
+        // Card 5: Buy Plans Pending (sourcing-color) — like sales "Proactive Intelligence"
+        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">' + bpPending.length + '</span></h3>';
+        if (bpPending.length) {
+            html += '<div class="cc-card-scroll">';
+            for (let i = 0; i < Math.min(bpPending.length, 8); i++) {
+                const bp = bpPending[i];
                 const statusLabel = bp.status === 'pending' ? 'awaiting approval' : bp.so_status === 'pending' ? 'SO pending' : bp.status;
                 const dotColor = bp.status === 'pending' ? 'var(--amber)' : 'var(--purple)';
-                return `<div class="cc-row" onclick="goToReq(${bp.requisition_id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(bp.customer_name || 'BP #' + bp.id)}</span>
-                        <span class="cc-row-detail">${fmtMoney(bp.revenue)} &middot; ${bp.margin_pct}% &middot; ${statusLabel}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div></div>';
+                html += '<div class="cc-row" onclick="goToReq(' + bp.requisition_id + ')">'
+                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
+                    + '<div class="cc-row-body">'
+                    + '<span class="cc-row-name">' + esc(bp.customer_name || 'BP #' + bp.id) + '</span>'
+                    + '<span class="cc-row-detail">' + fmtMoney(bp.revenue) + ' &middot; ' + bp.margin_pct + '% &middot; ' + statusLabel + '</span>'
+                    + '</div>'
+                    + '</div>';
+            }
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No buy plans pending.</p>';
         }
+        html += '</div>';
 
-        // Team Performance
+        // Card 6: Team Performance (purple) — same as sales
         html += _renderTeamSummaryCard(teamLb);
 
-        html += '</div>'; // close work-queue
+        html += '</div>'; // close cc-cards-grid
         el.innerHTML = html;
     } catch (err) {
         console.error('loadBuyerDashboard error:', err);
@@ -4966,7 +5028,9 @@ function _appendAddRow(rfqId, dd) {
     setTimeout(() => inMpn.focus(), 0);
 }
 
+const _saveAddRowPending = {};
 async function _saveAddRow(rfqId) {
+    if (_saveAddRowPending[rfqId]) return; // prevent double-submit
     const dd = document.getElementById('d-' + rfqId)?.querySelector('.dd-panel');
     if (!dd) return;
     const mpnInput = dd.querySelector('.add-row-mpn');
@@ -4987,6 +5051,7 @@ async function _saveAddRow(rfqId) {
     if (priceVal) body.target_price = parseFloat(priceVal);
 
     // Disable inputs during save
+    _saveAddRowPending[rfqId] = true;
     dd.querySelectorAll('.add-row input').forEach(inp => inp.disabled = true);
 
     try {
@@ -5000,12 +5065,17 @@ async function _saveAddRow(rfqId) {
         // Keep add row active so user can enter next part immediately
         delete _ddReqCache[rfqId];
         if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
-        const rfq = _reqListData.find(r => r.id === rfqId);
-        if (rfq) rfq.requirement_count = (rfq.requirement_count || 0) + 1;
         _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+        const rfq = _reqListData.find(r => r.id === rfqId);
+        if (rfq) {
+            const freshReqs = _ddReqCache[rfqId] || [];
+            rfq.requirement_count = freshReqs.length;
+            rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
+        }
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
         _addRowActive[rfqId] = true;
         _renderDrillDownTable(rfqId);
+        _refreshReqRow(rfqId);
         showToast('Part added \u2014 enter next part or press Esc to finish', 'success');
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
@@ -5017,6 +5087,8 @@ async function _saveAddRow(rfqId) {
         showToast('Failed to add part', 'error');
         dd.querySelectorAll('.add-row input').forEach(inp => inp.disabled = false);
         mpnInput.focus();
+    } finally {
+        delete _saveAddRowPending[rfqId];
     }
 }
 
@@ -5036,10 +5108,15 @@ async function deleteDrillRow(rfqId, reqId) {
         }
         // Sync tab cache
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = reqs; _ddTabCache[rfqId].details = reqs; }
-        // Update the count in the list data
+        // Update counts from the modified cache
         const rfq = _reqListData.find(r => r.id === rfqId);
-        if (rfq && rfq.requirement_count > 0) rfq.requirement_count--;
+        if (rfq) {
+            const freshReqs = reqs || [];
+            rfq.requirement_count = freshReqs.length;
+            rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
+        }
         _renderDrillDownTable(rfqId);
+        _refreshReqRow(rfqId);
         // Update header count
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
@@ -5069,8 +5146,13 @@ function ddUploadFile(rfqId) {
             _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
             if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
             const rfq = _reqListData.find(r => r.id === rfqId);
-            if (rfq) rfq.requirement_count = _ddReqCache[rfqId].length;
+            if (rfq) {
+                const freshReqs = _ddReqCache[rfqId] || [];
+                rfq.requirement_count = freshReqs.length;
+                rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
+            }
             _renderDrillDownTable(rfqId);
+            _refreshReqRow(rfqId);
             const drow = document.getElementById('d-' + rfqId);
             if (drow) {
                 const hdr = drow.querySelector('span[style*="font-weight:700"]');
@@ -5191,8 +5273,13 @@ async function submitPastedRows() {
         _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
         const rfq = _reqListData.find(r => r.id === rfqId);
-        if (rfq) rfq.requirement_count = _ddReqCache[rfqId].length;
+        if (rfq) {
+            const freshReqs = _ddReqCache[rfqId] || [];
+            rfq.requirement_count = freshReqs.length;
+            rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
+        }
         _renderDrillDownTable(rfqId);
+        _refreshReqRow(rfqId);
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
             const hdr = drow.querySelector('span[style*="font-weight:700"]');
@@ -6120,8 +6207,6 @@ function _renderReqRow(r) {
         else if (diff === 0) { dl = `<span class="dl dl-u dl-flash">\ud83d\udd34 DUE TODAY</span>`; dlClass = ' dl-row-today'; }
         else if (diff <= 3) { dl = `<span class="dl dl-w">\u26a0\ufe0f ${fmt}</span>`; dlClass = ' dl-row-warn'; }
         else dl = `<span class="dl dl-ok">\u2713 ${fmt}</span>`;
-    } else if (v === 'sourcing') {
-        dl = '<span class="dl dl-asap">ASAP</span>';
     } else {
         dl = '<span class="dl dl-set" title="Click to set deadline">+ Set date</span>';
     }
@@ -6180,7 +6265,7 @@ function _renderReqRow(r) {
 
         dataCells = `
             ${effortCell}
-            <td class="dl-cell">${dl}</td>
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             ${offersCell}
             <td class="mono">${total}</td>
             <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
@@ -6391,6 +6476,7 @@ async function saveDeadline(reqId, value, isAsap) {
         await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { deadline } });
         const r = _reqListData.find(x => x.id === reqId);
         if (r) r.deadline = deadline;
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].details;
         renderReqList();
         // Update detail header if viewing this req
         const dlEl = document.getElementById('detailDeadline');
@@ -6570,25 +6656,7 @@ async function _populateUserFilter() {
     sels.forEach(sel => { sel.innerHTML = opts; });
 }
 
-// ── API Health Tooltip ──────────────────────────────────────────────────
-function showHealthTooltip(e) {
-    hideHealthTooltip();
-    const errs = window._apiHealthErrors || [];
-    if (!errs.length) return;
-    const tip = document.createElement('div');
-    tip.id = 'healthTooltip';
-    tip.className = 'health-tooltip';
-    tip.innerHTML = '<div style="font-weight:600;margin-bottom:4px;font-size:11px">API Errors</div>' +
-        errs.map(s => `<div style="font-size:11px;margin-bottom:2px"><strong>${s.display_name}</strong>: ${s.last_error || 'Unknown error'}</div>`).join('');
-    document.body.appendChild(tip);
-    const r = e.target.closest('button').getBoundingClientRect();
-    tip.style.top = (r.bottom + 6) + 'px';
-    tip.style.right = (window.innerWidth - r.right) + 'px';
-}
-function hideHealthTooltip() {
-    const t = document.getElementById('healthTooltip');
-    if (t) t.remove();
-}
+// ── API Health Tooltip — defined at top of file (line ~41) ──────────────
 
 function clearAllFilters() {
     _activeFilters = {};
@@ -6885,10 +6953,10 @@ export function sidebarNav(page, el) {
         prospecting: () => window.showProspecting(),
         suggested: () => window.showSuggested(),
         apihealth: () => window.showApiHealth(),
-        tickets: () => window.showTickets()
+        tickets: () => { if (typeof window.showTickets === 'function') window.showTickets(); else showView('view-tickets'); }
     };
     try { if (routes[page]) routes[page](); }
-    catch(e) { console.error('sidebarNav error:', page, e); showToast('Navigation error: ' + e.message, 'error'); }
+    catch(e) { console.error('sidebarNav error:', page, e); }
 }
 
 export function navHighlight(btn) {
@@ -9866,7 +9934,7 @@ async function openMaterialPopup(cardId) {
     html += `<div class="mp-hub">
         <div class="mp-hub-stat"><span class="mp-hub-val">${offers.length}</span><span class="mp-hub-lbl">Offers</span></div>
         <div class="mp-hub-stat"><span class="mp-hub-val">${sightings.length}</span><span class="mp-hub-lbl">Sightings</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${uniqueVendors.size}</span><span class="mp-hub-lbl">Vendors</span></div>
+        <div class="mp-hub-stat"><span class="mp-hub-val">${card.vendor_count || uniqueVendors.size}</span><span class="mp-hub-lbl">Vendors</span></div>
         <div class="mp-hub-stat"><span class="mp-hub-val">${priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '–$' + priceMax.toFixed(2) : '') : '—'}</span><span class="mp-hub-lbl">Price Range</span></div>
     </div>`;
 
@@ -11044,7 +11112,7 @@ function _gatherBugContext() {
         var onPill = document.querySelector('#mainPills .fp.on');
         if (onPill) activeView = onPill.dataset.view || onPill.textContent.trim();
         var activeSidebar = document.querySelector('.sb-nav-btn.active');
-        if (activeSidebar) activeView = activeSidebar.textContent.trim().replace(/^[\s\S]/, '').trim() + '/' + activeView;
+        if (activeSidebar) activeView = activeSidebar.textContent.replace(/[^\w\s]/g, '').trim() + '/' + activeView;
     } catch(e) {}
     return {
         current_url: location.href,
@@ -11117,8 +11185,9 @@ async function submitTrouble(btn) {
         var payload = Object.assign({
             message: message,
             screenshot_b64: _troubleScreenshotB64 || null,
+            source: 'report_button',
         }, ctx);
-        await apiFetch('/api/error-reports', { method: 'POST', body: payload });
+        await apiFetch('/api/trouble-tickets', { method: 'POST', body: payload });
 
         // Show confirmation
         if (body) {

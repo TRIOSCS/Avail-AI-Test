@@ -1,18 +1,26 @@
-"""Trouble ticket router -- CRUD endpoints for the self-heal pipeline.
+"""Trouble ticket router -- unified CRUD endpoints for the self-heal pipeline.
 
 POST /api/trouble-tickets            -- create (any authenticated user)
-GET  /api/trouble-tickets            -- list all (admin, status filter + pagination)
+GET  /api/trouble-tickets            -- list all (admin, status/source filter + pagination)
 GET  /api/trouble-tickets/my-tickets -- current user's tickets
+GET  /api/trouble-tickets/stats      -- weekly stats + health (admin)
+GET  /api/trouble-tickets/export/xlsx-- Excel export (admin)
 GET  /api/trouble-tickets/{id}       -- single ticket (admin or submitter)
 PATCH /api/trouble-tickets/{id}      -- update (admin only)
 POST /api/trouble-tickets/{id}/verify -- user confirms fix or reports still broken
-POST /api/trouble-tickets/{id}/diagnose -- trigger AI diagnosis (planned, not yet implemented)
+POST /api/trouble-tickets/{id}/diagnose -- trigger AI diagnosis (admin)
+POST /api/trouble-tickets/{id}/execute -- approve and execute fix (admin)
+POST /api/trouble-tickets/{id}/regenerate-prompt -- regenerate AI prompt (admin)
 
 Called by: main.py (app.include_router)
 Depends on: services/trouble_ticket_service.py, dependencies.py
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -36,6 +44,10 @@ async def create_ticket(
     db: Session = Depends(get_db),
 ):
     """Submit a new trouble ticket. Any authenticated user."""
+    # Validate screenshot size
+    if body.screenshot_b64 and len(body.screenshot_b64) > svc.MAX_SCREENSHOT_SIZE:
+        raise HTTPException(400, "Screenshot too large (max 2 MB)")
+
     ticket = svc.create_ticket(
         db=db,
         user_id=user.id,
@@ -44,7 +56,43 @@ async def create_ticket(
         current_page=body.current_page,
         user_agent=request.headers.get("user-agent"),
         frontend_errors=body.frontend_errors,
+        source=body.source or "ticket_form",
+        screenshot_b64=body.screenshot_b64,
+        browser_info=body.browser_info,
+        screen_size=body.screen_size,
+        console_errors=body.console_errors,
+        page_state=body.page_state,
+        current_view=body.current_view,
     )
+
+    # For report_button tickets, generate AI prompt
+    if (body.source or "").lower() == "report_button":
+        try:
+            from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+            result = await generate_trouble_prompt(
+                user_message=body.message or body.description or body.title,
+                current_url=body.current_page,
+                current_view=body.current_view,
+                browser_info=body.browser_info,
+                screen_size=body.screen_size,
+                console_errors=body.console_errors,
+                page_state=body.page_state,
+                has_screenshot=bool(body.screenshot_b64),
+                reporter_name=user.name or user.email,
+            )
+            if result:
+                svc.update_ticket(
+                    db=db, ticket_id=ticket.id,
+                    title=result["title"],
+                    ai_prompt=result["prompt"],
+                )
+                logger.info("AI prompt generated for ticket #{}", ticket.id)
+        except Exception as e:
+            logger.warning("AI prompt generation failed for ticket #{}: {}", ticket.id, e)
+
+    # Fire-and-forget: auto-diagnose and auto-execute in background
+    asyncio.create_task(svc.auto_process_ticket(ticket.id))
     return {"ok": True, "id": ticket.id, "ticket_number": ticket.ticket_number}
 
 
@@ -75,6 +123,7 @@ async def my_tickets(
                 "status": t.status,
                 "risk_tier": t.risk_tier,
                 "category": t.category,
+                "source": t.source,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
             }
             for t in tickets
@@ -82,16 +131,83 @@ async def my_tickets(
     }
 
 
+@router.get("/api/trouble-tickets/export/xlsx")
+def export_tickets_xlsx(
+    status: str | None = Query(None),
+    source: str | None = Query(None),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Export tickets to Excel (admin)."""
+    import io
+
+    from openpyxl import Workbook
+
+    query = db.query(svc.TroubleTicket)
+    if status:
+        query = query.filter(svc.TroubleTicket.status == status)
+    if source:
+        query = query.filter(svc.TroubleTicket.source == source)
+    query = query.order_by(svc.TroubleTicket.created_at.desc())
+    tickets = query.limit(2000).all()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Trouble Tickets"
+    headers = [
+        "ID", "Ticket #", "Title", "Description", "Status", "Source",
+        "Risk Tier", "Category", "Reporter", "URL", "View",
+        "Browser", "Screen", "Console Errors", "Admin Notes",
+        "Created", "Diagnosed", "Resolved",
+    ]
+    ws.append(headers)
+    for t in tickets:
+        submitter = db.get(User, t.submitted_by) if t.submitted_by else None
+        ws.append([
+            t.id,
+            t.ticket_number,
+            t.title,
+            t.description or "",
+            t.status,
+            t.source or "",
+            t.risk_tier or "",
+            t.category or "",
+            submitter.email if submitter else "",
+            t.current_page or "",
+            t.current_view or "",
+            t.browser_info or "",
+            t.screen_size or "",
+            t.console_errors or "",
+            t.admin_notes or "",
+            t.created_at.isoformat() if t.created_at else "",
+            t.diagnosed_at.isoformat() if t.diagnosed_at else "",
+            t.resolved_at.isoformat() if t.resolved_at else "",
+        ])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=trouble_tickets.xlsx"},
+    )
+
+
 @router.get("/api/trouble-tickets")
 async def list_tickets(
     status: str | None = None,
+    source: str | None = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """List all tickets (admin only). Optional status filter and pagination."""
-    return svc.list_tickets(db=db, status_filter=status, limit=limit, offset=offset)
+    """List all tickets (admin only). Optional status/source filter and pagination."""
+    return svc.list_tickets(
+        db=db, status_filter=status, source_filter=source,
+        limit=limit, offset=offset,
+    )
 
 
 @router.get("/api/trouble-tickets/{ticket_id}")
@@ -107,6 +223,7 @@ async def get_ticket(
     if user.role != "admin" and ticket.submitted_by != user.id:
         raise HTTPException(403, "Access denied")
     submitter = db.get(User, ticket.submitted_by) if ticket.submitted_by else None
+    resolved_by = db.get(User, ticket.resolved_by_id) if ticket.resolved_by_id else None
     return {
         "id": ticket.id,
         "ticket_number": ticket.ticket_number,
@@ -132,6 +249,19 @@ async def get_ticket(
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
         "diagnosed_at": ticket.diagnosed_at.isoformat() if ticket.diagnosed_at else None,
         "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+        # Unified fields
+        "source": ticket.source,
+        "screenshot_b64": ticket.screenshot_b64,
+        "ai_prompt": ticket.ai_prompt,
+        "admin_notes": ticket.admin_notes,
+        "browser_info": ticket.browser_info,
+        "screen_size": ticket.screen_size,
+        "console_errors": ticket.console_errors,
+        "current_view": ticket.current_view,
+        "has_screenshot": bool(ticket.screenshot_b64),
+        "has_ai_prompt": bool(ticket.ai_prompt),
+        "resolved_by_email": resolved_by.email if resolved_by else None,
+        "reporter_email": submitter.email if submitter else None,
     }
 
 
@@ -146,11 +276,16 @@ async def update_ticket(
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(400, "No fields to update")
+    # If status being changed to resolved, set resolved_by
+    if updates.get("status") == "resolved":
+        updates["resolved_by_id"] = user.id
+        updates["resolved_at"] = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        )
     ticket = svc.update_ticket(db=db, ticket_id=ticket_id, **updates)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
     return {"ok": True}
-
 
 
 @router.post("/api/trouble-tickets/{ticket_id}/diagnose")
@@ -172,6 +307,7 @@ async def diagnose_ticket(
         raise HTTPException(500, result["error"])
     return result
 
+
 @router.post("/api/trouble-tickets/{ticket_id}/execute")
 async def execute_ticket_fix(
     ticket_id: int,
@@ -187,6 +323,42 @@ async def execute_ticket_fix(
     return result
 
 
+@router.post("/api/trouble-tickets/{ticket_id}/regenerate-prompt")
+async def regenerate_prompt(
+    ticket_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Re-generate the AI prompt for a ticket (admin only)."""
+    ticket = svc.get_ticket(db=db, ticket_id=ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+
+    from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+    result = await generate_trouble_prompt(
+        user_message=ticket.description or ticket.title,
+        current_url=ticket.current_page,
+        current_view=ticket.current_view,
+        browser_info=ticket.browser_info,
+        screen_size=ticket.screen_size,
+        console_errors=ticket.console_errors,
+        page_state=ticket.page_state,
+        has_screenshot=bool(ticket.screenshot_b64),
+        reporter_name=ticket.submitter.name if ticket.submitter else None,
+    )
+    if not result:
+        raise HTTPException(502, "AI prompt generation failed — try again later")
+
+    svc.update_ticket(
+        db=db, ticket_id=ticket.id,
+        title=result["title"],
+        ai_prompt=result["prompt"],
+    )
+    logger.info("AI prompt regenerated for ticket #{} by {}", ticket_id, user.email)
+    return {"id": ticket.id, "ai_prompt": result["prompt"], "title": result["title"]}
+
+
 @router.post("/api/trouble-tickets/{ticket_id}/verify")
 async def verify_ticket(
     ticket_id: int,
@@ -200,8 +372,8 @@ async def verify_ticket(
         raise HTTPException(404, "Ticket not found")
     if ticket.submitted_by != user.id and user.role != "admin":
         raise HTTPException(403, "Access denied")
-    if ticket.status != "awaiting_verification":
-        raise HTTPException(400, "Ticket is not awaiting verification")
+    if ticket.status not in ("in_progress", "open"):
+        raise HTTPException(400, "Ticket is not open or in progress")
 
     is_fixed = body.get("is_fixed", True)
 

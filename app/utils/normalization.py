@@ -331,6 +331,8 @@ def normalize_mpn(raw: Any) -> str | None:
     s = str(raw).strip().upper()
     # Remove surrounding quotes
     s = s.strip("'\"")
+    # Strip trailing punctuation (periods, commas) that are not part of the MPN
+    s = s.rstrip(".,;:")
     # Collapse internal whitespace
     s = re.sub(r"\s+", "", s)
 

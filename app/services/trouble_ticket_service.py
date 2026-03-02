@@ -4,7 +4,11 @@ Handles the full ticket lifecycle: creation with auto-context capture,
 sanitization of sensitive data before AI processing, listing, updating,
 and file lock checking for concurrent fix prevention.
 
-Called by: routers/trouble_tickets.py
+Supports two sources:
+- ticket_form: structured submission from sidebar Tickets view
+- report_button: quick bug report (formerly ErrorReport)
+
+Called by: routers/trouble_tickets.py, routers/error_reports.py
 Depends on: models/trouble_ticket.py, models/auth.py, config.py
 """
 
@@ -15,10 +19,12 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.config import APP_VERSION
+from app.config import APP_VERSION, settings
 from app.models.trouble_ticket import TroubleTicket
 from app.models import User
 
+
+MAX_SCREENSHOT_SIZE = 2 * 1024 * 1024  # 2 MB base64
 
 _SENSITIVE_PATTERNS = [
     re.compile(r"sk-[a-zA-Z0-9_-]{10,}"),
@@ -41,8 +47,18 @@ def create_ticket(
     current_page: str | None = None,
     user_agent: str | None = None,
     frontend_errors: list[dict] | None = None,
+    source: str | None = None,
+    screenshot_b64: str | None = None,
+    browser_info: str | None = None,
+    screen_size: str | None = None,
+    console_errors: str | None = None,
+    page_state: str | None = None,
+    current_view: str | None = None,
 ) -> TroubleTicket:
-    """Create a trouble ticket with auto-captured context."""
+    """Create a trouble ticket with auto-captured context.
+
+    Accepts both ticket_form fields and report_button fields (screenshot, browser, etc.).
+    """
     ticket_number = _generate_ticket_number(db)
 
     auto_ctx = _capture_auto_context(
@@ -62,18 +78,26 @@ def create_ticket(
         title=title.strip(),
         description=description.strip(),
         current_page=current_page,
-        user_agent=user_agent,
+        user_agent=user_agent or browser_info,
         auto_captured_context=auto_ctx,
         sanitized_context=sanitized,
+        source=source or "ticket_form",
+        screenshot_b64=screenshot_b64,
+        browser_info=browser_info,
+        screen_size=screen_size,
+        console_errors=console_errors,
+        page_state=page_state,
+        current_view=current_view,
     )
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
 
     logger.info(
-        "Ticket {ticket_number} created by user {user_id}",
+        "Ticket {ticket_number} created by user {user_id} (source={source})",
         ticket_number=ticket_number,
         user_id=user_id,
+        source=ticket.source,
     )
     return ticket
 
@@ -86,13 +110,16 @@ def get_ticket(db: Session, ticket_id: int) -> TroubleTicket | None:
 def list_tickets(
     db: Session,
     status_filter: str | None = None,
+    source_filter: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
-    """Paginated list of tickets, optionally filtered by status."""
+    """Paginated list of tickets, optionally filtered by status and/or source."""
     query = db.query(TroubleTicket)
     if status_filter:
         query = query.filter(TroubleTicket.status == status_filter)
+    if source_filter:
+        query = query.filter(TroubleTicket.source == source_filter)
     total = query.count()
     tickets = (
         query.order_by(TroubleTicket.created_at.desc())
@@ -112,6 +139,9 @@ def list_tickets(
             "category": t.category,
             "submitted_by": t.submitted_by,
             "submitted_by_name": submitter.name if submitter else None,
+            "source": t.source,
+            "has_screenshot": bool(t.screenshot_b64),
+            "has_ai_prompt": bool(t.ai_prompt),
             "created_at": t.created_at.isoformat() if t.created_at else None,
         })
     return {"items": items, "total": total, "limit": limit, "offset": offset}
@@ -138,10 +168,39 @@ def update_ticket(db: Session, ticket_id: int, **kwargs) -> TroubleTicket | None
             setattr(ticket, key, value)
 
     if "status" in kwargs:
-        if kwargs["status"] == "diagnosed" and not ticket.diagnosed_at:
+        if kwargs["status"] == "in_progress" and not ticket.diagnosed_at:
             ticket.diagnosed_at = datetime.now(timezone.utc)
         elif kwargs["status"] == "resolved" and not ticket.resolved_at:
             ticket.resolved_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(ticket)
+    return ticket
+
+
+def update_admin_status(
+    db: Session,
+    ticket_id: int,
+    status: str,
+    admin_notes: str | None = None,
+    admin_user_id: int | None = None,
+) -> TroubleTicket | None:
+    """Simple status + admin_notes update (used by admin UI)."""
+    ticket = db.get(TroubleTicket, ticket_id)
+    if not ticket:
+        return None
+
+    ticket.status = status
+    if admin_notes is not None:
+        ticket.admin_notes = admin_notes
+
+    if status == "resolved":
+        ticket.resolved_at = datetime.now(timezone.utc)
+        if admin_user_id:
+            ticket.resolved_by_id = admin_user_id
+    elif status == "open":
+        ticket.resolved_at = None
+        ticket.resolved_by_id = None
 
     db.commit()
     db.refresh(ticket)
@@ -152,7 +211,7 @@ def check_file_lock(db: Session, file_paths: list[str]) -> TroubleTicket | None:
     """Check if any active fix overlaps with the given files."""
     active = (
         db.query(TroubleTicket)
-        .filter(TroubleTicket.status == "fix_in_progress")
+        .filter(TroubleTicket.status == "in_progress")
         .filter(TroubleTicket.file_mapping.isnot(None))
         .all()
     )
@@ -255,3 +314,53 @@ def _sanitize_string(value: str, submitter_email: str) -> str:
         result = result[:500]
 
     return result
+
+
+async def auto_process_ticket(ticket_id: int) -> None:
+    """Background: auto-diagnose and auto-execute fixes for low/medium risk tickets.
+
+    Creates its own DB session to avoid request-scoped session issues.
+
+    Called by: routers/trouble_tickets.py (as asyncio background task)
+    Depends on: diagnosis_service.diagnose_full, execution_service.execute_fix
+    """
+    if not settings.self_heal_enabled:
+        return
+
+    from app.database import SessionLocal
+    from app.services.diagnosis_service import diagnose_full
+    from app.services.execution_service import execute_fix
+
+    db = SessionLocal()
+    try:
+        if settings.self_heal_auto_diagnose:
+            result = await diagnose_full(ticket_id, db)
+            if "error" in result:
+                logger.warning("Auto-diagnosis failed for ticket {}: {}", ticket_id, result["error"])
+                return
+
+            risk_tier = result.get("risk_tier", "high")
+            if risk_tier == "high":
+                logger.info("Ticket {} is high-risk — escalating for admin review", ticket_id)
+                ticket = db.get(TroubleTicket, ticket_id)
+                if ticket:
+                    ticket.status = "escalated"
+                    db.commit()
+                return
+
+            # Auto-execute for low and medium risk
+            if settings.self_heal_auto_execute_low and risk_tier in ("low", "medium"):
+                exec_result = await execute_fix(ticket_id, db)
+                if "error" in exec_result:
+                    logger.warning("Auto-execute failed for ticket {}: {}", ticket_id, exec_result["error"])
+                    return
+                logger.info("Ticket {} auto-processed: diagnosed and fix executed (risk={})", ticket_id, risk_tier)
+            else:
+                logger.info("Ticket {} auto-diagnosed (risk={}) — awaiting admin", ticket_id, risk_tier)
+        else:
+            logger.debug("Auto-diagnose disabled, skipping ticket {}", ticket_id)
+
+    except Exception:
+        logger.exception("Auto-process failed for ticket {}", ticket_id)
+    finally:
+        db.close()

@@ -310,3 +310,49 @@ def test_execute_partial_match(admin_client, db_session, source_user, target_use
     assert data["transferred"] == 2
     assert data["skipped"] == 1
     assert 99999 in data["skipped_ids"]
+
+
+def test_execute_blocked_exceeds_cap(admin_client, db_session, source_user, target_user, company_with_sites):
+    """Transfer blocked when it would push target user over 200-site cap."""
+    from app.routers.v13_features import SITE_CAP_PER_USER
+
+    co, sites = company_with_sites  # source_user owns 3 sites
+
+    # Give target_user exactly SITE_CAP_PER_USER - 2 sites (room for 2 but not 3)
+    for i in range(SITE_CAP_PER_USER - 2):
+        db_session.add(
+            CustomerSite(
+                company_id=co.id,
+                site_name=f"Target Existing {i}",
+                owner_id=target_user.id,
+                is_active=True,
+            )
+        )
+    db_session.commit()
+
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [s.id for s in sites],  # 3 sites — would exceed cap
+        },
+    )
+    assert resp.status_code == 409
+    assert "cap" in resp.json()["error"].lower()
+
+
+def test_execute_within_cap_succeeds(admin_client, db_session, source_user, target_user, company_with_sites):
+    """Transfer succeeds when target user stays within cap."""
+    co, sites = company_with_sites  # 3 sites
+
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [s.id for s in sites],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["transferred"] == 3

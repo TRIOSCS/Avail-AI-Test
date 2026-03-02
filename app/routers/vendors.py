@@ -1543,6 +1543,21 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
             if card_ids
             else {}
         )
+        # Batch fetch offer counts + best price
+        offer_stats = {}
+        if card_ids:
+            rows = (
+                db.query(
+                    Offer.material_card_id,
+                    sqlfunc.count(Offer.id),
+                    sqlfunc.min(Offer.unit_price),
+                )
+                .filter(Offer.material_card_id.in_(card_ids))
+                .group_by(Offer.material_card_id)
+                .all()
+            )
+            for mid, cnt, minp in rows:
+                offer_stats[mid] = {"count": cnt, "best_price": float(minp) if minp else None}
         return {
             "materials": [
                 {
@@ -1551,6 +1566,8 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
                     "manufacturer": c.manufacturer,
                     "search_count": c.search_count or 0,
                     "vendor_count": counts.get(c.id, 0),
+                    "offer_count": offer_stats.get(c.id, {}).get("count", 0),
+                    "best_price": offer_stats.get(c.id, {}).get("best_price"),
                     "last_searched_at": c.last_searched_at.isoformat() if c.last_searched_at else None,
                 }
                 for c in cards

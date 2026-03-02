@@ -1,35 +1,56 @@
 """Pydantic schemas for trouble ticket request/response validation.
 
-Called by: routers/trouble_tickets.py
+Supports both sources:
+- ticket_form: structured submission from sidebar Tickets view
+- report_button: quick bug report (formerly ErrorReport)
+
+Called by: routers/trouble_tickets.py, routers/error_reports.py
 Depends on: nothing (pure validation)
 """
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class TroubleTicketCreate(BaseModel):
-    title: str = Field(..., max_length=200)
-    description: str
+    title: str | None = Field(None, max_length=200)
+    description: str | None = None
+    message: str | None = Field(None, max_length=5000)  # alias used by report button
     current_page: str | None = None
     frontend_errors: list[dict] | None = None
+    source: str | None = None  # 'report_button' | 'ticket_form'
 
-    @field_validator("title")
-    @classmethod
-    def title_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Title is required")
-        return v
+    # Error-report fields (from report button)
+    screenshot_b64: str | None = None
+    browser_info: str | None = None
+    screen_size: str | None = None
+    console_errors: str | None = None
+    page_state: str | None = None
+    current_view: str | None = None
+    current_url: str | None = None  # alias for current_page used by report button
 
-    @field_validator("description")
-    @classmethod
-    def description_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Description is required")
-        return v
+    @model_validator(mode="after")
+    def require_title_or_message(self):
+        """Either title or message must be provided."""
+        title = (self.title or "").strip()
+        message = (self.message or "").strip()
+        desc = (self.description or "").strip()
+        if not title and not message and not desc:
+            raise ValueError("Either title or message is required")
+        # Normalize: if message provided but not title, derive title
+        if not title and message:
+            self.title = message[:200]
+        # Normalize: if message provided but not description, use message
+        if not desc and message:
+            self.description = message
+        # If title but no description, use title as description
+        if not (self.description or "").strip() and title:
+            self.description = title
+        # If current_url provided but not current_page, use it
+        if self.current_url and not self.current_page:
+            self.current_page = self.current_url
+        return self
 
 
 class TroubleTicketUpdate(BaseModel):
@@ -37,6 +58,7 @@ class TroubleTicketUpdate(BaseModel):
     resolution_notes: str | None = None
     risk_tier: str | None = None
     category: str | None = None
+    admin_notes: str | None = None
 
 
 class TroubleTicketResponse(BaseModel, extra="allow"):
@@ -66,3 +88,14 @@ class TroubleTicketResponse(BaseModel, extra="allow"):
     updated_at: datetime | None = None
     diagnosed_at: datetime | None = None
     resolved_at: datetime | None = None
+    # Unified fields
+    source: str | None = None
+    has_screenshot: bool = False
+    has_ai_prompt: bool = False
+    screenshot_b64: str | None = None
+    ai_prompt: str | None = None
+    admin_notes: str | None = None
+    browser_info: str | None = None
+    screen_size: str | None = None
+    console_errors: str | None = None
+    current_view: str | None = None

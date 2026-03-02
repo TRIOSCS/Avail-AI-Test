@@ -11,6 +11,16 @@ import {
     _renderAvailScoreTable,
 } from 'app';
 
+// ── Currency Formatting ─────────────────────────────────────────────────
+function fmtCurrency(n) {
+    const v = Math.abs(Number(n || 0));
+    const sign = Number(n || 0) < 0 ? '-' : '';
+    if (v >= 1e9) return sign + '$' + (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return sign + '$' + (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return sign + '$' + (v / 1e3).toFixed(1) + 'K';
+    return sign + '$' + v.toFixed(2);
+}
+
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
 const _debouncedUpdateBpTotals = debounce(() => updateBpTotals(), 150);
@@ -4753,10 +4763,15 @@ function switchProactiveTab(tab, btn) {
     else document.querySelectorAll('#proactiveTabs .tab').forEach(t => {
         if (t.textContent.toLowerCase().includes(tab)) t.classList.add('on');
     });
-    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
-    _p('proactiveMatchesPanel', tab === 'matches' ? '' : 'none');
-    _p('proactiveSentPanel', tab === 'sent' ? '' : 'none');
-    _p('proactiveScorecardPanel', tab === 'scorecard' ? '' : 'none');
+    const _p = (id, show) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (show) { el.classList.remove('hidden'); el.style.display = ''; }
+        else { el.classList.add('hidden'); el.style.display = 'none'; }
+    };
+    _p('proactiveMatchesPanel', tab === 'matches');
+    _p('proactiveSentPanel', tab === 'sent');
+    _p('proactiveScorecardPanel', tab === 'scorecard');
     if (tab === 'matches') loadProactiveMatches();
     else if (tab === 'sent') loadProactiveSent();
     else if (tab === 'scorecard') loadProactiveScorecard();
@@ -5128,7 +5143,9 @@ function updateProactivePreview() {
         const group = _proactiveGroups.find(g => g.customer_site_id === _proactiveSendSiteId);
         const match = group ? group.matches.find(m => m.id === parseInt(id)) : null;
         const cost = match ? (match.our_cost || match.unit_price || 0) : 0;
-        const qty = match ? (match.qty_available || 0) : 0;
+        const targetQty = match ? (match.target_qty || 0) : 0;
+        const availQty = match ? (match.qty_available || 0) : 0;
+        const qty = targetQty > 0 ? Math.min(availQty, targetQty) : availQty;
         const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
         const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
         if (marginEl) marginEl.textContent = margin + '%';
@@ -5188,7 +5205,8 @@ async function loadProactiveSent() {
 
 function renderProactiveSent() {
     const el = document.getElementById('proactiveSentPanel');
-    if (!_proactiveSent.length) {
+    if (!el) return;
+    if (!_proactiveSent || !_proactiveSent.length) {
         el.innerHTML = '<p class="empty">No proactive offers sent yet</p>';
         return;
     }
@@ -5238,14 +5256,16 @@ async function loadProactiveScorecard() {
 
 function renderProactiveScorecard(data) {
     const el = document.getElementById('proactiveScorecardPanel');
+    if (!el) return;
+    if (!data) { el.textContent = 'No scorecard data available'; return; }
     const summaryCards = `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
         <div class="card" style="text-align:center;padding:16px">
-            <div style="font-size:24px;font-weight:700;color:var(--teal)">${data.total_sent}</div>
+            <div style="font-size:24px;font-weight:700;color:var(--teal)">${data.total_sent||0}</div>
             <div style="font-size:11px;color:var(--muted)">Total Sent</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-            <div style="font-size:24px;font-weight:700;color:var(--green)">${data.total_converted}</div>
+            <div style="font-size:24px;font-weight:700;color:var(--green)">${data.total_converted||0}</div>
             <div style="font-size:11px;color:var(--muted)">Total Converted</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
@@ -5257,15 +5277,15 @@ function renderProactiveScorecard(data) {
             <div style="font-size:11px;color:var(--muted)">PO</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-            <div style="font-size:24px;font-weight:700;color:var(--text)">${data.conversion_rate}%</div>
+            <div style="font-size:24px;font-weight:700;color:var(--text)">${data.conversion_rate||0}%</div>
             <div style="font-size:11px;color:var(--muted)">Overall Rate</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-            <div style="font-size:24px;font-weight:700;color:var(--green)">$${Number(data.converted_revenue||0).toLocaleString()}</div>
+            <div style="font-size:24px;font-weight:700;color:var(--green)" title="$${Number(data.converted_revenue||0).toLocaleString()}">${fmtCurrency(data.converted_revenue)}</div>
             <div style="font-size:11px;color:var(--muted)">Won Revenue</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
-            <div style="font-size:24px;font-weight:700;color:var(--green)">$${Number(data.gross_profit||0).toLocaleString()}</div>
+            <div style="font-size:24px;font-weight:700;color:var(--green)" title="$${Number(data.gross_profit||0).toLocaleString()}">${fmtCurrency(data.gross_profit)}</div>
             <div style="font-size:11px;color:var(--muted)">Gross Profit</div>
         </div>
     </div>`;
@@ -5297,9 +5317,9 @@ function renderProactiveScorecard(data) {
                     <td style="text-align:right">${b.po||0}</td>
                     <td style="text-align:right">${b.converted}</td>
                     <td style="text-align:right;color:${rateColor};font-weight:600">${b.conversion_rate}%</td>
-                    <td style="text-align:right;color:var(--amber)">$${Number(b.anticipated_revenue||0).toLocaleString()}</td>
-                    <td style="text-align:right;color:var(--green)">$${Number(b.revenue||0).toLocaleString()}</td>
-                    <td style="text-align:right;color:var(--green)">$${Number(b.gross_profit||0).toLocaleString()}</td>
+                    <td style="text-align:right;color:var(--amber)" title="$${Number(b.anticipated_revenue||0).toLocaleString()}">${fmtCurrency(b.anticipated_revenue)}</td>
+                    <td style="text-align:right;color:var(--green)" title="$${Number(b.revenue||0).toLocaleString()}">${fmtCurrency(b.revenue)}</td>
+                    <td style="text-align:right;color:var(--green)" title="$${Number(b.gross_profit||0).toLocaleString()}">${fmtCurrency(b.gross_profit)}</td>
                 </tr>`;
             }).join('')}</tbody>
         </table>
@@ -5765,7 +5785,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'sources') loadSettingsSources();
     else if (name === 'teams') loadTeamsConfig();
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); loadCreditUsage(); }
-    else if (name === 'tickets') loadTroubleTickets();
+    else if (name === 'tickets') { /* Removed: now in sidebar Tickets view (tickets.js) */ }
     else if (name === 'transfer') loadTransferPanel();
 }
 
@@ -6827,174 +6847,12 @@ async function triggerDeepScan(userId) {
     }
 }
 
-// ── Trouble Tickets (Settings Tab) ──────────────────────────────────
-
-async function loadTroubleTickets() {
-    const list = document.getElementById('ticketList');
-    const detail = document.getElementById('ticketDetail');
-    if (!list) return;
-    list.style.display = '';
-    if (detail) detail.style.display = 'none';
-    const status = (document.getElementById('ticketStatusFilter') || {}).value || '';
-    const url = '/api/error-reports' + (status ? '?status=' + status : '');
-    try {
-        const data = await apiFetch(url);
-        const countEl = document.getElementById('ticketCount');
-        if (countEl) countEl.textContent = data.length + ' ticket' + (data.length !== 1 ? 's' : '');
-        if (!data.length) {
-            list.innerHTML = '<p class="empty">No trouble tickets found</p>';
-            return;
-        }
-        const statusBadge = (s) => {
-            const colors = {open:'red',in_progress:'amber',resolved:'green',closed:'muted'};
-            return `<span class="badge" style="background:var(--${colors[s]||'muted'}-light,var(--bg));color:var(--${colors[s]||'muted'});font-size:10px;padding:2px 8px;border-radius:4px">${s.replace('_',' ')}</span>`;
-        };
-        let html = '<table class="tbl"><thead><tr><th>#</th><th>Title</th><th>Reporter</th><th>Status</th><th>AI</th><th>Screenshot</th><th>Created</th><th></th></tr></thead><tbody>';
-        data.forEach(r => {
-            const created = r.created_at ? new Date(r.created_at).toLocaleDateString() : '';
-            html += `<tr>
-                <td>${r.id}</td>
-                <td>${esc(r.title)}</td>
-                <td class="text-xs">${esc(r.reporter_name || r.reporter_email || '')}</td>
-                <td>${statusBadge(r.status)}</td>
-                <td class="text-center">${r.has_ai_prompt ? '<span title="AI prompt available" style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--muted)">&mdash;</span>'}</td>
-                <td class="text-center">${r.has_screenshot ? '📷' : ''}</td>
-                <td class="text-xs-muted">${created}</td>
-                <td><button type="button" class="btn btn-sm" onclick="viewTicketDetail(${r.id})">View</button></td>
-            </tr>`;
-        });
-        html += '</tbody></table>';
-        list.innerHTML = html;
-    } catch (e) {
-        list.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load tickets</p>';
-    }
-}
-
-async function viewTicketDetail(id) {
-    const list = document.getElementById('ticketList');
-    const detail = document.getElementById('ticketDetail');
-    if (!detail) return;
-    if (list) list.style.display = 'none';
-    detail.style.display = '';
-    detail.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const r = await apiFetch('/api/error-reports/' + id);
-        let consoleHtml = '';
-        if (r.console_errors) {
-            try {
-                const errs = JSON.parse(r.console_errors);
-                if (errs.length) {
-                    consoleHtml = '<div style="margin-top:12px"><strong style="font-size:12px">Console Errors</strong><pre style="background:var(--bg);padding:8px;border-radius:6px;font-size:11px;max-height:200px;overflow:auto;margin-top:4px">' + esc(errs.map(e => e.msg).join('\n')) + '</pre></div>';
-                }
-            } catch(e) {}
-        }
-        let screenshotHtml = '';
-        if (r.screenshot_b64) {
-            screenshotHtml = '<div style="margin-top:12px"><strong style="font-size:12px">Screenshot</strong><br><img src="' + escAttr(r.screenshot_b64) + '" style="max-width:100%;max-height:400px;border:1px solid var(--border);border-radius:6px;margin-top:4px"></div>';
-        }
-        const statusOpts = ['open','in_progress','resolved','closed'].map(s =>
-            `<option value="${s}" ${s===r.status?'selected':''}>${s.replace('_',' ')}</option>`
-        ).join('');
-        detail.innerHTML = `
-            <button type="button" class="btn btn-ghost btn-sm" onclick="loadTroubleTickets()" style="margin-bottom:12px">&larr; Back to list</button>
-            <div class="card s-card">
-                <h3>#${r.id} — ${esc(r.title)}</h3>
-                <div class="s-row" style="gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:8px">
-                    <span>Reporter: <strong>${esc(r.reporter_name || r.reporter_email || 'Unknown')}</strong></span>
-                    <span>Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A'}</span>
-                    ${r.resolved_at ? '<span>Resolved: ' + new Date(r.resolved_at).toLocaleString() + ' by ' + esc(r.resolved_by_email || '') + '</span>' : ''}
-                </div>
-                ${r.description ? '<div style="margin-top:8px;font-size:13px;white-space:pre-wrap">' + esc(r.description) + '</div>' : ''}
-                <div style="margin-top:12px;font-size:11px;color:var(--muted)">
-                    <div>URL: ${esc(r.current_url || 'N/A')}</div>
-                    <div>View: ${esc(r.current_view || 'N/A')} | Browser: ${esc(r.browser_info || 'N/A')} | Screen: ${esc(r.screen_size || 'N/A')}</div>
-                </div>
-                ${consoleHtml}
-                ${r.ai_prompt ? `
-                <div style="margin-top:12px">
-                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                        <strong style="font-size:12px">AI Prompt</strong>
-                        <button type="button" class="btn btn-sm" onclick="copyPromptToClipboard(${r.id})" title="Copy to clipboard">Copy</button>
-                        <button type="button" class="btn btn-sm btn-ghost" onclick="regeneratePrompt(${r.id}, this)" title="Re-generate prompt">Regenerate</button>
-                    </div>
-                    <pre id="aiPrompt_${r.id}" style="background:var(--bg);padding:10px;border-radius:6px;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--border)">${esc(r.ai_prompt)}</pre>
-                </div>` : `
-                <div style="margin-top:12px">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <span style="font-size:12px;color:var(--muted)">No AI prompt generated</span>
-                        <button type="button" class="btn btn-sm" onclick="regeneratePrompt(${r.id}, this)">Generate</button>
-                    </div>
-                </div>`}
-                ${screenshotHtml}
-                <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
-                    <div class="s-row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
-                        <div class="field" style="flex:0 0 auto"><label style="font-size:11px">Status</label><select id="ticketStatusSelect" class="s-select" style="padding:6px 10px">${statusOpts}</select></div>
-                        <div class="field" style="flex:1"><label style="font-size:11px">Admin Notes</label><textarea id="ticketAdminNotes" rows="2" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit">${esc(r.admin_notes || '')}</textarea></div>
-                        <button type="button" class="btn btn-primary btn-sm" onclick="updateTicketStatus(${r.id}, this)">Update</button>
-                    </div>
-                </div>
-            </div>`;
-    } catch (e) {
-        detail.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load ticket</p>';
-    }
-}
-
-async function updateTicketStatus(id, btn) {
-    await guardBtn(btn, 'Saving…', async () => {
-        const status = (document.getElementById('ticketStatusSelect') || {}).value;
-        const notes = (document.getElementById('ticketAdminNotes') || {}).value;
-        await apiFetch('/api/error-reports/' + id + '/status', {
-            method: 'PUT',
-            body: { status: status, admin_notes: notes },
-        });
-        showToast('Ticket updated', 'success');
-        viewTicketDetail(id);
-    });
-}
-
-function exportTicketsXlsx() {
-    const status = (document.getElementById('ticketStatusFilter') || {}).value || '';
-    const url = '/api/error-reports/export/xlsx' + (status ? '?status=' + status : '');
-    window.open(url, '_blank');
-}
-
-function copyPromptToClipboard(id) {
-    const pre = document.getElementById('aiPrompt_' + id);
-    if (!pre) return;
-    const text = pre.textContent || pre.innerText;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-            showToast('Prompt copied to clipboard', 'success');
-        }).catch(() => {
-            _fallbackCopyText(pre);
-        });
-    } else {
-        _fallbackCopyText(pre);
-    }
-}
-
-function _fallbackCopyText(el) {
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    try {
-        document.execCommand('copy');
-        showToast('Prompt copied to clipboard', 'success');
-    } catch (e) {
-        showToast('Failed to copy — select and copy manually', 'error');
-    }
-    sel.removeAllRanges();
-}
-
-async function regeneratePrompt(id, btn) {
-    await guardBtn(btn, 'Generating…', async () => {
-        await apiFetch('/api/error-reports/' + id + '/regenerate-prompt', { method: 'POST' });
-        showToast('AI prompt regenerated', 'success');
-        viewTicketDetail(id);
-    });
-}
+// ── Trouble Tickets (Settings Tab) — REMOVED ───────────────────────
+// All ticket management is now in the unified tickets.js sidebar view.
+// The Settings > "Trouble Tickets" tab has been removed from index.html.
+// Old error-report functions (loadTroubleTickets, viewTicketDetail,
+// updateTicketStatus, exportTicketsXlsx, copyPromptToClipboard,
+// regeneratePrompt) have been deleted. See tickets.js for the unified UI.
 
 // ── Vendor Dedup ────────────────────────────────────────────────────────
 
@@ -7591,16 +7449,20 @@ function _renderCapacityBar() {
     if (!el || !_prospectCapacity) return;
     const c = _prospectCapacity;
     const pct = Math.min(100, Math.round((c.used / c.cap) * 100));
-    const color = pct >= 90 ? 'var(--red)' : pct >= 75 ? '#eab308' : 'var(--blue)';
+    const overCap = c.used > c.cap;
+    const color = overCap ? 'var(--red)' : pct >= 90 ? 'var(--red)' : pct >= 75 ? '#eab308' : 'var(--blue)';
     let nudge = '';
-    if (c.stale_accounts && c.stale_accounts.length > 0 && c.used >= 180) {
+    if (overCap) {
+        nudge = `<span style="color:var(--red);font-size:10px;margin-left:8px;font-weight:600">${c.used - c.cap} over limit — release inactive sites</span>`; // nosec: numeric values only, no user input
+    } else if (c.stale_accounts && c.stale_accounts.length > 0 && c.used >= 180) {
         nudge = `<span style="color:var(--muted);font-size:10px;margin-left:8px">${c.stale_accounts.length} accounts with no activity in 90+ days</span>`;
     }
+    // nosec: all values are numeric (c.used, c.cap, pct) from internal API - no user input
     el.innerHTML = `<span style="white-space:nowrap">My Pipeline: <strong>${c.used}</strong>/${c.cap} sites</span>
         <div style="width:120px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
             <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width .3s"></div>
         </div>
-        <span style="font-weight:600;color:${color}">${pct}%</span>${nudge}`;
+        <span style="font-weight:600;color:${color}">${overCap ? 'OVER' : pct + '%'}</span>${nudge}`;
 }
 
 let _prospectAbort = null;
@@ -8169,15 +8031,15 @@ async function loadApiHealthDashboard() {
 function refreshApiHealthDashboard() { loadApiHealthDashboard(); }
 
 function renderApiHealthDashboard(container, sources) {
-    const active = sources.filter(s => s.is_active);
-    const inactive = sources.filter(s => !s.is_active);
+    const active = sources.filter(s => s.is_active && s.status !== 'disabled');
+    const inactive = sources.filter(s => !s.is_active || s.status === 'disabled');
     const live = active.filter(s => s.status === 'live').length;
     const errors = active.filter(s => s.status === 'error').length;
     const degraded = active.filter(s => s.status === 'degraded').length;
 
-    // All data values are escaped via _esc() and numeric values are coerced to numbers.
+    // All data values are escaped via esc() and numeric values are coerced to numbers.
     // This follows the established innerHTML pattern used throughout crm.js (e.g. renderCompanyCards,
-    // _renderSourceCards, renderProspecting) where _esc() sanitizes all external strings.
+    // _renderSourceCards, renderProspecting) where esc() sanitizes all external strings.
     let html = '<div class="ahd-summary">';
     html += '<div class="ahd-stat live"><div class="ahd-stat-value">' + live + '</div><div class="ahd-stat-label">Live</div></div>';
     html += '<div class="ahd-stat degraded"><div class="ahd-stat-value">' + degraded + '</div><div class="ahd-stat-label">Degraded</div></div>';
@@ -8199,7 +8061,7 @@ function renderApiHealthDashboard(container, sources) {
             const pct = src.usage_pct || 0;
             const cls = pct >= 90 ? 'critical' : pct >= 70 ? 'warn' : '';
             html += '<div class="ahd-usage-row">';
-            html += '<span class="ahd-usage-name">' + _esc(src.display_name) + '</span>';
+            html += '<span class="ahd-usage-name">' + esc(src.display_name) + '</span>';
             html += '<div class="ahd-usage-bar"><div class="ahd-usage-fill ' + cls + '" style="width:' + Math.min(Number(pct), 100) + '%"></div></div>';
             html += '<span class="ahd-usage-pct">' + Number(src.calls_this_month || 0) + '/' + Number(src.monthly_quota) + '</span>';
             html += '</div>';
@@ -8211,27 +8073,27 @@ function renderApiHealthDashboard(container, sources) {
         html += '<details class="ahd-inactive"><summary>' + inactive.length + ' inactive sources</summary>';
         html += '<div class="ahd-inactive-list">';
         for (const src of inactive) {
-            html += '<span class="ahd-inactive-chip">' + _esc(src.display_name) + ' (' + _esc(src.status) + ')</span>';
+            html += '<span class="ahd-inactive-chip">' + esc(src.display_name) + ' (' + esc(src.status) + ')</span>';
         }
         html += '</div></details>';
     }
 
-    container.innerHTML = html;  // nosec: all dynamic values escaped via _esc() or coerced to Number
+    container.innerHTML = html;  // nosec: all dynamic values escaped via esc() or coerced to Number
 }
 
 function _renderHealthCard(src) {
-    // All dynamic string values escaped via _esc(); numeric values coerced to Number
+    // All dynamic string values escaped via esc(); numeric values coerced to Number
     let html = '<div class="ahd-card">';
     html += '<div class="ahd-card-header">';
-    html += '<span class="ahd-dot ' + _esc(src.status) + '"></span>';
-    html += '<span class="ahd-card-name">' + _esc(src.display_name) + '</span>';
-    html += '<span class="ahd-card-status">' + _esc(src.status) + '</span>';
+    html += '<span class="ahd-dot ' + esc(src.status) + '"></span>';
+    html += '<span class="ahd-card-name">' + esc(src.display_name) + '</span>';
+    html += '<span class="ahd-card-status">' + esc(src.status) + '</span>';
     html += '</div>';
     html += '<div class="ahd-card-meta">';
-    if (src.last_success) html += '<div>Last success: <strong>' + _esc(_timeAgo(src.last_success)) + '</strong></div>';
-    if (src.last_error) html += '<div>Last error: <strong>' + _esc(String(src.last_error).substring(0, 80)) + '</strong></div>';
+    if (src.last_success) html += '<div>Last success: <strong>' + esc(_timeAgo(src.last_success)) + '</strong></div>';
+    if (src.last_error) html += '<div>Last error: <strong>' + esc(String(src.last_error).substring(0, 80)) + '</strong></div>';
     if (src.avg_response_ms) html += '<div>Avg response: <strong>' + Number(src.avg_response_ms) + 'ms</strong></div>';
-    if (src.last_ping_at) html += '<div>Last check: <strong>' + _esc(_timeAgo(src.last_ping_at)) + '</strong></div>';
+    if (src.last_ping_at) html += '<div>Last check: <strong>' + esc(_timeAgo(src.last_ping_at)) + '</strong></div>';
     if (src.recent_checks > 0) {
         html += '<div>24h checks: ';
         const successes = Number(src.recent_checks) - Number(src.recent_failures || 0);
@@ -8437,13 +8299,13 @@ Object.assign(window, {
     applyMarkup, approveBuyPlan, approveBuyPlanV3, approveEnrichItem,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob, confirmPOV3,
-    completeBuyPlan, convertProactiveOffer, copyPromptToClipboard,
+    completeBuyPlan, convertProactiveOffer,
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
     dismissProactiveGroup, editCredential,
     eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyPlanV3, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
-    loadTroubleTickets, markQuoteResult, onSourcesSearch,
+    markQuoteResult, onSourcesSearch,
     openAddSiteContact, openAddSiteModal, openBuyPlanDetailV3,
     openFlagIssueV3, openHaltSOV3,
     openOfferComparisonV3, openRejectBuyPlanV3, openRejectPOV3, openRejectSOV3,
@@ -8452,7 +8314,7 @@ Object.assign(window, {
     openOfferGallery, openPricingHistory, openProactiveSendModal,
     openRejectBuyPlanModal, quickCreateCompany,
     refreshBuyerLeaderboard, refreshTeamsChannels,
-    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
+    refreshVendorScorecards, rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
     rejectEnrichItem, reopenQuote, resubmitBuyPlan, reviseQuote,
     saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
     saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
@@ -8463,12 +8325,12 @@ Object.assign(window, {
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     triggerDeepScan, unifiedEnrichCompany, updateQuoteLine, verifyContactEmail,
     loadCreditUsage, loadCustomerGaps, startCustomerBackfill,
-    updateQuoteLineField, updateTicketStatus, updateUserField,
-    verifyBuyPlanPOs, verifyPOV3, verifySOV3, viewTicketDetail,
+    updateQuoteLineField, updateUserField,
+    verifyBuyPlanPOs, verifyPOV3, verifySOV3,
     openSuggestedContacts,
     // HTML template inline handlers
     addSelectedSuggestedContacts, addSite, bulkApproveSelected,
-    confirmSendQuote, createCompany, createUser, exportTicketsXlsx,
+    confirmSendQuote, createCompany, createUser,
     filterSiteTypeahead,
     loadCustomers, loadEnrichmentQueue, onSqContactChange,
     debouncedCheckDupCompany, openNewCompanyModal, renderBuyPlansList, saveEditCompany,

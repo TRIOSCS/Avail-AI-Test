@@ -11,7 +11,7 @@ function checkExportsPlugin() {
   return {
     name: "check-js-exports",
     buildStart() {
-      const files = ["app.js", "crm.js"];
+      const files = ["app.js", "crm.js", "tickets.js"];
       const staticDir = resolve(__dirname, "app/static");
       const errors = [];
 
@@ -146,6 +146,7 @@ export default defineConfig({
       input: {
         app: resolve(__dirname, "app/static/app.js"),
         crm: resolve(__dirname, "app/static/crm.js"),
+        tickets: resolve(__dirname, "app/static/tickets.js"),
         styles: resolve(__dirname, "app/static/styles.css"),
         mobile: resolve(__dirname, "app/static/mobile.css"),
         touch: resolve(__dirname, "app/static/touch.js"),

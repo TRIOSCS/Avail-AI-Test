@@ -251,6 +251,7 @@ def get_matches_for_user(
                 "offer_id": m.offer_id,
                 "vendor_name": offer.vendor_name if offer else "",
                 "qty_available": offer.qty_available if offer else 0,
+                "target_qty": m.requirement.target_qty if m.requirement else 0,
                 "unit_price": float(offer.unit_price) if offer and offer.unit_price else None,
                 "condition": offer.condition if offer else "",
                 "warranty": offer.warranty if offer else "",
@@ -364,7 +365,9 @@ async def send_proactive_offer(
             continue
         cost = float(offer.unit_price) if offer.unit_price else 0
         sell = sell_prices.get(str(m.id), cost * 1.3)
-        qty = offer.qty_available or 0
+        target = m.requirement.target_qty if m.requirement else 0
+        avail = offer.qty_available or 0
+        qty = min(avail, target) if target > 0 else avail
         line_total_sell = Decimal(str(sell)) * qty
         line_total_cost = Decimal(str(cost)) * qty
         total_sell += line_total_sell

@@ -19,16 +19,12 @@ var COMMON_ISSUES = [
 ];
 
 var STATUS_LABELS = {
-    submitted: 'Submitted', triaging: 'Triaging', diagnosed: 'Diagnosed',
-    prompt_ready: 'Prompt Ready', fix_in_progress: 'Fixing',
-    awaiting_verification: 'Verify', resolved: 'Resolved',
-    rejected: 'Rejected', escalated: 'Escalated',
+    open: 'Open', in_progress: 'In Progress',
+    resolved: 'Resolved', escalated: 'Escalated',
 };
 var STATUS_COLORS = {
-    submitted: '#6b7280', triaging: '#d97706', diagnosed: '#2563eb',
-    prompt_ready: '#7c3aed', fix_in_progress: '#ea580c',
-    awaiting_verification: '#0891b2', resolved: '#16a34a',
-    rejected: '#dc2626', escalated: '#dc2626',
+    open: '#6b7280', in_progress: '#2563eb',
+    resolved: '#16a34a', escalated: '#dc2626',
 };
 var RISK_COLORS = { low: '#16a34a', medium: '#d97706', high: '#dc2626' };
 
@@ -187,7 +183,8 @@ async function renderMyTickets(container) {
     container.appendChild(el('p', { className: 'empty', textContent: 'Loading...' }));
 
     try {
-        var data = await apiFetch('/api/trouble-tickets/my-tickets');
+        var resp = await apiFetch('/api/trouble-tickets/my-tickets');
+        var data = resp.items || resp;
         clearNode(container);
         container.appendChild(header);
 
@@ -205,7 +202,7 @@ async function renderMyTickets(container) {
 }
 
 // ── Admin Dashboard ───────────────────────────────────────────────────
-var _adminFilter = '';
+var _adminFilter = 'in_progress';
 var _adminOffset = 0;
 
 async function renderAdminDashboard(container) {
@@ -222,8 +219,8 @@ async function renderAdminDashboard(container) {
 
     // Filter pills
     var pills = el('div', { className: 'fpills fpills-sm', style: 'margin-bottom:12px;' });
-    var filters = ['', 'submitted', 'diagnosed', 'prompt_ready', 'fix_in_progress', 'awaiting_verification', 'resolved', 'escalated'];
-    var labels = ['All', 'Submitted', 'Diagnosed', 'Review Queue', 'Fixing', 'Verify', 'Resolved', 'Escalated'];
+    var filters = ['in_progress', 'submitted', 'escalated', 'resolved', ''];
+    var labels = ['In Progress', 'Submitted', 'Escalated', 'Resolved', 'All'];
     filters.forEach(function(f, i) {
         var btn = el('button', {
             type: 'button',
@@ -315,7 +312,7 @@ function buildTicketTable(tickets, isAdmin) {
         }
         // Status badge
         var statusTd = el('td');
-        var st = t.status || 'submitted';
+        var st = t.status || 'open';
         statusTd.appendChild(badge(STATUS_LABELS[st] || st, STATUS_COLORS[st] || '#6b7280'));
         row.appendChild(statusTd);
         // Risk badge
@@ -362,12 +359,16 @@ async function showTicketDetail(ticketId) {
         ]);
         container.appendChild(header);
 
-        // Status + risk row
-        var metaRow = el('div', { style: 'display:flex;gap:8px;align-items:center;padding:0 16px 12px;' });
-        var st = t.status || 'submitted';
+        // Status + risk + source row
+        var metaRow = el('div', { style: 'display:flex;gap:8px;align-items:center;padding:0 16px 12px;flex-wrap:wrap;' });
+        var st = t.status || 'open';
         metaRow.appendChild(badge(STATUS_LABELS[st] || st, STATUS_COLORS[st] || '#6b7280'));
         if (t.risk_tier) metaRow.appendChild(badge(t.risk_tier, RISK_COLORS[t.risk_tier] || '#6b7280'));
         if (t.category) metaRow.appendChild(el('span', { style: 'font-size:12px;color:var(--muted);', textContent: t.category }));
+        if (t.source) {
+            var srcLabel = t.source === 'report_button' ? 'Bug Report' : 'Ticket Form';
+            metaRow.appendChild(el('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-alt);color:var(--muted);border:1px solid var(--border);', textContent: srcLabel }));
+        }
         container.appendChild(metaRow);
 
         // Title + description
@@ -415,41 +416,145 @@ async function showTicketDetail(ticketId) {
             ]));
         }
 
-        // Verify buttons (for submitter when awaiting_verification)
-        if (t.status === 'awaiting_verification') {
-            var verifyRow = el('div', { style: 'display:flex;gap:8px;margin-top:16px;' });
-            verifyRow.appendChild(el('button', {
-                className: 'btn btn-primary',
-                textContent: 'Confirm Fixed',
-                onclick: function() { verifyTicket(ticketId, 'resolved', container); },
-            }));
-            verifyRow.appendChild(el('button', {
-                className: 'btn btn-ghost',
-                textContent: 'Still Broken',
-                onclick: function() { verifyTicket(ticketId, 'still_broken', container); },
-            }));
-            body.appendChild(verifyRow);
+        // Browser / screen info (from report_button submissions)
+        if (t.browser_info || t.screen_size || t.current_view || t.current_page) {
+            var ctxDiv = el('div', { style: 'margin-bottom:16px;font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:8px 12px;' });
+            ctxDiv.appendChild(el('strong', { style: 'font-size:12px;color:var(--fg);display:block;margin-bottom:4px;', textContent: 'Browser Context' }));
+            if (t.current_page) ctxDiv.appendChild(el('div', {}, ['URL: ' + t.current_page]));
+            if (t.current_view) ctxDiv.appendChild(el('div', {}, ['View: ' + t.current_view]));
+            if (t.browser_info) ctxDiv.appendChild(el('div', {}, ['Browser: ' + t.browser_info]));
+            if (t.screen_size) ctxDiv.appendChild(el('div', {}, ['Screen: ' + t.screen_size]));
+            body.appendChild(ctxDiv);
         }
 
+        // Console errors
+        if (t.console_errors) {
+            try {
+                var errs = JSON.parse(t.console_errors);
+                if (errs.length) {
+                    body.appendChild(collapsibleSection('Console Errors', errs.map(function(e) { return e.msg || e; }).join('\n')));
+                }
+            } catch(e) {
+                body.appendChild(collapsibleSection('Console Errors', t.console_errors));
+            }
+        }
+
+        // AI prompt section with copy/regenerate
+        if (t.ai_prompt) {
+            var promptDiv = el('div', { style: 'margin-bottom:16px;' });
+            var promptHeader = el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:4px;' });
+            promptHeader.appendChild(el('strong', { style: 'font-size:12px;', textContent: 'AI Prompt' }));
+            var copyBtn = el('button', { className: 'btn btn-sm', textContent: 'Copy' });
+            copyBtn.onclick = function() {
+                var text = t.ai_prompt;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(function() {
+                        showToast('Prompt copied to clipboard', 'success');
+                    }).catch(function() { showToast('Failed to copy', 'error'); });
+                }
+            };
+            promptHeader.appendChild(copyBtn);
+            if (window.__isAdmin) {
+                var regenBtn = el('button', { className: 'btn btn-sm btn-ghost', textContent: 'Regenerate' });
+                regenBtn.onclick = async function() {
+                    regenBtn.disabled = true;
+                    regenBtn.textContent = 'Generating...';
+                    try {
+                        await apiFetch('/api/trouble-tickets/' + ticketId + '/regenerate-prompt', { method: 'POST' });
+                        showToast('AI prompt regenerated', 'success');
+                        showTicketDetail(ticketId);
+                    } catch(e) {
+                        showToast('Regeneration failed: ' + e.message, 'error');
+                        regenBtn.disabled = false;
+                        regenBtn.textContent = 'Regenerate';
+                    }
+                };
+                promptHeader.appendChild(regenBtn);
+            }
+            promptDiv.appendChild(promptHeader);
+            promptDiv.appendChild(el('pre', {
+                style: 'background:var(--bg);padding:10px;border-radius:6px;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--border);',
+                textContent: t.ai_prompt,
+            }));
+            body.appendChild(promptDiv);
+        } else if (window.__isAdmin) {
+            var genDiv = el('div', { style: 'margin-bottom:16px;display:flex;align-items:center;gap:8px;' });
+            genDiv.appendChild(el('span', { style: 'font-size:12px;color:var(--muted);', textContent: 'No AI prompt generated' }));
+            var genBtn = el('button', { className: 'btn btn-sm', textContent: 'Generate' });
+            genBtn.onclick = async function() {
+                genBtn.disabled = true;
+                genBtn.textContent = 'Generating...';
+                try {
+                    await apiFetch('/api/trouble-tickets/' + ticketId + '/regenerate-prompt', { method: 'POST' });
+                    showToast('AI prompt generated', 'success');
+                    showTicketDetail(ticketId);
+                } catch(e) {
+                    showToast('Generation failed: ' + e.message, 'error');
+                    genBtn.disabled = false;
+                    genBtn.textContent = 'Generate';
+                }
+            };
+            genDiv.appendChild(genBtn);
+            body.appendChild(genDiv);
+        }
+
+        // Screenshot
+        if (t.screenshot_b64) {
+            var ssDiv = el('div', { style: 'margin-bottom:16px;' });
+            ssDiv.appendChild(el('strong', { style: 'font-size:12px;display:block;margin-bottom:4px;', textContent: 'Screenshot' }));
+            var img = el('img', {
+                src: t.screenshot_b64,
+                style: 'max-width:100%;max-height:400px;border:1px solid var(--border);border-radius:6px;',
+            });
+            ssDiv.appendChild(img);
+            body.appendChild(ssDiv);
+        }
+
+        // Admin notes
+        if (window.__isAdmin) {
+            var notesDiv = el('div', { style: 'margin-bottom:16px;border-top:1px solid var(--border);padding-top:12px;' });
+            notesDiv.appendChild(el('label', { style: 'display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;', textContent: 'Admin Notes' }));
+            var notesArea = el('textarea', {
+                id: 'ttAdminNotes',
+                rows: '3',
+                style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit;',
+            });
+            notesArea.value = t.admin_notes || '';
+            notesDiv.appendChild(notesArea);
+            var saveNotesBtn = el('button', { className: 'btn btn-sm', textContent: 'Save Notes', style: 'margin-top:4px;' });
+            saveNotesBtn.onclick = async function() {
+                try {
+                    await apiFetch('/api/trouble-tickets/' + ticketId, {
+                        method: 'PATCH', body: { admin_notes: notesArea.value },
+                    });
+                    showToast('Notes saved', 'success');
+                } catch(e) {
+                    showToast('Failed to save notes: ' + e.message, 'error');
+                }
+            };
+            notesDiv.appendChild(saveNotesBtn);
+            body.appendChild(notesDiv);
+        } else if (t.admin_notes) {
+            body.appendChild(el('div', { style: 'margin-bottom:16px;' }, [
+                el('strong', { textContent: 'Admin Notes' }),
+                el('p', { style: 'font-size:13px;white-space:pre-wrap;', textContent: t.admin_notes }),
+            ]));
+        }
+
+        // Verify buttons (for submitter when awaiting_verification)
         // Admin actions
-        if (window.__isAdmin && t.status !== 'resolved' && t.status !== 'rejected') {
+        if (window.__isAdmin && t.status !== 'resolved') {
             var adminRow = el('div', { style: 'display:flex;gap:8px;margin-top:16px;border-top:1px solid var(--border);padding-top:12px;' });
             adminRow.appendChild(el('strong', { textContent: 'Admin: ', style: 'align-self:center;font-size:12px;' }));
 
-            if (t.status === 'submitted') {
-                adminRow.appendChild(el('button', {
-                    className: 'btn btn-sm', textContent: 'Start Triage',
-                    onclick: function() { updateTicketStatus(ticketId, 'triaging', container); },
-                }));
-            }
-            if (!t.diagnosis && (t.status === 'submitted' || t.status === 'triaging')) {
+            if (!t.diagnosis) {
                 adminRow.appendChild(el('button', {
                     className: 'btn btn-sm', textContent: 'AI Diagnose',
                     style: 'background:var(--blue);color:#fff;',
                     onclick: function() { diagnoseTicket(ticketId, container); },
                 }));
             }
-            if (t.generated_prompt && (t.status === 'diagnosed' || t.status === 'prompt_ready')) {
+            if (t.generated_prompt && t.status !== 'escalated') {
                 adminRow.appendChild(el('button', {
                     className: 'btn btn-sm', textContent: 'Execute Fix',
                     style: 'background:#16a34a;color:#fff;',
@@ -466,10 +571,10 @@ async function showTicketDetail(ticketId) {
                 }));
             }
             adminRow.appendChild(el('button', {
-                className: 'btn btn-sm btn-ghost', textContent: 'Reject',
-                style: 'color:var(--red);',
+                className: 'btn btn-sm', textContent: 'Resolve',
+                style: 'background:#16a34a;color:#fff;',
                 onclick: function() {
-                    if (confirm('Reject this ticket?')) updateTicketStatus(ticketId, 'rejected', container);
+                    if (confirm('Mark this ticket as resolved?')) updateTicketStatus(ticketId, 'resolved', container);
                 },
             }));
             body.appendChild(adminRow);
@@ -658,7 +763,7 @@ async function loadSysNotifs() {
                 markSysNotifRead(n.id);
                 if (n.ticket_id) {
                     document.getElementById('sysNotifPanel').style.display = 'none';
-                    sidebarNav('tickets', document.getElementById('troublePill'));
+                    sidebarNav('tickets', document.getElementById('navTickets'));
                     setTimeout(function() { showTicketDetail(n.ticket_id); }, 300);
                 }
             };

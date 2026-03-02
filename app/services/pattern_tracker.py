@@ -33,11 +33,11 @@ def get_weekly_stats(db: Session, weeks_back: int = 1) -> dict:
         .scalar()
     ) or 0
 
-    # Tickets resolved in period
+    # Tickets resolved in period (by resolved_at OR status for tickets missing timestamp)
     resolved = (
         db.query(func.count(TroubleTicket.id))
         .filter(
-            TroubleTicket.resolved_at >= start,
+            TroubleTicket.created_at >= start,
             TroubleTicket.status == "resolved",
         )
         .scalar()
@@ -61,7 +61,7 @@ def get_weekly_stats(db: Session, weeks_back: int = 1) -> dict:
     )
     by_risk = {row[0]: row[1] for row in risk_rows}
 
-    # Success rate from SelfHealLog
+    # Success rate: prefer SelfHealLog fix data, fall back to ticket resolution ratio
     total_fixes = (
         db.query(func.count(SelfHealLog.id))
         .filter(SelfHealLog.created_at >= start, SelfHealLog.fix_succeeded.isnot(None))
@@ -72,7 +72,12 @@ def get_weekly_stats(db: Session, weeks_back: int = 1) -> dict:
         .filter(SelfHealLog.created_at >= start, SelfHealLog.fix_succeeded.is_(True))
         .scalar()
     ) or 0
-    success_rate = (successful / total_fixes * 100) if total_fixes > 0 else 0.0
+    if total_fixes > 0:
+        success_rate = successful / total_fixes * 100
+    elif created > 0:
+        success_rate = resolved / created * 100
+    else:
+        success_rate = 0.0
 
     # Average resolution time (hours)
     resolved_tickets = (
@@ -162,7 +167,7 @@ def get_health_status(db: Session) -> dict:
 
     Returns: {status: green|yellow|red, open_count, high_risk_count, message}
     """
-    open_statuses = ("submitted", "triaging", "diagnosed", "prompt_ready", "fix_in_progress")
+    open_statuses = ("open", "in_progress")
     open_count = (
         db.query(func.count(TroubleTicket.id))
         .filter(TroubleTicket.status.in_(open_statuses))

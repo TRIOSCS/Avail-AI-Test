@@ -2440,14 +2440,70 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
         )
 
     # Verify card was created
-    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="LM317T").first()
+    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="lm317t").first()
     assert card is not None
+    assert card.display_mpn == "LM317T"
     assert card.manufacturer == "TI"
 
     # Verify MVH was created
     mvh = scheduler_db.query(MaterialVendorHistory).filter_by(material_card_id=card.id, vendor_name="arrow").first()
     assert mvh is not None
     assert mvh.last_qty == 100
+
+
+def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db, test_user):
+    """Bug fix: MPN with hyphens should normalize to canonical key, not create duplicate cards."""
+    import base64
+
+    from app.models import MaterialCard
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    # Pre-create a card as if the UI add-part flow created it (proper normalized key)
+    existing = MaterialCard(
+        normalized_mpn="qatest001",  # canonical key (lowercase, no dashes)
+        display_mpn="QA-TEST-001",
+        search_count=0,
+    )
+    scheduler_db.add(existing)
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(
+        return_value={"contentBytes": base64.b64encode(b"data").decode()}
+    )
+
+    rows = [{"mpn": "QA-TEST-001", "qty": 50, "manufacturer": "Test Corp"}]
+
+    with (
+        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="testvendor"),
+        patch("app.services.activity_service.match_email_to_entity", return_value=None),
+        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
+    ):
+        from app.scheduler import _download_and_import_stock_list
+
+        asyncio.run(
+            _download_and_import_stock_list(
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="TestVendor",
+                vendor_email="sales@test.com",
+            )
+        )
+
+    # Should NOT create a second card — the existing one should be reused
+    all_cards = scheduler_db.query(MaterialCard).all()
+    qa_cards = [c for c in all_cards if "qatest" in c.normalized_mpn]
+    assert len(qa_cards) == 1, f"Expected 1 card, got {len(qa_cards)}: {[(c.normalized_mpn, c.display_mpn) for c in qa_cards]}"
+    assert qa_cards[0].normalized_mpn == "qatest001"
 
 
 def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_user):
@@ -2459,9 +2515,9 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
     test_user.access_token = "at_dl"
     scheduler_db.commit()
 
-    # Pre-create card + MVH
+    # Pre-create card + MVH (use canonical key form for normalized_mpn)
     card = MaterialCard(
-        normalized_mpn="NE555",
+        normalized_mpn="ne555",
         display_mpn="NE555",
         manufacturer="TI",
         description="Timer",
@@ -2620,7 +2676,7 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
 
     cards = scheduler_db.query(MaterialCard).all()
     # Only "ABC" should have been created (existing test cards may be present)
-    abc_card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="ABC").first()
+    abc_card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="abc").first()
     assert abc_card is not None
 
 
@@ -2716,7 +2772,7 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
             )
         )
 
-    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="NOEMAIL1").first()
+    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="noemail1").first()
     assert card is not None
 
 
@@ -2729,9 +2785,9 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
     test_user.access_token = "at_dl"
     scheduler_db.commit()
 
-    # Pre-create card + MVH
+    # Pre-create card + MVH (use canonical key form for normalized_mpn)
     card = MaterialCard(
-        normalized_mpn="PRICEFB",
+        normalized_mpn="pricefb",
         display_mpn="PRICEFB",
         manufacturer="Test",
     )

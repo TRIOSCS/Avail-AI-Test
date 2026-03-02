@@ -1282,6 +1282,7 @@ async def _download_and_import_stock_list(
 ):
     """Download an attachment via Graph API and import as material cards + sightings."""
     from .models import MaterialCard, MaterialVendorHistory
+    from .utils.normalization import normalize_mpn, normalize_mpn_key
     from .vendor_utils import normalize_vendor_name
 
     # Extract vendor domain from email for column mapping cache
@@ -1351,11 +1352,12 @@ async def _download_and_import_stock_list(
     # Pre-load existing MaterialCards in one query instead of per-row
     valid_mpns = list(
         {
-            (row.get("mpn") or "").strip().upper()
+            normalize_mpn_key((row.get("mpn") or "").strip())
             for row in rows
             if (row.get("mpn") or "").strip() and len((row.get("mpn") or "").strip()) >= 3
         }
     )
+    valid_mpns = [k for k in valid_mpns if k]  # filter empty keys
     card_map = {}
     mvh_map = {}
     if valid_mpns:
@@ -1384,24 +1386,27 @@ async def _download_and_import_stock_list(
                     mvh_map[m.material_card_id] = m
 
     for row in rows:
-        mpn = (row.get("mpn") or "").strip().upper()
-        if not mpn or len(mpn) < 3:
+        raw_mpn = (row.get("mpn") or "").strip()
+        if not raw_mpn or len(raw_mpn) < 3:
+            continue
+        norm_key = normalize_mpn_key(raw_mpn)
+        if not norm_key:
             continue
 
-        card = card_map.get(mpn)
+        card = card_map.get(norm_key)
         if not card:
             card = MaterialCard(
-                normalized_mpn=mpn,
-                display_mpn=row.get("mpn", mpn).strip(),
+                normalized_mpn=norm_key,
+                display_mpn=normalize_mpn(raw_mpn) or raw_mpn,
                 manufacturer=row.get("manufacturer", ""),
                 description=row.get("description", ""),
             )
             db.add(card)
             try:
                 db.flush()
-                card_map[mpn] = card
+                card_map[norm_key] = card
             except Exception as e:
-                logger.debug(f"MaterialCard flush conflict for '{mpn}': {e}")
+                logger.debug(f"MaterialCard flush conflict for '{norm_key}': {e}")
                 db.rollback()
                 continue
 
@@ -1448,7 +1453,7 @@ async def _download_and_import_stock_list(
         from app.models import Requirement, Requisition
         from app.services.teams import send_stock_match_alert
 
-        imported_mpns = [r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")]
+        imported_mpns = [normalize_mpn(r.get("mpn", "")) or r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")]
         if imported_mpns:
             matches = (
                 db.query(Requirement.id, Requirement.primary_mpn, Requirement.requisition_id)
@@ -2156,7 +2161,7 @@ async def _job_self_heal_weekly_report():  # pragma: no cover
 
 @_traced_job
 async def _job_self_heal_auto_close():  # pragma: no cover
-    """Auto-close stale tickets: 48h awaiting_verification → resolved, 7d submitted → rejected."""
+    """Auto-close stale tickets: 7d open with no progress → resolved."""
     from datetime import datetime, timedelta, timezone
 
     from .database import SessionLocal
@@ -2168,51 +2173,28 @@ async def _job_self_heal_auto_close():  # pragma: no cover
     try:
         now = datetime.now(timezone.utc)
 
-        # 48h awaiting_verification → auto-resolved (user didn't respond)
-        stale_verify = (
+        # 7d open with no progress → auto-resolved
+        stale = (
             db.query(TroubleTicket)
             .filter(
-                TroubleTicket.status == "awaiting_verification",
-                TroubleTicket.diagnosed_at.isnot(None),
-                TroubleTicket.diagnosed_at < now - timedelta(hours=48),
-            )
-            .all()
-        )
-        for ticket in stale_verify:
-            update_ticket(db, ticket.id, status="resolved",
-                          resolution_notes="Auto-resolved: no verification response after 48h")
-            if ticket.submitted_by:
-                create_notification(
-                    db, user_id=ticket.submitted_by, event_type="fixed",
-                    title=f"Ticket #{ticket.id} auto-resolved",
-                    body="No verification response after 48h — assumed fixed.",
-                    ticket_id=ticket.id,
-                )
-
-        # 7d submitted with no diagnosis → auto-rejected
-        stale_submitted = (
-            db.query(TroubleTicket)
-            .filter(
-                TroubleTicket.status == "submitted",
+                TroubleTicket.status == "open",
                 TroubleTicket.created_at < now - timedelta(days=7),
             )
             .all()
         )
-        for ticket in stale_submitted:
-            update_ticket(db, ticket.id, status="rejected",
-                          resolution_notes="Auto-rejected: no triage after 7 days")
+        for ticket in stale:
+            update_ticket(db, ticket.id, status="resolved",
+                          resolution_notes="Auto-resolved: no activity after 7 days")
             if ticket.submitted_by:
                 create_notification(
-                    db, user_id=ticket.submitted_by, event_type="failed",
-                    title=f"Ticket #{ticket.id} auto-closed",
-                    body="No triage after 7 days — ticket closed.",
+                    db, user_id=ticket.submitted_by, event_type="fixed",
+                    title=f"Ticket #{ticket.id} auto-resolved",
+                    body="No activity after 7 days — ticket closed.",
                     ticket_id=ticket.id,
                 )
 
-        closed = len(stale_verify) + len(stale_submitted)
-        if closed:
-            logger.info("Auto-closed {} stale tickets ({} verify, {} submitted)",
-                        closed, len(stale_verify), len(stale_submitted))
+        if stale:
+            logger.info("Auto-closed {} stale tickets", len(stale))
     except Exception:
         logger.exception("Self-heal auto-close failed")
     finally:

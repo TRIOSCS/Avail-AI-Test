@@ -1246,6 +1246,163 @@ class TestScorecardPOCounts:
         assert user_entry["quoted"] >= 1
 
 
+# ── Qty capping (target_qty vs qty_available) ─────────────────────
+
+
+class TestQtyCapping:
+    """Verify proactive offer totals use min(qty_available, target_qty) not raw qty_available."""
+
+    @pytest.mark.asyncio
+    async def test_send_caps_qty_at_target(self, db_session, test_user, test_company, test_customer_site):
+        """When vendor qty_available >> customer target_qty, totals use target_qty."""
+        source_req = Requisition(
+            name="Cap-Req",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(source_req)
+        db_session.flush()
+
+        # Vendor has 10,000 units but customer only needs 50
+        offer = Offer(
+            requisition_id=source_req.id,
+            vendor_name="BigVendor",
+            mpn="CAP-QTY-TEST",
+            qty_available=10000,
+            unit_price=2.00,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.flush()
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="CAP-QTY-TEST", target_qty=50
+        )
+        match = ProactiveMatch(
+            offer_id=offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="CAP-QTY-TEST",
+        )
+        db_session.add(match)
+        contact = _make_site_contact(db_session, test_customer_site)
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+            result = await send_proactive_offer(
+                db=db_session,
+                user=test_user,
+                token="fake-token",
+                match_ids=[match.id],
+                contact_ids=[contact.id],
+                sell_prices={str(match.id): 3.00},
+            )
+
+        # Should use target_qty=50, NOT qty_available=10000
+        # total_sell = 3.00 * 50 = 150.00 (not 3.00 * 10000 = 30000.00)
+        # total_cost = 2.00 * 50 = 100.00 (not 2.00 * 10000 = 20000.00)
+        assert result["total_sell"] == 150.00
+        assert result["total_cost"] == 100.00
+
+    @pytest.mark.asyncio
+    async def test_send_uses_avail_when_less_than_target(
+        self, db_session, test_user, test_company, test_customer_site
+    ):
+        """When vendor qty_available < customer target_qty, totals use qty_available."""
+        source_req = Requisition(
+            name="Avail-Req",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(source_req)
+        db_session.flush()
+
+        # Vendor has only 30 units but customer needs 500
+        offer = Offer(
+            requisition_id=source_req.id,
+            vendor_name="SmallVendor",
+            mpn="AVAIL-QTY-TEST",
+            qty_available=30,
+            unit_price=5.00,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.flush()
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="AVAIL-QTY-TEST", target_qty=500
+        )
+        match = ProactiveMatch(
+            offer_id=offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="AVAIL-QTY-TEST",
+        )
+        db_session.add(match)
+        contact = _make_site_contact(db_session, test_customer_site)
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+            result = await send_proactive_offer(
+                db=db_session,
+                user=test_user,
+                token="fake-token",
+                match_ids=[match.id],
+                contact_ids=[contact.id],
+                sell_prices={str(match.id): 7.00},
+            )
+
+        # Should use qty_available=30 (vendor has less than customer needs)
+        # total_sell = 7.00 * 30 = 210.00
+        # total_cost = 5.00 * 30 = 150.00
+        assert result["total_sell"] == 210.00
+        assert result["total_cost"] == 150.00
+
+    def test_match_data_includes_target_qty(self, db_session, test_user, test_company, test_customer_site, test_offer):
+        """get_matches_for_user() includes target_qty in match data for frontend."""
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="TARGET-QTY-TEST", target_qty=250
+        )
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="TARGET-QTY-TEST",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+
+        result = get_matches_for_user(db_session, test_user.id)
+        groups = result["groups"]
+        assert len(groups) >= 1
+        match_data = groups[0]["matches"][0]
+        assert "target_qty" in match_data
+        assert match_data["target_qty"] == 250
+
+
 # ── get_match_count ───────────────────────────────────────────────
 
 

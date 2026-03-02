@@ -1,4 +1,11 @@
-"""Error Reports API — trouble ticket submission and management."""
+"""Error Reports API — compatibility shim that delegates to the unified trouble ticket system.
+
+All error report operations now create/read TroubleTickets with source='report_button'.
+This shim preserves backward compatibility for any clients still using /api/error-reports.
+
+Called by: main.py (app.include_router)
+Depends on: services/trouble_ticket_service.py, services/ai_trouble_prompt.py
+"""
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -10,10 +17,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import User
-from ..models.error_report import ErrorReport
+from ..models.trouble_ticket import TroubleTicket
+from ..services import trouble_ticket_service as svc
 from ..services.ai_trouble_prompt import generate_trouble_prompt
 
 router = APIRouter(tags=["error-reports"])
@@ -42,6 +51,27 @@ class StatusUpdate(BaseModel):
     admin_notes: Optional[str] = None
 
 
+# ── Status mapping ───────────────────────────────────────────────────
+
+# ErrorReport statuses → TroubleTicket statuses
+_ER_TO_TT_STATUS = {
+    "open": "submitted",
+    "in_progress": "diagnosed",
+    "resolved": "resolved",
+    "closed": "rejected",
+}
+
+_TT_TO_ER_STATUS = {v: k for k, v in _ER_TO_TT_STATUS.items()}
+_TT_TO_ER_STATUS["submitted"] = "open"
+_TT_TO_ER_STATUS["diagnosed"] = "in_progress"
+_TT_TO_ER_STATUS["rejected"] = "closed"
+
+
+def _tt_to_er_status(tt_status: str) -> str:
+    """Map TroubleTicket status back to ErrorReport status for compat."""
+    return _TT_TO_ER_STATUS.get(tt_status, tt_status)
+
+
 # ── Endpoints ────────────────────────────────────────────────────────
 
 
@@ -51,32 +81,30 @@ async def create_error_report(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Submit a trouble report (any authenticated user)."""
+    """Submit a trouble report (any authenticated user). Creates a TroubleTicket."""
     if body.screenshot_b64 and len(body.screenshot_b64) > MAX_SCREENSHOT_SIZE:
         raise HTTPException(400, "Screenshot too large (max 2 MB)")
 
-    # Use message as description; truncate for initial title
     message = body.message.strip()
-    initial_title = body.title.strip() if body.title else message[:255]
+    initial_title = body.title.strip() if body.title else message[:200]
 
-    report = ErrorReport(
+    ticket = svc.create_ticket(
+        db=db,
         user_id=user.id,
         title=initial_title,
         description=message,
+        current_page=body.current_url,
+        source="report_button",
         screenshot_b64=body.screenshot_b64 or None,
-        current_url=body.current_url,
-        current_view=body.current_view,
         browser_info=body.browser_info,
         screen_size=body.screen_size,
         console_errors=body.console_errors,
         page_state=body.page_state,
+        current_view=body.current_view,
     )
-    db.add(report)
-    db.commit()
-    db.refresh(report)
-    logger.info("Trouble report #{} created by {}", report.id, user.email)
+    logger.info("Trouble report #{} created by {} (via compat shim)", ticket.id, user.email)
 
-    # Generate AI prompt in background — failure doesn't break submission
+    # Generate AI prompt — failure doesn't break submission
     try:
         result = await generate_trouble_prompt(
             user_message=message,
@@ -90,14 +118,20 @@ async def create_error_report(
             reporter_name=user.name or user.email,
         )
         if result:
-            report.title = result["title"]
-            report.ai_prompt = result["prompt"]
-            db.commit()
-            logger.info("AI prompt generated for report #{}", report.id)
+            svc.update_ticket(
+                db=db, ticket_id=ticket.id,
+                title=result["title"],
+                ai_prompt=result["prompt"],
+            )
+            logger.info("AI prompt generated for ticket #{}", ticket.id)
     except Exception as e:
-        logger.warning("AI prompt generation failed for report #{}: {}", report.id, e)
+        logger.warning("AI prompt generation failed for ticket #{}: {}", ticket.id, e)
 
-    return {"id": report.id, "status": "created"}
+    # Fire-and-forget: auto-diagnose in background
+    import asyncio
+    asyncio.create_task(svc.auto_process_ticket(ticket.id))
+
+    return {"id": ticket.id, "status": "created"}
 
 
 @router.get("/api/error-reports")
@@ -106,27 +140,28 @@ def list_error_reports(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """List trouble reports (admin). Omits screenshot_b64 for performance."""
-    q = db.query(ErrorReport)
+    """List trouble reports (admin). Filters TroubleTickets where source='report_button'."""
+    q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
     if status:
-        q = q.filter(ErrorReport.status == status)
-    q = q.order_by(desc(ErrorReport.created_at))
-    reports = q.limit(500).all()
+        tt_status = _ER_TO_TT_STATUS.get(status, status)
+        q = q.filter(TroubleTicket.status == tt_status)
+    q = q.order_by(desc(TroubleTicket.created_at))
+    tickets = q.limit(500).all()
     return [
         {
-            "id": r.id,
-            "title": r.title,
-            "status": r.status,
-            "reporter_email": r.reporter.email if r.reporter else None,
-            "reporter_name": r.reporter.name if r.reporter else None,
-            "has_screenshot": bool(r.screenshot_b64),
-            "has_ai_prompt": bool(r.ai_prompt),
-            "current_url": r.current_url,
-            "current_view": r.current_view,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "resolved_at": r.resolved_at.isoformat() if r.resolved_at else None,
+            "id": t.id,
+            "title": t.title,
+            "status": _tt_to_er_status(t.status),
+            "reporter_email": t.submitter.email if t.submitter else None,
+            "reporter_name": t.submitter.name if t.submitter else None,
+            "has_screenshot": bool(t.screenshot_b64),
+            "has_ai_prompt": bool(t.ai_prompt),
+            "current_url": t.current_page,
+            "current_view": t.current_view,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "resolved_at": t.resolved_at.isoformat() if t.resolved_at else None,
         }
-        for r in reports
+        for t in tickets
     ]
 
 
@@ -141,49 +176,38 @@ def export_error_reports_xlsx(
 
     from openpyxl import Workbook
 
-    q = db.query(ErrorReport)
+    q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
     if status:
-        q = q.filter(ErrorReport.status == status)
-    q = q.order_by(desc(ErrorReport.created_at))
-    reports = q.limit(2000).all()
+        tt_status = _ER_TO_TT_STATUS.get(status, status)
+        q = q.filter(TroubleTicket.status == tt_status)
+    q = q.order_by(desc(TroubleTicket.created_at))
+    tickets = q.limit(2000).all()
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Trouble Tickets"
     headers = [
-        "ID",
-        "Title",
-        "Description",
-        "Status",
-        "Reporter",
-        "URL",
-        "View",
-        "Browser",
-        "Screen",
-        "Console Errors",
-        "Admin Notes",
-        "Created",
-        "Resolved",
+        "ID", "Title", "Description", "Status", "Reporter",
+        "URL", "View", "Browser", "Screen", "Console Errors",
+        "Admin Notes", "Created", "Resolved",
     ]
     ws.append(headers)
-    for r in reports:
-        ws.append(
-            [
-                r.id,
-                r.title,
-                r.description or "",
-                r.status,
-                r.reporter.email if r.reporter else "",
-                r.current_url or "",
-                r.current_view or "",
-                r.browser_info or "",
-                r.screen_size or "",
-                r.console_errors or "",
-                r.admin_notes or "",
-                r.created_at.isoformat() if r.created_at else "",
-                r.resolved_at.isoformat() if r.resolved_at else "",
-            ]
-        )
+    for t in tickets:
+        ws.append([
+            t.id,
+            t.title,
+            t.description or "",
+            _tt_to_er_status(t.status),
+            t.submitter.email if t.submitter else "",
+            t.current_page or "",
+            t.current_view or "",
+            t.browser_info or "",
+            t.screen_size or "",
+            t.console_errors or "",
+            t.admin_notes or "",
+            t.created_at.isoformat() if t.created_at else "",
+            t.resolved_at.isoformat() if t.resolved_at else "",
+        ])
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -202,28 +226,29 @@ def get_error_report(
     db: Session = Depends(get_db),
 ):
     """Get full trouble report detail including screenshot (admin)."""
-    report = db.get(ErrorReport, report_id)
-    if not report:
+    ticket = db.get(TroubleTicket, report_id)
+    if not ticket:
         raise HTTPException(404, "Report not found")
+    resolved_by = db.get(User, ticket.resolved_by_id) if ticket.resolved_by_id else None
     return {
-        "id": report.id,
-        "title": report.title,
-        "description": report.description,
-        "screenshot_b64": report.screenshot_b64,
-        "current_url": report.current_url,
-        "current_view": report.current_view,
-        "browser_info": report.browser_info,
-        "screen_size": report.screen_size,
-        "console_errors": report.console_errors,
-        "page_state": report.page_state,
-        "status": report.status,
-        "admin_notes": report.admin_notes,
-        "ai_prompt": report.ai_prompt,
-        "reporter_email": report.reporter.email if report.reporter else None,
-        "reporter_name": report.reporter.name if report.reporter else None,
-        "resolved_at": report.resolved_at.isoformat() if report.resolved_at else None,
-        "resolved_by_email": report.resolved_by.email if report.resolved_by else None,
-        "created_at": report.created_at.isoformat() if report.created_at else None,
+        "id": ticket.id,
+        "title": ticket.title,
+        "description": ticket.description,
+        "screenshot_b64": ticket.screenshot_b64,
+        "current_url": ticket.current_page,
+        "current_view": ticket.current_view,
+        "browser_info": ticket.browser_info,
+        "screen_size": ticket.screen_size,
+        "console_errors": ticket.console_errors,
+        "page_state": ticket.page_state,
+        "status": _tt_to_er_status(ticket.status),
+        "admin_notes": ticket.admin_notes,
+        "ai_prompt": ticket.ai_prompt,
+        "reporter_email": ticket.submitter.email if ticket.submitter else None,
+        "reporter_name": ticket.submitter.name if ticket.submitter else None,
+        "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
+        "resolved_by_email": resolved_by.email if resolved_by else None,
+        "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
     }
 
 
@@ -234,29 +259,31 @@ async def regenerate_prompt(
     db: Session = Depends(get_db),
 ):
     """Re-generate the AI prompt for an existing trouble report (admin)."""
-    report = db.get(ErrorReport, report_id)
-    if not report:
+    ticket = db.get(TroubleTicket, report_id)
+    if not ticket:
         raise HTTPException(404, "Report not found")
 
     result = await generate_trouble_prompt(
-        user_message=report.description or report.title,
-        current_url=report.current_url,
-        current_view=report.current_view,
-        browser_info=report.browser_info,
-        screen_size=report.screen_size,
-        console_errors=report.console_errors,
-        page_state=report.page_state,
-        has_screenshot=bool(report.screenshot_b64),
-        reporter_name=report.reporter.name if report.reporter else None,
+        user_message=ticket.description or ticket.title,
+        current_url=ticket.current_page,
+        current_view=ticket.current_view,
+        browser_info=ticket.browser_info,
+        screen_size=ticket.screen_size,
+        console_errors=ticket.console_errors,
+        page_state=ticket.page_state,
+        has_screenshot=bool(ticket.screenshot_b64),
+        reporter_name=ticket.submitter.name if ticket.submitter else None,
     )
     if not result:
         raise HTTPException(502, "AI prompt generation failed — try again later")
 
-    report.title = result["title"]
-    report.ai_prompt = result["prompt"]
-    db.commit()
-    logger.info("AI prompt regenerated for report #{} by {}", report_id, user.email)
-    return {"id": report.id, "ai_prompt": report.ai_prompt, "title": report.title}
+    svc.update_ticket(
+        db=db, ticket_id=ticket.id,
+        title=result["title"],
+        ai_prompt=result["prompt"],
+    )
+    logger.info("AI prompt regenerated for ticket #{} by {}", report_id, user.email)
+    return {"id": ticket.id, "ai_prompt": result["prompt"], "title": result["title"]}
 
 
 @router.put("/api/error-reports/{report_id}/status")
@@ -267,21 +294,16 @@ def update_error_report_status(
     db: Session = Depends(get_db),
 ):
     """Update bug report status and admin notes (admin)."""
-    report = db.get(ErrorReport, report_id)
-    if not report:
+    tt_status = _ER_TO_TT_STATUS.get(body.status, body.status)
+    ticket = svc.update_admin_status(
+        db=db,
+        ticket_id=report_id,
+        status=tt_status,
+        admin_notes=body.admin_notes,
+        admin_user_id=user.id,
+    )
+    if not ticket:
         raise HTTPException(404, "Report not found")
 
-    report.status = body.status
-    if body.admin_notes is not None:
-        report.admin_notes = body.admin_notes
-
-    if body.status in ("resolved", "closed"):
-        report.resolved_at = datetime.now(timezone.utc)
-        report.resolved_by_id = user.id
-    elif body.status == "open":
-        report.resolved_at = None
-        report.resolved_by_id = None
-
-    db.commit()
     logger.info("Bug report #{} → {} by {}", report_id, body.status, user.email)
-    return {"id": report.id, "status": report.status}
+    return {"id": ticket.id, "status": _tt_to_er_status(ticket.status)}

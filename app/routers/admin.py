@@ -1055,6 +1055,28 @@ def api_transfer_execute(
     if not sites:
         raise HTTPException(400, "No matching sites owned by source user")
 
+    # Enforce site cap on target user
+    from sqlalchemy import func
+
+    target_current = (
+        db.query(func.count(CustomerSite.id))
+        .filter(
+            CustomerSite.owner_id == body.target_user_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+    from app.routers.v13_features import SITE_CAP_PER_USER
+
+    if target_current + len(sites) > SITE_CAP_PER_USER:
+        raise HTTPException(
+            409,
+            f"Transfer would give {target.name} {target_current + len(sites)} sites "
+            f"(cap is {SITE_CAP_PER_USER}, currently owns {target_current}). "
+            "Reduce transfer count or release sites first.",
+        )
+
     transferred_ids = {s.id for s in sites}
     skipped_ids = [sid for sid in body.site_ids if sid not in transferred_ids]
 

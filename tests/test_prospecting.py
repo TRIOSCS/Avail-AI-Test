@@ -260,6 +260,73 @@ class TestProspectingAssignOwner:
         )
         assert resp.status_code == 404
 
+    def test_assign_blocked_at_cap(self, admin_client, db_session, sales_user, test_company):
+        """Admin assign blocked when target user already at 200-site cap."""
+        from app.routers.v13_features import SITE_CAP_PER_USER
+
+        # Create SITE_CAP_PER_USER active sites for sales_user
+        for i in range(SITE_CAP_PER_USER):
+            db_session.add(
+                CustomerSite(
+                    company_id=test_company.id,
+                    site_name=f"Cap Site {i}",
+                    owner_id=sales_user.id,
+                    is_active=True,
+                )
+            )
+        db_session.commit()
+
+        # Create a new unowned site
+        new_site = CustomerSite(
+            company_id=test_company.id,
+            site_name="Over Cap Site",
+            is_active=True,
+        )
+        db_session.add(new_site)
+        db_session.commit()
+        db_session.refresh(new_site)
+
+        # Assign should be blocked without force
+        resp = admin_client.put(
+            f"/api/prospecting/sites/{new_site.id}/owner",
+            json={"owner_id": sales_user.id},
+        )
+        assert resp.status_code == 409
+        assert "cap" in resp.json()["error"].lower()
+
+    def test_assign_force_override(self, admin_client, db_session, sales_user, test_company):
+        """Admin can force-assign past cap with force=true."""
+        from app.routers.v13_features import SITE_CAP_PER_USER
+
+        for i in range(SITE_CAP_PER_USER):
+            db_session.add(
+                CustomerSite(
+                    company_id=test_company.id,
+                    site_name=f"Force Cap Site {i}",
+                    owner_id=sales_user.id,
+                    is_active=True,
+                )
+            )
+        db_session.commit()
+
+        new_site = CustomerSite(
+            company_id=test_company.id,
+            site_name="Forced Site",
+            is_active=True,
+        )
+        db_session.add(new_site)
+        db_session.commit()
+        db_session.refresh(new_site)
+
+        resp = admin_client.put(
+            f"/api/prospecting/sites/{new_site.id}/owner",
+            json={"owner_id": sales_user.id, "force": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "warning" in data
+
 
 # ── PUT /api/sites/{site_id} ownership guard ──────────────────────────
 

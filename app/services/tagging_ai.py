@@ -1,7 +1,8 @@
 """AI fallback classification — classify remaining untagged parts via Claude Haiku.
 
-Last resort in the classification waterfall. Batches 20-50 MPNs per API call,
-parses structured JSON response, creates MaterialTags with source='ai_classified'.
+Last resort in the classification waterfall. Two modes:
+  - Batch API (preferred): Submit all MPNs at once, 50% cheaper, no rate limits
+  - Real-time API (fallback): Concurrent calls with rate limiting
 
 Also provides chunked batch result applier for large Anthropic Batch API results.
 
@@ -116,6 +117,205 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
                 card.manufacturer = manufacturer
 
     return matched, unknown
+
+
+# ── Batch API mode ──────────────────────────────────────────────────────
+
+_BATCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "classifications": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "mpn": {"type": "string"},
+                    "manufacturer": {"type": "string"},
+                    "category": {"type": "string"},
+                },
+                "required": ["mpn", "manufacturer", "category"],
+            },
+        }
+    },
+    "required": ["classifications"],
+}
+
+
+async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # pragma: no cover
+    """Submit all untagged cards to Anthropic Batch API. 50% cheaper, no rate limits.
+
+    Returns: {batch_id, total_requests, total_mpns} or {error: str}
+    """
+    from app.utils.claude_client import claude_batch_submit
+
+    # Find cards with NO brand tag
+    tagged_brand_ids = (
+        db.query(MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(Tag.tag_type == "brand")
+        .distinct()
+        .subquery()
+    )
+    untagged = (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
+        .order_by(MaterialCard.id)
+        .all()
+    )
+
+    if not untagged:
+        logger.info("No untagged cards for batch AI backfill")
+        return {"batch_id": None, "total_requests": 0, "total_mpns": 0}
+
+    logger.info(f"Batch AI backfill: preparing {len(untagged)} cards in batches of {batch_size}")
+
+    # Build batch requests — each request classifies batch_size MPNs
+    requests = []
+    for i in range(0, len(untagged), batch_size):
+        batch = untagged[i : i + batch_size]
+        mpns = [row.normalized_mpn for row in batch]
+        mpn_list = "\n".join(f"- {mpn}" for mpn in mpns)
+        prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
+
+        # custom_id encodes the card IDs for this batch
+        card_ids = [str(row.id) for row in batch]
+        custom_id = f"batch_{i // batch_size}"
+
+        requests.append({
+            "custom_id": custom_id,
+            "prompt": prompt,
+            "schema": _BATCH_SCHEMA,
+            "system": _SYSTEM,
+            "model_tier": "fast",
+            "max_tokens": 4096,
+        })
+
+    # Store batch metadata for result processing
+    # Save card_id→mpn mapping to a temp table or file
+    batch_meta = {}
+    for i in range(0, len(untagged), batch_size):
+        batch = untagged[i : i + batch_size]
+        batch_key = f"batch_{i // batch_size}"
+        batch_meta[batch_key] = [(row.id, row.normalized_mpn) for row in batch]
+
+    logger.info(f"Submitting {len(requests)} batch requests ({len(untagged)} MPNs)")
+
+    # Batch API limit is 100K requests — split if needed
+    batch_ids = []
+    chunk_size = 50000  # Stay well under 100K limit
+    for chunk_start in range(0, len(requests), chunk_size):
+        chunk = requests[chunk_start : chunk_start + chunk_size]
+        batch_id = await claude_batch_submit(chunk)
+        if not batch_id:
+            return {"error": f"Batch submit failed at chunk {chunk_start}"}
+        batch_ids.append(batch_id)
+        logger.info(f"Submitted batch chunk: {batch_id} ({len(chunk)} requests)")
+
+    # Persist metadata so we can process results later
+    import json
+    meta_path = "/tmp/ai_backfill_meta.json"
+    with open(meta_path, "w") as f:
+        json.dump({
+            "batch_ids": batch_ids,
+            "batch_meta": {k: v for k, v in batch_meta.items()},
+            "total_mpns": len(untagged),
+        }, f)
+
+    logger.info(f"Batch metadata saved to {meta_path}")
+
+    return {
+        "batch_ids": batch_ids,
+        "total_requests": len(requests),
+        "total_mpns": len(untagged),
+    }
+
+
+async def check_and_apply_batch_results(db: Session) -> dict:  # pragma: no cover
+    """Poll batch status and apply results if complete.
+
+    Returns: {status, ...} where status is 'processing', 'complete', or 'error'
+    """
+    import json
+    from app.utils.claude_client import claude_batch_results
+
+    meta_path = "/tmp/ai_backfill_meta.json"
+    try:
+        with open(meta_path) as f:
+            meta = json.load(f)
+    except FileNotFoundError:
+        return {"status": "error", "error": "No batch metadata found. Run submit_batch_backfill first."}
+
+    batch_ids = meta["batch_ids"]
+    batch_meta = meta["batch_meta"]
+    total_mpns = meta["total_mpns"]
+
+    total_matched = 0
+    total_unknown = 0
+    total_processed = 0
+    all_complete = True
+
+    for batch_id in batch_ids:
+        results = await claude_batch_results(batch_id)
+        if results is None:
+            all_complete = False
+            logger.info(f"Batch {batch_id} still processing")
+            continue
+
+        # Apply results
+        for custom_id, parsed in results.items():
+            if custom_id not in batch_meta:
+                continue
+
+            batch = batch_meta[custom_id]
+
+            if parsed and isinstance(parsed, dict):
+                classifications = parsed.get("classifications", [])
+                # Normalize to list[dict] format
+                classified = []
+                for item in classifications:
+                    if isinstance(item, dict):
+                        classified.append({
+                            "mpn": (item.get("mpn") or "").strip(),
+                            "manufacturer": (item.get("manufacturer") or "Unknown").strip(),
+                            "category": (item.get("category") or "Miscellaneous").strip(),
+                        })
+            else:
+                # Failed request — mark as unknown
+                classified = [
+                    {"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"}
+                    for _, mpn in batch
+                ]
+
+            matched, unknown = _apply_ai_results(classified, batch, db)
+            total_matched += matched
+            total_unknown += unknown
+            total_processed += len(batch)
+
+            if total_processed % 10000 == 0:
+                db.commit()
+                logger.info(f"Batch results: {total_processed}/{total_mpns} applied — {total_matched} matched")
+
+        db.commit()
+
+    if all_complete:
+        logger.info(f"Batch AI backfill complete: {total_processed} processed, {total_matched} matched, {total_unknown} unknown")
+        # Clean up metadata
+        import os
+        os.remove(meta_path)
+        return {
+            "status": "complete",
+            "total_processed": total_processed,
+            "total_matched": total_matched,
+            "total_unknown": total_unknown,
+        }
+
+    return {
+        "status": "processing",
+        "total_processed": total_processed,
+        "total_matched": total_matched,
+        "total_unknown": total_unknown,
+        "message": "Some batches still processing. Run again later.",
+    }
 
 
 async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 10) -> dict:  # pragma: no cover

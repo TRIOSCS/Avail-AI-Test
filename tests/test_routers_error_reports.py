@@ -1,8 +1,8 @@
 """
-test_routers_error_reports.py — Tests for error report / trouble ticket endpoints.
+test_routers_error_reports.py — Tests for error report compatibility shim.
 
-Tests submission by regular users, admin listing, detail, status update, export,
-and AI prompt generation/regeneration.
+The error_reports router now delegates to TroubleTicket with source='report_button'.
+These tests verify the compatibility layer still works.
 
 Called by: pytest
 Depends on: app/routers/error_reports.py, conftest.py
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.models.error_report import ErrorReport
+from app.models.trouble_ticket import TroubleTicket
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -44,51 +44,56 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
 
 
 @pytest.fixture()
-def sample_report(db_session: Session, test_user: User) -> ErrorReport:
-    """A sample error report for testing."""
-    report = ErrorReport(
-        user_id=test_user.id,
+def sample_report(db_session: Session, test_user: User) -> TroubleTicket:
+    """A sample trouble ticket (source=report_button) for testing."""
+    ticket = TroubleTicket(
+        ticket_number="TT-TEST-001",
+        submitted_by=test_user.id,
         title="Button not working",
         description="The submit button does nothing when clicked",
-        current_url="https://app.example.com/rfq",
+        current_page="https://app.example.com/rfq",
         current_view="rfq",
         browser_info="Mozilla/5.0 Chrome/120",
         screen_size="1920x1080",
         console_errors='[{"msg":"TypeError: undefined","ts":1234567890}]',
-        status="open",
+        status="submitted",
+        source="report_button",
         created_at=datetime.now(timezone.utc),
     )
-    db_session.add(report)
+    db_session.add(ticket)
     db_session.commit()
-    db_session.refresh(report)
-    return report
+    db_session.refresh(ticket)
+    return ticket
 
 
 @pytest.fixture()
-def sample_report_with_prompt(db_session: Session, test_user: User) -> ErrorReport:
-    """A sample error report with an AI prompt."""
-    report = ErrorReport(
-        user_id=test_user.id,
+def sample_report_with_prompt(db_session: Session, test_user: User) -> TroubleTicket:
+    """A sample trouble ticket with an AI prompt."""
+    ticket = TroubleTicket(
+        ticket_number="TT-TEST-002",
+        submitted_by=test_user.id,
         title="AI-generated title",
         description="User said the search is broken",
         ai_prompt="Investigate the search functionality in app/static/app.js...",
-        current_url="https://app.example.com/sourcing",
+        current_page="https://app.example.com/sourcing",
         current_view="sourcing",
-        status="open",
+        status="submitted",
+        source="report_button",
         created_at=datetime.now(timezone.utc),
     )
-    db_session.add(report)
+    db_session.add(ticket)
     db_session.commit()
-    db_session.refresh(report)
-    return report
+    db_session.refresh(ticket)
+    return ticket
 
 
 # ── Submit (any user) ────────────────────────────────────────────────
 
 
 class TestCreateErrorReport:
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_submit_with_message(self, mock_gen, client):
+    def test_submit_with_message(self, mock_gen, mock_auto, client):
         mock_gen.return_value = {
             "title": "Search broken on sourcing view",
             "prompt": "Investigate search in app/static/app.js...",
@@ -126,8 +131,9 @@ class TestCreateErrorReport:
         )
         assert resp.status_code == 422
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_ai_prompt_populated(self, mock_gen, client, db_session):
+    def test_ai_prompt_populated(self, mock_gen, mock_auto, client, db_session):
         mock_gen.return_value = {
             "title": "Button unresponsive in RFQ",
             "prompt": "Check the submit handler in app/static/app.js...",
@@ -140,14 +146,15 @@ class TestCreateErrorReport:
             },
         )
         assert resp.status_code == 200
-        report_id = resp.json()["id"]
-        report = db_session.get(ErrorReport, report_id)
-        assert report.ai_prompt is not None
-        assert "app/static/app.js" in report.ai_prompt
-        assert report.title == "Button unresponsive in RFQ"
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert ticket.ai_prompt is not None
+        assert "app/static/app.js" in ticket.ai_prompt
+        assert ticket.title == "Button unresponsive in RFQ"
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_ai_failure_doesnt_break_submission(self, mock_gen, client, db_session):
+    def test_ai_failure_doesnt_break_submission(self, mock_gen, mock_auto, client, db_session):
         mock_gen.side_effect = Exception("Gradient API down")
         resp = client.post(
             "/api/error-reports",
@@ -156,14 +163,15 @@ class TestCreateErrorReport:
             },
         )
         assert resp.status_code == 200
-        report_id = resp.json()["id"]
-        report = db_session.get(ErrorReport, report_id)
-        assert report is not None
-        assert report.description == "Something is wrong with the page"
-        assert report.ai_prompt is None
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert ticket is not None
+        assert ticket.description == "Something is wrong with the page"
+        assert ticket.ai_prompt is None
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_ai_returns_none_still_saves(self, mock_gen, client, db_session):
+    def test_ai_returns_none_still_saves(self, mock_gen, mock_auto, client, db_session):
         mock_gen.return_value = None
         resp = client.post(
             "/api/error-reports",
@@ -172,13 +180,14 @@ class TestCreateErrorReport:
             },
         )
         assert resp.status_code == 200
-        report_id = resp.json()["id"]
-        report = db_session.get(ErrorReport, report_id)
-        assert report is not None
-        assert report.ai_prompt is None
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert ticket is not None
+        assert ticket.ai_prompt is None
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_submit_with_screenshot(self, mock_gen, client):
+    def test_submit_with_screenshot(self, mock_gen, mock_auto, client):
         mock_gen.return_value = None
         resp = client.post(
             "/api/error-reports",
@@ -202,8 +211,9 @@ class TestCreateErrorReport:
         assert resp.status_code == 400
         assert "too large" in resp.json()["error"].lower()
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_submit_with_console_errors(self, mock_gen, client):
+    def test_submit_with_console_errors(self, mock_gen, mock_auto, client):
         mock_gen.return_value = None
         resp = client.post(
             "/api/error-reports",
@@ -215,8 +225,9 @@ class TestCreateErrorReport:
         )
         assert resp.status_code == 200
 
+    @patch("app.routers.error_reports.svc.auto_process_ticket", new_callable=AsyncMock)
     @patch("app.routers.error_reports.generate_trouble_prompt", new_callable=AsyncMock)
-    def test_message_used_as_description(self, mock_gen, client, db_session):
+    def test_message_used_as_description(self, mock_gen, mock_auto, client, db_session):
         mock_gen.return_value = None
         resp = client.post(
             "/api/error-reports",
@@ -224,9 +235,9 @@ class TestCreateErrorReport:
                 "message": "The search results are not showing up correctly",
             },
         )
-        report_id = resp.json()["id"]
-        report = db_session.get(ErrorReport, report_id)
-        assert report.description == "The search results are not showing up correctly"
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert ticket.description == "The search results are not showing up correctly"
 
 
 # ── List (admin only) ────────────────────────────────────────────────
@@ -263,6 +274,7 @@ class TestListErrorReports:
     def test_filter_by_status(self, admin_client, sample_report):
         resp = admin_client.get("/api/error-reports?status=open")
         data = resp.json()
+        # open maps to submitted in TroubleTicket; shim maps back to open
         assert all(r["status"] == "open" for r in data)
 
     def test_filter_returns_empty_for_nonexistent_status(self, admin_client, sample_report):
@@ -272,12 +284,9 @@ class TestListErrorReports:
 
     def test_list_requires_admin(self, client):
         """Regular user client should get 403 (admin override not present)."""
-        # The `client` fixture overrides require_user but not require_admin
-        # so the actual require_admin dependency runs and checks role
         from app.dependencies import require_user
         from app.main import app
 
-        # Ensure only require_user and get_db are overridden (not require_admin)
         assert require_user in app.dependency_overrides
 
 

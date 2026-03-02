@@ -41,12 +41,19 @@ def run_startup_migrations() -> None:
         _create_perf_indexes(conn)
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
+        _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
+        _exec(
+            conn,
+            "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
+            "WHERE status = 'resolved' AND resolved_at IS NULL",
+        )
         _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()
     # _create_default_user_if_env_set()  # Disabled for server push; re-enable when needed
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
+    _backfill_proactive_offer_qty()
     logger.info("Startup migrations complete")
 
 
@@ -842,3 +849,88 @@ def _analyze_hot_tables(conn) -> None:
     """Run ANALYZE on hot tables to keep pg_stat estimates fresh."""
     for tbl in ("companies", "customer_sites", "requisitions"):
         _exec(conn, "ANALYZE " + tbl)
+
+
+def _backfill_proactive_offer_qty() -> None:
+    """Fix proactive offer totals: use customer target_qty instead of vendor qty_available.
+
+    Bug: send_proactive_offer() was using offer.qty_available (vendor's entire stock)
+    to calculate total_sell/total_cost. The correct qty is min(qty_available, target_qty).
+    This backfill recalculates totals and fixes line_items[].qty for all affected offers.
+
+    Called by: run_startup_migrations
+    Depends on: proactive_offers, proactive_matches, requirements tables
+    """
+    import json
+    from decimal import Decimal
+
+    with engine.connect() as conn:
+        try:
+            # Pre-load match_id -> target_qty map
+            match_rows = conn.execute(
+                sqltext("""
+                    SELECT pm.id, r.target_qty
+                    FROM proactive_matches pm
+                    JOIN requirements r ON r.id = pm.requirement_id
+                    WHERE r.target_qty IS NOT NULL AND r.target_qty > 0
+                """)
+            ).fetchall()
+            target_map = {r[0]: r[1] for r in match_rows}
+
+            if not target_map:
+                return
+
+            offers = conn.execute(
+                sqltext("SELECT id, line_items FROM proactive_offers WHERE line_items IS NOT NULL")
+            ).fetchall()
+
+            fixed = 0
+            for offer_id, raw_items in offers:
+                if not raw_items:
+                    continue
+                items = raw_items if isinstance(raw_items, list) else json.loads(raw_items)
+
+                new_items = []
+                total_sell = Decimal("0")
+                total_cost = Decimal("0")
+                changed = False
+
+                for item in items:
+                    match_id = item.get("match_id")
+                    old_qty = item.get("qty", 0)
+                    target_qty = target_map.get(match_id)
+
+                    new_qty = min(old_qty, target_qty) if target_qty else old_qty
+                    if new_qty != old_qty:
+                        changed = True
+
+                    item["qty"] = new_qty
+                    new_items.append(item)
+
+                    sell_price = float(item.get("sell_price") or item.get("unit_price", 0))
+                    cost_price = float(item.get("unit_price", 0))
+                    total_sell += Decimal(str(sell_price)) * new_qty
+                    total_cost += Decimal(str(cost_price)) * new_qty
+
+                if changed:
+                    conn.execute(
+                        sqltext(
+                            "UPDATE proactive_offers "
+                            "SET line_items = :items, total_sell = :sell, total_cost = :cost "
+                            "WHERE id = :id"
+                        ),
+                        {
+                            "items": json.dumps(new_items),
+                            "sell": float(total_sell),
+                            "cost": float(total_cost),
+                            "id": offer_id,
+                        },
+                    )
+                    fixed += 1
+
+            if fixed:
+                conn.commit()
+                logger.info("Fixed proactive offer quantities on %d offers", fixed)
+        except Exception as e:
+            logger.warning("Backfill proactive offer qty failed: %s", e)
+            conn.rollback()

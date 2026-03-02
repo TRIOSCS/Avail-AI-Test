@@ -1,9 +1,13 @@
-"""Trouble ticket model — user-submitted bug reports for the self-heal pipeline.
+"""Trouble ticket model — unified bug reports + self-heal pipeline.
 
 Tracks the full lifecycle: submitted -> diagnosed -> fix_proposed -> fix_in_progress ->
 fix_applied -> awaiting_verification -> resolved (or escalated/fix_reverted).
 
-Called by: routers/trouble_tickets.py, services/trouble_ticket_service.py
+Supports two sources:
+- report_button: quick bug report via red chat bubble (formerly ErrorReport)
+- ticket_form: structured ticket via sidebar Tickets view
+
+Called by: routers/trouble_tickets.py, routers/error_reports.py, services/trouble_ticket_service.py
 Depends on: models/base.py, models/auth.py (User FK)
 """
 
@@ -32,6 +36,7 @@ class TroubleTicket(Base):
         Index("ix_trouble_tickets_risk_tier", "risk_tier"),
         Index("ix_trouble_tickets_submitted_by", "submitted_by"),
         Index("ix_trouble_tickets_created_at", "created_at"),
+        Index("ix_trouble_tickets_source", "source"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -61,5 +66,19 @@ class TroubleTicket(Base):
     diagnosed_at = Column(DateTime)
     resolved_at = Column(DateTime)
 
+    # Columns from ErrorReport (unified in migration 043)
+    screenshot_b64 = Column(Text)
+    browser_info = Column(String(512))
+    screen_size = Column(String(50))
+    page_state = Column(Text)
+    console_errors = Column(Text)
+    current_view = Column(String(100))
+    ai_prompt = Column(Text)
+    admin_notes = Column(Text)
+    resolved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    source = Column(String(20))  # 'report_button' | 'ticket_form'
+    legacy_error_report_id = Column(Integer)  # traceability to old error_reports
+
     submitter = relationship("User", foreign_keys=[submitted_by])
+    resolved_by = relationship("User", foreign_keys=[resolved_by_id])
     parent_ticket = relationship("TroubleTicket", remote_side=[id], foreign_keys=[parent_ticket_id])

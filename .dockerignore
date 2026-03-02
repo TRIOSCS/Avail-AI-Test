@@ -28,6 +28,9 @@ Dockerfile
 .env
 .env.example
 
+# Vite build output (builder stage produces its own)
+app/static/dist/
+
 # Misc
 __pycache__/
 *.pyc

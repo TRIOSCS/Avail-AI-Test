@@ -744,6 +744,30 @@ async def prospecting_assign_owner(
         if not target:
             raise HTTPException(404, "User not found")
 
+    # Enforce site cap unless admin explicitly overrides
+    cap_warning = None
+    if new_owner_id is not None:
+        from sqlalchemy import func
+
+        current_count = (
+            db.query(func.count(CustomerSite.id))
+            .filter(
+                CustomerSite.owner_id == new_owner_id,
+                CustomerSite.is_active.is_(True),
+            )
+            .scalar()
+            or 0
+        )
+        force = body.get("force", False)
+        if current_count >= SITE_CAP_PER_USER and not force:
+            raise HTTPException(
+                409,
+                f"User already owns {current_count} sites (cap is {SITE_CAP_PER_USER}). "
+                "Pass force=true to override.",
+            )
+        if current_count >= SITE_CAP_PER_USER:
+            cap_warning = f"User now has {current_count + 1} sites (cap is {SITE_CAP_PER_USER})"
+
     site.owner_id = new_owner_id
     if new_owner_id is None:
         site.ownership_cleared_at = datetime.now(timezone.utc)
@@ -751,11 +775,14 @@ async def prospecting_assign_owner(
         site.ownership_cleared_at = None
     db.commit()
 
-    return {
+    result = {
         "ok": True,
         "site_id": site_id,
         "owner_id": new_owner_id,
     }
+    if cap_warning:
+        result["warning"] = cap_warning
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════
