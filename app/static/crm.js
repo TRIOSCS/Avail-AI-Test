@@ -737,6 +737,7 @@ async function switchCustDrawerTab(tab, btn) {
     else if (tab === 'sites') _renderCustDrawerSites(_selectedCustId);
     else if (tab === 'activity') _renderCustDrawerActivity(_selectedCustId);
     else if (tab === 'pipeline') _renderCustDrawerPipeline(_selectedCustId);
+    else if (tab === 'apollo') _renderCustDrawerApollo(_selectedCustId);
 }
 
 async function _ensureCompanyDetail(companyId) {
@@ -8260,6 +8261,165 @@ async function testSourceNow(sourceId, btn) {
     }
 }
 
+// ── Apollo Integration (company drawer tab) ──────────────────────────
+
+let _apolloDiscoverResults = [];
+
+async function _renderCustDrawerApollo(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
+
+    if (!c.domain) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No domain set for this company — add a domain in the Overview tab to use Apollo discovery.</p></div>';
+        return;
+    }
+
+    _apolloDiscoverResults = [];
+
+    let html = `<div class="drawer-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="drawer-section-title" style="margin:0">Apollo Contact Discovery</div>
+            <span id="apolloCreditsBadge" style="font-size:11px;color:var(--muted)">Credits: --</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+            <button class="btn btn-primary btn-sm" onclick="apolloDiscover()">Find Procurement Contacts</button>
+        </div>
+        <div id="apolloDiscoverResults"></div>
+        <div id="apolloEnrichResults"></div>
+    </div>`;
+    body.innerHTML = html;
+
+    // Load credits in background
+    _apolloLoadCredits();
+}
+
+async function _apolloLoadCredits() {
+    try {
+        const data = await apiFetch('/api/apollo/credits');
+        const badge = document.getElementById('apolloCreditsBadge');
+        if (badge) badge.textContent = `Lead credits: ${data.lead_credits_remaining ?? '--'}`;
+    } catch (_) { /* ignore */ }
+}
+
+async function apolloDiscover() {
+    const c = crmCustomers.find(x => x.id === _selectedCustId);
+    if (!c || !c.domain) return;
+
+    const container = document.getElementById('apolloDiscoverResults');
+    if (!container) return;
+    container.innerHTML = '<p class="crm-empty">Searching Apollo...</p>';
+
+    try {
+        const data = await apiFetch('/api/apollo/discover/' + encodeURIComponent(c.domain));
+        _apolloDiscoverResults = data.contacts || [];
+
+        if (!_apolloDiscoverResults.length) {
+            container.innerHTML = '<p class="crm-empty">No procurement contacts found at ' + esc(c.domain) + '</p>';
+            return;
+        }
+
+        let html = `<div style="margin-bottom:8px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:12px;color:var(--muted)">${data.total_found} contact${data.total_found !== 1 ? 's' : ''} found</span>
+            <div style="display:flex;gap:8px">
+                <label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer">
+                    <input type="checkbox" onchange="apolloToggleAll(this)" checked> Select all
+                </label>
+                <button class="btn btn-sm btn-primary" onclick="apolloEnrichSelected()">Enrich Selected</button>
+            </div>
+        </div>`;
+        html += '<table class="crm-table" style="font-size:12px"><thead><tr>';
+        html += '<th style="width:30px"></th><th>Name</th><th>Title</th><th>Seniority</th><th>Email (masked)</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const ct of _apolloDiscoverResults) {
+            html += `<tr>
+                <td><input type="checkbox" class="apollo-cb" data-id="${esc(ct.apollo_id || '')}" checked></td>
+                <td>${esc(ct.full_name || '')}</td>
+                <td>${esc(ct.title || '')}</td>
+                <td>${esc(ct.seniority || '')}</td>
+                <td style="color:var(--muted)">${esc(ct.email_masked || 'N/A')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+
+    } catch (e) {
+        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">Apollo search failed: ' + esc(String(e.message || e)) + '</p>';
+    }
+}
+
+function apolloToggleAll(master) {
+    const checked = master.checked;
+    document.querySelectorAll('.apollo-cb').forEach(cb => { cb.checked = checked; });
+}
+
+async function apolloEnrichSelected() {
+    const checked = Array.from(document.querySelectorAll('.apollo-cb:checked'));
+    const ids = checked.map(cb => cb.dataset.id).filter(Boolean);
+    if (!ids.length) { alert('Select at least one contact to enrich.'); return; }
+
+    const c = crmCustomers.find(x => x.id === _selectedCustId);
+    if (!c) return;
+
+    // Find vendor card by domain
+    let vendorCardId = null;
+    try {
+        const vendors = await apiFetch('/api/vendor-cards?domain=' + encodeURIComponent(c.domain));
+        if (vendors && vendors.length) vendorCardId = vendors[0].id;
+    } catch (_) { /* no vendor card lookup available */ }
+
+    if (!vendorCardId) {
+        alert('No vendor card found for domain ' + (c.domain || '') + '. Create a vendor card first.');
+        return;
+    }
+
+    if (!confirm(`Enrich ${ids.length} contact${ids.length !== 1 ? 's' : ''}? This will use ${ids.length} lead credit${ids.length !== 1 ? 's' : ''}.`)) return;
+
+    const container = document.getElementById('apolloEnrichResults');
+    if (!container) return;
+    container.style.display = '';
+    container.innerHTML = '<p class="crm-empty">Enriching contacts...</p>';
+
+    try {
+        const data = await apiFetch('/api/apollo/enrich', {
+            method: 'POST',
+            body: { apollo_ids: ids, vendor_card_id: vendorCardId },
+        });
+
+        let html = `<div style="margin-top:12px;padding:12px;background:var(--surface);border-radius:8px">
+            <div style="font-weight:600;margin-bottom:8px">Enrichment Results</div>
+            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+                ${data.enriched} enriched &middot; ${data.verified} verified &middot; ${data.credits_used} credits used &middot; ${data.credits_remaining} remaining
+            </div>`;
+
+        if (data.contacts && data.contacts.length) {
+            html += '<table class="crm-table" style="font-size:12px"><thead><tr>';
+            html += '<th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>Verified</th>';
+            html += '</tr></thead><tbody>';
+            for (const ct of data.contacts) {
+                html += `<tr>
+                    <td>${esc(ct.full_name || '')}</td>
+                    <td>${esc(ct.title || '')}</td>
+                    <td>${esc(ct.email || 'N/A')}</td>
+                    <td>${esc(ct.phone || '')}</td>
+                    <td>${ct.is_verified ? '<span style="color:var(--green)">Yes</span>' : 'No'}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+        container.innerHTML = html;
+
+        // Refresh credits badge
+        _apolloLoadCredits();
+
+    } catch (e) {
+        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">Enrichment failed: ' + esc(String(e.message || e)) + '</p>';
+    }
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     _refreshCustPipeline,
@@ -8344,4 +8504,6 @@ Object.assign(window, {
     // API Health Dashboard
     showApiHealth, loadApiHealthDashboard, refreshApiHealthDashboard,
     renderApiHealthDashboard, testSourceNow,
+    // Apollo integration
+    apolloDiscover, apolloEnrichSelected, apolloToggleAll,
 });

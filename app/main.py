@@ -931,6 +931,11 @@ from .routers.prospect_suggested import router as prospect_suggested_router
 
 app.include_router(prospect_pool_router)
 app.include_router(prospect_suggested_router)
+
+from .routers.apollo_sync import router as apollo_sync_router
+
+app.include_router(apollo_sync_router)
+
 from .routers.nc_admin import router as nc_admin_router
 
 app.include_router(nc_admin_router)
