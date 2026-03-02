@@ -1150,7 +1150,7 @@ async def get_saved_sightings(
     # Batch-fetch all sightings for this requisition's requirements in one query
     req_ids = [r.id for r in req.requirements]
     all_sightings = (
-        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.score.desc()).all())
+        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.created_at.desc()).all())
         if req_ids
         else []
     )
@@ -1261,7 +1261,7 @@ async def get_saved_sightings(
         sighting_dicts = _deduplicate_sightings(sighting_dicts)
         if not sighting_dicts and not hist_offers:
             continue
-        sighting_dicts.sort(key=lambda x: x.get("score", 0), reverse=True)
+        sighting_dicts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         results[str(r.id)] = {
             "label": label,
             "sightings": sighting_dicts,

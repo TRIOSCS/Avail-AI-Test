@@ -54,7 +54,7 @@ class TestBuyerBrief:
         db.flush()
         return c
 
-    # 1. Empty DB returns zeros
+    # 1. Empty DB returns zeros (incl team_kpis)
     def test_empty_db(self, client):
         resp = client.get("/api/dashboard/buyer-brief")
         assert resp.status_code == 200
@@ -63,6 +63,12 @@ class TestBuyerBrief:
         assert data["kpis"]["offer_quote_rate"] == 0
         assert data["kpis"]["quote_win_rate"] == 0
         assert data["kpis"]["buyplan_po_rate"] == 0
+        # team_kpis present with all 4 rate fields
+        tk = data["team_kpis"]
+        assert tk["sourcing_ratio"] == 0
+        assert tk["offer_quote_rate"] == 0
+        assert tk["quote_win_rate"] == 0
+        assert tk["buyplan_po_rate"] == 0
         assert data["new_requirements"] == []
         assert data["offers_to_review"] == []
         assert data["reqs_at_risk"] == []
@@ -272,25 +278,23 @@ class TestBuyerBrief:
         data = resp.json()
         assert data["quotes_due_soon"] == []
 
-    # 12. Team scope shows all users
-    def test_team_scope(self, client, db_session, test_user, sales_user):
-        self._make_req(db_session, test_user, name="BUYER-REQ")
+    # 12. Personal KPIs scoped to user; team_kpis reflect all users
+    def test_team_kpis_include_all_users(self, client, db_session, test_user, sales_user):
+        # Both users create reqs; only test_user sources one
+        r1 = self._make_req(db_session, test_user, name="BUYER-REQ")
+        self._make_offer(db_session, r1, test_user)
         self._make_req(db_session, sales_user, name="SALES-REQ")
         db_session.commit()
 
-        # My scope: only buyer's
         resp = client.get("/api/dashboard/buyer-brief?scope=my")
         data = resp.json()
-        names = [r["name"] for r in data["new_requirements"]]
-        assert "BUYER-REQ" in names
-        assert "SALES-REQ" not in names
 
-        # Team scope: both
-        resp = client.get("/api/dashboard/buyer-brief?scope=team")
-        data = resp.json()
-        names = [r["name"] for r in data["new_requirements"]]
-        assert "BUYER-REQ" in names
-        assert "SALES-REQ" in names
+        # Personal KPIs: 1 req sourced out of 1 = 100%
+        assert data["kpis"]["sourcing_ratio"] == 100
+        assert data["kpis"]["total_reqs"] == 1
+
+        # Team KPIs: 1 sourced out of 2 total = 50%
+        assert data["team_kpis"]["sourcing_ratio"] == 50
 
     # 13. Pipeline summary counts
     def test_pipeline_summary(self, client, db_session, test_user):

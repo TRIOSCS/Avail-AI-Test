@@ -1383,9 +1383,9 @@ function showContacts() {
 }
 
 let _dashPeriod = '30d';
-let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
+let _dashScope = 'my';           // always 'my' — team averages shown inline
 let _dashUserId = null;          // specific user to view in CC — null = current user
-let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
+let _buyerScope = 'my';          // always 'my' — team averages shown inline
 let _dashPerspective = null;     // 'sales' or 'purchasing' — null = auto from role
 
 function setDashPeriod(period, btn) {
@@ -1395,28 +1395,14 @@ function setDashPeriod(period, btn) {
     loadDashboard();
 }
 
-function setDashScope(scope, btn) {
-    _dashScope = scope;
-    _buyerScope = scope;  // keep legacy in sync
-    document.querySelectorAll('#dashScopePills .chip').forEach(b => b.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    loadDashboard();
-}
-
-function setBuyerScope(scope, btn) {
-    // Legacy — redirect to new unified scope
-    setDashScope(scope, null);
-}
+function setDashScope() {}   // no-op — kept for backward compat
+function setBuyerScope() {}  // no-op — kept for backward compat
 
 function setDashUserFilter(val) {
     if (val === '' || val === String(window.userId)) {
         _dashUserId = null;
-        _dashScope = 'my';
-        _buyerScope = 'my';
     } else {
         _dashUserId = parseInt(val);
-        _dashScope = 'team';
-        _buyerScope = 'team';
     }
     loadDashboard();
 }
@@ -1606,6 +1592,8 @@ function _renderTeamLeaderboard(entries, role, month) {
         const rankClass = e.rank === 1 ? 'lb-gold' : e.rank === 2 ? 'lb-silver' : e.rank === 3 ? 'lb-bronze' : '';
         const bonusTotal = (e.avail_bonus || 0) + (e.mult_bonus || 0);
         const bonusTag = bonusTotal > 0 ? `<span class="lb-bonus-badge">+$${bonusTotal}</span>` : '';
+        const prizeMap = {1: 500, 2: 250, 3: 100};
+        const prizeTag = prizeMap[e.rank] ? `<span class="lb-prize-badge ${rankClass}">$${prizeMap[e.rank]} Prize</span>` : '';
         const qualTag = (!e.avail_qualified && !e.mult_qualified) ? '<span class="lb-unqualified">Not Qualified</span>' : '';
         const meClass = isMe ? ' lb-me' : '';
 
@@ -1629,7 +1617,7 @@ function _renderTeamLeaderboard(entries, role, month) {
                 <div class="lb-name-col">
                     <span class="lb-name">${esc(e.user_name)}${traderTag}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
                     ${blurbHtml}
-                    <div class="lb-tags">${qualTag}${bonusTag}</div>
+                    <div class="lb-tags">${prizeTag}${qualTag}${bonusTag}</div>
                 </div>
                 <div class="lb-scores">
                     <div class="lb-score-block">
@@ -2041,6 +2029,17 @@ async function loadDashboard() {
         const lostLastMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
         const lastWinRate = (wonLastMonth + lostLastMonth) > 0 ? Math.round(wonLastMonth / (wonLastMonth + lostLastMonth) * 100) : 0;
 
+        // ── Team averages (from unfiltered lists) ──
+        const teamSize = (window._userFilterList || []).length || 1;
+        const teamOpenReqs = reqList.filter(r => ['open','active','sourcing'].includes(r.status)).length;
+        const teamQuotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
+        const teamWon = reqList.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
+        const teamLost = reqList.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
+        const teamWinRate = (teamWon + teamLost) > 0 ? Math.round(teamWon / (teamWon + teamLost) * 100) : 0;
+        const avgOpenReqs = Math.round(teamOpenReqs / teamSize * 10) / 10;
+        const avgQuotesOut = Math.round(teamQuotesOut / teamSize * 10) / 10;
+        const avgWon = Math.round(teamWon / teamSize * 10) / 10;
+
         let html = '';
 
         // ── Morning Brief ──
@@ -2054,12 +2053,12 @@ async function loadDashboard() {
             }
         }
 
-        // ── Stat Row ──
+        // ── Stat Row — personal + team averages inline ──
         html += `<div class="cc-stat-row">
-            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div></div>
-            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div><div class="cc-stat-sub">Team avg: ${avgOpenReqs}</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div><div class="cc-stat-sub">Team avg: ${avgQuotesOut}</div></div>
+            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div><div class="cc-stat-sub">Team avg: ${avgWon}</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">Team avg: ${teamWinRate}%</div></div>
         </div>`;
 
         // ── Detail Cards Grid ──
@@ -2201,7 +2200,7 @@ async function loadBuyerDashboard(el) {
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const [brief, hotOffers, teamLb] = await Promise.all([
-            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
+            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=my`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
             apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
         ]);
@@ -2212,6 +2211,7 @@ async function loadBuyerDashboard(el) {
         }
 
         const kpis = brief.kpis || {};
+        const tk = brief.team_kpis || {};
         const pipeline = brief.pipeline || {};
         const reviewOffers = brief.offers_to_review || [];
         const reqsAtRisk = brief.reqs_at_risk || [];
@@ -2223,12 +2223,12 @@ async function loadBuyerDashboard(el) {
 
         let html = '';
 
-        // ── Stat Row (matches sales layout) ──
+        // ── Stat Row (matches sales layout) — personal + team averages inline ──
         html += '<div class="cc-stat-row cc-stat-row-buyer">'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer&rarr;Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">BP&rarr;PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs &middot; Team ' + (tk.sourcing_ratio || 0) + '%</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer&rarr;Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">BP&rarr;PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
             + '</div>';
 
         // ── Pipeline Bar ──
@@ -6042,8 +6042,7 @@ function renderReqList() {
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const v = _currentMainView;
-    const _healthWarnHtml = `<button class="subbar-icon-btn subbar-health-warn" id="subbarHealthWarn" style="display:${window._apiHealthErrors.length?'inline-flex':'none'}" onmouseenter="showHealthTooltip(event)" onmouseleave="hideHealthTooltip()" title="API errors detected"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>`;
-    const _thIcons = `<th style="width:140px;text-align:right">${_healthWarnHtml}<select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select><button class="subbar-icon-btn subbar-trouble" onclick="openTroubleChat()" title="Trouble Ticket"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button></th>`;
+    const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select></th>`;
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
@@ -7739,7 +7738,25 @@ function renderSources() {
                 ratingHtml = '<span class="sc-rating sc-rating-new" title="New vendor">\u2606</span>';
             }
 
-            const octopartLink = s.octopart_url ? `<a href="${escAttr(s.octopart_url)}" target="_blank" class="btn-link">🔗 Octopart</a>` : '';
+            // Build listing link: use click_url if available, else construct from source + MPN
+            const _srcListingUrl = (() => {
+                if (s.click_url) return s.click_url;
+                if (s.octopart_url) return s.octopart_url;
+                const pn = encodeURIComponent(s.mpn_matched || '');
+                if (!pn) return '';
+                const st = (s.source_type || '').toLowerCase();
+                if (st === 'digikey') return `https://www.digikey.com/en/products/result?keywords=${pn}`;
+                if (st === 'mouser') return `https://www.mouser.com/Search/Refine?Keyword=${pn}`;
+                if (st === 'nexar' || st === 'octopart') return `https://octopart.com/search?q=${pn}`;
+                if (st === 'oemsecrets') return `https://www.oemsecrets.com/compare/${pn}`;
+                if (st === 'element14') return `https://www.newark.com/search?st=${pn}`;
+                if (st === 'brokerbin') return `https://www.brokerbin.com/search?q=${pn}`;
+                if (st === 'sourcengine') return `https://www.sourcengine.com/search/${pn}`;
+                if (st === 'netcomponents') return `https://www.netcomponents.com/partsearch/${pn}`;
+                if (st === 'ebay') return `https://www.ebay.com/sch/i.html?_nkw=${pn}`;
+                return `https://octopart.com/search?q=${pn}`;
+            })();
+            const listingLink = _srcListingUrl ? `<a href="${escAttr(_srcListingUrl)}" target="_blank" class="btn-link" title="Search on ${esc(s.source_type || 'web')}">🔗 Listing</a>` : '';
             const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';
             const phoneLink = s.vendor_phone ? `<a class="btn-call" href="tel:${ph}" onclick="logCall(event,'${vn}','${ph}','${mpn}')">📞 ${esc(s.vendor_phone)}</a>` : '';
             const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
@@ -7780,7 +7797,7 @@ function renderSources() {
                     <div class="sc-badges">${visibleBadges}${overflowBadge}${s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== (group.label || '').trim().toUpperCase() ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.mpn_matched)}</span>` : ''}${s.manufacturer ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.manufacturer)}</span>` : ''}</div>
                 </div>
                 <div class="sc-actions-right">
-                    ${phoneLink}${octopartLink}${vendorLink}${unavailBtn}
+                    ${phoneLink}${listingLink}${vendorLink}${unavailBtn}
                 </div>
             </div>`;
         }

@@ -654,7 +654,8 @@ def buyer_brief(
 ):
     """Buyer Command Center data: KPIs, priority tiles, follow-up tiles.
 
-    scope='my' filters to current user's work; scope='team' shows all.
+    Always returns personal KPIs + team_kpis (team-wide rates).
+    scope param kept for backward compat but primary KPIs are always user-scoped.
     """
     from ..models.offers import Offer
     from ..models.quotes import BuyPlan, Quote
@@ -664,86 +665,120 @@ def buyer_brief(
     cutoff = now - timedelta(days=days)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # ── Scope filter helper ──
-    def _user_filter(col):
-        """Return filter clause: restrict to user if scope='my'."""
-        if scope == "my":
-            return col == user.id
-        return col.isnot(None)  # team: all non-null
-
-    # ── KPI 1: Sourcing Ratio (reqs with ≥1 offer / total reqs this month) ──
-    total_reqs_q = (
-        db.query(func.count(Requisition.id))
-        .filter(Requisition.created_at >= month_start, _user_filter(Requisition.created_by))
-        .scalar()
-    ) or 0
-
-    sourced_reqs_q = 0
-    if total_reqs_q:
-        sourced_reqs_q = (
-            db.query(func.count(Requisition.id.distinct()))
-            .join(Offer, Offer.requisition_id == Requisition.id)
-            .filter(
-                Requisition.created_at >= month_start,
-                _user_filter(Requisition.created_by),
-            )
+    # ── KPI calculation helper (reused for personal + team) ──
+    def _compute_kpis(filter_fn):
+        """Compute 4 buyer KPIs using the given column filter function."""
+        total_reqs = (
+            db.query(func.count(Requisition.id))
+            .filter(Requisition.created_at >= month_start, filter_fn(Requisition.created_by))
             .scalar()
         ) or 0
 
-    sourcing_ratio = round(sourced_reqs_q / total_reqs_q * 100) if total_reqs_q else 0
-
-    # ── KPI 2: Offer→Quote Rate (offers converted / total offers) — single query ──
-    offer_stats = (
-        db.query(
-            func.count(Offer.id).label("total"),
-            func.count(
-                case(
-                    (Offer.attribution_status == "converted", Offer.id),
+        sourced_reqs = 0
+        if total_reqs:
+            sourced_reqs = (
+                db.query(func.count(Requisition.id.distinct()))
+                .join(Offer, Offer.requisition_id == Requisition.id)
+                .filter(
+                    Requisition.created_at >= month_start,
+                    filter_fn(Requisition.created_by),
                 )
-            ).label("quoted"),
-        )
-        .filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id))
-        .first()
-    )
-    total_offers_month = offer_stats.total or 0
-    quoted_offers_month = offer_stats.quoted or 0
-    offer_quote_rate = round(quoted_offers_month / total_offers_month * 100) if total_offers_month else 0
+                .scalar()
+            ) or 0
 
-    # ── KPI 3: Quote→Win Rate — single query ──
-    quote_stats = (
-        db.query(
-            func.count(case((Quote.result == "won", Quote.id))).label("won"),
-            func.count(case((Quote.result == "lost", Quote.id))).label("lost"),
-        )
-        .filter(Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
-        .first()
-    )
-    won_quotes = quote_stats.won or 0
-    lost_quotes = quote_stats.lost or 0
-    quote_win_rate = round(won_quotes / (won_quotes + lost_quotes) * 100) if (won_quotes + lost_quotes) else 0
+        s_ratio = round(sourced_reqs / total_reqs * 100) if total_reqs else 0
 
-    # ── KPI 4: Buy Plan→PO Rate — single query ──
-    bp_stats = (
-        db.query(
-            func.count(BuyPlan.id).label("total"),
-            func.count(
-                case(
-                    (BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")), BuyPlan.id),
-                )
-            ).label("approved"),
-            func.count(
-                case(
-                    (BuyPlan.status.in_(("po_confirmed", "complete")), BuyPlan.id),
-                )
-            ).label("confirmed"),
+        o_stats = (
+            db.query(
+                func.count(Offer.id).label("total"),
+                func.count(
+                    case((Offer.attribution_status == "converted", Offer.id))
+                ).label("quoted"),
+            )
+            .filter(Offer.created_at >= month_start, filter_fn(Offer.entered_by_id))
+            .first()
         )
-        .filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id))
-        .first()
-    )
-    total_bps = bp_stats.total or 0
-    approved_bps = bp_stats.approved or 0
-    po_confirmed_bps = bp_stats.confirmed or 0
-    buyplan_po_rate = round(po_confirmed_bps / total_bps * 100) if total_bps else 0
+        total_offers = o_stats.total or 0
+        quoted_offers = o_stats.quoted or 0
+        oq_rate = round(quoted_offers / total_offers * 100) if total_offers else 0
+
+        q_stats = (
+            db.query(
+                func.count(case((Quote.result == "won", Quote.id))).label("won"),
+                func.count(case((Quote.result == "lost", Quote.id))).label("lost"),
+            )
+            .filter(Quote.result_at >= month_start, filter_fn(Quote.created_by_id))
+            .first()
+        )
+        won = q_stats.won or 0
+        lost = q_stats.lost or 0
+        qw_rate = round(won / (won + lost) * 100) if (won + lost) else 0
+
+        bp = (
+            db.query(
+                func.count(BuyPlan.id).label("total"),
+                func.count(
+                    case(
+                        (BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")), BuyPlan.id),
+                    )
+                ).label("approved"),
+                func.count(
+                    case(
+                        (BuyPlan.status.in_(("po_confirmed", "complete")), BuyPlan.id),
+                    )
+                ).label("confirmed"),
+            )
+            .filter(BuyPlan.submitted_at >= month_start, filter_fn(BuyPlan.submitted_by_id))
+            .first()
+        )
+        total_bp = bp.total or 0
+        confirmed_bp = bp.confirmed or 0
+        bp_rate = round(confirmed_bp / total_bp * 100) if total_bp else 0
+
+        return {
+            "sourcing_ratio": s_ratio,
+            "total_reqs": total_reqs,
+            "sourced_reqs": sourced_reqs,
+            "offer_quote_rate": oq_rate,
+            "total_offers": total_offers,
+            "quoted_offers": quoted_offers,
+            "quote_win_rate": qw_rate,
+            "won": won,
+            "lost": lost,
+            "buyplan_po_rate": bp_rate,
+            "total_buyplans": total_bp,
+            "confirmed_pos": confirmed_bp,
+        }
+
+    # Personal KPIs (always user-scoped)
+    personal = _compute_kpis(lambda col: col == user.id)
+    sourcing_ratio = personal["sourcing_ratio"]
+    total_reqs_q = personal["total_reqs"]
+    sourced_reqs_q = personal["sourced_reqs"]
+    offer_quote_rate = personal["offer_quote_rate"]
+    total_offers_month = personal["total_offers"]
+    quoted_offers_month = personal["quoted_offers"]
+    quote_win_rate = personal["quote_win_rate"]
+    won_quotes = personal["won"]
+    lost_quotes = personal["lost"]
+    buyplan_po_rate = personal["buyplan_po_rate"]
+    total_bps = personal["total_buyplans"]
+    approved_bps = 0  # not used downstream separately
+    po_confirmed_bps = personal["confirmed_pos"]
+
+    # Team-wide KPIs (all users)
+    team = _compute_kpis(lambda col: col.isnot(None))
+    team_kpis = {
+        "sourcing_ratio": team["sourcing_ratio"],
+        "offer_quote_rate": team["offer_quote_rate"],
+        "quote_win_rate": team["quote_win_rate"],
+        "buyplan_po_rate": team["buyplan_po_rate"],
+    }
+
+    # ── Scope filter for tiles (always user-scoped for primary view) ──
+    def _user_filter(col):
+        """Restrict to current user for tile data."""
+        return col == user.id
 
     # ── Tile 1: New Requirements (active reqs in window, check for offers) ──
     new_reqs_q = (
@@ -1233,20 +1268,8 @@ def buyer_brief(
     ]
 
     return {
-        "kpis": {
-            "sourcing_ratio": sourcing_ratio,
-            "total_reqs": total_reqs_q,
-            "sourced_reqs": sourced_reqs_q,
-            "offer_quote_rate": offer_quote_rate,
-            "total_offers": total_offers_month,
-            "quoted_offers": quoted_offers_month,
-            "quote_win_rate": quote_win_rate,
-            "won": won_quotes,
-            "lost": lost_quotes,
-            "buyplan_po_rate": buyplan_po_rate,
-            "total_buyplans": total_bps,
-            "confirmed_pos": po_confirmed_bps,
-        },
+        "kpis": personal,
+        "team_kpis": team_kpis,
         "new_requirements": new_requirements,
         "offers_to_review": offers_to_review,
         "revenue_profit": revenue_profit,

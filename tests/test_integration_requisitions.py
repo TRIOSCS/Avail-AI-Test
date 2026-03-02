@@ -247,6 +247,9 @@ def test_get_saved_sightings_returns_data(client, db_session):
     item_id = reqs[0]["id"]
 
     # Insert sightings directly in DB
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
     s1 = Sighting(
         requirement_id=item_id,
         vendor_name="Acme Chips",
@@ -255,6 +258,7 @@ def test_get_saved_sightings_returns_data(client, db_session):
         unit_price=0.45,
         source_type="brokerbin",
         score=82.0,
+        created_at=now - timedelta(hours=1),  # older
     )
     s2 = Sighting(
         requirement_id=item_id,
@@ -265,6 +269,7 @@ def test_get_saved_sightings_returns_data(client, db_session):
         source_type="nexar",
         score=75.0,
         is_authorized=True,
+        created_at=now,  # newer
     )
     db_session.add_all([s1, s2])
     db_session.commit()
@@ -276,10 +281,10 @@ def test_get_saved_sightings_returns_data(client, db_session):
     group = data[str(item_id)]
     assert group["label"] == "LM358N"
     assert len(group["sightings"]) == 2
-    # Sorted by score desc — Acme (82) first
-    assert group["sightings"][0]["vendor_name"] == "Acme Chips"
-    assert group["sightings"][0]["score"] == 82.0
-    assert group["sightings"][1]["vendor_name"] == "Beta Semi"
+    # Sorted by newest first — Beta Semi (created now) before Acme (1h ago)
+    assert group["sightings"][0]["vendor_name"] == "Beta Semi"
+    assert group["sightings"][1]["vendor_name"] == "Acme Chips"
+    assert group["sightings"][1]["score"] == 82.0
 
 
 def test_get_saved_sightings_404_bad_req(client):

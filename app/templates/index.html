@@ -98,7 +98,6 @@
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
     <select id="mobileUserFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user"></select>
     <button type="button" class="mobile-act-btn mobile-act-primary" onclick="openNewReqModal()" title="New Req">+</button>
-    <button type="button" class="mobile-act-btn mobile-act-trouble" onclick="openTroubleChat()" title="Report Issue">!</button>
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
@@ -1133,11 +1132,7 @@
                 <select id="dashUserSelect" class="vflt" onchange="setDashUserFilter(this.value)" style="font-size:11px;min-width:120px"></select>
             </div>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                <div class="chip-row" style="margin:0" id="dashScopePills">
-                    <span class="chip on" onclick="setDashScope('my',this)">My Data</span>
-                    <span class="chip" onclick="setDashScope('team',this)">Team</span>
-                </div>
-                <div class="chip-row" style="margin:0" id="dashPeriodPills">
+<div class="chip-row" style="margin:0" id="dashPeriodPills">
                     <span class="chip on" onclick="setDashPeriod('30d',this)">30 Days</span>
                     <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
                     <span class="chip" onclick="setDashPeriod('ytd',this)">YTD</span>
@@ -1438,6 +1433,7 @@
     </div>
 </div>
 
+
 <!-- Floating trouble ticket pill — always visible -->
 <button type="button" id="troublePill" onclick="openTroubleChat()" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s;letter-spacing:.3px" onmouseover="this.style.transform='scale(1.06)';this.style.boxShadow='0 6px 20px rgba(239,68,68,.5),0 2px 6px rgba(0,0,0,.2)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15)'">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"/></svg>
@@ -1448,8 +1444,8 @@
 <!-- System notification bell — placeholder, wired up when notification service is registered -->
 {% endif %}
 
-<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script type="application/json" id="app-config" nonce="{{ csp_nonce }}">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" nonce="{{ csp_nonce }}"></script>
 {{ vite_js_tags }}
 {% endif %}
 </body>
