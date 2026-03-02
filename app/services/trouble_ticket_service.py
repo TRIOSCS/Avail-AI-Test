@@ -21,7 +21,7 @@ from app.models import User
 
 
 _SENSITIVE_PATTERNS = [
-    re.compile(r"sk-[a-zA-Z0-9_-]{20,}"),
+    re.compile(r"sk-[a-zA-Z0-9_-]{10,}"),
     re.compile(r"Bearer\s+\S+"),
     re.compile(r"postgres(ql)?://\S+"),
     re.compile(r'password["\s:=]+\S+', re.IGNORECASE),
