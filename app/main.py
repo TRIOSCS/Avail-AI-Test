@@ -947,3 +947,7 @@ app.include_router(ics_admin_router)
 from .routers.trouble_tickets import router as trouble_tickets_router
 
 app.include_router(trouble_tickets_router)
+
+from .routers.notifications import router as notifications_router
+
+app.include_router(notifications_router)
