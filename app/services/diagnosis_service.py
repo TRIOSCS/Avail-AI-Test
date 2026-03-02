@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models.self_heal_log import SelfHealLog
 from app.models.trouble_ticket import TroubleTicket
 from app.services.file_mapper import get_relevant_files, has_stable_files, STABLE_FILES
+from app.services.prompt_generator import generate_fix_prompt
 from app.services.trouble_ticket_service import update_ticket
 from app.utils.claude_client import claude_structured
 
@@ -255,6 +256,18 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
         "relevant_files": [f["path"] for f in relevant_files],
     }
 
+    # Generate fix prompt
+    generated_prompt = None
+    if diagnosis and risk_tier != "high":
+        generated_prompt = generate_fix_prompt(
+            ticket_id=ticket_id,
+            title=ticket.title,
+            description=ticket.description or "",
+            category=classification.get("category", "other"),
+            diagnosis=diagnosis,
+            relevant_files=relevant_files,
+        )
+
     # Update ticket
     update_kwargs = {
         "status": "diagnosed",
@@ -264,6 +277,8 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
     }
     if diagnosis:
         update_kwargs["file_mapping"] = diagnosis.get("affected_files", [])
+    if generated_prompt:
+        update_kwargs["generated_prompt"] = generated_prompt
 
     update_ticket(db, ticket_id, **update_kwargs)
 
