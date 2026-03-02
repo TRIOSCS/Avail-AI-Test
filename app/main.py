@@ -938,3 +938,7 @@ app.include_router(nc_admin_router)
 from .routers.ics_admin import router as ics_admin_router
 
 app.include_router(ics_admin_router)
+
+from .routers.trouble_tickets import router as trouble_tickets_router
+
+app.include_router(trouble_tickets_router)

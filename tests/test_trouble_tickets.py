@@ -172,3 +172,72 @@ class TestFileLock:
         result = check_file_lock(db=db_session, file_paths=["app/routers/vendors.py"])
         assert result is not None
         assert result.id == ticket.id
+
+
+class TestRouterEndpoints:
+    def test_create_ticket_endpoint(self, client, db_session: Session):
+        resp = client.post("/api/trouble-tickets", json={
+            "title": "Test ticket",
+            "description": "Something broke",
+            "current_page": "/vendors",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "ticket_number" in data
+
+    def test_my_tickets_endpoint(self, client, db_session: Session, test_user: User):
+        create_ticket(db=db_session, user_id=test_user.id, title="My ticket", description="D")
+        resp = client.get("/api/trouble-tickets/my-tickets")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["items"]) == 1
+
+    def test_get_ticket_endpoint(self, client, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Detail test", description="D")
+        resp = client.get(f"/api/trouble-tickets/{ticket.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] == "Detail test"
+        assert data["submitted_by"] == test_user.id
+
+    def test_get_ticket_not_found(self, client, db_session: Session):
+        resp = client.get("/api/trouble-tickets/99999")
+        assert resp.status_code == 404
+
+
+class TestVerifyEndpoint:
+    def test_verify_resolved(self, client, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        ticket.status = "awaiting_verification"
+        db_session.commit()
+        resp = client.post(f"/api/trouble-tickets/{ticket.id}/verify", json={"is_fixed": True})
+        assert resp.status_code == 200
+        db_session.refresh(ticket)
+        assert ticket.status == "resolved"
+
+    def test_verify_still_broken_creates_child(self, client, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        ticket.status = "awaiting_verification"
+        ticket.risk_tier = "low"
+        db_session.commit()
+        resp = client.post(
+            f"/api/trouble-tickets/{ticket.id}/verify",
+            json={"is_fixed": False, "description": "Still broken"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "child_ticket_id" in data
+        from app.models.trouble_ticket import TroubleTicket
+        child = db_session.get(TroubleTicket, data["child_ticket_id"])
+        assert child.parent_ticket_id == ticket.id
+        assert child.risk_tier in ("medium", "high")
+
+    def test_verify_wrong_status(self, client, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        resp = client.post(f"/api/trouble-tickets/{ticket.id}/verify", json={"is_fixed": True})
+        assert resp.status_code == 400
+
+    def test_verify_not_found(self, client, db_session: Session):
+        resp = client.post("/api/trouble-tickets/99999/verify", json={"is_fixed": True})
+        assert resp.status_code == 404
