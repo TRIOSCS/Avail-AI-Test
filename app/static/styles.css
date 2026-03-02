@@ -102,7 +102,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-light);box-shadow:var(--glow-blue)}
 .btn-sm{padding:5px 11px;font-size:11px}
 .btn-danger{background:var(--red-light);color:var(--red);border:1px solid rgba(239,68,68,.12)}.btn-danger:hover{box-shadow:var(--glow-red)}
-.btn:disabled{opacity:.4;cursor:default;transform:none!important;box-shadow:none!important}
+.btn:disabled,.btn:disabled:hover,.btn:disabled:active{opacity:.4;cursor:default;transform:none;box-shadow:none}
 
 /* Cards — elevated */
 .card{background:var(--white);border:1px solid rgba(0,0,0,.04);border-left:3px solid var(--border2);border-radius:var(--radius);padding:14px 16px;margin-bottom:8px;transition:all var(--speed) cubic-bezier(.4,0,.2,1);box-shadow:var(--shadow-md)}
@@ -285,7 +285,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .act-card-email-preview{font-size:11px;color:var(--text2);margin-top:4px;padding:4px 8px;background:var(--bg);border-radius:6px;cursor:pointer;line-height:1.4}
 .act-card-email-preview .act-card-email-label{color:var(--teal);font-weight:600;font-size:10px}
 .act-card-email-preview.expanded .act-card-email-short{display:none}
-.act-card-email-preview.expanded .act-card-email-full{display:block!important}
+.act-card-email-preview.expanded .act-card-email-full{display:block}
 .act-card-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
 .act-badge-classification{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:#f0e6ff;color:#7b4fb0;text-transform:uppercase;letter-spacing:.3px}
 .act-action-hint{font-size:10px;color:var(--teal);font-weight:600;padding:2px 6px}
@@ -492,9 +492,9 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .sidebar .sb-group-items .sb-nav-btn{padding-left:22px}
     .sidebar .sidebar-footer .un,.sidebar .sidebar-footer .rb{display:initial}
     .sidebar .sidebar-footer{justify-content:flex-start;padding:12px 16px}
-    .main{margin-left:0 !important;padding:12px 10px;padding-top:calc(92px + env(safe-area-inset-top))}
-    .mobile-topbar{display:flex !important}
-    .mobile-toolbar{display:flex !important}
+    html body .main{margin-left:0;padding:12px 10px;padding-top:calc(92px + env(safe-area-inset-top))}
+    html .mobile-topbar{display:flex}
+    html .mobile-toolbar{display:flex}
     #mobilePills{flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;min-height:36px;flex-wrap:nowrap}
     #mobilePills::-webkit-scrollbar{display:none}
     #mobilePills .fp{white-space:nowrap;flex-shrink:0}
@@ -532,7 +532,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .filter-count{text-align:right}
 
     /* Sighting cards — stack layout */
-    .sc{flex-direction:column;align-items:flex-start;gap:4px;padding:6px 10px !important}
+    .sc{flex-direction:column;align-items:flex-start;gap:4px;padding:6px 10px}
     .sc input[type=checkbox]{width:18px;height:18px}
     .sc-top{flex-wrap:wrap}
     .sc-vendor{max-width:140px;font-size:13px}
@@ -563,8 +563,8 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .rfq-condition{flex-wrap:wrap;gap:4px}
 
     /* WP6: Modal treatment — reduce padding, stack buttons */
-    .modal-lg{max-width:100% !important}
-    .modal{padding:16px 12px !important}
+    html .modal-lg{max-width:100%}
+    html .modal{padding:16px 12px}
     .modal h2{font-size:15px;margin-bottom:12px}
     .mactions{flex-wrap:wrap;gap:6px}
     .mactions .btn{flex:1 1 100%;text-align:center;justify-content:center}
@@ -627,9 +627,9 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .sbox{width:100%;font-size:16px}
     .filter-panel{width:calc(100vw - 24px);left:-12px}
     .sb-rail{display:none}
-    .toparea{margin-left:0 !important}
-    body.sb-open .main{margin-left:0 !important}
-    body.sb-open .toparea{margin-left:0 !important}
+    html .toparea{margin-left:0}
+    html body.sb-open .main{margin-left:0}
+    html body.sb-open .toparea{margin-left:0}
     /* v7 table: hide low-priority columns */
     .tbl th:nth-child(n+6),.tbl td:nth-child(n+6){display:none}
     .tbl{font-size:12px}
@@ -653,7 +653,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     /* View toolbars — stack on mobile */
     .view-toolbar{flex-direction:column;align-items:stretch;gap:8px}
     .view-toolbar h2{font-size:16px}
-    .view-toolbar .sbox{width:100% !important}
+    html .view-toolbar .sbox{width:100%}
     .view-toolbar .fpills{overflow-x:auto;scrollbar-width:none}
     .view-toolbar .fpills::-webkit-scrollbar{display:none}
     /* WP9: Main scroll padding with safe areas */
@@ -702,9 +702,9 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     #mobilePills .fp{padding:4px 10px;font-size:12px}
     /* Tighter padding to reclaim space */
     .main-scroll{padding:2px 6px}
-    .modal{padding:12px 8px !important}
+    html .modal{padding:12px 8px}
     .req-row{padding:8px 10px}
-    .sc{padding:4px 8px !important}
+    .sc{padding:4px 8px}
 }
 
 /* ── Data Sources Tab ── */
@@ -1080,7 +1080,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 /* AI action buttons */
 .btn-ai{display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:var(--radius-sm);font-size:11px;font-weight:600;background:linear-gradient(135deg,#f5f3ff,#edf3fa);color:#7c3aed;border:1px solid rgba(124,58,237,.12);cursor:pointer;transition:all var(--speed)}
 .btn-ai:hover{background:linear-gradient(135deg,#ede9fe,#e0ecf8);border-color:rgba(124,58,237,.25);box-shadow:0 0 0 3px rgba(124,58,237,.1);transform:translateY(-1px) scale(1.02)}
-.btn-ai:disabled{opacity:.4;cursor:default;transform:none!important;box-shadow:none!important}
+.btn-ai:disabled,.btn-ai:disabled:hover,.btn-ai:disabled:active{opacity:.4;cursor:default;transform:none;box-shadow:none}
 
 /* AI Contact Panel (modal overlay) */
 .ai-panel-bg{position:fixed;inset:0;background:rgba(15,23,42,.4);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:510;padding:20px;animation:modalBgIn var(--speed) ease}
@@ -1294,7 +1294,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .sb-group-chevron{width:14px;height:14px;fill:none;stroke:var(--muted);stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform var(--speed);flex-shrink:0}
 .sb-nav-group.collapsed .sb-group-chevron{transform:rotate(-90deg)}
 .sb-group-items{overflow:hidden;transition:max-height .25s ease,opacity .2s ease}
-.sb-nav-group.collapsed .sb-group-items{max-height:0!important;opacity:0;pointer-events:none}
+.sb-nav-group.collapsed .sb-group-items{max-height:0;opacity:0;pointer-events:none}
 /* Section-colored active states */
 [data-section="sourcing"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(234,179,8,.1),rgba(234,179,8,.04));color:var(--sourcing-color);box-shadow:inset 3px 0 0 var(--sourcing-accent)}
 [data-section="relationships"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(20,184,166,.1),rgba(20,184,166,.04));color:var(--relationships-color);box-shadow:inset 3px 0 0 var(--relationships-accent)}
@@ -1335,7 +1335,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .sidebar .sb-group-header .sb-group-label,.sidebar .sb-group-header .sb-group-chevron{display:none}
 .sidebar .sb-group-header .sb-group-icon{width:20px;height:20px;border-radius:4px;pointer-events:auto}
 .sidebar .sb-group-header .sb-group-icon svg{width:12px;height:12px}
-.sidebar .sb-group-items{max-height:none!important;opacity:1;pointer-events:auto}
+html .sidebar .sb-group-items{max-height:none;opacity:1;pointer-events:auto}
 .sidebar .sb-top-gradient{display:none}
 .sidebar .sidebar-nav{padding:12px 0 8px;gap:2px;scrollbar-width:none;justify-content:flex-start;align-items:center}
 .sidebar .sidebar-nav::-webkit-scrollbar{display:none}
@@ -1528,7 +1528,7 @@ body.sb-open .toparea{margin-left:var(--sbw)}
 .ea{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;cursor:pointer;transition:transform .15s,color .15s,background .15s;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--white)}
 .ea:hover{background:var(--blue-light,#e0f2fe);color:var(--blue);border-color:var(--blue)}.ea.open{transform:rotate(90deg);color:var(--blue);border-color:var(--blue)}
 .drow{display:none}.drow.open{display:table-row}
-.drow>td{padding:8px 12px 14px;background:var(--surface)!important;border:1px solid var(--border)!important;border-radius:0 0 6px 6px!important}
+table .drow>td,.tbl .drow>td,.dtbl .drow>td{padding:8px 12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:0 0 6px 6px}
 .dtbl{width:100%;font-size:11px;border-collapse:collapse;margin-top:4px}
 .dtbl th{text-align:left;padding:6px 8px;color:var(--text2);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);background:transparent}
 .dtbl td{padding:4px 8px;border-bottom:1px solid var(--card2)}
@@ -1539,8 +1539,8 @@ body.sb-open .toparea{margin-left:var(--sbw)}
 .dtbl tr.selected>td{background:var(--teal-light)}
 .dd-edit{cursor:pointer}
 .dd-edit:hover{background:var(--bg);border-radius:3px}
-.add-row td{background:var(--teal-light)!important}
-.add-row input{background:var(--white)!important}
+table .add-row td,.tbl .add-row td,.dtbl .add-row td{background:var(--teal-light)}
+table .add-row input,.tbl .add-row input,.dtbl .add-row input{background:var(--white)}
 
 /* Deadline flags */
 .dl{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px}
@@ -1548,12 +1548,12 @@ body.sb-open .toparea{margin-left:var(--sbw)}
 .dl-flash{animation:dl-blink 1.5s ease-in-out 3;font-weight:800}
 @keyframes dl-blink{0%,100%{opacity:1}50%{opacity:.4}}
 .dl-set{color:var(--blue);font-weight:500;cursor:pointer;font-size:11px}
-.dl-cell{cursor:pointer}.dl-cell:hover{background:var(--blue-light)!important;border-radius:4px}
+.dl-cell{cursor:pointer}td.dl-cell:hover,.dl-cell:hover{background:var(--blue-light);border-radius:4px}
 .detail-deadline{display:inline-block;margin-top:2px;font-size:12px}
 /* Row-level deadline alerts */
-tr.dl-row-today>td{background:rgba(217,68,82,.1)!important;animation:row-flash 1.2s ease-in-out 3}
-tr.dl-row-overdue>td{background:rgba(217,68,82,.07)!important}
-tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
+table tr.dl-row-today>td{background:rgba(217,68,82,.1);animation:row-flash 1.2s ease-in-out 3}
+table tr.dl-row-overdue>td{background:rgba(217,68,82,.07)}
+table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
 @keyframes row-flash{0%,100%{background:rgba(217,68,82,.1)}50%{background:rgba(217,68,82,.25)}}
 
 /* Vendor drill-down */
@@ -2306,7 +2306,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .bulk-bar-count{font-weight:700}
 .bulk-bar button{background:rgba(255,255,255,.15);border:none;color:#fff;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;transition:background 0.15s}
 .bulk-bar button:hover{background:rgba(255,255,255,.25)}
-.bulk-bar-close{background:none!important;font-size:16px;padding:4px 8px!important}
+.bulk-bar .bulk-bar-close{background:none;font-size:16px;padding:4px 8px}
 
 /* Activity feed in drawer */
 .activity-feed{display:flex;flex-direction:column;gap:0}
@@ -2373,9 +2373,9 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .cc-stat-row{flex-wrap:wrap}.cc-stat{min-width:calc(50% - 4px)}.cc-cards-grid{grid-template-columns:1fr}.cc-pipeline-bar{flex-wrap:wrap}
     .as-metrics{grid-template-columns:1fr}.as-scores{gap:2px}.as-total{font-size:14px}
     .lb-detail-grid{grid-template-columns:1fr}.lb-detail-split{grid-template-columns:1fr}.lb-scores{gap:8px}.lb-score-val{font-size:14px}
-    .cust-mini-list{display:none!important}
+    html .cust-mini-list,html .cust-mini-list.open{display:none}
     .cust-split-active .drawer{left:0;width:100%}
-    .prospect-mini-list{display:none!important}.prospect-split-active .drawer{left:0;width:100%}
+    html .prospect-mini-list,html .prospect-mini-list.open{display:none}.prospect-split-active .drawer{left:0;width:100%}
     .suggested-grid{grid-template-columns:1fr}
     /* v2 responsive (consolidated from standalone block) */
     .stat-grid{grid-template-columns:repeat(2,1fr)}
@@ -2384,8 +2384,8 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .sb-group-header{padding:6px 10px}
     .contact-card{flex-wrap:wrap}
     .contact-card-meta{width:100%;margin-top:4px}
-    .split-panel{flex-direction:column;height:auto!important}
-    .split-panel-left{width:100%!important;border-right:none!important;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
+    html .split-panel{flex-direction:column;height:auto}
+    html .split-panel-left{width:100%;border-right:none;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
     .split-panel-right{min-height:50vh}
     .kanban{flex-direction:column}
     .kanban-col{width:100%}
@@ -2440,7 +2440,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 
 /* Adjust drawer when split-pane is active */
 .cust-split-active .drawer{min-width:0;width:calc(100vw - 280px);max-width:none;left:280px;right:0;top:88px}
-.cust-split-active .drawer-backdrop{display:none!important}
+.cust-split-active .drawer-backdrop,.cust-split-active .drawer-backdrop.open{display:none}
 /* cust-split responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Top breadcrumb (account detail) ─────────────────────── */
@@ -2484,7 +2484,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .prospect-mini-list-meta{display:flex;align-items:center;gap:6px;margin-top:1px}
 .prospect-mini-list-sub{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prospect-split-active .drawer{min-width:0;width:calc(100vw - 280px);max-width:none;left:280px;right:0;top:88px}
-.prospect-split-active .drawer-backdrop{display:none!important}
+.prospect-split-active .drawer-backdrop,.prospect-split-active .drawer-backdrop.open{display:none}
 /* prospect responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Contact card location ───────────────────────────────── */
