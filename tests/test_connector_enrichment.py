@@ -701,6 +701,37 @@ def test_boost_confidence_multiple_batches(db_session):
         assert mt.confidence == 0.90
 
 
+def test_boost_confidence_fuzzy_match(db_session):
+    """Fuzzy match: 'Vishay Intertechnology' contains 'VISHAY' → boosted to 0.85."""
+    card = _make_card(db_session, "vsm001", manufacturer="Vishay Intertechnology")
+    tag = _make_brand_tag(db_session, "VISHAY")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["fuzzy_boosted"] >= 1
+    db_session.refresh(mt)
+    assert mt.confidence == 0.85
+    assert mt.source == "ai_confirmed_fuzzy"
+
+
+def test_boost_confidence_commodity_tags(db_session):
+    """Commodity tags at 0.7 → boosted to 0.85."""
+    card = _make_card(db_session, "cap001")
+    tag = Tag(name="Capacitors", tag_type="commodity")
+    db_session.add(tag)
+    db_session.commit()
+    db_session.refresh(tag)
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["commodity_boosted"] == 1
+    db_session.refresh(mt)
+    assert mt.confidence == 0.85
+    assert mt.source == "ai_commodity_confirmed"
+
+
 # ── nexar_bulk_validate tests ───────────────────────────────────────────
 
 
