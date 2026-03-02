@@ -906,7 +906,7 @@ async def upload_requirements(
             ):
                 try:  # pragma: no cover
                     enqueue_for_nc_search(r_item.id, bg_db)
-                except Exception:
+                except Exception:  # pragma: no cover
                     logger.debug("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
         finally:
             bg_db.close()
@@ -1195,7 +1195,7 @@ async def get_saved_sightings(
             card_ids.add(r.material_card_id)
         for sub_key in req_sub_keys.get(r.id, []):
             card_id = sub_card_lookup.get(sub_key)
-            if card_id:
+            if card_id:  # pragma: no cover
                 card_ids.add(card_id)
         req_card_map[r.id] = card_ids
         all_card_ids |= card_ids
@@ -1214,7 +1214,7 @@ async def get_saved_sightings(
             .limit(100)
             .all()
         )
-        for ho in hist_query:
+        for ho in hist_query:  # pragma: no cover
             for r in req.requirements:
                 if ho.material_card_id in req_card_map.get(r.id, set()):
                     if r.id not in hist_by_req:

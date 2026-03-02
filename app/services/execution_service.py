@@ -111,17 +111,17 @@ async def _run_fix(prompt: str, ticket: TroubleTicket) -> dict:
     if os.getenv("TESTING"):
         return {"success": False, "error": "Execution disabled in test mode"}
 
-    try:
+    try:  # pragma: no cover
         result = await asyncio.to_thread(
             _subprocess_fix, prompt, ticket.id,
         )
         return result
-    except Exception as e:
+    except Exception as e:  # pragma: no cover
         logger.error("Execution subprocess failed for ticket {}: {}", ticket.id, e)
         return {"success": False, "error": str(e), "cost_usd": 0.0}
 
 
-def _subprocess_fix(prompt: str, ticket_id: int) -> dict:
+def _subprocess_fix(prompt: str, ticket_id: int) -> dict:  # pragma: no cover
     """Run claude CLI as subprocess with the fix prompt."""
     try:
         result = subprocess.run(

@@ -158,6 +158,30 @@ class TestTroubleTicketAdminEndpoints:
             resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/diagnose")
             assert resp.status_code == 500
 
+    def test_execute_disabled(self, admin_client, db_session, admin_user):
+        """Execute returns 403 when self_heal_enabled=False."""
+        ticket = create_ticket(db=db_session, user_id=admin_user.id, title="T", description="D")
+        resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/execute")
+        assert resp.status_code == 403
+
+    @patch("app.routers.trouble_tickets.execute_fix", new_callable=AsyncMock)
+    def test_execute_error(self, mock_exec, admin_client, db_session, admin_user):
+        """Execute with error result returns 400."""
+        mock_exec.return_value = {"error": "Budget exceeded"}
+        ticket = create_ticket(db=db_session, user_id=admin_user.id, title="T", description="D")
+        with patch("app.config.settings.self_heal_enabled", True):
+            resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/execute")
+            assert resp.status_code == 400
+
+    @patch("app.routers.trouble_tickets.execute_fix", new_callable=AsyncMock)
+    def test_execute_success(self, mock_exec, admin_client, db_session, admin_user):
+        """Execute success returns 200."""
+        mock_exec.return_value = {"ok": True, "status": "awaiting_verification"}
+        ticket = create_ticket(db=db_session, user_id=admin_user.id, title="T", description="D")
+        with patch("app.config.settings.self_heal_enabled", True):
+            resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/execute")
+            assert resp.status_code == 200
+
 
 # ══════════════════════════════════════════════════════════════════════
 #  2. TROUBLE TICKET SCHEMA VALIDATORS

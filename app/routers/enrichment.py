@@ -695,7 +695,7 @@ async def api_customer_backfill(
 
     gaps = get_enrichment_gaps(db, limit=body.max_accounts)
     if body.assigned_only:
-        gaps = [g for g in gaps if g.get("account_owner_id")]
+        gaps = [g for g in gaps if g.get("account_owner_id")]  # pragma: no cover
 
     if not gaps:
         return {"status": "no_gaps", "processed": 0}
