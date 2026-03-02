@@ -59,6 +59,7 @@
 *{margin:0;padding:0;box-sizing:border-box}
 
 /* Utility classes */
+.u-hidden{display:none}
 .text-xs{font-size:11px}.text-xxs{font-size:10px}
 .text-xs-muted{font-size:11px;color:var(--muted)}.text-xxs-muted{font-size:10px;color:var(--muted)}
 .text-xs-secondary{font-size:11px;color:var(--text2)}.text-muted{color:var(--muted)}

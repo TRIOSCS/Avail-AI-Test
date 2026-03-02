@@ -192,8 +192,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (nb && mb) {
         new MutationObserver(function() {
             mb.textContent = nb.textContent;
-            mb.style.display = nb.style.display;
-        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style']});
+            if (nb.style.display === 'none') { mb.classList.add('u-hidden'); mb.style.display = ''; }
+            else { mb.classList.remove('u-hidden'); mb.style.display = nb.style.display; }
+        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style','class']});
     }
 });
 
@@ -571,7 +572,7 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
         if (!websiteId) return;
         const el = document.getElementById(websiteId);
         const row = el?.closest('.ac-website-row') || el;
-        if (row) row.style.display = show ? '' : 'none';
+        if (row) { if (show) { row.classList.remove('u-hidden'); row.style.display = ''; } else { row.classList.add('u-hidden'); row.style.display = ''; } }
     }
 
     const doSearch = debounce(async function(query) {
@@ -805,9 +806,11 @@ async function pollApiHealth() {
         if (badge) {
             if (alerts.length > 0) {
                 badge.textContent = alerts.length;
+                badge.classList.remove('u-hidden');
                 badge.style.display = 'inline-block';
             } else {
-                badge.style.display = 'none';
+                badge.classList.add('u-hidden');
+                badge.style.display = '';
             }
         }
 
@@ -906,7 +909,7 @@ function applyRoleGating() {
 
     // ── Settings: admin only ──
     const navSettings = document.getElementById('navSettings');
-    if (navSettings) navSettings.style.display = isAdmin ? '' : 'none';
+    if (navSettings) { if (isAdmin) navSettings.classList.remove('u-hidden'); else navSettings.classList.add('u-hidden'); }
 
     // "My Accounts" toggle: admin/manager/trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
@@ -1018,9 +1021,10 @@ export function showView(viewId) {
         const el = document.getElementById(id);
         if (!el) continue;
         if (id === viewId) {
-            el.classList.remove('hidden');
+            el.classList.remove('hidden', 'u-hidden');
             el.style.display = '';
         } else {
+            el.classList.add('u-hidden');
             el.style.display = 'none';
         }
     }
@@ -1086,7 +1090,7 @@ function showDetail(id, name, tab) {
 function showVendors() {
     showView('view-vendors');
     const viewEl = document.getElementById('view-vendors');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     currentReqId = null;
     if (window._setTopViewLabel) window._setTopViewLabel('Vendors');
     loadVendorList();
@@ -1400,7 +1404,7 @@ function closeContactDrawer() {
 function showContacts() {
     showView('view-contacts');
     const viewEl = document.getElementById('view-contacts');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     _contactCache = [];
     loadContacts();
 }
@@ -7109,8 +7113,8 @@ async function createRequisition() {
         const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
         _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
         _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
-        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) nrSS.style.display = 'none';
-        const nrCF = document.getElementById('nrContactField'); if (nrCF) nrCF.style.display = 'none';
+        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
+        const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         await loadRequisitions();
         toggleDrillDown(data.id);
     } catch (e) { showToast('Failed to create requisition', 'error'); }
@@ -7120,8 +7124,8 @@ function clearNrSite() {
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrSiteId', 'value', ''); _s('nrSiteSearch', 'value', '');
     const ss = document.getElementById('nrSiteSearch'); if (ss) ss.style.display = '';
-    const sel = document.getElementById('nrSiteSelected'); if (sel) sel.style.display = 'none';
-    const cf = document.getElementById('nrContactField'); if (cf) cf.style.display = 'none';
+    const sel = document.getElementById('nrSiteSelected'); if (sel) { sel.classList.add('u-hidden'); sel.style.display = ''; }
+    const cf = document.getElementById('nrContactField'); if (cf) { cf.classList.add('u-hidden'); cf.style.display = ''; }
 }
 
 async function toggleArchive(id) {
@@ -7386,9 +7390,9 @@ function showFileReady(inputId, readyId, nameId) {
     const nameEl = document.getElementById(nameId);
     if (file) {
         if (nameEl) nameEl.textContent = file.name;
-        if (readyEl) readyEl.style.display = '';
+        if (readyEl) { readyEl.classList.remove('u-hidden'); readyEl.style.display = ''; }
     } else {
-        if (readyEl) readyEl.style.display = 'none';
+        if (readyEl) { readyEl.classList.add('u-hidden'); readyEl.style.display = 'none'; }
     }
 }
 
@@ -8008,7 +8012,7 @@ async function openBatchRfqModal(prebuiltGroups) {
         const rfqCancelWrap = document.getElementById('rfqPrepareCancel');
         if (rfqCancelWrap) {
             rfqCancelWrap.innerHTML = '<button class="btn btn-danger btn-sm" id="rfqCancelLookup">Cancel Lookup</button>';
-            rfqCancelWrap.style.display = '';
+            rfqCancelWrap.classList.remove('u-hidden');
             document.getElementById('rfqCancelLookup').onclick = () => abortCtrl.abort();
         }
         try {
@@ -8045,7 +8049,7 @@ async function openBatchRfqModal(prebuiltGroups) {
             }));
         } finally {
             delete modal.dataset.loading;
-            if (rfqCancelWrap) rfqCancelWrap.style.display = 'none';
+            if (rfqCancelWrap) rfqCancelWrap.classList.add('u-hidden');
         }
     }
 
@@ -8434,7 +8438,7 @@ function renderRfqMessage() {
 
     // Show AI Draft button for admins
     const aiWrap = document.getElementById('aiDraftWrap');
-    if (aiWrap) aiWrap.style.display = '';
+    if (aiWrap) aiWrap.classList.remove('u-hidden');
 }
 
 function _saveRfqDraft() {
@@ -8620,7 +8624,7 @@ function _rfqShowResults(results) {
     }).join('');
 
     const retryBtn = document.getElementById('rfqRetryBtn');
-    if (retryBtn) retryBtn.style.display = _rfqLastFailedGroups.length ? '' : 'none';
+    if (retryBtn) { if (_rfqLastFailedGroups.length) retryBtn.classList.remove('u-hidden'); else retryBtn.classList.add('u-hidden'); }
 
     const sent = results.filter(r => r.status === 'sent').length;
     const failedCount = results.length - sent;
@@ -10632,7 +10636,7 @@ function openRepliedEmailsModal() {
 // ── Stock List Import ────────────────────────────────────────────────────
 function toggleStockImport() {
     const el = document.getElementById('stockImportArea');
-    el.style.display = el.style.display === 'none' ? '' : 'none';
+    el.classList.toggle('u-hidden');
 }
 
 async function doStockImport() {
@@ -10650,7 +10654,7 @@ async function doStockImport() {
     }
 
     statusEl.className = 'ustatus load'; statusEl.textContent = 'Importing...'; statusEl.style.display = 'block';
-    const sfr = document.getElementById('stockFileReady'); if (sfr) sfr.style.display = 'none';
+    const sfr = document.getElementById('stockFileReady'); if (sfr) sfr.classList.add('u-hidden');
 
     try {
         const form = new FormData();

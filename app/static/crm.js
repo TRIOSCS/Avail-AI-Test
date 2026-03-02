@@ -163,7 +163,7 @@ async function showCustomers() {
     showView('view-customers');
     // Ensure flex display for the full-width layout
     const viewEl = document.getElementById('view-customers');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     setCurrentReqId(null);
     // Reset stale state from previous session
     _selectedCustId = null;
@@ -180,9 +180,9 @@ async function showCustomers() {
     const toggleInput = document.getElementById('custMyOnly');
     if (toggleLabel && toggleInput) {
         if (isManagerOrAdmin) {
-            toggleLabel.style.display = '';
+            toggleLabel.classList.remove('u-hidden');
         } else {
-            toggleLabel.style.display = 'none';
+            toggleLabel.classList.add('u-hidden');
             toggleInput.checked = true;
         }
     }
@@ -270,7 +270,7 @@ async function goToCompany(companyId) {
     if (!companyId) return;
     showView('view-customers');
     const viewEl = document.getElementById('view-customers');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     setCurrentReqId(null);
     try {
         const result = await apiFetch('/api/companies');
@@ -1490,7 +1490,7 @@ function openNewCompanyModal() {
         if (el) el.value = '';
     });
     const warn = document.getElementById('ncDupWarning');
-    if (warn) warn.style.display = 'none';
+    if (warn) warn.classList.add('u-hidden');
     openModal('newCompanyModal', 'ncName');
 }
 
@@ -1498,7 +1498,7 @@ const debouncedCheckDupCompany = debounce(async (val) => {
     const warn = document.getElementById('ncDupWarning');
     if (!warn) return;
     const q = (val || '').trim();
-    if (q.length < 3) { warn.style.display = 'none'; return; }
+    if (q.length < 3) { warn.classList.add('u-hidden'); return; }
     try {
         const resp = await apiFetch('/api/companies/check-duplicate?name=' + encodeURIComponent(q));
         if (resp.matches && resp.matches.length > 0) {
@@ -1506,11 +1506,11 @@ const debouncedCheckDupCompany = debounce(async (val) => {
                 '<b>' + esc(m.name) + '</b>' + (m.match === 'exact' ? ' (exact match)' : '')
             ).join(', ');
             warn.innerHTML = 'Possible duplicate: ' + names;
-            warn.style.display = '';
+            warn.classList.remove('u-hidden');
         } else {
-            warn.style.display = 'none';
+            warn.classList.add('u-hidden');
         }
-    } catch (e) { warn.style.display = 'none'; }
+    } catch (e) { warn.classList.add('u-hidden'); }
 }, 400);
 
 async function createCompany(forceCreate) {
@@ -2370,7 +2370,7 @@ function onSqContactChange() {
     var sel = document.getElementById('sqContactSelect');
     if (!sel) return;
     var manual = sel.value === '__manual__';
-    const mr = document.getElementById('sqManualRow'); if (mr) mr.style.display = manual ? '' : 'none';
+    const mr = document.getElementById('sqManualRow'); if (mr) { if (manual) mr.classList.remove('u-hidden'); else mr.classList.add('u-hidden'); }
     if (manual) setTimeout(function() { document.getElementById('sqManualEmail')?.focus(); }, 50);
 }
 
@@ -3905,7 +3905,7 @@ function selectSite(id, label) {
     const sel = document.getElementById('nrSiteSelected');
     if (sel) {
         const lbl = document.getElementById('nrSiteSelectedLabel'); if (lbl) lbl.textContent = label;
-        sel.style.display = '';
+        sel.classList.remove('u-hidden');
     }
     // Load contacts for the selected site's company
     loadNrContacts(id);
@@ -3938,22 +3938,22 @@ async function loadNrContacts(siteId) {
     if (!field || !select) return;
     // Find site in cache to get company info
     const site = (_siteListCache || []).find(s => s.id === siteId);
-    if (!site) { field.style.display = 'none'; return; }
+    if (!site) { field.classList.add('u-hidden'); return; }
     // Fetch company sites to get contacts
     try {
         const companies = await apiFetch(`/api/companies?search=${encodeURIComponent(site.companyName)}`);
         const company = companies.find(c => c.name === site.companyName);
-        if (!company || !company.sites) { field.style.display = 'none'; return; }
+        if (!company || !company.sites) { field.classList.add('u-hidden'); return; }
         const contacts = company.sites
             .filter(s => s.contact_name)
             .map(s => ({ siteId: s.id, name: s.contact_name, email: s.contact_email, siteName: s.site_name }));
-        if (contacts.length === 0) { field.style.display = 'none'; return; }
+        if (contacts.length === 0) { field.classList.add('u-hidden'); return; }
         select.innerHTML = '<option value="">— Select contact —</option>' +
             contacts.map(c =>
                 `<option value="${c.siteId}" ${c.siteId === siteId ? 'selected' : ''}>${esc(c.name)}${c.email ? ' (' + esc(c.email) + ')' : ''} — ${esc(c.siteName)}</option>`
             ).join('');
-        field.style.display = '';
-    } catch (e) { logCatchError('loadNrContacts', e); field.style.display = 'none'; }
+        field.classList.remove('u-hidden');
+    } catch (e) { logCatchError('loadNrContacts', e); field.classList.add('u-hidden'); }
 }
 
 // Close typeahead on outside click
@@ -4823,8 +4823,8 @@ function renderProactiveStatsBar() {
     const el = document.getElementById('proactiveStatsBar');
     if (!el) return;
     const s = _proactiveStats;
-    if (!s.total) { el.style.display = 'none'; return; }
-    el.style.display = '';
+    if (!s.total) { el.classList.add('u-hidden'); return; }
+    el.classList.remove('u-hidden');
     el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);border-radius:8px;font-size:12px">
         <div><span style="font-weight:700;font-size:18px;color:var(--teal)">${s.total}</span> <span style="color:var(--muted)">Matches</span></div>
         <div><span style="font-weight:700;font-size:18px">${s.avg_score || 0}</span> <span style="color:var(--muted)">Avg Score</span></div>
@@ -6963,7 +6963,7 @@ function setSuggestedReadiness(val, btn) {
 async function showSuggested() {
     showView('view-suggested');
     const viewEl = document.getElementById('view-suggested');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     setCurrentReqId(null);
     _suggestedPage = 1;
     const search = document.getElementById('suggestedSearch');
@@ -7429,7 +7429,7 @@ function setProspectingTab(tab, btn) {
 async function showProspecting() {
     showView('view-prospecting');
     const viewEl = document.getElementById('view-prospecting');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     setCurrentReqId(null);
     _selectedProspectSiteId = null;
     _prospectingData = [];

@@ -85,7 +85,7 @@
         <button type="button" class="search-btn" id="mobileSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
     </div>
     <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
-        &#x1f514;<span id="mobileNotifBadge" class="notif-badge" style="position:absolute;top:-4px;right:-4px;display:none">0</span>
+        &#x1f514;<span id="mobileNotifBadge" class="notif-badge u-hidden" style="position:absolute;top:-4px;right:-4px">0</span>
     </button>
 </div>
 <!-- Mobile action toolbar — view pills + quick actions -->
@@ -154,7 +154,7 @@
         <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
             <div class="sb-section-dot"></div>
             <div class="sb-group-items" style="padding-top:4px">
-                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings<span id="apiHealthBadge" class="sb-badge" style="display:none;background:var(--red);color:#fff"></span></button>
+                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings<span id="apiHealthBadge" class="sb-badge u-hidden" style="background:var(--red);color:#fff"></span></button>
             </div>
         </div>
         {% endif %}
@@ -172,7 +172,7 @@
                 <div style="font-size:10px;color:var(--muted);padding:4px 0;border-top:1px solid var(--border);margin-top:4px">v{{ app_version }}</div>
             </div>
         </div>
-        <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
+        <span id="m365Status" class="u-hidden" style="font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
     </div>
 </aside>
 
@@ -249,11 +249,11 @@
     </div>
 
     <!-- VIEW: Customers (full-width table + slide drawer) -->
-    <div id="view-customers" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-customers" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Accounts</h2>
             <div class="crm-header-actions">
-                <label id="custMyOnlyLabel" style="display:none;font-size:11px;gap:4px;cursor:pointer;align-items:center">
+                <label id="custMyOnlyLabel" class="u-hidden" style="font-size:11px;gap:4px;cursor:pointer;align-items:center">
                     <input type="checkbox" id="custMyOnly" onchange="loadCustomers()"> My accounts
                 </label>
                 <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Account</button>
@@ -307,7 +307,7 @@
     </div>
 
     <!-- VIEW: Prospecting (accounts-first hierarchy) -->
-    <div id="view-prospecting" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-prospecting" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header" style="gap:12px;flex-wrap:wrap">
             <h2>Prospecting</h2>
             <div id="prospectCapBar" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)"></div>
@@ -356,7 +356,7 @@
     </div>
 
     <!-- VIEW: Suggested (unified prospect pool from prospect_accounts) -->
-    <div id="view-suggested" style="display:none;flex-direction:column;height:100%;min-height:0">
+    <div id="view-suggested" class="u-hidden" style="flex-direction:column;height:100%;min-height:0">
         <div class="crm-header">
             <h2>Suggested Accounts</h2>
         </div>
@@ -447,7 +447,7 @@
     </div>
 
     <!-- VIEW: Vendors (full-width table + slide drawer) -->
-    <div id="view-vendors" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-vendors" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Vendors</h2>
         </div>
@@ -494,15 +494,15 @@
             <input class="sbox sbox-wide" id="materialSearch" placeholder="Search by MPN or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
             <button type="button" class="tb-btn" onclick="toggleStockImport()">Import Stock</button>
         </div>
-        <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
+        <div id="stockImportArea" data-role="buyer" style="margin-bottom:12px" class="card u-hidden">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
                 <div class="site-typeahead" style="flex:1;min-width:150px"><input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" autocomplete="off" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"><div class="site-typeahead-list" id="stockVendorNameList"></div></div>
-                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" aria-label="Vendor website URL" class="ac-website-inline" style="display:none;flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
-                <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
+                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" aria-label="Vendor website URL" class="ac-website-inline u-hidden" style="flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" class="u-hidden" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
                 <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
-            <div id="stockFileReady" style="display:none;margin-top:8px">
+            <div id="stockFileReady" class="u-hidden" style="margin-top:8px">
                 <div style="display:flex;gap:8px;align-items:center">
                     <span style="font-size:12px;color:var(--text2)">📄 <span id="stockFileName"></span></span>
                     <button type="button" class="btn btn-primary btn-sm" onclick="doStockImport()">Import</button>
@@ -540,7 +540,7 @@
                 <button type="button" class="btn btn-ghost btn-sm" id="proactiveRefreshBtn" onclick="refreshProactiveMatches()">Refresh Matches</button>
             </div>
         </div>
-        <div id="proactiveStatsBar" style="display:none;margin:0 16px 12px"></div>
+        <div id="proactiveStatsBar" class="u-hidden" style="margin:0 16px 12px"></div>
         <div class="tabs" id="proactiveTabs">
             <button type="button" class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
             <button type="button" class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
@@ -563,7 +563,7 @@
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
-            <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
+            <div id="nrSiteSelected" class="u-hidden" style="margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
                 <span id="nrSiteSelectedLabel" class="u-fw-600"></span>
                 <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
             </div>
@@ -575,7 +575,7 @@
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="nrAsap" onchange="if(this.checked)document.getElementById('nrDeadline').value=''"> ASAP</label>
             </div>
         </div>
-        <div class="field" id="nrContactField" style="margin-top:10px;display:none">
+        <div class="field" id="nrContactField" class="u-hidden" style="margin-top:10px">
             <label>Requesting Contact</label>
             <select id="nrContactSelect" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
                 <option value="">— Select contact —</option>
@@ -598,7 +598,7 @@
                 <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin:0">Checking vendor contacts…</p>
             </div>
             <div id="rfqPrepareVendors" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
-            <div id="rfqPrepareCancel" style="display:none;margin-bottom:8px"></div>
+            <div id="rfqPrepareCancel" class="u-hidden" style="margin-bottom:8px"></div>
             <button type="button" class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
         </div>
         <div id="rfqReady" class="hidden">
@@ -625,7 +625,7 @@
                 <label>Message <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:6px" onclick="navigator.clipboard.writeText(document.getElementById('rfqBody').value);showToast('Body copied','success')" title="Copy body to clipboard">Copy</button></label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
             </div>
-            <div id="aiDraftWrap" style="display:none;margin-bottom:8px;text-align:right">
+            <div id="aiDraftWrap" class="u-hidden" style="margin-bottom:8px;text-align:right">
                 <button type="button" class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="aiDraftRfq(this)">AI Draft</button>
             </div>
             <div class="mactions">
@@ -647,7 +647,7 @@
             <h3 style="margin-bottom:12px">Send Results</h3>
             <div id="rfqResultsList" style="max-height:340px;overflow-y:auto;margin-bottom:12px"></div>
             <div class="mactions">
-                <button type="button" class="btn btn-danger" id="rfqRetryBtn" onclick="rfqRetryFailed()" style="display:none">Retry Failed</button>
+                <button type="button" class="btn btn-danger u-hidden" id="rfqRetryBtn" onclick="rfqRetryFailed()">Retry Failed</button>
                 <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Close</button>
             </div>
         </div>
@@ -738,7 +738,7 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" style="display:none;margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
+        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" class="u-hidden" style="margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
         <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
@@ -852,7 +852,7 @@
         <label style="display:block;margin-bottom:8px;font-size:12px;font-weight:600">Recipient</label>
         <select id="sqContactSelect" onchange="onSqContactChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:8px">
         </select>
-        <div id="sqManualRow" style="display:none;margin-bottom:8px">
+        <div id="sqManualRow" class="u-hidden" style="margin-bottom:8px">
             <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:2px">Email address</label>
             <input id="sqManualEmail" type="email" placeholder="name@company.com" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
         </div>
@@ -1090,7 +1090,7 @@
 </div>
 
     <!-- VIEW: Contact Intelligence (full-width table) -->
-    <div id="view-contacts" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-contacts" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Contacts</h2>
             <div class="crm-header-actions">
