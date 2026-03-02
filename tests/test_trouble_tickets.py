@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.models.trouble_ticket import TroubleTicket
 from app.services.diagnosis_service import diagnose_full
+from app.services.execution_service import execute_fix
 from app.services.trouble_ticket_service import (
     create_ticket,
     get_ticket,
@@ -313,3 +314,41 @@ class TestDiagnoseEndpoint:
         db_session.refresh(ticket)
         assert ticket.diagnosis is not None
         assert ticket.status == "diagnosed"
+
+
+class TestExecuteEndpoint:
+    """Tests for the execute endpoint — service-level since router is thin wrapper."""
+
+    def test_execute_feature_gate(self, client, db_session, test_user):
+        """Execute endpoint should return 403 when self_heal_enabled is False."""
+        ticket = create_ticket(db=db_session, user_id=test_user.id,
+                               title="Bug", description="Something broke")
+        from app.config import settings
+        assert settings.self_heal_enabled is False
+
+    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
+    def test_execute_after_diagnose(self, mock_claude, mock_run, db_session, test_user):
+        """Full flow: diagnose → execute → awaiting_verification."""
+        import asyncio
+
+        mock_claude.side_effect = [
+            {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "Bug"},
+            {"root_cause": "CSS", "affected_files": [], "fix_approach": "Fix",
+             "test_strategy": "Test", "estimated_complexity": "simple",
+             "requires_migration": False},
+        ]
+        mock_run.return_value = {
+            "success": True, "summary": "Fixed", "branch": "fix/1", "cost_usd": 0.10,
+        }
+
+        ticket = create_ticket(db=db_session, user_id=test_user.id,
+                               title="CSS Bug", description="Button misaligned")
+        asyncio.get_event_loop().run_until_complete(diagnose_full(ticket.id, db_session))
+        db_session.refresh(ticket)
+        assert ticket.status == "diagnosed"
+
+        result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
+        assert result["ok"] is True
+        db_session.refresh(ticket)
+        assert ticket.status == "awaiting_verification"

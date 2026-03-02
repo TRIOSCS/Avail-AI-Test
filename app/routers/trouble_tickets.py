@@ -22,6 +22,7 @@ from app.models import User
 from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
 from app.services.diagnosis_service import diagnose_full
+from app.services.execution_service import execute_fix
 
 router = APIRouter(tags=["trouble-tickets"])
 
@@ -158,6 +159,21 @@ async def diagnose_ticket(
     if "error" in result:
         raise HTTPException(500, result["error"])
     return result
+
+@router.post("/api/trouble-tickets/{ticket_id}/execute")
+async def execute_ticket_fix(
+    ticket_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Approve and execute AI-generated fix (admin only)."""
+    if not settings.self_heal_enabled:
+        raise HTTPException(403, "Self-heal pipeline is disabled")
+    result = await execute_fix(ticket_id, db)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
 
 @router.post("/api/trouble-tickets/{ticket_id}/verify")
 async def verify_ticket(

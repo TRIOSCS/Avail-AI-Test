@@ -446,9 +446,9 @@ async function showTicketDetail(ticketId) {
             }
             if (t.generated_prompt && (t.status === 'diagnosed' || t.status === 'prompt_ready')) {
                 adminRow.appendChild(el('button', {
-                    className: 'btn btn-sm', textContent: 'Approve Fix',
+                    className: 'btn btn-sm', textContent: 'Execute Fix',
                     style: 'background:#16a34a;color:#fff;',
-                    onclick: function() { updateTicketStatus(ticketId, 'fix_in_progress', container); },
+                    onclick: function() { executeTicketFix(ticketId, container); },
                 }));
             }
             if (t.status !== 'escalated') {
@@ -519,6 +519,19 @@ async function diagnoseTicket(ticketId, container) {
         showTicketDetail(ticketId);
     } catch (e) {
         showToast('Diagnosis failed: ' + e.message, 'error');
+    }
+}
+
+async function executeTicketFix(ticketId, container) {
+    if (!confirm('Execute AI-generated fix for this ticket?')) return;
+    try {
+        showToast('Executing fix...', 'info');
+        var result = await apiFetch('/api/trouble-tickets/' + ticketId + '/execute', { method: 'POST' });
+        showToast(result.message || 'Fix executed', 'success');
+        showTicketDetail(ticketId);
+    } catch (e) {
+        showToast('Execution failed: ' + e.message, 'error');
+        showTicketDetail(ticketId);
     }
 }
 
