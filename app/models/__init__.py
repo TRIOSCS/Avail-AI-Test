@@ -35,6 +35,7 @@ from .enrichment import (  # noqa: F401
 
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
+from .self_heal_log import SelfHealLog  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # ICsource Search
