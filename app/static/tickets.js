@@ -239,6 +239,11 @@ async function renderAdminDashboard(container) {
     });
     container.appendChild(pills);
 
+    // Health + Stats bar (loads async, non-blocking)
+    var statsBar = el('div', { id: 'ttStatsBar', style: 'margin-bottom:12px;' });
+    container.appendChild(statsBar);
+    loadStatsBar(statsBar);
+
     container.appendChild(el('p', { className: 'empty', textContent: 'Loading...' }));
 
     try {
@@ -545,6 +550,65 @@ async function updateTicketStatus(ticketId, newStatus, container) {
     } catch (e) {
         showToast('Update failed: ' + e.message, 'error');
     }
+}
+
+// ── Stats Bar (admin dashboard health indicator) ───────────────────────
+var _statsCache = null;
+var _statsCacheTs = 0;
+
+async function loadStatsBar(container) {
+    // Cache for 60s to avoid hammering on every filter pill click
+    var now = Date.now();
+    if (_statsCache && now - _statsCacheTs < 60000) {
+        renderStatsBar(container, _statsCache);
+        return;
+    }
+    try {
+        var data = await apiFetch('/api/trouble-tickets/stats');
+        _statsCache = data;
+        _statsCacheTs = now;
+        renderStatsBar(container, data);
+    } catch (e) { /* silent — stats bar is optional */ }
+}
+
+function renderStatsBar(container, data) {
+    clearNode(container);
+    var health = data.health || {};
+    var stats = data.stats || {};
+
+    var hColors = { green: '#16a34a', yellow: '#d97706', red: '#dc2626' };
+    var hColor = hColors[health.status] || '#6b7280';
+
+    var bar = el('div', {
+        style: 'display:flex;gap:16px;align-items:center;padding:10px 14px;border-radius:8px;background:var(--bg-alt);border:1px solid var(--border);flex-wrap:wrap;',
+    });
+
+    // Health dot + label
+    var dot = el('span', {
+        style: 'display:inline-block;width:10px;height:10px;border-radius:50%;background:' + hColor + ';flex-shrink:0;',
+    });
+    bar.appendChild(el('div', { style: 'display:flex;align-items:center;gap:6px;' }, [
+        dot,
+        el('span', { style: 'font-weight:600;font-size:12px;color:' + hColor, textContent: health.status ? health.status.toUpperCase() : '—' }),
+        el('span', { style: 'font-size:11px;color:var(--muted);', textContent: health.message || '' }),
+    ]));
+
+    // Stat chips
+    var chips = [
+        { label: 'Created', value: stats.tickets_created },
+        { label: 'Resolved', value: stats.tickets_resolved },
+        { label: 'Success', value: stats.success_rate != null ? stats.success_rate + '%' : '—' },
+        { label: 'Avg Time', value: stats.avg_resolution_hours != null ? stats.avg_resolution_hours + 'h' : '—' },
+        { label: 'Cost', value: stats.total_cost != null ? '$' + stats.total_cost.toFixed(2) : '—' },
+    ];
+    chips.forEach(function(c) {
+        bar.appendChild(el('div', { style: 'text-align:center;min-width:60px;' }, [
+            el('div', { style: 'font-size:15px;font-weight:700;color:var(--fg);', textContent: String(c.value != null ? c.value : 0) }),
+            el('div', { style: 'font-size:10px;color:var(--muted);', textContent: c.label }),
+        ]));
+    });
+
+    container.appendChild(bar);
 }
 
 // ── System Notifications (self-heal pipeline) ────────────────────────────

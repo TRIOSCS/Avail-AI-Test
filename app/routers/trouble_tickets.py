@@ -23,6 +23,7 @@ from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
+from app.services.pattern_tracker import get_health_status, get_weekly_stats
 
 router = APIRouter(tags=["trouble-tickets"])
 
@@ -45,6 +46,17 @@ async def create_ticket(
         frontend_errors=body.frontend_errors,
     )
     return {"ok": True, "id": ticket.id, "ticket_number": ticket.ticket_number}
+
+
+@router.get("/api/trouble-tickets/stats")
+async def ticket_stats(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Weekly stats + health indicator for admin dashboard."""
+    stats = get_weekly_stats(db, weeks_back=1)
+    health = get_health_status(db)
+    return {"stats": stats, "health": health}
 
 
 @router.get("/api/trouble-tickets/my-tickets")

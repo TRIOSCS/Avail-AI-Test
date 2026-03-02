@@ -352,3 +352,40 @@ class TestExecuteEndpoint:
         assert result["ok"] is True
         db_session.refresh(ticket)
         assert ticket.status == "awaiting_verification"
+
+
+class TestStatsEndpoint:
+    def test_stats_returns_health_and_stats(self, db_session, test_user):
+        """Stats endpoint returns weekly stats + health indicator."""
+        from app.database import get_db
+        from app.dependencies import require_admin, require_user
+        from app.main import app
+
+        create_ticket(db=db_session, user_id=test_user.id, title="A", description="D")
+
+        admin = User(
+            email="stats_admin@trioscs.com", name="Stats Admin", role="admin",
+            azure_id="test-stats-admin", created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(admin)
+        db_session.commit()
+        db_session.refresh(admin)
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: admin
+        app.dependency_overrides[require_admin] = lambda: admin
+
+        from starlette.testclient import TestClient
+        with TestClient(app) as c:
+            resp = c.get("/api/trouble-tickets/stats")
+        app.dependency_overrides.clear()
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "stats" in data
+        assert "health" in data
+        assert data["health"]["status"] in ("green", "yellow", "red")
+        assert data["stats"]["tickets_created"] >= 1
