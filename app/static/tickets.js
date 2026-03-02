@@ -751,3 +751,36 @@ if (document.readyState === 'loading') {
 } else {
     startSysNotifPolling();
 }
+
+// ── Close notification panel on outside click ────────────────────────
+document.addEventListener('click', function(e) {
+    var panel = document.getElementById('sysNotifPanel');
+    var bell = document.getElementById('sysNotifBell');
+    if (!panel || panel.style.display === 'none') return;
+    if (panel.contains(e.target) || (bell && bell.contains(e.target))) return;
+    panel.style.display = 'none';
+});
+
+// ── Keyboard shortcuts for ticket detail (admin only) ────────────────
+document.addEventListener('keydown', function(e) {
+    if (!window.__isAdmin) return;
+    // Skip if user is typing in an input/textarea/select
+    var tag = (e.target.tagName || '').toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+    var container = document.getElementById('view-tickets');
+    if (!container || container.style.display === 'none') return;
+
+    // Only active on ticket detail view (has a Back button)
+    var backBtn = container.querySelector('.btn-ghost.btn-sm');
+    if (!backBtn || backBtn.textContent !== 'Back') return;
+
+    // Find ticket ID from the URL-like pattern or admin action buttons
+    var execBtn = container.querySelector('button[style*="background:#16a34a"]');
+    var escBtn = container.querySelector('button[style*="background:#f59e0b"]');
+    var rejBtn = container.querySelector('button[style*="color:var(--red)"]');
+
+    if (e.key === 'e' && execBtn && !execBtn.disabled) { execBtn.click(); }
+    if (e.key === 's' && escBtn) { escBtn.click(); }
+    if (e.key === 'r' && rejBtn) { rejBtn.click(); }
+});
