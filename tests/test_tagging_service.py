@@ -367,3 +367,21 @@ def test_propagate_untagged_material_no_error(db_session, test_material_card):
 
     count = db_session.query(EntityTag).count()
     assert count == 0
+
+
+def test_propagate_skips_low_confidence_tags(db_session, test_material_card):
+    """Tags with confidence < 0.7 are not propagated to entities."""
+    _seed_thresholds(db_session)
+    tag = _make_tag(db_session)
+    tag_material_card(
+        test_material_card.id,
+        [{"tag_id": tag.id, "source": "ai_classified", "confidence": 0.3}],
+        db_session,
+    )
+    db_session.commit()
+
+    propagate_tags_to_entity("vendor_card", 1, test_material_card.id, 1.0, db_session)
+    db_session.commit()
+
+    count = db_session.query(EntityTag).count()
+    assert count == 0

@@ -118,10 +118,10 @@ async def get_material_card_tags(
     db: Session = Depends(get_db),
     _user=Depends(require_user),
 ):
-    """Get tags for a specific material card."""
+    """Get tags for a specific material card (confidence >= 0.7 only)."""
     material_tags = (
         db.query(MaterialTag)
-        .filter(MaterialTag.material_card_id == material_card_id)
+        .filter(MaterialTag.material_card_id == material_card_id, MaterialTag.confidence >= 0.7)
         .all()
     )
 

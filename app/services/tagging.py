@@ -284,8 +284,13 @@ def recalculate_entity_tag_visibility(
 def propagate_tags_to_entity(
     entity_type: str, entity_id: int, material_card_id: int, weight: float, db: Session
 ) -> None:
-    """Propagate all MaterialTags for a part to an entity. Upsert EntityTag counts."""
-    material_tags = db.query(MaterialTag).filter_by(material_card_id=material_card_id).all()
+    """Propagate MaterialTags (confidence >= 0.7) for a part to an entity. Upsert EntityTag counts."""
+    material_tags = (
+        db.query(MaterialTag)
+        .filter_by(material_card_id=material_card_id)
+        .filter(MaterialTag.confidence >= 0.7)
+        .all()
+    )
     if not material_tags:
         return
 

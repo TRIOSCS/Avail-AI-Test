@@ -132,6 +132,16 @@ def test_get_material_card_tags_empty(client, db_session, test_material_card):
     assert resp.json() == []
 
 
+def test_get_material_card_tags_hides_low_confidence(client, db_session, test_material_card):
+    """Tags with confidence < 0.7 are hidden from the API response."""
+    tag = _make_tag(db_session)
+    _make_material_tag(db_session, test_material_card.id, tag.id, confidence=0.3)
+
+    resp = client.get(f"/api/tags/material-cards/{test_material_card.id}")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
 # ── Vendor detail includes tags ────────────────────────────────────────
 
 
