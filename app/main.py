@@ -951,3 +951,7 @@ app.include_router(trouble_tickets_router)
 from .routers.notifications import router as notifications_router
 
 app.include_router(notifications_router)
+
+from .routers.tagging_admin import router as tagging_admin_router
+
+app.include_router(tagging_admin_router)
