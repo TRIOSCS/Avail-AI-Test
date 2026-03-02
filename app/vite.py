@@ -100,15 +100,19 @@ def vite_js_tags(app_version: str = "") -> Markup:
             f'<script type="module" src="{VITE_DEV_ORIGIN}/@vite/client"></script>\n'
             f'    <script type="module" src="{VITE_DEV_ORIGIN}/app.js"></script>\n'
             f'    <script type="module" src="{VITE_DEV_ORIGIN}/crm.js"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/tickets.js"></script>\n'
             f'    <script type="module" src="{VITE_DEV_ORIGIN}/touch.js"></script>'
         )
 
     # Try manifest (production)
     app_url = _manifest_url("app.js")
     crm_url = _manifest_url("crm.js")
+    tickets_url = _manifest_url("tickets.js")
     touch_url = _manifest_url("touch.js")
     if app_url and crm_url:
         tags = f'<script type="module" src="{app_url}"></script>\n    <script type="module" src="{crm_url}"></script>'
+        if tickets_url:
+            tags += f'\n    <script type="module" src="{tickets_url}"></script>'
         if touch_url:
             tags += f'\n    <script type="module" src="{touch_url}"></script>'
         return Markup(tags)
@@ -125,5 +129,6 @@ def vite_js_tags(app_version: str = "") -> Markup:
         "</script>\n"
         f'    <script type="module" src="/static/app.js{bust}"></script>\n'
         f'    <script type="module" src="/static/crm.js{bust}"></script>\n'
+        f'    <script type="module" src="/static/tickets.js{bust}"></script>\n'
         f'    <script defer src="/static/touch.js{bust}"></script>'
     )

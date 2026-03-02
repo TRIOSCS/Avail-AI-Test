@@ -20,6 +20,7 @@ from app.services.trouble_ticket_service import (
     get_ticket,
     list_tickets,
     get_tickets_by_user,
+    update_ticket,
     check_file_lock,
     _capture_auto_context,
     _sanitize_context,
@@ -241,3 +242,22 @@ class TestVerifyEndpoint:
     def test_verify_not_found(self, client, db_session: Session):
         resp = client.post("/api/trouble-tickets/99999/verify", json={"is_fixed": True})
         assert resp.status_code == 404
+
+
+class TestUpdateTicket:
+    def test_update_not_found(self, db_session: Session):
+        result = update_ticket(db_session, 99999, status="triaging")
+        assert result is None
+
+    def test_update_diagnosed_sets_timestamp(self, db_session: Session, test_user: User):
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        assert ticket.diagnosed_at is None
+        updated = update_ticket(db_session, ticket.id, status="diagnosed")
+        assert updated.diagnosed_at is not None
+
+    def test_sanitize_non_string_non_dict_non_list(self, db_session: Session):
+        context = {"count": 42, "flag": True, "score": 3.14}
+        result = _sanitize_context(context)
+        assert result["count"] == 42
+        assert result["flag"] is True
+        assert result["score"] == 3.14
