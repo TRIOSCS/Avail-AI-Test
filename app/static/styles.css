@@ -1041,6 +1041,14 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     /* Intel card — compact */
     .intel-card summary{padding:8px 10px;font-size:11px}
     .intel-body{padding:8px 10px}
+    /* Work queue + status bar (consolidated from standalone block) */
+    .work-queue{grid-template-columns:1fr}
+    .status-bar{flex-wrap:wrap;gap:4px 8px}
+    /* Scorecard personal (consolidated from standalone block) */
+    .sc-personal{flex-direction:column;align-items:stretch}
+    .sc-personal-right{flex-direction:column;gap:12px}
+    .sc-score-ring{margin:0 auto}
+    .sc-outcomes-grid{grid-template-columns:1fr}
 }
 
 /* Suggested Contacts */
@@ -1910,7 +1918,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 
 /* ── Work Queue (Zone 3) ─────────────────────────────────── */
 .work-queue{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-@media(max-width:768px){.work-queue{grid-template-columns:1fr}.status-bar{flex-wrap:wrap;gap:4px 8px}}
+/* work-queue/status-bar responsive rules moved to consolidated @media(max-width:768px) block at line ~976 */
 
 /* ── Trader Badge ────────────────────────────────────────── */
 .trader-badge{font-size:9px;font-weight:700;color:var(--purple,#7c3aed);background:var(--purple-lt,#f3e8ff);padding:1px 5px;border-radius:6px;margin-left:4px;vertical-align:middle}
@@ -2066,12 +2074,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .sc-bar-fill{height:100%;border-radius:3px;transition:width .3s ease}
 .sc-bar-val{font-size:10px;font-weight:600;color:var(--text-muted);width:24px;text-align:right;font-family:'JetBrains Mono',monospace}
 .sc-outcomes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:0 16px}
-@media(max-width:768px){
-    .sc-personal{flex-direction:column;align-items:stretch}
-    .sc-personal-right{flex-direction:column;gap:12px}
-    .sc-score-ring{margin:0 auto}
-    .sc-outcomes-grid{grid-template-columns:1fr}
-}
+/* sc-personal responsive rules moved to consolidated @media(max-width:768px) block at line ~976 */
 
 /* ── Engagement Ring (SVG) ───────────────────────────────── */
 .eng-ring{width:44px;height:44px;flex-shrink:0}
@@ -2105,20 +2108,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 /* ── Stat Grid ───────────────────────────────────────────── */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
 
-/* ── v2 Responsive ───────────────────────────────────────── */
-@media (max-width:768px){
-    .stat-grid{grid-template-columns:repeat(2,1fr)}
-    .sb-group-label{font-size:12px}
-    .sb-nav-group .sb-nav-btn{margin-left:4px}
-    .sb-group-header{padding:6px 10px}
-    .contact-card{flex-wrap:wrap}
-    .contact-card-meta{width:100%;margin-top:4px}
-    .split-panel{flex-direction:column;height:auto!important}
-    .split-panel-left{width:100%!important;border-right:none!important;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
-    .split-panel-right{min-height:50vh}
-    .kanban{flex-direction:column}
-    .kanban-col{width:100%}
-}
+/* v2 responsive rules moved to consolidated CRM v3 @media(max-width:768px) block below */
 @media (max-width:480px){
     .stat-grid{grid-template-columns:1fr}
     .chip-row{gap:4px}
@@ -2387,6 +2377,18 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .cust-split-active .drawer{left:0;width:100%}
     .prospect-mini-list{display:none!important}.prospect-split-active .drawer{left:0;width:100%}
     .suggested-grid{grid-template-columns:1fr}
+    /* v2 responsive (consolidated from standalone block) */
+    .stat-grid{grid-template-columns:repeat(2,1fr)}
+    .sb-group-label{font-size:12px}
+    .sb-nav-group .sb-nav-btn{margin-left:4px}
+    .sb-group-header{padding:6px 10px}
+    .contact-card{flex-wrap:wrap}
+    .contact-card-meta{width:100%;margin-top:4px}
+    .split-panel{flex-direction:column;height:auto!important}
+    .split-panel-left{width:100%!important;border-right:none!important;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
+    .split-panel-right{min-height:50vh}
+    .kanban{flex-direction:column}
+    .kanban-col{width:100%}
 }
 
 /* ── Drawer: wide layout helpers ──────────────────────────── */

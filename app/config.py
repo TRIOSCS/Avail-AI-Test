@@ -147,6 +147,10 @@ class Settings:
     routing_window_hours: int = int(os.getenv("ROUTING_WINDOW_HOURS", "48"))
     collision_lookback_days: int = int(os.getenv("COLLISION_LOOKBACK_DAYS", "7"))
 
+    # Self-heal pipeline
+    self_heal_enabled: bool = os.getenv("SELF_HEAL_ENABLED", "false").lower() == "true"
+    self_heal_auto_diagnose: bool = os.getenv("SELF_HEAL_AUTO_DIAGNOSE", "false").lower() == "true"
+
     # Proactive offers
     proactive_matching_enabled: bool = os.getenv("PROACTIVE_MATCHING_ENABLED", "true").lower() == "true"
     proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
