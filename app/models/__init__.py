@@ -35,6 +35,7 @@ from .enrichment import (  # noqa: F401
 
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
+from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401
