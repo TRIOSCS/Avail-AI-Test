@@ -105,6 +105,39 @@ def test_prefix_lookup_silicon_labs():
     assert conf == 0.7  # 2-char prefix
 
 
+def test_new_prefix_entries():
+    """Verify new prefix entries from Phase 2 expansion match correctly."""
+    from app.services.prefix_lookup import lookup_manufacturer_by_prefix
+
+    # Renesas
+    mfr, conf = lookup_manufacturer_by_prefix("R7FA2E1A93CFM")
+    assert mfr == "Renesas Electronics"
+
+    # Bourns
+    mfr, conf = lookup_manufacturer_by_prefix("SRR1260A-100M")
+    assert mfr == "Bourns"
+
+    # GigaDevice
+    mfr, conf = lookup_manufacturer_by_prefix("GD25Q128CSIG")
+    assert mfr == "GigaDevice"
+
+    # Monolithic Power
+    mfr, conf = lookup_manufacturer_by_prefix("MP2315GJ")
+    assert mfr == "Monolithic Power Systems"
+
+    # Realtek
+    mfr, conf = lookup_manufacturer_by_prefix("RTL8211F")
+    assert mfr == "Realtek"
+
+    # Semtech
+    mfr, conf = lookup_manufacturer_by_prefix("SX1276IMLTRT")
+    assert mfr == "Semtech"
+
+    # Macronix
+    mfr, conf = lookup_manufacturer_by_prefix("MX25L12835F")
+    assert mfr == "Macronix"
+
+
 # ── classify_material_card ─────────────────────────────────────────────
 
 

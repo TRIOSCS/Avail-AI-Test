@@ -291,6 +291,104 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
     return {"total_processed": total_processed, "total_tagged": total_tagged, "total_skipped": total_skipped}
 
 
+def purge_unknown_tags(db: Session, batch_size: int = 1000) -> dict:
+    """Purge 'Unknown' brand junk tags (confidence <= 0.30) that block reprocessing.
+
+    These tags were created by early AI classification runs and prevent prefix/sighting
+    backfill from reprocessing those cards. Deletes MaterialTag rows and the 'Unknown'
+    Tag row if no references remain.
+
+    Called by: app.routers.tagging_admin
+    Returns: {total_purged, tag_deleted}
+    """
+    from app.models.tags import Tag
+
+    # Find the "Unknown" brand tag
+    unknown_tag = db.query(Tag).filter(Tag.name == "Unknown", Tag.tag_type == "brand").first()
+    if not unknown_tag:
+        logger.info("Purge: no 'Unknown' brand tag found — nothing to do")
+        return {"total_purged": 0, "tag_deleted": False}
+
+    total_purged = 0
+
+    while True:
+        # Batch delete MaterialTag rows referencing the Unknown brand tag at low confidence
+        mt_ids = (
+            db.query(MaterialTag.id)
+            .filter(
+                MaterialTag.tag_id == unknown_tag.id,
+                MaterialTag.confidence <= 0.30,
+            )
+            .limit(batch_size)
+            .all()
+        )
+
+        if not mt_ids:
+            break
+
+        ids = [row.id for row in mt_ids]
+        deleted = (
+            db.query(MaterialTag)
+            .filter(MaterialTag.id.in_(ids))
+            .delete(synchronize_session="fetch")
+        )
+        db.commit()
+        total_purged += deleted
+        logger.info(f"Purge: deleted {total_purged} 'Unknown' junk tags so far")
+
+    # Check if any MaterialTags still reference the Unknown tag
+    remaining = db.query(func.count(MaterialTag.id)).filter(MaterialTag.tag_id == unknown_tag.id).scalar() or 0
+    tag_deleted = False
+    if remaining == 0:
+        db.delete(unknown_tag)
+        db.commit()
+        tag_deleted = True
+        logger.info("Purge: deleted orphaned 'Unknown' brand Tag row")
+
+    logger.info(f"Purge complete: {total_purged} junk tags removed, tag_deleted={tag_deleted}")
+    return {"total_purged": total_purged, "tag_deleted": tag_deleted}
+
+
+def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:
+    """Analyze untagged MPNs to discover common prefixes not in the current lookup table.
+
+    Returns top_n prefix groups with counts, sorted by frequency.
+    Called by: app.routers.tagging_admin
+    """
+    from app.services.prefix_lookup import PREFIX_TABLE
+
+    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
+    untagged = (
+        db.query(MaterialCard.normalized_mpn)
+        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
+        .all()
+    )
+
+    if not untagged:
+        return []
+
+    # Count 2-5 char prefixes
+    prefix_counts: Counter = Counter()
+    for (mpn,) in untagged:
+        upper = mpn.upper()
+        for length in range(5, 1, -1):
+            if len(upper) >= length:
+                prefix = upper[:length]
+                # Skip if already in PREFIX_TABLE
+                if prefix not in {k.upper() for k in PREFIX_TABLE}:
+                    prefix_counts[prefix] += 1
+                break
+
+    results = [
+        {"prefix": prefix, "count": count}
+        for prefix, count in prefix_counts.most_common(top_n)
+        if count >= 5  # Only prefixes appearing 5+ times
+    ]
+
+    logger.info(f"Prefix analysis: found {len(results)} candidate prefixes from {len(untagged)} untagged cards")
+    return results
+
+
 def repair_entity_tag_visibility(db: Session) -> dict:
     """Recalculate is_visible for ALL entity tags using corrected thresholds.
 

@@ -51,6 +51,9 @@ PREFIX_TABLE: dict[str, str] = {
     "L79": "STMicroelectronics",
     "ST": "STMicroelectronics",
     # Analog Devices (ADI)
+    "MAX3": "Analog Devices",
+    "MAX6": "Analog Devices",
+    "MAX9": "Analog Devices",
     "ADM": "Analog Devices",
     "ADP": "Analog Devices",
     "ADG": "Analog Devices",
@@ -75,6 +78,8 @@ PREFIX_TABLE: dict[str, str] = {
     "AT24": "Microchip Technology",
     "AT25": "Microchip Technology",
     "MCP": "Microchip Technology",
+    "MIC": "Microchip Technology",
+    "SST": "Microchip Technology",
     "PIC": "Microchip Technology",
     # Intel
     "XEON": "Intel",
@@ -82,6 +87,8 @@ PREFIX_TABLE: dict[str, str] = {
     "EPYC": "AMD",
     "RYZEN": "AMD",
     # Infineon Technologies
+    "S25FL": "Infineon Technologies",
+    "FM25": "Infineon Technologies",
     "IRFP": "Infineon Technologies",
     "AUIR": "Infineon Technologies",
     "IRF": "Infineon Technologies",
@@ -91,22 +98,36 @@ PREFIX_TABLE: dict[str, str] = {
     "XMC": "Infineon Technologies",
     "CY": "Infineon Technologies",
     # onsemi
+    "FDMS": "onsemi",
     "MMBT": "onsemi",
     "NCP": "onsemi",
     "FQP": "onsemi",
+    "FQD": "onsemi",
+    "FDN": "onsemi",
+    "FDS": "onsemi",
+    "FAN": "onsemi",
+    "FOD": "onsemi",
     "NCV": "onsemi",
     "NTD": "onsemi",
+    "NTB": "onsemi",
+    "NUP": "onsemi",
+    "NIS": "onsemi",
     "NSI": "onsemi",
     "NJM": "onsemi",
     "MC": "onsemi",
     # Renesas Electronics
+    "RH850": "Renesas Electronics",
+    "R5FA": "Renesas Electronics",
+    "R7FA": "Renesas Electronics",
     "R5F": "Renesas Electronics",
     "R7F": "Renesas Electronics",
     "RL78": "Renesas Electronics",
     "UPD": "Renesas Electronics",
     "ISL": "Renesas Electronics",
+    "RAA": "Renesas Electronics",
     "RX": "Renesas Electronics",
     "ZL": "Renesas Electronics",
+    "RA": "Renesas Electronics",
     # Samsung
     "K4": "Samsung",
     "K9": "Samsung",
@@ -141,6 +162,8 @@ PREFIX_TABLE: dict[str, str] = {
     "W9825": "Winbond",
     "W25": "Winbond",
     # Broadcom / Avago
+    "HDSP": "Broadcom",
+    "AFBR": "Broadcom",
     "ACPL": "Broadcom",
     "HCPL": "Broadcom",
     "BCM": "Broadcom",
@@ -202,18 +225,66 @@ PREFIX_TABLE: dict[str, str] = {
     # Yageo
     "RC": "Yageo",
     "CC": "Yageo",
+    "AC": "Yageo",
+    "PT": "Yageo",
     # TE Connectivity
+    "1-17": "TE Connectivity",
     "AMP": "TE Connectivity",
+    "282": "TE Connectivity",
     # Molex
     "MOLEX": "Molex",
+    "5055": "Molex",
+    "5023": "Molex",
+    "430": "Molex",
     # Amphenol
     "AMPHENOL": "Amphenol",
+    "FCI": "Amphenol",
     # Samtec
     "SAMTEC": "Samtec",
+    "SSW": "Samtec",
+    "TSW": "Samtec",
     # Hirose
     "DF": "Hirose",
     # Wurth Elektronik
+    "WE-P": "Wurth Elektronik",
+    "WE-E": "Wurth Elektronik",
+    "WE-T": "Wurth Elektronik",
     "WE-": "Wurth Elektronik",
+    # Bourns
+    "SRR": "Bourns",
+    "SRP": "Bourns",
+    "SRN": "Bourns",
+    "CR": "Bourns",
+    # AVX
+    "TAJB": "AVX",
+    "TAJA": "AVX",
+    "TAJC": "AVX",
+    # Littelfuse
+    "SMBJ": "Littelfuse",
+    "SMAJ": "Littelfuse",
+    "SMDJ": "Littelfuse",
+    "0603": "Littelfuse",
+    # Diodes Incorporated
+    "ZXTN": "Diodes Incorporated",
+    "ZXTP": "Diodes Incorporated",
+    "PAM": "Diodes Incorporated",
+    "AP": "Diodes Incorporated",
+    # Torex Semiconductor
+    "XC6": "Torex Semiconductor",
+    "XCL": "Torex Semiconductor",
+    # Macronix
+    "MX25": "Macronix",
+    "MX29": "Macronix",
+    # GigaDevice
+    "GD25": "GigaDevice",
+    "GD32": "GigaDevice",
+    # Monolithic Power Systems
+    "MP": "Monolithic Power Systems",
+    # Realtek
+    "RTL": "Realtek",
+    # Semtech
+    "SX12": "Semtech",
+    "SX13": "Semtech",
 }
 
 # Pre-sorted longest-first for most-specific matching

@@ -330,3 +330,34 @@ async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_user))
 
     asyncio.create_task(_run())
     return {"ok": True, "message": f"Nexar bulk validation started (limit={limit})"}
+
+
+@router.post("/purge-unknown")
+async def purge_unknown_tags(_user=Depends(require_user)):
+    """Purge 'Unknown' brand junk tags that block reprocessing (instant, no API calls)."""
+
+    def _run():
+        from app.database import SessionLocal
+        from app.services.tagging_backfill import purge_unknown_tags
+
+        session = SessionLocal()
+        try:
+            result = purge_unknown_tags(session)
+            logger.info(f"Purge unknown result: {result}")
+        except Exception:
+            logger.exception("Purge unknown failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.get_event_loop().run_in_executor(None, _run)
+    return {"ok": True, "message": "Purging 'Unknown' junk tags in background"}
+
+
+@router.get("/analyze-prefixes")
+async def analyze_prefixes(db: Session = Depends(get_db), _user=Depends(require_user)):
+    """Analyze untagged MPNs to discover missing prefix patterns."""
+    from app.services.tagging_backfill import analyze_untagged_prefixes
+
+    results = analyze_untagged_prefixes(db)
+    return {"ok": True, "candidates": results, "count": len(results)}

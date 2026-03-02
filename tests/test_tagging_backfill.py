@@ -163,3 +163,117 @@ def test_admin_backfill_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
+
+
+# ── purge_unknown_tags ─────────────────────────────────────────────────
+
+
+def test_purge_unknown_tags_removes_low_confidence(db_session):
+    """Purge deletes Unknown brand tags at <=0.30 confidence."""
+    from app.services.tagging_backfill import purge_unknown_tags
+
+    card = _make_card(db_session, "INTERNAL001")
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(unknown_tag)
+    db_session.flush()
+    mt = MaterialTag(material_card_id=card.id, tag_id=unknown_tag.id, confidence=0.30, source="ai_classified")
+    db_session.add(mt)
+    db_session.commit()
+
+    result = purge_unknown_tags(db_session)
+
+    assert result["total_purged"] == 1
+    assert result["tag_deleted"] is True
+    assert db_session.query(MaterialTag).count() == 0
+    assert db_session.query(Tag).filter(Tag.name == "Unknown", Tag.tag_type == "brand").first() is None
+
+
+def test_purge_unknown_tags_keeps_higher_confidence(db_session):
+    """Purge does NOT delete Unknown tags above 0.30 confidence."""
+    from app.services.tagging_backfill import purge_unknown_tags
+
+    card = _make_card(db_session, "REALPART001")
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(unknown_tag)
+    db_session.flush()
+    mt = MaterialTag(material_card_id=card.id, tag_id=unknown_tag.id, confidence=0.50, source="manual")
+    db_session.add(mt)
+    db_session.commit()
+
+    result = purge_unknown_tags(db_session)
+
+    assert result["total_purged"] == 0
+    assert result["tag_deleted"] is False
+    assert db_session.query(MaterialTag).count() == 1
+
+
+def test_purge_unknown_tags_no_tag_exists(db_session):
+    """Purge handles case where no Unknown brand tag exists."""
+    from app.services.tagging_backfill import purge_unknown_tags
+
+    result = purge_unknown_tags(db_session)
+
+    assert result["total_purged"] == 0
+    assert result["tag_deleted"] is False
+
+
+def test_purge_unknown_tags_batch_processing(db_session):
+    """Purge processes in batches correctly."""
+    from app.services.tagging_backfill import purge_unknown_tags
+
+    unknown_tag = Tag(name="Unknown", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(unknown_tag)
+    db_session.flush()
+
+    for i in range(5):
+        card = _make_card(db_session, f"JUNK{i:03d}")
+        mt = MaterialTag(material_card_id=card.id, tag_id=unknown_tag.id, confidence=0.30, source="ai_classified")
+        db_session.add(mt)
+    db_session.commit()
+
+    result = purge_unknown_tags(db_session, batch_size=2)
+
+    assert result["total_purged"] == 5
+    assert result["tag_deleted"] is True
+
+
+def test_admin_purge_unknown_endpoint(client):
+    resp = client.post("/api/admin/tagging/purge-unknown")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+# ── analyze_untagged_prefixes ──────────────────────────────────────────
+
+
+def test_analyze_untagged_prefixes(db_session):
+    from app.services.tagging_backfill import analyze_untagged_prefixes
+
+    # Create cards with unmatched prefix patterns
+    for i in range(10):
+        _make_card(db_session, f"ZZTOP{i:03d}")
+    for i in range(3):
+        _make_card(db_session, f"RAREPART{i}")
+
+    results = analyze_untagged_prefixes(db_session)
+
+    # ZZTOP should appear (10 occurrences > 5 threshold)
+    prefixes = [r["prefix"] for r in results]
+    assert any("ZZ" in p for p in prefixes)
+
+
+def test_analyze_untagged_prefixes_empty(db_session):
+    from app.services.tagging_backfill import analyze_untagged_prefixes
+
+    results = analyze_untagged_prefixes(db_session)
+    assert results == []
+
+
+def test_admin_analyze_prefixes_endpoint(client, db_session):
+    _make_card(db_session, "NEWPREFIX001")
+
+    resp = client.get("/api/admin/tagging/analyze-prefixes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "candidates" in data
