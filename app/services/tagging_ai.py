@@ -26,18 +26,26 @@ from app.services.tagging import (
 )
 
 _CLASSIFY_PROMPT = """Classify these electronic component part numbers. For each MPN, provide:
-- manufacturer: The most likely manufacturer (full company name)
-- category: The component category (e.g., Microcontrollers (MCU), Capacitors, Connectors, etc.)
+- manufacturer: The most likely manufacturer (full company name), or null if unknown
+- category: The component category (e.g., Microcontrollers (MCU), Capacitors, Connectors, etc.), or null if unknown
+- confidence: Your confidence in the manufacturer identification (0.0 to 1.0)
+
+Common MPN patterns to help:
+- STM32*, STM8* → STMicroelectronics; TPS*, LM*, SN* → Texas Instruments
+- ATMEGA*, PIC* → Microchip Technology; LPC*, S32K* → NXP Semiconductors
+- IRF*, BSC*, CY8C* → Infineon Technologies; AD*, LTC*, MAX* → Analog Devices
+- GRM*, BLM* → Murata; ERJ*, EEE* → Panasonic; CRCW* → Vishay
+
+If this looks like an internal/custom part number (company-specific prefixes, purchase
+order numbers, or non-standard formats), return null for manufacturer.
 
 Return a JSON array with one object per part:
-[{{"mpn": "...", "manufacturer": "...", "category": "..."}}]
-
-If you're unsure about a part, use "Unknown" for manufacturer and "Miscellaneous" for category.
+[{{"mpn": "...", "manufacturer": "..." or null, "category": "..." or null, "confidence": 0.0-1.0}}]
 
 Part numbers to classify:
 {mpns}"""
 
-_SYSTEM = "You are an expert electronic component classifier. Return only valid JSON."
+_SYSTEM = "You are an expert electronic component classifier. Return only valid JSON. Use null instead of 'Unknown' when unsure."
 
 
 async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
@@ -403,6 +411,84 @@ async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 
     return {"total_processed": total_processed, "total_matched": total_matched, "total_unknown": total_unknown}
 
 
+async def submit_targeted_backfill(db: Session, limit: int = 50000) -> dict:
+    """Submit untagged cards (no MaterialTag at all) to Anthropic Batch API.
+
+    Excludes cards that already failed AI classification (0.30 "Unknown" tags).
+    Groups into batches of 100 MPNs each, submits as a single Batch API job.
+
+    Returns: {batch_id, total_submitted} or {error: str}
+    """
+    from app.http_client import http
+    from app.services.credential_service import get_credential_cached
+
+    api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+    if not api_key:
+        return {"error": "No Anthropic API key configured"}
+
+    # Cards with NO MaterialTag at all AND no manufacturer field
+    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
+    untagged = (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(
+            ~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)),
+            (MaterialCard.manufacturer.is_(None) | (MaterialCard.manufacturer == "")),
+        )
+        .order_by(MaterialCard.id)
+        .limit(limit)
+        .all()
+    )
+
+    if not untagged:
+        return {"batch_id": None, "total_submitted": 0}
+
+    logger.info(f"Targeted backfill: preparing {len(untagged)} cards for Batch API")
+
+    # Build batch requests — 100 MPNs per request
+    requests = []
+    for i in range(0, len(untagged), 100):
+        batch = untagged[i : i + 100]
+        mpn_list = "\n".join(f"- {row.normalized_mpn}" for row in batch)
+        prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
+
+        requests.append({
+            "custom_id": f"backfill_{i}",
+            "params": {
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 8192,
+                "system": _SYSTEM,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+        })
+
+    # Submit to Batch API
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+
+    # Write requests as JSONL
+    import tempfile
+    jsonl_lines = "\n".join(json.dumps(r) for r in requests)
+
+    resp = await http.post(
+        "https://api.anthropic.com/v1/messages/batches",
+        headers=headers,
+        json={"requests": requests},
+        timeout=60,
+    )
+
+    if resp.status_code not in (200, 201):
+        return {"error": f"Batch API submission failed: HTTP {resp.status_code} — {resp.text[:200]}"}
+
+    data = resp.json()
+    batch_id = data.get("id", "unknown")
+    logger.info(f"Targeted backfill submitted: batch_id={batch_id}, {len(untagged)} cards in {len(requests)} requests")
+
+    return {"batch_id": batch_id, "total_submitted": len(untagged)}
+
+
 async def apply_batch_results_chunked(batch_id: str) -> dict:
     """Download and apply Batch API results without loading all into memory.
 
@@ -569,11 +655,20 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
 
     for card in cards:
         item = mpn_map.get(card.normalized_mpn.lower(), {})
-        manufacturer = (item.get("manufacturer") or "Unknown").strip()
-        category = (item.get("category") or "Miscellaneous").strip()
+        manufacturer = (item.get("manufacturer") or "").strip() or None
+        category = (item.get("category") or "").strip() or None
+        model_confidence = item.get("confidence")
 
-        is_unknown = manufacturer == "Unknown"
-        confidence = 0.3 if is_unknown else 0.7
+        # v2 schema: skip null/Unknown manufacturers entirely (don't create 0.30 junk tags)
+        if not manufacturer or manufacturer == "Unknown":
+            unknown += 1
+            continue
+
+        # Use model-reported confidence if available and >= 0.7, otherwise default 0.7
+        if model_confidence is not None and isinstance(model_confidence, (int, float)):
+            confidence = max(0.7, min(1.0, float(model_confidence)))
+        else:
+            confidence = 0.7
 
         tags_to_apply = []
         brand_tag = get_or_create_brand_tag(manufacturer, db)
@@ -583,23 +678,21 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
             "confidence": confidence,
         })
 
-        commodity_tag = get_or_create_commodity_tag(category, db)
-        if commodity_tag:
-            tags_to_apply.append({
-                "tag_id": commodity_tag.id,
-                "source": "ai_classified",
-                "confidence": confidence,
-            })
+        if category and category != "Miscellaneous":
+            commodity_tag = get_or_create_commodity_tag(category, db)
+            if commodity_tag:
+                tags_to_apply.append({
+                    "tag_id": commodity_tag.id,
+                    "source": "ai_classified",
+                    "confidence": min(confidence, 0.9),
+                })
 
         tag_material_card(card.id, tags_to_apply, db)
 
-        if not is_unknown and not card.manufacturer:
+        if not card.manufacturer:
             card.manufacturer = manufacturer
 
-        if is_unknown:
-            unknown += 1
-        else:
-            matched += 1
+        matched += 1
 
     db.commit()
     return matched, unknown

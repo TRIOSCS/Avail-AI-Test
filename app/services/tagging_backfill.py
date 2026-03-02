@@ -10,11 +10,14 @@ Called by: app.scheduler, app.routers.tagging_admin
 Depends on: app.models.tags, app.models.intelligence, app.services.tagging
 """
 
+from collections import Counter
+
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
+from app.models.sourcing import Sighting
 from app.models.tags import MaterialTag
 from app.services.tagging import (
     classify_material_card,
@@ -172,4 +175,169 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
         "total_matched": total_matched,
         "total_unmatched": total_unmatched,
         "new_brands_discovered": len(new_brands),
+    }
+
+
+_JUNK_MANUFACTURERS = {"unknown", "n/a", "various", "", "none", "other", "generic", "-", "na"}
+
+
+def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> dict:
+    """Mine sighting manufacturer data for untagged material cards.
+
+    For each untagged card, find the most common non-empty manufacturer
+    across its sightings (majority vote). Apply as brand tag with
+    confidence based on agreement level:
+    - 3+ sources agree: 0.95 (source='sighting_consensus')
+    - 2 sources agree: 0.90 (source='sighting_consensus')
+    - 1 source only: 0.85 (source='sighting_single')
+
+    Called by: app.routers.tagging_admin, app.scheduler
+    """
+    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
+    total_untagged = (
+        db.query(func.count(MaterialCard.id))
+        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
+        .scalar()
+    )
+
+    if not total_untagged:
+        logger.info("Sighting mining: no untagged cards")
+        return {"total_processed": 0, "total_tagged": 0, "total_skipped": 0}
+
+    logger.info(f"Sighting mining: {total_untagged} untagged cards to process")
+
+    total_processed = 0
+    total_tagged = 0
+    total_skipped = 0
+    last_id = 0
+
+    while True:
+        cards = (
+            db.query(MaterialCard)
+            .filter(
+                ~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)),
+                MaterialCard.id > last_id,
+            )
+            .order_by(MaterialCard.id)
+            .limit(batch_size)
+            .all()
+        )
+        if not cards:
+            break
+
+        for card in cards:
+            last_id = card.id
+            total_processed += 1
+
+            # Get distinct manufacturer values from sightings for this card
+            sighting_mfrs = (
+                db.query(Sighting.manufacturer)
+                .filter(
+                    Sighting.material_card_id == card.id,
+                    Sighting.manufacturer.isnot(None),
+                    Sighting.manufacturer != "",
+                )
+                .all()
+            )
+
+            # Filter junk and count occurrences
+            mfr_counts: Counter = Counter()
+            for (mfr,) in sighting_mfrs:
+                cleaned = mfr.strip()
+                if cleaned.lower() not in _JUNK_MANUFACTURERS:
+                    mfr_counts[cleaned] += 1
+
+            if not mfr_counts:
+                total_skipped += 1
+                continue
+
+            # Majority vote: pick the most common manufacturer
+            winner, count = mfr_counts.most_common(1)[0]
+            distinct_sources = len(mfr_counts)
+
+            # Confidence based on agreement level
+            if count >= 3:
+                confidence = 0.95
+                source = "sighting_consensus"
+            elif count >= 2 or distinct_sources >= 2:
+                confidence = 0.90
+                source = "sighting_consensus"
+            else:
+                confidence = 0.85
+                source = "sighting_single"
+
+            # Update card manufacturer if not set
+            if not card.manufacturer:
+                card.manufacturer = winner
+
+            # Create brand tag
+            brand_tag = get_or_create_brand_tag(winner, db)
+            if brand_tag.id is None:
+                db.flush()
+            tag_material_card(
+                card.id,
+                [{"tag_id": brand_tag.id, "source": source, "confidence": confidence}],
+                db,
+            )
+            total_tagged += 1
+
+        db.commit()
+        logger.info(f"Sighting mining: {total_processed}/{total_untagged} — {total_tagged} tagged")
+
+    logger.info(
+        f"Sighting mining complete: {total_processed} processed, "
+        f"{total_tagged} tagged, {total_skipped} skipped"
+    )
+    return {"total_processed": total_processed, "total_tagged": total_tagged, "total_skipped": total_skipped}
+
+
+def repair_entity_tag_visibility(db: Session) -> dict:
+    """Recalculate is_visible for ALL entity tags using corrected thresholds.
+
+    Needed after fixing the entity_type mismatch in TagThresholdConfig (migration 043).
+    Processes all distinct (entity_type, entity_id) pairs and recalculates visibility.
+
+    Called by: app.routers.tagging_admin
+    Returns: {total_entities, total_tags_updated, now_visible, now_hidden}
+    """
+    from app.models.tags import EntityTag
+    from app.services.tagging import recalculate_entity_tag_visibility
+
+    # Get all distinct entity (type, id) pairs
+    entities = (
+        db.query(EntityTag.entity_type, EntityTag.entity_id)
+        .distinct()
+        .all()
+    )
+
+    if not entities:
+        logger.info("Visibility repair: no entity tags found")
+        return {"total_entities": 0, "total_tags_updated": 0, "now_visible": 0, "now_hidden": 0}
+
+    logger.info(f"Visibility repair: recalculating {len(entities)} entities")
+
+    total_entities = 0
+    for entity_type, entity_id in entities:
+        recalculate_entity_tag_visibility(entity_type, entity_id, db)
+        total_entities += 1
+
+        if total_entities % 100 == 0:
+            db.commit()
+            logger.info(f"Visibility repair: {total_entities}/{len(entities)} entities processed")
+
+    db.commit()
+
+    # Count results
+    now_visible = db.query(func.count(EntityTag.id)).filter(EntityTag.is_visible.is_(True)).scalar() or 0
+    now_hidden = db.query(func.count(EntityTag.id)).filter(EntityTag.is_visible.is_(False)).scalar() or 0
+
+    logger.info(
+        f"Visibility repair complete: {total_entities} entities, "
+        f"{now_visible} visible, {now_hidden} hidden"
+    )
+    return {
+        "total_entities": total_entities,
+        "total_tags_updated": now_visible + now_hidden,
+        "now_visible": now_visible,
+        "now_hidden": now_hidden,
     }

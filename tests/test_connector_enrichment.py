@@ -845,3 +845,296 @@ def test_admin_nexar_validate_endpoint(client, db_session):
     data = resp.json()
     assert data["ok"] is True
     assert "nexar" in data["message"].lower()
+
+
+# ── Cross-check pipeline tests (Phase 4 + Phase 5) ────────────────────────
+
+
+def _make_sighting_for_boost(db: Session, card: MaterialCard, manufacturer: str):
+    """Create a Sighting for cross-check boost tests."""
+    from app.models.sourcing import Requirement, Requisition, Sighting
+
+    req_parent = db.query(Requisition).first()
+    if not req_parent:
+        req_parent = Requisition(name="Test RFQ", status="submitted")
+        db.add(req_parent)
+        db.flush()
+
+    requirement = Requirement(requisition_id=req_parent.id, primary_mpn=card.display_mpn, material_card_id=card.id)
+    db.add(requirement)
+    db.flush()
+
+    sighting = Sighting(
+        requirement_id=requirement.id, material_card_id=card.id,
+        vendor_name="TestVendor", manufacturer=manufacturer,
+        mpn_matched=card.display_mpn, source_type="test",
+    )
+    db.add(sighting)
+    db.commit()
+    return sighting
+
+
+def test_boost_sighting_confirmed(db_session):
+    """Sighting manufacturer matches existing AI tag → boosted to 0.90."""
+    card = _make_card(db_session, "boost_sight_001", "Texas Instruments")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+    _make_sighting_for_boost(db_session, card, "Texas Instruments")
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+    # Phase 1 (exact match on card.manufacturer) or Phase 4 (sighting) should boost it
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt.confidence >= 0.90
+
+
+def test_boost_multi_source_confirmed(db_session):
+    """AI + sighting agree → boosted to 0.95 by Phase 5."""
+    card = _make_card(db_session, "boost_multi_001")
+    tag = _make_brand_tag(db_session, "Murata")
+    # Start with sighting_confirmed at 0.90 (simulating Phase 4 already ran)
+    _make_material_tag(db_session, card.id, tag.id, "sighting_confirmed", 0.90)
+    _make_sighting_for_boost(db_session, card, "Murata")
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt.confidence == 0.95
+    assert mt.source == "multi_source_confirmed"
+
+
+def test_boost_sighting_no_match(db_session):
+    """Sighting manufacturer differs from tag → no boost."""
+    card = _make_card(db_session, "boost_nomatch_001")
+    tag = _make_brand_tag(db_session, "NXP Semiconductors")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+    _make_sighting_for_boost(db_session, card, "Texas Instruments")
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt.confidence == 0.7  # unchanged
+
+
+def test_boost_already_high_confidence_skipped(db_session):
+    """Tags >= 0.95 not touched by cross-check."""
+    card = _make_card(db_session, "boost_high_001", "Infineon")
+    tag = _make_brand_tag(db_session, "Infineon")
+    _make_material_tag(db_session, card.id, tag.id, "connector_digikey", 0.95)
+    _make_sighting_for_boost(db_session, card, "Infineon")
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt.confidence == 0.95
+    assert mt.source == "connector_digikey"  # unchanged
+
+
+def test_admin_ai_backfill_endpoint(client, db_session):
+    """POST /api/admin/tagging/ai-backfill returns 200."""
+    resp = client.post("/api/admin/tagging/ai-backfill?limit=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+# ── Scheduler job tests ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_scheduler_internal_boost_job(db_session):
+    """_job_internal_boost calls boost_confidence_internal."""
+    with patch("app.database.SessionLocal", return_value=db_session):
+        with patch("app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}) as mock_boost:
+            from app.scheduler import _job_internal_boost
+            await _job_internal_boost()
+            mock_boost.assert_called_once_with(db_session)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_prefix_backfill_job(db_session):
+    """_job_prefix_backfill calls run_prefix_backfill."""
+    with patch("app.database.SessionLocal", return_value=db_session):
+        with patch("app.services.tagging_backfill.run_prefix_backfill", return_value={"total_processed": 0}) as mock_pf:
+            from app.scheduler import _job_prefix_backfill
+            await _job_prefix_backfill()
+            mock_pf.assert_called_once_with(db_session)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_sighting_mining_job(db_session):
+    """_job_sighting_mining calls backfill_manufacturer_from_sightings."""
+    with patch("app.database.SessionLocal", return_value=db_session):
+        with patch(
+            "app.services.tagging_backfill.backfill_manufacturer_from_sightings",
+            return_value={"total_tagged": 0},
+        ) as mock_sm:
+            from app.scheduler import _job_sighting_mining
+            await _job_sighting_mining()
+            mock_sm.assert_called_once_with(db_session)
+
+
+# ── Sighting manufacturer mining tests ─────────────────────────────────────
+
+
+def _make_sighting(db: Session, card: MaterialCard, manufacturer: str):
+    """Create a Sighting linked to a card (via a temporary Requirement/Requisition)."""
+    from app.models.sourcing import Requirement, Requisition, Sighting
+
+    # Reuse existing requisition or create one
+    req_parent = db.query(Requisition).first()
+    if not req_parent:
+        req_parent = Requisition(name="Test RFQ", status="submitted")
+        db.add(req_parent)
+        db.flush()
+
+    requirement = Requirement(requisition_id=req_parent.id, primary_mpn=card.display_mpn, material_card_id=card.id)
+    db.add(requirement)
+    db.flush()
+
+    sighting = Sighting(
+        requirement_id=requirement.id,
+        material_card_id=card.id,
+        vendor_name="TestVendor",
+        manufacturer=manufacturer,
+        mpn_matched=card.display_mpn,
+        source_type="test",
+    )
+    db.add(sighting)
+    db.commit()
+    return sighting
+
+
+def test_backfill_sighting_consensus_three_sources(db_session):
+    """3 sightings with same manufacturer → confidence 0.95."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "xyzpart001")
+    for _ in range(3):
+        _make_sighting(db_session, card, "Texas Instruments")
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
+    assert result["total_tagged"] == 1
+
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt is not None
+    assert mt.confidence == 0.95
+    assert mt.source == "sighting_consensus"
+
+
+def test_backfill_sighting_two_sources(db_session):
+    """2 agree, 1 different → picks majority at 0.90."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "xyzpart002")
+    _make_sighting(db_session, card, "Murata")
+    _make_sighting(db_session, card, "Murata")
+    _make_sighting(db_session, card, "TDK")
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
+    assert result["total_tagged"] == 1
+
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt is not None
+    assert mt.confidence == 0.90
+    assert mt.source == "sighting_consensus"
+
+    tag = db_session.get(Tag, mt.tag_id)
+    assert tag.name == "Murata"
+
+
+def test_backfill_sighting_single_source(db_session):
+    """Only 1 sighting → confidence 0.85."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "xyzpart003")
+    _make_sighting(db_session, card, "NXP Semiconductors")
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
+    assert result["total_tagged"] == 1
+
+    mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
+    assert mt is not None
+    assert mt.confidence == 0.85
+    assert mt.source == "sighting_single"
+
+
+def test_backfill_sighting_skips_junk_manufacturers(db_session):
+    """Junk values like 'Unknown', 'N/A' are filtered out."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "xyzpart004")
+    _make_sighting(db_session, card, "Unknown")
+    _make_sighting(db_session, card, "N/A")
+    _make_sighting(db_session, card, "Various")
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
+    assert result["total_tagged"] == 0
+    assert result["total_skipped"] == 1
+
+
+def test_backfill_sighting_skips_already_tagged(db_session):
+    """Cards with existing tags are untouched."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "xyzpart005")
+    tag = _make_brand_tag(db_session, "Existing Brand")
+    _make_material_tag(db_session, card.id, tag.id, "existing_data", 0.95)
+    _make_sighting(db_session, card, "Texas Instruments")
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
+    assert result["total_tagged"] == 0  # already tagged, skipped
+
+
+def test_admin_backfill_sightings_endpoint(client, db_session):
+    """POST /api/admin/tagging/backfill-sightings returns 200."""
+    resp = client.post("/api/admin/tagging/backfill-sightings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "sighting" in data["message"].lower()
+
+
+# ── Entity visibility repair tests ─────────────────────────────────────────
+
+
+def test_repair_visibility_updates_all(db_session):
+    """Seeds entities with wrong visibility, repairs, verifies correct visibility."""
+    from app.models.tags import EntityTag, TagThresholdConfig
+    from app.services.tagging_backfill import repair_entity_tag_visibility
+
+    # Seed thresholds for vendor_card
+    db_session.add(TagThresholdConfig(entity_type="vendor_card", tag_type="brand", min_count=2, min_percentage=0.05))
+    db_session.commit()
+
+    tag = _make_brand_tag(db_session, "TI Repair Test")
+
+    # Entity tag with enough interactions to be visible, but is_visible=False (the bug)
+    et = EntityTag(
+        entity_type="vendor_card", entity_id=999, tag_id=tag.id,
+        interaction_count=5.0, is_visible=False,
+    )
+    db_session.add(et)
+    db_session.commit()
+
+    assert et.is_visible is False  # Pre-condition: incorrectly hidden
+
+    result = repair_entity_tag_visibility(db_session)
+    db_session.refresh(et)
+
+    assert result["total_entities"] == 1
+    assert et.is_visible is True  # Now correctly visible
+
+
+def test_repair_visibility_empty_db(db_session):
+    """No entities → no error, returns zeros."""
+    from app.services.tagging_backfill import repair_entity_tag_visibility
+
+    result = repair_entity_tag_visibility(db_session)
+    assert result["total_entities"] == 0
+    assert result["now_visible"] == 0
+
+
+def test_admin_repair_visibility_endpoint(client, db_session):
+    """POST /api/admin/tagging/repair-visibility returns 200."""
+    resp = client.post("/api/admin/tagging/repair-visibility")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "visibility" in data["message"].lower()

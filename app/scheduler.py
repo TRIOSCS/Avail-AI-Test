@@ -319,6 +319,30 @@ def configure_scheduler():
         name="Enrich low-confidence material cards via connectors",
     )
 
+    # Tag confidence boost — daily cross-check (no API calls)
+    scheduler.add_job(
+        _job_internal_boost,
+        CronTrigger(hour=2, minute=0),
+        id="internal_confidence_boost",
+        name="Cross-check and boost tag confidence",
+    )
+
+    # Prefix backfill — catch new cards added since last run
+    scheduler.add_job(
+        _job_prefix_backfill,
+        CronTrigger(hour=3, minute=0),
+        id="prefix_backfill",
+        name="Run prefix lookup on untagged cards",
+    )
+
+    # Sighting manufacturer mining — mine sighting data for untagged cards
+    scheduler.add_job(
+        _job_sighting_mining,
+        CronTrigger(hour=4, minute=0),
+        id="sighting_mining",
+        name="Mine sighting manufacturer data for untagged cards",
+    )
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -2253,6 +2277,57 @@ async def _job_connector_enrichment():  # pragma: no cover
         cv_result = await cross_validate_batch(db, limit=200, concurrency=3)
         if cv_result["total"] > 0:
             logger.info(f"Cross-validation done: {cv_result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_internal_boost():
+    """Cross-check and boost tag confidence using internal data (no API calls). Daily at 2 AM."""
+    from .database import SessionLocal
+    from .services.enrichment import boost_confidence_internal
+
+    db = SessionLocal()
+    try:
+        result = boost_confidence_internal(db)
+        logger.info(f"Internal confidence boost: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_prefix_backfill():
+    """Run prefix lookup on untagged cards. Daily at 3 AM."""
+    from .database import SessionLocal
+    from .services.tagging_backfill import run_prefix_backfill
+
+    db = SessionLocal()
+    try:
+        result = run_prefix_backfill(db)
+        logger.info(f"Prefix backfill: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_sighting_mining():
+    """Mine sighting manufacturer data for untagged cards. Daily at 4 AM."""
+    from .database import SessionLocal
+    from .services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    db = SessionLocal()
+    try:
+        result = backfill_manufacturer_from_sightings(db)
+        logger.info(f"Sighting mining: {result}")
     except Exception:
         db.rollback()
         raise
