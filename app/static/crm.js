@@ -8299,7 +8299,14 @@ async function _apolloLoadCredits() {
     try {
         const data = await apiFetch('/api/apollo/credits');
         const badge = document.getElementById('apolloCreditsBadge');
-        if (badge) badge.textContent = `Lead credits: ${data.lead_credits_remaining ?? '--'}`;
+        if (!badge) return;
+        if (data.note) {
+            badge.textContent = 'Credits: unavailable';
+            badge.title = data.note;
+            badge.style.cursor = 'help';
+        } else {
+            badge.textContent = `Lead credits: ${data.lead_credits_remaining ?? '--'}`;
+        }
     } catch (_) { /* ignore */ }
 }
 

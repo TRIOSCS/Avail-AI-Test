@@ -155,6 +155,9 @@ async def get_credits() -> dict:
                 resp.status_code,
                 resp.text[:200],
             )
+            note = f"API error: {resp.status_code}"
+            if resp.status_code == 403:
+                note = "API key needs master key permissions — regenerate in Apollo Settings > API Keys with 'Set as master key' enabled"
             return {
                 "lead_credits_remaining": 0,
                 "lead_credits_used": 0,
@@ -162,7 +165,7 @@ async def get_credits() -> dict:
                 "direct_dial_used": 0,
                 "ai_credits_remaining": 0,
                 "ai_credits_used": 0,
-                "note": f"API error: {resp.status_code}",
+                "note": note,
             }
 
         data = resp.json()

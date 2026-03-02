@@ -318,6 +318,25 @@ async def test_get_credits_api_error():
 
 
 @pytest.mark.asyncio
+async def test_get_credits_403_master_key_hint():
+    """Credits 403 should return helpful master key message."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.text = "API_INACCESSIBLE"
+
+    with patch(
+        "app.services.apollo_sync_service.http.get",
+        new_callable=AsyncMock,
+        return_value=mock_resp,
+    ):
+        with patch("app.services.apollo_sync_service.settings") as ms:
+            ms.apollo_api_key = "test-key"
+            result = await get_credits()
+    assert result["lead_credits_remaining"] == 0
+    assert "master key" in result["note"]
+
+
+@pytest.mark.asyncio
 async def test_get_credits_exception():
     """Credits should catch exceptions."""
     with patch(
