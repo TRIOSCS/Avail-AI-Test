@@ -84,13 +84,13 @@ async def execute_fix(ticket_id: int, db: Session) -> dict:
     if result["success"]:
         update_ticket(
             db, ticket_id,
-            status="in_progress",
+            status="awaiting_verification",
             fix_branch=result.get("branch"),
         )
         record_cost(db, ticket_id, result.get("cost_usd", 0.0))
         _notify(db, ticket, "fixed", "Fix applied", result.get("summary", "Fix completed"))
         logger.info("Ticket {} fix applied successfully", ticket_id)
-        return {"ok": True, "status": "in_progress", "message": "Fix applied"}
+        return {"ok": True, "status": "awaiting_verification", "message": "Fix applied"}
     else:
         error_msg = result.get("error", "Unknown error")
         if current_iter + 1 >= max_iter:

@@ -4968,6 +4968,9 @@ function _appendAddRow(rfqId, dd) {
     const tbody = dd.querySelector('.dtbl tbody');
     if (!tbody) return;
 
+    // Remove any existing add-row to prevent duplicates
+    tbody.querySelectorAll('.add-row').forEach(r => r.remove());
+
     const tr = document.createElement('tr');
     tr.className = 'add-row';
     tr.addEventListener('click', e => e.stopPropagation());
@@ -5444,7 +5447,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         const checked = sel.has(s.id) ? 'checked' : '';
         const dimStyle = !hasEmail ? 'opacity:.7' : '';
         const disabledAttr = '';
-        const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
+        const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) + (s.price_outlier ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:600" title="Suspected outlier">!</span>' : '') : '\u2014'; // nosec: numeric values only
         const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
         const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
@@ -5471,7 +5474,10 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         // Price color-coding vs target
         let priceColor = s.unit_price ? 'var(--teal)' : 'var(--muted)';
         let priceTitle = '';
-        if (targetPrice && s.unit_price) {
+        if (s.price_outlier) {
+            priceColor = 'var(--red)';
+            priceTitle = ' title="Price outlier — 20x+ above median market price"';
+        } else if (targetPrice && s.unit_price) {
             const pctDelta = ((s.unit_price - targetPrice) / targetPrice) * 100;
             priceColor = pctDelta <= 0 ? 'var(--green)' : pctDelta <= 15 ? 'var(--amber)' : 'var(--red)';
             priceTitle = ` title="${pctDelta > 0 ? '+' : ''}${pctDelta.toFixed(0)}% vs target ($${Number(targetPrice).toFixed(2)})"`;

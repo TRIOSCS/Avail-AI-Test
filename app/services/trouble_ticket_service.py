@@ -168,7 +168,7 @@ def update_ticket(db: Session, ticket_id: int, **kwargs) -> TroubleTicket | None
             setattr(ticket, key, value)
 
     if "status" in kwargs:
-        if kwargs["status"] == "in_progress" and not ticket.diagnosed_at:
+        if kwargs["status"] == "diagnosed" and not ticket.diagnosed_at:
             ticket.diagnosed_at = datetime.now(timezone.utc)
         elif kwargs["status"] == "resolved" and not ticket.resolved_at:
             ticket.resolved_at = datetime.now(timezone.utc)

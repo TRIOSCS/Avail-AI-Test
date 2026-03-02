@@ -690,7 +690,7 @@ class TestTaggingRaceCondition:
 
     def test_classify_material_race_condition(self, db_session):
         """Race condition on MaterialTag insert is handled (lines 232-235)."""
-        from app.services.tagging import classify_material
+        from app.services.tagging import classify_material_card as classify_material
 
         mc = MaterialCard(
             normalized_mpn="tag_race", display_mpn="TAG_RACE",

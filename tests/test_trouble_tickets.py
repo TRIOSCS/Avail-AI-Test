@@ -163,7 +163,7 @@ class TestTicketQueries:
 class TestFileLock:
     def test_no_conflict(self, db_session: Session, test_user: User):
         ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
-        ticket.status = "fix_in_progress"
+        ticket.status = "in_progress"
         ticket.file_mapping = ["app/routers/vendors.py"]
         db_session.commit()
         result = check_file_lock(db=db_session, file_paths=["app/routers/crm.py"])
@@ -171,7 +171,7 @@ class TestFileLock:
 
     def test_conflict_detected(self, db_session: Session, test_user: User):
         ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
-        ticket.status = "fix_in_progress"
+        ticket.status = "in_progress"
         ticket.file_mapping = ["app/routers/vendors.py", "app/services/vendor_service.py"]
         db_session.commit()
         result = check_file_lock(db=db_session, file_paths=["app/routers/vendors.py"])
@@ -483,7 +483,7 @@ class TestAutoProcessTicket:
     @patch("app.services.trouble_ticket_service.settings")
     def test_skips_execute_high_risk(self, mock_settings, mock_claude,
                                      mock_session_local, db_session, test_user):
-        """High-risk ticket should be diagnosed but NOT auto-executed."""
+        """High-risk ticket should be diagnosed and escalated, NOT auto-executed."""
         import asyncio
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
@@ -498,7 +498,7 @@ class TestAutoProcessTicket:
         asyncio.get_event_loop().run_until_complete(
             auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
-        assert ticket.status == "diagnosed"
+        assert ticket.status == "escalated"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)

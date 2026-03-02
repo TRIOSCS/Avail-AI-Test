@@ -372,8 +372,8 @@ async def verify_ticket(
         raise HTTPException(404, "Ticket not found")
     if ticket.submitted_by != user.id and user.role != "admin":
         raise HTTPException(403, "Access denied")
-    if ticket.status not in ("in_progress", "open"):
-        raise HTTPException(400, "Ticket is not open or in progress")
+    if ticket.status not in ("awaiting_verification", "in_progress", "open"):
+        raise HTTPException(400, "Ticket is not awaiting verification")
 
     is_fixed = body.get("is_fixed", True)
 

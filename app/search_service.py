@@ -214,6 +214,18 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         else:
             r["cross_references"] = []
 
+    # 7. Flag price outliers — historical results 20x+ above fresh median
+    fresh_prices = [r["unit_price"] for r in results
+                    if not r.get("is_material_history") and r.get("unit_price")]
+    if fresh_prices:
+        median_price = sorted(fresh_prices)[len(fresh_prices) // 2]
+        if median_price > 0:
+            for r in results:
+                p = r.get("unit_price")
+                if p and p > median_price * 20:
+                    r["price_outlier"] = True
+                    r["score"] = max(5, r.get("score", 0) * 0.2)
+
     results = _deduplicate_sightings(results)
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     return {"sightings": results, "source_stats": source_stats}

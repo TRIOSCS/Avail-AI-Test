@@ -271,7 +271,7 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
 
     # Update ticket
     update_kwargs = {
-        "status": "in_progress",
+        "status": "diagnosed",
         "risk_tier": risk_tier,
         "category": classification.get("category"),
         "diagnosis": full_diagnosis,
@@ -315,5 +315,5 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
         "classification": classification,
         "diagnosis": diagnosis,
         "risk_tier": risk_tier,
-        "status": "in_progress",
+        "status": "diagnosed",
     }
