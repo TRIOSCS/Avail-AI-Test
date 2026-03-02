@@ -973,83 +973,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .ac-vendor{background:var(--teal-light,#e0f5f0);color:var(--teal,#0f766e)}
 .ac-customer{background:#f0e6ff;color:#6b3fa0}
 
-@media(max-width:768px){
-    .lo-form{grid-template-columns:1fr}
-    .lo-form .field-full{grid-column:span 1}
-    .quote-totals{flex-direction:column;gap:8px}
-    .quote-terms{flex-direction:column}
-    .offer-group-header{flex-wrap:wrap}
-    .si-contact-card{flex-wrap:wrap}
-    .si-contact-actions{opacity:1;width:100%;justify-content:flex-end}
-    .si-contact-meta a{max-width:none}
-    /* CRM company cards */
-    .cust-header{flex-wrap:wrap;gap:6px}
-    .cust-header>span:last-child{width:100%;justify-content:flex-start}
-    .cust-activity-section{padding:6px 0}
-    .act-row{flex-wrap:wrap;gap:4px}
-    .act-row-meta{font-size:11px}
-    /* Vendor contacts in popup */
-    #vpContactsList .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
-    #vpContactsList .si-contact-actions{width:100%;justify-content:flex-end}
-    /* AI panel */
-    .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
-    .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
-    .ai-contact-row{flex-direction:column;gap:6px}
-    .ai-contact-actions{width:100%;justify-content:flex-end}
-    .intel-meta{flex-direction:column;gap:4px}
-    /* Drill-down sub-tabs — horizontal scroll like main tabs */
-    .dd-tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
-    .dd-tabs::-webkit-scrollbar{display:none}
-    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:44px}
-    /* Drill-down inner tables — scroll via panel wrapper */
-    .dtbl{font-size:11px}
-    .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
-    /* Drill-down cell — more breathing room */
-    .drow>td{padding:8px 6px 12px}
-    /* WP2: Expand arrow — 44px touch target */
-    .ea{width:44px;height:44px;font-size:12px}
-    /* Quote table — wrap in scrollable parent */
-    .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
-    .quote-sell-input{width:70px;font-size:14px;min-height:36px}
-    .quote-cell-input{font-size:12px;min-height:30px}
-    .quote-markup input{font-size:14px;min-height:36px}
-    /* Quote header — stack on narrow */
-    .quote-header{flex-direction:column;gap:8px;padding:10px 12px}
-    /* Proactive offer cards */
-    .proactive-match{flex-direction:column;gap:4px;align-items:flex-start}
-    .proactive-match .pm-mpn{min-width:auto}
-    .proactive-match .pm-vendor{min-width:auto}
-    /* Buy plan approve/reject actions */
-    .proactive-actions{flex-wrap:wrap}
-    /* Activity thread on mobile */
-    .act-vendor-card{padding:6px 8px}
-    .act-msg{padding:6px 8px}
-    .act-body{max-height:200px;font-size:12px}
-    /* Email thread body — prevent horizontal overflow */
-    .act-body-text{word-break:break-word;overflow-wrap:break-word}
-    /* Toast — full width on mobile */
-    #toastContainer{left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
-    /* Fix: tables inside drill-down need wrapper-level scroll */
-    .dd-panel{overflow-x:auto}
-    /* Offer group header — stack */
-    .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
-    /* Parse preview panel — tighter on mobile */
-    .parse-preview{padding:10px}
-    .parse-parts-table{font-size:12px}
-    .parse-actions{flex-wrap:wrap;justify-content:stretch}
-    .parse-actions .btn{flex:1;text-align:center}
-    /* Intel card — compact */
-    .intel-card summary{padding:8px 10px;font-size:11px}
-    .intel-body{padding:8px 10px}
-    /* Work queue + status bar (consolidated from standalone block) */
-    .work-queue{grid-template-columns:1fr}
-    .status-bar{flex-wrap:wrap;gap:4px 8px}
-    /* Scorecard personal (consolidated from standalone block) */
-    .sc-personal{flex-direction:column;align-items:stretch}
-    .sc-personal-right{flex-direction:column;gap:12px}
-    .sc-score-ring{margin:0 auto}
-    .sc-outcomes-grid{grid-template-columns:1fr}
-}
+/* @media(max-width:768px) rules consolidated into single block near end of file */
 
 /* Suggested Contacts */
 .sc-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;transition:background .15s}
@@ -2353,6 +2277,77 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 
 /* ── CRM v3 Responsive ────────────────────────────────────── */
 @media (max-width:768px){
+    /* Forms & quotes */
+    .lo-form{grid-template-columns:1fr}
+    .lo-form .field-full{grid-column:span 1}
+    .quote-totals{flex-direction:column;gap:8px}
+    .quote-terms{flex-direction:column}
+    .offer-group-header{flex-wrap:wrap}
+    .si-contact-card{flex-wrap:wrap}
+    .si-contact-actions{opacity:1;width:100%;justify-content:flex-end}
+    .si-contact-meta a{max-width:none}
+    /* CRM company cards */
+    .cust-header{flex-wrap:wrap;gap:6px}
+    .cust-header>span:last-child{width:100%;justify-content:flex-start}
+    .cust-activity-section{padding:6px 0}
+    .act-row{flex-wrap:wrap;gap:4px}
+    .act-row-meta{font-size:11px}
+    /* Vendor contacts in popup */
+    #vpContactsList .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
+    #vpContactsList .si-contact-actions{width:100%;justify-content:flex-end}
+    /* AI panel */
+    .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
+    .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
+    .ai-contact-row{flex-direction:column;gap:6px}
+    .ai-contact-actions{width:100%;justify-content:flex-end}
+    .intel-meta{flex-direction:column;gap:4px}
+    /* Drill-down sub-tabs — horizontal scroll like main tabs */
+    .dd-tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
+    .dd-tabs::-webkit-scrollbar{display:none}
+    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:44px}
+    /* Drill-down inner tables — scroll via panel wrapper */
+    .dtbl{font-size:11px}
+    .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
+    .drow>td{padding:8px 6px 12px}
+    .ea{width:44px;height:44px;font-size:12px}
+    /* Quote table */
+    .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
+    .quote-sell-input{width:70px;font-size:14px;min-height:36px}
+    .quote-cell-input{font-size:12px;min-height:30px}
+    .quote-markup input{font-size:14px;min-height:36px}
+    .quote-header{flex-direction:column;gap:8px;padding:10px 12px}
+    /* Proactive offer cards */
+    .proactive-match{flex-direction:column;gap:4px;align-items:flex-start}
+    .proactive-match .pm-mpn{min-width:auto}
+    .proactive-match .pm-vendor{min-width:auto}
+    .proactive-actions{flex-wrap:wrap}
+    /* Activity thread */
+    .act-vendor-card{padding:6px 8px}
+    .act-msg{padding:6px 8px}
+    .act-body{max-height:200px;font-size:12px}
+    .act-body-text{word-break:break-word;overflow-wrap:break-word}
+    /* Toast */
+    #toastContainer{left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
+    .dd-panel{overflow-x:auto}
+    /* Offer group header — stack */
+    .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
+    /* Parse preview */
+    .parse-preview{padding:10px}
+    .parse-parts-table{font-size:12px}
+    .parse-actions{flex-wrap:wrap;justify-content:stretch}
+    .parse-actions .btn{flex:1;text-align:center}
+    /* Intel card */
+    .intel-card summary{padding:8px 10px;font-size:11px}
+    .intel-body{padding:8px 10px}
+    /* Work queue + status bar */
+    .work-queue{grid-template-columns:1fr}
+    .status-bar{flex-wrap:wrap;gap:4px 8px}
+    /* Scorecard personal */
+    .sc-personal{flex-direction:column;align-items:stretch}
+    .sc-personal-right{flex-direction:column;gap:12px}
+    .sc-score-ring{margin:0 auto}
+    .sc-outcomes-grid{grid-template-columns:1fr}
+    /* CRM v3 */
     .crm-header{padding:12px 16px 0;flex-direction:column;align-items:flex-start}
     .crm-toolbar{padding:8px 16px;flex-direction:column}
     .crm-toolbar .sbox{max-width:100%}
@@ -2360,16 +2355,14 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .crm-table{font-size:12px}
     .crm-table th,.crm-table td{padding:8px 10px}
     .drawer{width:100%;min-width:0;max-width:100%}
-    /* WP2: drawer close — 44px touch target */
     .drawer-close{width:44px;height:44px}
-    /* WP9: drawer safe areas for notched phones */
     .drawer-body{padding-bottom:env(safe-area-inset-bottom)}
     .drawer-header{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
     .bulk-bar{left:16px;right:16px;transform:none;width:auto;padding-bottom:calc(10px + var(--sai-bottom,env(safe-area-inset-bottom,0px)))}
     .bulk-bar.visible{transform:translateY(0)}
     .drawer-overview-grid{grid-template-columns:1fr}
     .contacts-grid{grid-template-columns:1fr}
-    /* Consolidated from scattered media blocks */
+    /* Stats & grids */
     .cc-stat-row{flex-wrap:wrap}.cc-stat{min-width:calc(50% - 4px)}.cc-cards-grid{grid-template-columns:1fr}.cc-pipeline-bar{flex-wrap:wrap}
     .as-metrics{grid-template-columns:1fr}.as-scores{gap:2px}.as-total{font-size:14px}
     .lb-detail-grid{grid-template-columns:1fr}.lb-detail-split{grid-template-columns:1fr}.lb-scores{gap:8px}.lb-score-val{font-size:14px}
@@ -2377,7 +2370,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .cust-split-active .drawer{left:0;width:100%}
     html .prospect-mini-list,html .prospect-mini-list.open{display:none}.prospect-split-active .drawer{left:0;width:100%}
     .suggested-grid{grid-template-columns:1fr}
-    /* v2 responsive (consolidated from standalone block) */
     .stat-grid{grid-template-columns:repeat(2,1fr)}
     .sb-group-label{font-size:12px}
     .sb-nav-group .sb-nav-btn{margin-left:4px}
