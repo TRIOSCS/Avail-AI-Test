@@ -76,6 +76,20 @@ class BaseConnector(ABC):
                 self._breaker.record_failure()
                 logger.warning(f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}")
                 raise
+            except httpx.HTTPStatusError as e:
+                # Auth/permission errors will never succeed on retry — fail fast
+                if e.response.status_code in (401, 403, 422):
+                    self._breaker.record_failure()
+                    logger.warning(
+                        f"{self.__class__.__name__} auth error {e.response.status_code} for {part_number} — not retrying"
+                    )
+                    raise
+                self._breaker.record_failure()
+                last_err = e
+                if attempt < self.max_retries:
+                    await asyncio.sleep(2**attempt + random.uniform(0, 1))
+                else:
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
             except Exception as e:
                 self._breaker.record_failure()
                 last_err = e

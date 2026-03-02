@@ -2444,16 +2444,17 @@ def _make_sighting_dict(**overrides):
     return base
 
 
-def test_dedup_filters_out_no_qty():
-    """Sightings with qty_available=None or 0 are excluded."""
+def test_dedup_filters_out_zero_qty():
+    """Sightings with qty_available=0 are excluded; None (unknown) is kept."""
     rows = [
-        _make_sighting_dict(id=1, qty_available=None),
-        _make_sighting_dict(id=2, qty_available=0),
+        _make_sighting_dict(id=1, qty_available=None, vendor_name="Nexar", source_type="nexar"),
+        _make_sighting_dict(id=2, qty_available=0, vendor_name="Mouser", source_type="mouser"),
         _make_sighting_dict(id=3, qty_available=100),
     ]
     result = _deduplicate_sightings(rows)
-    assert len(result) == 1
-    assert result[0]["id"] == 3
+    assert len(result) == 2
+    result_ids = {r["id"] for r in result}
+    assert result_ids == {1, 3}  # None kept, 0 filtered
 
 
 def test_dedup_merges_same_vendor_mpn_price():

@@ -134,7 +134,8 @@ def test_add_requirement_teams_alert_exception(client, db_session, test_requisit
 # ── 3. Skip empty row in upload requirements (requisitions.py line 779) ──
 
 
-def test_upload_requirements_file_with_empty_mpn_rows(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_file_with_empty_mpn_rows(mock_sl, client, db_session, test_requisition):
     """Upload requirements CSV where some rows have empty MPN -- should be skipped."""
     csv_content = b"mpn,qty,target_price\nLM317T,1000,0.50\n,500,0.30\n   ,200,0.25\nNE555P,800,0.40"
     with patch("app.file_utils.parse_tabular_file") as mock_parse:
@@ -809,7 +810,8 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
 # ── 18. Upload with substitutes containing empty MPN (line 779) ──
 
 
-def test_upload_requirements_with_empty_substitute(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_with_empty_substitute(mock_sl, client, db_session, test_requisition):
     """Upload requirements CSV with substitutes that have empty MPNs -- should skip them."""
     csv_content = b'mpn,qty,substitutes\nLM317T,1000,"LM337T,,  ,NE555P"'
     with patch("app.file_utils.parse_tabular_file") as mock_parse:
@@ -983,7 +985,8 @@ async def test_standalone_stock_import_vendor_card_integrity_direct(db_session, 
 # ── 24. Upload requirements with substitutes that skip normalize_mpn (line 779) ──
 
 
-def test_upload_requirements_csv_with_bad_substitutes(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_csv_with_bad_substitutes(mock_sl, client, db_session, test_requisition):
     """Upload CSV where a row has substitutes with blank entries that get skipped (line 779)."""
     # The file_utils parse returns rows, and the upload code handles subs processing
     # We need rows where substitutes column contains empty/invalid entries
@@ -1495,7 +1498,8 @@ def test_build_quote_email_html_zero_price(db_session, test_user):
 # =========================================================================
 
 
-def test_upload_requirements_substitute_normalizes_to_none(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_substitute_normalizes_to_none(mock_sl, client, db_session, test_requisition):
     """Upload where a substitute normalize_mpn returns None (line 779)."""
     # A substitute like "-" will normalize_mpn → None, triggering the continue
     csv_content = b"mpn,qty,sub_1,sub_2\nLM317T,1000,-,LM337T"

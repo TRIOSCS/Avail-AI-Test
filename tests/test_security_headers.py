@@ -95,3 +95,67 @@ def test_error_response_format(client):
     assert "status_code" in data
     assert data["status_code"] == 404
     assert "request_id" in data
+
+
+# ── CSP nonce tests ──────────────────────────────────────────────────
+
+
+import re
+
+
+def test_csp_header_present_on_all_responses(client):
+    """Content-Security-Policy header is set on every response."""
+    resp = client.get("/health")
+    csp = resp.headers.get("Content-Security-Policy")
+    assert csp is not None
+    assert "default-src 'self'" in csp
+    assert "script-src" in csp
+
+
+def test_csp_header_contains_nonce(client):
+    """CSP script-src includes a nonce directive (not unsafe-inline)."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    # Extract the script-src directive specifically
+    script_src = re.search(r"script-src\s+([^;]+)", csp)
+    assert script_src, "CSP must have a script-src directive"
+    script_src_value = script_src.group(1)
+    assert "'unsafe-inline'" not in script_src_value, "script-src must not contain unsafe-inline"
+    nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", script_src_value)
+    assert nonce_match, "script-src must contain a nonce"
+    assert len(nonce_match.group(1)) >= 16  # token_urlsafe(16) produces 22 chars
+
+
+def test_csp_nonce_unique_per_request(client):
+    """Each request generates a unique CSP nonce."""
+    nonces = set()
+    for _ in range(5):
+        resp = client.get("/health")
+        csp = resp.headers["Content-Security-Policy"]
+        nonce = re.search(r"'nonce-([A-Za-z0-9_-]+)'", csp).group(1)
+        nonces.add(nonce)
+    assert len(nonces) == 5, "Every request must get a unique nonce"
+
+
+def test_csp_header_on_html_page(client):
+    """CSP header is present on the HTML index page."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    csp = resp.headers.get("Content-Security-Policy")
+    assert csp is not None
+    nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", csp)
+    assert nonce_match, "CSP header on HTML pages must include a nonce"
+
+
+def test_csp_includes_cdnjs_allowlist(client):
+    """CSP script-src allows cdnjs.cloudflare.com for html2canvas."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "https://cdnjs.cloudflare.com" in csp
+
+
+def test_csp_style_src_allows_google_fonts(client):
+    """CSP style-src allows Google Fonts."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "https://fonts.googleapis.com" in csp

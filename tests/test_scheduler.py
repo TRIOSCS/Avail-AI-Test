@@ -329,7 +329,7 @@ def test_performance_tracking_recomputes_previous_month_in_grace_period(schedule
     with (
         patch("app.services.performance_service.compute_all_vendor_scorecards") as mock_vs,
         patch("app.services.performance_service.compute_buyer_leaderboard") as mock_bl,
-        patch("app.scheduler.datetime") as mock_dt,
+        patch("app.jobs.offers_jobs.datetime") as mock_dt,
     ):
         mock_dt.now.return_value = frozen_now
         mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
@@ -1036,7 +1036,7 @@ def test_proactive_matching_logs_summary(scheduler_db):
         patch("app.services.proactive_service.scan_new_offers_for_matches") as mock_legacy,
         patch("app.services.proactive_matching.run_proactive_scan") as mock_cph,
         patch("app.services.proactive_matching.expire_old_matches") as mock_expire,
-        patch("app.scheduler.logger") as mock_logger,
+        patch("app.jobs.offers_jobs.logger") as mock_logger,
     ):
         mock_legacy.return_value = {"matches_created": 2, "scanned": 10}
         mock_cph.return_value = {"matches_created": 1, "scanned_offers": 5, "scanned_sightings": 3}

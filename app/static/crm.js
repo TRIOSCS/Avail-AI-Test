@@ -5785,7 +5785,8 @@ function switchSettingsTab(name, btn) {
     else if (name === 'sources') loadSettingsSources();
     else if (name === 'teams') loadTeamsConfig();
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); loadCreditUsage(); }
-    else if (name === 'tickets') { /* Removed: now in sidebar Tickets view (tickets.js) */ }
+    else if (name === 'tickets') { if (typeof window.showTickets === 'function') window.showTickets(); }
+    else if (name === 'apihealth') loadApiHealthDashboard();
     else if (name === 'transfer') loadTransferPanel();
 }
 
@@ -8004,8 +8005,7 @@ function _timeAgo(iso) {
 }
 
 function showApiHealth() {
-    showView('view-apihealth');
-    loadApiHealthDashboard();
+    openSettingsTab('apihealth');
 }
 
 async function loadApiHealthDashboard() {

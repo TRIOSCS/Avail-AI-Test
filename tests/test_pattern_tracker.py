@@ -163,25 +163,25 @@ class TestHealthStatus:
 
     def test_yellow_several_tickets(self, db_session, pt_user):
         for _ in range(4):
-            _ticket(db_session, pt_user.id, status="submitted")
+            _ticket(db_session, pt_user.id, status="open")
         health = get_health_status(db_session)
         assert health["status"] == "yellow"
 
     def test_yellow_high_risk(self, db_session, pt_user):
-        _ticket(db_session, pt_user.id, status="submitted", risk_tier="high")
+        _ticket(db_session, pt_user.id, status="open", risk_tier="high")
         health = get_health_status(db_session)
         assert health["status"] == "yellow"
         assert health["high_risk_count"] == 1
 
     def test_red_many_tickets(self, db_session, pt_user):
         for _ in range(12):
-            _ticket(db_session, pt_user.id, status="submitted")
+            _ticket(db_session, pt_user.id, status="in_progress")
         health = get_health_status(db_session)
         assert health["status"] == "red"
 
     def test_red_many_high_risk(self, db_session, pt_user):
         for _ in range(4):
-            _ticket(db_session, pt_user.id, status="diagnosed", risk_tier="high")
+            _ticket(db_session, pt_user.id, status="open", risk_tier="high")
         health = get_health_status(db_session)
         assert health["status"] == "red"
 

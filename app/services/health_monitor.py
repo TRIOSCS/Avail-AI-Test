@@ -1,4 +1,4 @@
-"""Health monitor service — scheduled API health checking.
+"""Health monitor service — scheduled API health checking + proactive alerts.
 
 Called by scheduler jobs to verify all active API connectors are reachable.
 Two check levels:
@@ -7,6 +7,10 @@ Two check levels:
 
 Status is determined ONLY by actual API responses, never by credential presence.
 This is the source of truth for whether an API is actually working.
+
+Proactive alerts:
+  - Notifies admin users when a source transitions live → error
+  - Warns when quota usage exceeds 80% or 95% of monthly_quota
 
 Depends on: app.models.config (ApiSource, ApiUsageLog), app.routers.sources (_get_connector_for_source)
 Called by: app.scheduler (health_check_ping, health_check_deep jobs)
@@ -19,6 +23,10 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models.config import ApiSource, ApiUsageLog
+
+# Quota warning thresholds (percentage of monthly_quota)
+QUOTA_WARN_THRESHOLD = 80
+QUOTA_CRITICAL_THRESHOLD = 95
 
 # Known good MPN for testing — universally available across all distributors
 DEEP_TEST_MPN = "LM317"
@@ -34,6 +42,52 @@ def _get_connector(source: ApiSource, db: Session):
         return None
 
 
+def _notify_admins(db: Session, event_type: str, title: str, body: str | None = None):
+    """Send an in-app notification to all admin users."""
+    from ..models.auth import User
+    from .notification_service import create_notification
+
+    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()  # noqa: E712
+    for admin in admins:
+        try:
+            create_notification(db, admin.id, event_type, title, body)
+        except Exception as e:
+            logger.warning("Failed to notify admin {}: {}", admin.email, e)
+
+
+def _check_status_transition(source: ApiSource, old_status: str, new_status: str, db: Session, error_msg: str | None = None):
+    """Fire notification when a source transitions from live to error."""
+    if old_status == "live" and new_status == "error":
+        _notify_admins(
+            db,
+            event_type="api_source_down",
+            title=f"API down: {source.display_name or source.name}",
+            body=f"{source.display_name or source.name} changed from live → error. Last error: {error_msg or 'unknown'}",
+        )
+        logger.warning("Source {} transitioned live → error, admin notification sent", source.name)
+
+
+def _check_quota_threshold(source: ApiSource, db: Session):
+    """Warn admins when quota usage crosses 80% or 95%."""
+    if not source.monthly_quota or source.monthly_quota <= 0:
+        return
+    usage_pct = ((source.calls_this_month or 0) / source.monthly_quota) * 100
+    if usage_pct >= QUOTA_CRITICAL_THRESHOLD:
+        _notify_admins(
+            db,
+            event_type="api_quota_critical",
+            title=f"Quota critical: {source.display_name or source.name} ({usage_pct:.0f}%)",
+            body=f"{source.calls_this_month}/{source.monthly_quota} calls used this month. Service may stop working soon.",
+        )
+    elif usage_pct >= QUOTA_WARN_THRESHOLD:
+        _notify_admins(
+            db,
+            event_type="api_quota_warning",
+            title=f"Quota warning: {source.display_name or source.name} ({usage_pct:.0f}%)",
+            body=f"{source.calls_this_month}/{source.monthly_quota} calls used this month.",
+        )
+
+
 async def ping_source(source: ApiSource, db: Session) -> dict:
     """Lightweight health check — verify connector can be instantiated and respond.
 
@@ -44,6 +98,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
     Returns dict with success, elapsed_ms, error keys.
     """
     now = datetime.now(timezone.utc)
+    old_status = source.status
     connector = _get_connector(source, db)
 
     if not connector:
@@ -63,6 +118,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
         source.last_error = None
         source.avg_response_ms = elapsed_ms
         source.calls_this_month = (source.calls_this_month or 0) + 1
+        _check_quota_threshold(source, db)
         db.flush()
 
         return {"success": True, "elapsed_ms": elapsed_ms, "error": None}
@@ -76,6 +132,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
         source.last_error_at = now
         source.last_ping_at = now
         source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
         db.flush()
 
         logger.warning("Health ping failed for {}: {}", source.name, error_msg)
@@ -89,6 +146,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
     Returns dict with success, results_count, elapsed_ms, error keys.
     """
     now = datetime.now(timezone.utc)
+    old_status = source.status
     connector = _get_connector(source, db)
 
     if not connector:
@@ -117,6 +175,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
         source.last_error = None
         source.avg_response_ms = elapsed_ms
         source.calls_this_month = (source.calls_this_month or 0) + 1
+        _check_quota_threshold(source, db)
 
         log = ApiUsageLog(
             source_id=source.id,
@@ -141,6 +200,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
         source.last_error_at = now
         source.last_deep_test_at = now
         source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
 
         log = ApiUsageLog(
             source_id=source.id,

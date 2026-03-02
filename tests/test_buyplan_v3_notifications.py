@@ -176,6 +176,32 @@ class TestPlanContext:
         assert ctx["quote_number"] == ""
         assert ctx["submitter"] is None
 
+    def test_site_without_company(self, db_session):
+        """When quote.customer_site exists but .company is None, falls back to site_name."""
+        from app.services.buyplan_v3_notifications import _plan_context
+
+        user = _make_user(db_session, "site-test@trioscs.com", "Site User", "buyer")
+
+        # Mock the quote to have customer_site with no company
+        mock_site = MagicMock()
+        mock_site.company = None
+        mock_site.site_name = "Orphan HQ"
+
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-SITE-001"
+        mock_quote.customer_site = mock_site
+
+        # Mock plan referencing the quote
+        mock_plan = MagicMock(submitted_by_id=user.id, quote_id=999)
+
+        with patch.object(db_session, "get", side_effect=lambda model, pk: {
+            "User": user,
+            "Quote": mock_quote,
+        }.get(model.__name__)):
+            ctx = _plan_context(mock_plan, db_session)
+
+        assert ctx["customer_name"] == "Orphan HQ"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # _lines_html

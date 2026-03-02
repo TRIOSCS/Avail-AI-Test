@@ -1,11 +1,11 @@
 /* AVAIL v1.2.0 — Trouble Tickets: submit, my-tickets, admin dashboard.
  *
- * Called by: sidebarNav('tickets') in app.js
- * Depends on: app.js (apiFetch, esc, showView, showToast, sidebarNav)
+ * Called by: switchSettingsTab('tickets') in crm.js
+ * Depends on: app.js (apiFetch, esc, showToast, sidebarNav)
  */
 
 import {
-    apiFetch, esc, showView, showToast, sidebarNav,
+    apiFetch, esc, showToast, sidebarNav,
 } from 'app';
 
 // ── Common Issues dropdown options ─────────────────────────────────────
@@ -19,12 +19,18 @@ var COMMON_ISSUES = [
 ];
 
 var STATUS_LABELS = {
-    open: 'Open', in_progress: 'In Progress',
-    resolved: 'Resolved', escalated: 'Escalated',
+    submitted: 'Submitted', diagnosed: 'Diagnosed',
+    fix_proposed: 'Fix Proposed', fix_in_progress: 'Fixing',
+    fix_applied: 'Fix Applied', awaiting_verification: 'Awaiting Verify',
+    in_progress: 'In Progress', open: 'Open',
+    resolved: 'Resolved', escalated: 'Escalated', rejected: 'Rejected',
 };
 var STATUS_COLORS = {
-    open: '#6b7280', in_progress: '#2563eb',
-    resolved: '#16a34a', escalated: '#dc2626',
+    submitted: '#6b7280', diagnosed: '#7c3aed',
+    fix_proposed: '#2563eb', fix_in_progress: '#2563eb',
+    fix_applied: '#0891b2', awaiting_verification: '#d97706',
+    in_progress: '#2563eb', open: '#6b7280',
+    resolved: '#16a34a', escalated: '#dc2626', rejected: '#991b1b',
 };
 var RISK_COLORS = { low: '#16a34a', medium: '#d97706', high: '#dc2626' };
 
@@ -70,8 +76,7 @@ function clearNode(node) {
 
 // ── Show Tickets View (entry point from sidebarNav) ───────────────────
 function showTickets() {
-    showView('view-tickets');
-    var container = document.getElementById('view-tickets');
+    var container = document.getElementById('settings-tickets');
     if (!container) return;
     if (window.__isAdmin) {
         renderAdminDashboard(container);
@@ -202,7 +207,7 @@ async function renderMyTickets(container) {
 }
 
 // ── Admin Dashboard ───────────────────────────────────────────────────
-var _adminFilter = 'in_progress';
+var _adminFilter = '';
 var _adminOffset = 0;
 
 async function renderAdminDashboard(container) {
@@ -219,8 +224,8 @@ async function renderAdminDashboard(container) {
 
     // Filter pills
     var pills = el('div', { className: 'fpills fpills-sm', style: 'margin-bottom:12px;' });
-    var filters = ['in_progress', 'submitted', 'escalated', 'resolved', ''];
-    var labels = ['In Progress', 'Submitted', 'Escalated', 'Resolved', 'All'];
+    var filters = ['', 'submitted', 'diagnosed', 'escalated', 'resolved'];
+    var labels = ['All', 'Submitted', 'Diagnosed', 'Escalated', 'Resolved'];
     filters.forEach(function(f, i) {
         var btn = el('button', {
             type: 'button',
@@ -763,7 +768,7 @@ async function loadSysNotifs() {
                 markSysNotifRead(n.id);
                 if (n.ticket_id) {
                     document.getElementById('sysNotifPanel').style.display = 'none';
-                    sidebarNav('tickets', document.getElementById('navTickets'));
+                    sidebarNav('tickets', document.getElementById('navSettings'));
                     setTimeout(function() { showTicketDetail(n.ticket_id); }, 300);
                 }
             };

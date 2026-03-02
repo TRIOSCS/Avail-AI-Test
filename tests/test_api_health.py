@@ -699,3 +699,229 @@ def test_api_health_dashboard_usage_log(admin_client, db_session):
     log_src = next(s for s in data["sources"] if s["name"] == "log_test")
     assert log_src["recent_checks"] == 3
     assert log_src["recent_failures"] == 1
+
+
+# ── Proactive Notification Tests ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ping_live_to_error_notifies_admins(db_session):
+    """When a source transitions live → error, admin users get notified."""
+    admin = User(
+        email="notify_admin@test.com",
+        name="Notify Admin",
+        role="admin",
+        azure_id="notify-admin-1",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(admin)
+    db_session.flush()
+
+    src = ApiSource(
+        name="notif_test_src",
+        display_name="Notif Test",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(side_effect=Exception("403 Forbidden"))
+
+    with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+        from app.services.health_monitor import ping_source
+
+        result = await ping_source(src, db_session)
+
+    assert result["success"] is False
+    assert src.status == "error"
+
+    from app.models.notification import Notification
+
+    notifs = db_session.query(Notification).filter_by(
+        user_id=admin.id, event_type="api_source_down"
+    ).all()
+    assert len(notifs) == 1
+    assert "Notif Test" in notifs[0].title
+    assert "403" in notifs[0].body
+
+
+@pytest.mark.asyncio
+async def test_ping_error_to_error_no_duplicate_notification(db_session):
+    """When a source stays in error, no duplicate notification fires."""
+    admin = User(
+        email="no_dup_admin@test.com",
+        name="No Dup Admin",
+        role="admin",
+        azure_id="no-dup-admin-1",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(admin)
+    db_session.flush()
+
+    src = ApiSource(
+        name="nodup_src",
+        display_name="NoDup Source",
+        category="api",
+        source_type="test",
+        status="error",
+        is_active=True,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(side_effect=Exception("Still broken"))
+
+    with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+        from app.services.health_monitor import ping_source
+
+        await ping_source(src, db_session)
+
+    from app.models.notification import Notification
+
+    notifs = db_session.query(Notification).filter_by(
+        user_id=admin.id, event_type="api_source_down"
+    ).all()
+    assert len(notifs) == 0
+
+
+@pytest.mark.asyncio
+async def test_quota_warning_at_80_percent(db_session):
+    """Quota warning fires when usage crosses 80%."""
+    admin = User(
+        email="quota_admin@test.com",
+        name="Quota Admin",
+        role="admin",
+        azure_id="quota-admin-1",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(admin)
+    db_session.flush()
+
+    src = ApiSource(
+        name="quota_src",
+        display_name="Quota Source",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+        monthly_quota=100,
+        calls_this_month=79,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=[{"mpn": "LM317"}])
+
+    with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+        from app.services.health_monitor import ping_source
+
+        result = await ping_source(src, db_session)
+
+    assert result["success"] is True
+    # calls_this_month is now 80 (79 + 1 from the ping)
+    assert src.calls_this_month == 80
+
+    from app.models.notification import Notification
+
+    notifs = db_session.query(Notification).filter_by(
+        user_id=admin.id, event_type="api_quota_warning"
+    ).all()
+    assert len(notifs) == 1
+    assert "80%" in notifs[0].title
+
+
+@pytest.mark.asyncio
+async def test_quota_critical_at_95_percent(db_session):
+    """Quota critical fires when usage crosses 95%."""
+    admin = User(
+        email="crit_admin@test.com",
+        name="Critical Admin",
+        role="admin",
+        azure_id="crit-admin-1",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(admin)
+    db_session.flush()
+
+    src = ApiSource(
+        name="crit_src",
+        display_name="Critical Source",
+        category="api",
+        source_type="test",
+        status="live",
+        is_active=True,
+        monthly_quota=100,
+        calls_this_month=94,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=[{"mpn": "LM317"}])
+
+    with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+        from app.services.health_monitor import ping_source
+
+        result = await ping_source(src, db_session)
+
+    assert result["success"] is True
+
+    from app.models.notification import Notification
+
+    notifs = db_session.query(Notification).filter_by(
+        user_id=admin.id, event_type="api_quota_critical"
+    ).all()
+    assert len(notifs) == 1
+    assert "critical" in notifs[0].title.lower()
+
+
+# ── Auth Error Skip Tests ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_connector_skips_retry_on_401(db_session):
+    """401 errors skip retry and fail immediately."""
+    import httpx
+
+    from app.connectors.sources import BaseConnector
+
+    class MockConnector(BaseConnector):
+        async def _do_search(self, part_number):
+            resp = httpx.Response(401, request=httpx.Request("GET", "http://test"))
+            raise httpx.HTTPStatusError("401 Unauthorized", request=resp.request, response=resp)
+
+    conn = MockConnector(max_retries=2)
+    with pytest.raises(httpx.HTTPStatusError):
+        await conn.search("LM317")
+
+    # Should only have been called once (no retries)
+    assert conn._breaker._fail_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_connector_skips_retry_on_403(db_session):
+    """403 errors skip retry and fail immediately."""
+    import httpx
+
+    from app.connectors.sources import BaseConnector
+
+    class MockConnector(BaseConnector):
+        call_count = 0
+
+        async def _do_search(self, part_number):
+            self.call_count += 1
+            resp = httpx.Response(403, request=httpx.Request("POST", "http://test"))
+            raise httpx.HTTPStatusError("403 Forbidden", request=resp.request, response=resp)
+
+    conn = MockConnector(max_retries=2)
+    with pytest.raises(httpx.HTTPStatusError):
+        await conn.search("LM317")
+
+    # Only 1 call, no retries for auth errors
+    assert conn.call_count == 1

@@ -241,6 +241,7 @@ async def import_customers(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    # Admin-only; User table bounded by org size (~20 users)
     users_map = {u.email.lower(): u for u in db.query(User).all()}
     created_companies = 0
     created_sites = 0

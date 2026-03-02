@@ -44,6 +44,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
     is_admin = user.role == "admin" if user else False
     is_manager = user.role == "manager" if user else False
     user_role = user.role if user else ""
+    csp_nonce = getattr(request.state, "csp_nonce", "")
     return templates.TemplateResponse(
         "index.html",
         {
@@ -55,8 +56,9 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "is_manager": is_manager,
             "user_role": user_role,
             "app_version": APP_VERSION,
-            "vite_css_tags": vite_css_tags(APP_VERSION),
-            "vite_js_tags": vite_js_tags(APP_VERSION),
+            "csp_nonce": csp_nonce,
+            "vite_css_tags": vite_css_tags(APP_VERSION, csp_nonce),
+            "vite_js_tags": vite_js_tags(APP_VERSION, csp_nonce),
             "vite_app_url": vite_app_url(APP_VERSION),
             "vite_crm_url": vite_crm_url(APP_VERSION),
         },
