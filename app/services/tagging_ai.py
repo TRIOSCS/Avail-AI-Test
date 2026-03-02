@@ -147,30 +147,38 @@ async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 
     total_matched = 0
     total_unknown = 0
 
-    # Process in super-batches of (concurrency * batch_size) cards
-    super_batch_size = concurrency * batch_size
-    for i in range(0, len(untagged), super_batch_size):
-        super_batch = untagged[i : i + super_batch_size]
+    # Semaphore limits concurrent API calls; delay paces token usage
+    sem = asyncio.Semaphore(concurrency)
 
-        # Split into sub-batches for parallel API calls
-        sub_batches = [
-            super_batch[j : j + batch_size]
-            for j in range(0, len(super_batch), batch_size)
-        ]
+    async def _classify_batch(batch):
+        mpns = [row.normalized_mpn for row in batch]
+        async with sem:
+            for attempt in range(3):
+                try:
+                    return await classify_parts_with_ai(mpns)
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() or "429" in str(e):
+                        wait = 10 * (attempt + 1)
+                        logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt + 1}/3)")
+                        await asyncio.sleep(wait)
+                    else:
+                        logger.exception("AI classification batch failed")
+                        break
+            return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in mpns]
 
-        # Fire all API calls concurrently
-        async def _classify_batch(batch):
-            mpns = [row.normalized_mpn for row in batch]
-            try:
-                return await classify_parts_with_ai(mpns)
-            except Exception:
-                logger.exception("AI classification batch failed")
-                return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in mpns]
+    # Split all untagged into sub-batches
+    all_batches = [
+        untagged[j : j + batch_size]
+        for j in range(0, len(untagged), batch_size)
+    ]
 
-        results = await asyncio.gather(*[_classify_batch(b) for b in sub_batches])
+    # Process in rounds of (concurrency) batches with a delay between rounds
+    for round_start in range(0, len(all_batches), concurrency):
+        round_batches = all_batches[round_start : round_start + concurrency]
 
-        # Apply all results to DB (sequential — DB writes aren't concurrent)
-        for batch, classified in zip(sub_batches, results):
+        results = await asyncio.gather(*[_classify_batch(b) for b in round_batches])
+
+        for batch, classified in zip(round_batches, results):
             matched, unknown = _apply_ai_results(classified, batch, db)
             total_matched += matched
             total_unknown += unknown
@@ -178,6 +186,14 @@ async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 
 
         db.commit()
         logger.info(f"AI backfill: {total_processed}/{len(untagged)} — {total_matched} matched, {total_unknown} unknown")
+
+        # Pace to stay under 90K output tokens/min (~3K tokens per batch)
+        # concurrency batches * 3K tokens = tokens_per_round
+        # Target: stay under 80K/min to leave headroom
+        if round_start + concurrency < len(all_batches):
+            tokens_per_round = concurrency * 3000
+            delay = max(1.0, (tokens_per_round / 80000) * 60)
+            await asyncio.sleep(delay)
 
     logger.info(f"AI backfill complete: {total_processed} processed, {total_matched} matched, {total_unknown} unknown")
     return {"total_processed": total_processed, "total_matched": total_matched, "total_unknown": total_unknown}
