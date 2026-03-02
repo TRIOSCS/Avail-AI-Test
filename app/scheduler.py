@@ -311,6 +311,14 @@ def configure_scheduler():
         name="Auto-close stale tickets",
     )
 
+    # Connector enrichment — upgrade low-confidence material card tags
+    scheduler.add_job(
+        _job_connector_enrichment,
+        IntervalTrigger(hours=4),
+        id="connector_enrichment",
+        name="Enrich low-confidence material cards via connectors",
+    )
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -2221,6 +2229,40 @@ async def _job_tagging_backfill():  # pragma: no cover
     try:
         seed_from_existing_manufacturers(db)
         run_prefix_backfill(db)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_connector_enrichment():  # pragma: no cover
+    """Enrich low-confidence material cards via API connectors. Runs every 4h."""
+    from .database import SessionLocal
+    from .models.intelligence import MaterialCard
+    from .models.tags import MaterialTag, Tag
+    from .services.enrichment import enrich_batch
+
+    db = SessionLocal()
+    try:
+        # Find cards with low-confidence AI tags (< 0.9), lowest confidence first
+        low_conf_cards = (
+            db.query(MaterialCard.normalized_mpn)
+            .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+            .join(Tag, MaterialTag.tag_id == Tag.id)
+            .filter(Tag.tag_type == "brand", MaterialTag.confidence < 0.9)
+            .order_by(MaterialTag.confidence.asc())
+            .limit(500)
+            .all()
+        )
+        mpns = [row.normalized_mpn for row in low_conf_cards]
+        if mpns:
+            logger.info(f"Connector enrichment: processing {len(mpns)} low-confidence cards")
+            result = await enrich_batch(mpns, db, concurrency=3)
+            logger.info(f"Connector enrichment done: {result}")
+        else:
+            logger.debug("Connector enrichment: no low-confidence cards found")
     except Exception:
         db.rollback()
         raise

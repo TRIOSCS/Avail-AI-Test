@@ -1,10 +1,11 @@
-"""Tagging admin endpoints — status dashboard and backfill trigger.
+"""Tagging admin endpoints — status dashboard, backfill trigger, enrichment.
 
 Called by: app.main (router registration)
-Depends on: app.models.tags, app.services.tagging_backfill, app.scheduler
+Depends on: app.models.tags, app.services.tagging_backfill, app.services.enrichment, app.scheduler
 """
 
 import asyncio
+import time
 
 from fastapi import APIRouter, Depends
 from loguru import logger
@@ -15,6 +16,9 @@ from app.database import get_db
 from app.dependencies import require_user
 from app.models.intelligence import MaterialCard
 from app.models.tags import EntityTag, MaterialTag, Tag
+
+# Track enrichment progress (simple in-memory state)
+_enrichment_status: dict = {"running": False, "started_at": None, "result": None}
 
 router = APIRouter(prefix="/api/admin/tagging", tags=["admin"])
 
@@ -103,3 +107,87 @@ async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_
 
     asyncio.get_event_loop().run_in_executor(None, _run_backfill)
     return {"ok": True, "message": "Backfill triggered in background"}
+
+
+@router.post("/enrich")
+async def trigger_enrichment(db: Session = Depends(get_db), _user=Depends(require_user)):
+    """Trigger connector enrichment for low-confidence and untagged cards."""
+    global _enrichment_status
+
+    if _enrichment_status["running"]:
+        return {"ok": False, "message": "Enrichment already running", "started_at": _enrichment_status["started_at"]}
+
+    # Find cards with low-confidence AI tags (< 0.9)
+    low_conf_mpns = (
+        db.query(MaterialCard.normalized_mpn)
+        .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(Tag.tag_type == "brand", MaterialTag.confidence < 0.9)
+        .order_by(MaterialTag.confidence.asc())
+        .limit(500)
+        .all()
+    )
+
+    # Plus untagged cards
+    tagged_ids = (
+        db.query(MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(Tag.tag_type == "brand")
+        .distinct()
+        .subquery()
+    )
+    untagged_mpns = (
+        db.query(MaterialCard.normalized_mpn)
+        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
+        .limit(500)
+        .all()
+    )
+
+    mpns = list({row.normalized_mpn for row in low_conf_mpns} | {row.normalized_mpn for row in untagged_mpns})
+
+    if not mpns:
+        return {"ok": True, "message": "No cards need enrichment", "count": 0}
+
+    _enrichment_status = {"running": True, "started_at": time.time(), "result": None}
+
+    async def _run():
+        from app.database import SessionLocal
+        from app.services.enrichment import enrich_batch
+
+        session = SessionLocal()
+        try:
+            result = await enrich_batch(mpns, session, concurrency=3)
+            _enrichment_status["result"] = result
+        except Exception:
+            logger.exception("Connector enrichment failed")
+            _enrichment_status["result"] = {"error": "enrichment failed"}
+            session.rollback()
+        finally:
+            session.close()
+            _enrichment_status["running"] = False
+
+    asyncio.create_task(_run())
+    return {"ok": True, "message": f"Enrichment started for {len(mpns)} cards", "count": len(mpns)}
+
+
+@router.get("/enrich/status")
+async def enrichment_status(_user=Depends(require_user)):
+    """Check enrichment progress."""
+    return {
+        "running": _enrichment_status["running"],
+        "started_at": _enrichment_status["started_at"],
+        "result": _enrichment_status["result"],
+    }
+
+
+@router.post("/apply-batch")
+async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi", _user=Depends(require_user)):
+    """Apply pending Batch API results (chunked, memory-safe)."""
+
+    async def _run():
+        from app.services.tagging_ai import apply_batch_results_chunked
+
+        return await apply_batch_results_chunked(batch_id)
+
+    asyncio.create_task(_run())
+    return {"ok": True, "message": f"Applying batch {batch_id} results in background"}

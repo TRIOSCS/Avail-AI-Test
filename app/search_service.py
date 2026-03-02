@@ -180,6 +180,9 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
             db.rollback()
 
+    # 3b. Fire background enrichment for cards without manufacturer
+    _schedule_background_enrichment(card_ids, db)
+
     # 4. Historical vendors from material cards
     fresh_vendors = {s.vendor_name.lower() for s in sightings}
     history = _get_material_history(list(card_ids), fresh_vendors, db)
@@ -1005,6 +1008,49 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
         logger.debug("Tag classification failed for card %s", card.id, exc_info=True)
 
     return card
+
+
+def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
+    """Fire background connector enrichment for cards missing a manufacturer."""
+    if not card_ids:
+        return
+
+    cards_needing_enrichment = (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(MaterialCard.id.in_(card_ids))
+        .filter(MaterialCard.manufacturer.is_(None) | (MaterialCard.manufacturer == ""))
+        .all()
+    )
+
+    if not cards_needing_enrichment:
+        return
+
+    logger.info(f"Scheduling background enrichment for {len(cards_needing_enrichment)} cards")
+
+    async def _enrich_cards():
+        from .database import SessionLocal
+        from .services.enrichment import enrich_material_card, _apply_enrichment_to_card
+
+        session = SessionLocal()
+        try:
+            for card_id, mpn in cards_needing_enrichment:
+                try:
+                    result = await enrich_material_card(mpn, session)
+                    if result:
+                        card = session.get(MaterialCard, card_id)
+                        if card:
+                            _apply_enrichment_to_card(card, result, session)
+                            session.commit()
+                except Exception:
+                    logger.debug("Background enrichment failed for %s", mpn, exc_info=True)
+                    session.rollback()
+        finally:
+            session.close()
+
+    try:
+        asyncio.create_task(_enrich_cards())
+    except RuntimeError:
+        pass  # No event loop — skip silently (e.g., in tests)
 
 
 def sighting_to_dict(s: Sighting) -> dict:
