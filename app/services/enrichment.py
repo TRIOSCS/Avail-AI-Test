@@ -12,6 +12,7 @@ import asyncio
 import importlib
 
 from loguru import logger
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -343,10 +344,115 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
     if commodity_boosted:
         logger.info(f"Commodity confidence boost: {commodity_boosted} tags upgraded to 0.85")
 
+    # Phase 4: Sighting-confirmed — sighting manufacturer confirms existing brand tag
+    from app.models.sourcing import Sighting
+
+    sighting_boosted = 0
+    last_id = 0
+
+    while True:
+        # Find brand tags (0.30-0.89) where a sighting manufacturer matches the tag name
+        rows = (
+            db.query(MaterialTag.id)
+            .join(Tag, MaterialTag.tag_id == Tag.id)
+            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+            .join(Sighting, Sighting.material_card_id == MaterialCard.id)
+            .filter(
+                Tag.tag_type == "brand",
+                MaterialTag.confidence < 0.9,
+                MaterialTag.confidence > 0.3,
+                Sighting.manufacturer.isnot(None),
+                Sighting.manufacturer != "",
+                or_(
+                    func.lower(Sighting.manufacturer) == func.lower(Tag.name),
+                    func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
+                    func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
+                ),
+                MaterialTag.id > last_id,
+            )
+            .order_by(MaterialTag.id)
+            .limit(batch_size)
+            .all()
+        )
+
+        if not rows:
+            break
+
+        mt_ids = list({r.id for r in rows})
+        last_id = max(mt_ids)
+
+        updated = (
+            db.query(MaterialTag)
+            .filter(MaterialTag.id.in_(mt_ids))
+            .update(
+                {"confidence": 0.90, "source": "sighting_confirmed"},
+                synchronize_session="fetch",
+            )
+        )
+        db.commit()
+        sighting_boosted += updated
+        logger.info(f"Sighting-confirmed boost: {sighting_boosted} tags upgraded so far")
+
+    if sighting_boosted:
+        logger.info(f"Sighting-confirmed boost: {sighting_boosted} tags upgraded to 0.90")
+
+    # Phase 5: Multi-source agreement — AI + sighting independently agree → 0.95
+    # Find AI-classified tags (any confidence) where sighting also confirms the same manufacturer
+    multi_boosted = 0
+    last_id = 0
+
+    while True:
+        rows = (
+            db.query(MaterialTag.id)
+            .join(Tag, MaterialTag.tag_id == Tag.id)
+            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+            .join(Sighting, Sighting.material_card_id == MaterialCard.id)
+            .filter(
+                Tag.tag_type == "brand",
+                MaterialTag.source.in_(["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]),
+                MaterialTag.confidence < 0.95,
+                MaterialTag.confidence >= 0.7,
+                Sighting.manufacturer.isnot(None),
+                Sighting.manufacturer != "",
+                or_(
+                    func.lower(Sighting.manufacturer) == func.lower(Tag.name),
+                    func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
+                    func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
+                ),
+                MaterialTag.id > last_id,
+            )
+            .order_by(MaterialTag.id)
+            .limit(batch_size)
+            .all()
+        )
+
+        if not rows:
+            break
+
+        mt_ids = list({r.id for r in rows})
+        last_id = max(mt_ids)
+
+        updated = (
+            db.query(MaterialTag)
+            .filter(MaterialTag.id.in_(mt_ids))
+            .update(
+                {"confidence": 0.95, "source": "multi_source_confirmed"},
+                synchronize_session="fetch",
+            )
+        )
+        db.commit()
+        multi_boosted += updated
+        logger.info(f"Multi-source boost: {multi_boosted} tags upgraded so far")
+
+    if multi_boosted:
+        logger.info(f"Multi-source boost: {multi_boosted} tags upgraded to 0.95")
+
     return {
         "total_boosted": total_boosted,
         "fuzzy_boosted": fuzzy_boosted,
         "commodity_boosted": commodity_boosted,
+        "sighting_boosted": sighting_boosted,
+        "multi_source_boosted": multi_boosted,
     }
 
 

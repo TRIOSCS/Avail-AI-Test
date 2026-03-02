@@ -96,11 +96,14 @@ PREFIX_TABLE: dict[str, str] = {
     "FQP": "onsemi",
     "NCV": "onsemi",
     "NTD": "onsemi",
+    "NSI": "onsemi",
     "NJM": "onsemi",
     "MC": "onsemi",
     # Renesas Electronics
     "R5F": "Renesas Electronics",
+    "R7F": "Renesas Electronics",
     "RL78": "Renesas Electronics",
+    "UPD": "Renesas Electronics",
     "ISL": "Renesas Electronics",
     "RX": "Renesas Electronics",
     "ZL": "Renesas Electronics",
@@ -137,7 +140,7 @@ PREFIX_TABLE: dict[str, str] = {
     # Winbond
     "W9825": "Winbond",
     "W25": "Winbond",
-    # Broadcom
+    # Broadcom / Avago
     "ACPL": "Broadcom",
     "HCPL": "Broadcom",
     "BCM": "Broadcom",
@@ -145,6 +148,41 @@ PREFIX_TABLE: dict[str, str] = {
     "QCA": "Qualcomm",
     "MDM": "Qualcomm",
     "WCN": "Qualcomm",
+    # Nordic Semiconductor
+    "NRF": "Nordic Semiconductor",
+    # Espressif Systems
+    "ESP": "Espressif Systems",
+    # FTDI
+    "FT": "FTDI",
+    # Silicon Labs
+    "EFR": "Silicon Labs",
+    "EFM": "Silicon Labs",
+    "SI": "Silicon Labs",
+    # MediaTek
+    "MT6": "MediaTek",
+    "MT7": "MediaTek",
+    # Lattice Semiconductor
+    "LCMXO": "Lattice Semiconductor",
+    "ICE40": "Lattice Semiconductor",
+    # Skyworks Solutions
+    "SKY": "Skyworks Solutions",
+    # Marvell
+    "88E": "Marvell",
+    # Infineon (PSoC / Cypress)
+    "CY8C": "Infineon Technologies",
+    "PSOC": "Infineon Technologies",
+    # Allegro MicroSystems
+    "ACS": "Allegro MicroSystems",
+    "A49": "Allegro MicroSystems",
+    # Bosch Sensortec
+    "BME": "Bosch Sensortec",
+    "BNO": "Bosch Sensortec",
+    "BMP": "Bosch Sensortec",
+    # ams-OSRAM
+    "TMD": "ams-OSRAM",
+    "AS7": "ams-OSRAM",
+    # NXP (legacy TDA series)
+    "TDA": "NXP Semiconductors",
     # ROHM Semiconductor
     "BD": "ROHM Semiconductor",
     "BR": "ROHM Semiconductor",

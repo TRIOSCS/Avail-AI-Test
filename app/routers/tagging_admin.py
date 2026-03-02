@@ -193,6 +193,28 @@ async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi
     return {"ok": True, "message": f"Applying batch {batch_id} results in background"}
 
 
+@router.post("/ai-backfill")
+async def trigger_ai_backfill(limit: int = 50000, db: Session = Depends(get_db), _user=Depends(require_user)):
+    """Submit untagged cards to Anthropic Batch API for AI classification."""
+
+    async def _run():
+        from app.database import SessionLocal
+        from app.services.tagging_ai import submit_targeted_backfill
+
+        session = SessionLocal()
+        try:
+            result = await submit_targeted_backfill(session, limit=limit)
+            logger.info(f"AI backfill result: {result}")
+        except Exception:
+            logger.exception("AI backfill failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.create_task(_run())
+    return {"ok": True, "message": f"AI backfill submitted for up to {limit} cards"}
+
+
 @router.post("/cross-validate")
 async def trigger_cross_validation(
     limit: int = 500,
@@ -217,6 +239,50 @@ async def trigger_cross_validation(
 
     asyncio.create_task(_run())
     return {"ok": True, "message": f"Cross-validation started (limit={limit})"}
+
+
+@router.post("/repair-visibility")
+async def repair_visibility(_user=Depends(require_user)):
+    """Recalculate is_visible for all entity tags using corrected thresholds."""
+
+    def _run():
+        from app.database import SessionLocal
+        from app.services.tagging_backfill import repair_entity_tag_visibility
+
+        session = SessionLocal()
+        try:
+            result = repair_entity_tag_visibility(session)
+            logger.info(f"Visibility repair result: {result}")
+        except Exception:
+            logger.exception("Visibility repair failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.get_event_loop().run_in_executor(None, _run)
+    return {"ok": True, "message": "Entity tag visibility repair started in background"}
+
+
+@router.post("/backfill-sightings")
+async def trigger_sighting_backfill(_user=Depends(require_user)):
+    """Mine sighting manufacturer data for untagged material cards (no API calls)."""
+
+    def _run():
+        from app.database import SessionLocal
+        from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+        session = SessionLocal()
+        try:
+            result = backfill_manufacturer_from_sightings(session)
+            logger.info(f"Sighting backfill result: {result}")
+        except Exception:
+            logger.exception("Sighting backfill failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.get_event_loop().run_in_executor(None, _run)
+    return {"ok": True, "message": "Sighting manufacturer mining started in background"}
 
 
 @router.post("/boost-confidence")

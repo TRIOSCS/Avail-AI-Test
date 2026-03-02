@@ -29,12 +29,14 @@ def _make_tag(db, name="Texas Instruments", tag_type="brand"):
 
 
 def _seed_thresholds(db):
-    """Seed the 4 default threshold config rows."""
+    """Seed default threshold config rows (entity_types match propagate_tags_to_entity)."""
     for et, tt, mc, mp in [
-        ("vendor", "brand", 2, 0.05),
-        ("vendor", "commodity", 3, 0.05),
-        ("customer", "brand", 3, 0.05),
-        ("customer", "commodity", 3, 0.05),
+        ("vendor_card", "brand", 2, 0.05),
+        ("vendor_card", "commodity", 3, 0.05),
+        ("customer_site", "brand", 3, 0.05),
+        ("customer_site", "commodity", 3, 0.05),
+        ("company", "brand", 2, 0.05),
+        ("company", "commodity", 3, 0.05),
     ]:
         db.add(TagThresholdConfig(entity_type=et, tag_type=tt, min_count=mc, min_percentage=mp))
     db.commit()
@@ -77,6 +79,30 @@ def test_prefix_lookup_most_specific_wins():
     """STM32 prefix (5 chars) should beat ST prefix (2 chars)."""
     mfr, _ = lookup_manufacturer_by_prefix("stm32l476rg")
     assert mfr == "STMicroelectronics"
+
+
+def test_prefix_lookup_nordic():
+    mfr, conf = lookup_manufacturer_by_prefix("nrf52840")
+    assert mfr == "Nordic Semiconductor"
+    assert conf == 0.9
+
+
+def test_prefix_lookup_espressif():
+    mfr, conf = lookup_manufacturer_by_prefix("esp32s3")
+    assert mfr == "Espressif Systems"
+    assert conf == 0.9
+
+
+def test_prefix_lookup_ftdi():
+    mfr, conf = lookup_manufacturer_by_prefix("ft232r")
+    assert mfr == "FTDI"
+    assert conf == 0.7  # 2-char prefix
+
+
+def test_prefix_lookup_silicon_labs():
+    mfr, conf = lookup_manufacturer_by_prefix("si5351")
+    assert mfr == "Silicon Labs"
+    assert conf == 0.7  # 2-char prefix
 
 
 # ── classify_material_card ─────────────────────────────────────────────
@@ -207,12 +233,12 @@ def test_visibility_both_gates_pass(db_session):
     _seed_thresholds(db_session)
     tag = _make_tag(db_session, "Murata", "brand")
 
-    # vendor brand threshold: min_count=2, min_percentage=0.05
-    et = EntityTag(entity_type="vendor", entity_id=1, tag_id=tag.id, interaction_count=5.0)
+    # vendor_card brand threshold: min_count=2, min_percentage=0.05
+    et = EntityTag(entity_type="vendor_card", entity_id=1, tag_id=tag.id, interaction_count=5.0)
     db_session.add(et)
     db_session.commit()
 
-    recalculate_entity_tag_visibility("vendor", 1, db_session)
+    recalculate_entity_tag_visibility("vendor_card", 1, db_session)
     db_session.commit()
 
     db_session.refresh(et)
@@ -226,14 +252,14 @@ def test_visibility_gate1_only(db_session):
     tag1 = _make_tag(db_session, "Small Brand", "brand")
     tag2 = _make_tag(db_session, "Big Brand", "brand")
 
-    # vendor brand: min_count=2, min_percentage=0.05
+    # vendor_card brand: min_count=2, min_percentage=0.05
     # small: 2 interactions, big: 98 → small is 2% which is < 5%
-    et1 = EntityTag(entity_type="vendor", entity_id=1, tag_id=tag1.id, interaction_count=2.0)
-    et2 = EntityTag(entity_type="vendor", entity_id=1, tag_id=tag2.id, interaction_count=98.0)
+    et1 = EntityTag(entity_type="vendor_card", entity_id=1, tag_id=tag1.id, interaction_count=2.0)
+    et2 = EntityTag(entity_type="vendor_card", entity_id=1, tag_id=tag2.id, interaction_count=98.0)
     db_session.add_all([et1, et2])
     db_session.commit()
 
-    recalculate_entity_tag_visibility("vendor", 1, db_session)
+    recalculate_entity_tag_visibility("vendor_card", 1, db_session)
     db_session.commit()
 
     db_session.refresh(et1)
@@ -247,13 +273,13 @@ def test_visibility_gate2_only(db_session):
     _seed_thresholds(db_session)
     tag = _make_tag(db_session, "Rare Brand", "brand")
 
-    # vendor brand: min_count=2, min_percentage=0.05
+    # vendor_card brand: min_count=2, min_percentage=0.05
     # 1 interaction = 100% but count < 2
-    et = EntityTag(entity_type="vendor", entity_id=1, tag_id=tag.id, interaction_count=1.0)
+    et = EntityTag(entity_type="vendor_card", entity_id=1, tag_id=tag.id, interaction_count=1.0)
     db_session.add(et)
     db_session.commit()
 
-    recalculate_entity_tag_visibility("vendor", 1, db_session)
+    recalculate_entity_tag_visibility("vendor_card", 1, db_session)
     db_session.commit()
 
     db_session.refresh(et)
@@ -265,22 +291,22 @@ def test_visibility_respects_config(db_session):
     _seed_thresholds(db_session)
     tag = _make_tag(db_session, "NXP", "brand")
 
-    # customer brand: min_count=3, min_percentage=0.05
-    et = EntityTag(entity_type="customer", entity_id=1, tag_id=tag.id, interaction_count=2.0)
+    # customer_site brand: min_count=3, min_percentage=0.05
+    et = EntityTag(entity_type="customer_site", entity_id=1, tag_id=tag.id, interaction_count=2.0)
     db_session.add(et)
     db_session.commit()
 
-    recalculate_entity_tag_visibility("customer", 1, db_session)
+    recalculate_entity_tag_visibility("customer_site", 1, db_session)
     db_session.commit()
 
     db_session.refresh(et)
-    assert et.is_visible is False  # count=2 < min_count=3 for customer/brand
+    assert et.is_visible is False  # count=2 < min_count=3 for customer_site/brand
 
 
 def test_visibility_no_tags_no_error(db_session):
     """Empty entity → no error."""
     _seed_thresholds(db_session)
-    recalculate_entity_tag_visibility("vendor", 999, db_session)
+    recalculate_entity_tag_visibility("vendor_card", 999, db_session)
 
 
 # ── propagate_tags_to_entity ───────────────────────────────────────────
@@ -351,12 +377,12 @@ def test_propagate_recalculates_visibility(db_session, test_material_card):
     )
     db_session.commit()
 
-    # After 3 propagations with weight 1.0, vendor brand min_count=2 should be met
+    # After 3 propagations with weight 1.0, vendor_card brand min_count=2 should be met
     for _ in range(3):
-        propagate_tags_to_entity("vendor", 1, test_material_card.id, 1.0, db_session)
+        propagate_tags_to_entity("vendor_card", 1, test_material_card.id, 1.0, db_session)
         db_session.commit()
 
-    et = db_session.query(EntityTag).filter_by(entity_type="vendor", entity_id=1).first()
+    et = db_session.query(EntityTag).filter_by(entity_type="vendor_card", entity_id=1).first()
     assert et.is_visible is True
 
 
