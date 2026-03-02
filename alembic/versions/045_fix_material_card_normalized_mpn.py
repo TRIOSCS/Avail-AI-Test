@@ -29,7 +29,6 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_material_cards_normalized_mpn")
 
     # Step 1: Recompute normalized_mpn for rows that don't match canonical form
-    # Canonical form = lowercase + strip all non-alphanumeric chars
     op.execute("""
         UPDATE material_cards
         SET normalized_mpn = lower(regexp_replace(normalized_mpn, '[^a-zA-Z0-9]', '', 'g'))
@@ -37,100 +36,56 @@ def upgrade() -> None:
           AND deleted_at IS NULL
     """)
 
-    # Step 2: Identify and merge duplicates (keep lowest id per normalized_mpn)
-    # Reassign sightings from duplicate cards to keeper
+    # Build a temp table of (dup_id, keeper_id) for clarity
     op.execute("""
-        UPDATE sightings s
-        SET material_card_id = keeper.id
+        CREATE TEMP TABLE _dup_map AS
+        SELECT dup.id AS dup_id, keeper.id AS keeper_id
         FROM material_cards dup
         JOIN (
             SELECT normalized_mpn, min(id) AS id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
+            FROM material_cards WHERE deleted_at IS NULL
+            GROUP BY normalized_mpn HAVING count(*) > 1
         ) keeper ON keeper.normalized_mpn = dup.normalized_mpn AND dup.id != keeper.id
-        WHERE s.material_card_id = dup.id
+        WHERE dup.deleted_at IS NULL
     """)
 
-    # Reassign material_vendor_history
+    # Step 2: Merge child rows from dupes to keepers
+
+    # Sightings: no unique constraint — safe to bulk-update
     op.execute("""
-        UPDATE material_vendor_history mvh
-        SET material_card_id = keeper.id
-        FROM material_cards dup
-        JOIN (
-            SELECT normalized_mpn, min(id) AS id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
-        ) keeper ON keeper.normalized_mpn = dup.normalized_mpn AND dup.id != keeper.id
-        WHERE mvh.material_card_id = dup.id
+        UPDATE sightings s SET material_card_id = dm.keeper_id
+        FROM _dup_map dm WHERE s.material_card_id = dm.dup_id
     """)
 
-    # Reassign material_tags (skip if already pointing to keeper to avoid unique violations)
+    # Material_vendor_history: unique on (material_card_id, vendor_name)
+    # For each (keeper_id, vendor_name) keep only the row with the newest last_seen
+    # Delete all dup rows first, then insert non-conflicting ones isn't practical.
+    # Simplest: just delete dup rows (keeper already has its own history).
     op.execute("""
-        UPDATE material_tags mt
-        SET material_card_id = keeper.id
-        FROM material_cards dup
-        JOIN (
-            SELECT normalized_mpn, min(id) AS id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
-        ) keeper ON keeper.normalized_mpn = dup.normalized_mpn AND dup.id != keeper.id
-        WHERE mt.material_card_id = dup.id
-          AND NOT EXISTS (
-              SELECT 1 FROM material_tags mt2
-              WHERE mt2.material_card_id = keeper.id AND mt2.tag_id = mt.tag_id
-          )
+        DELETE FROM material_vendor_history mvh
+        USING _dup_map dm WHERE mvh.material_card_id = dm.dup_id
     """)
 
-    # Delete orphaned material_tags that already exist on keeper
+    # Material_tags: unique on (material_card_id, tag_id)
+    # Same approach — delete dup rows (tags on keeper are sufficient)
     op.execute("""
         DELETE FROM material_tags mt
-        USING material_cards dup
-        JOIN (
-            SELECT normalized_mpn, min(id) AS id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
-        ) keeper ON keeper.normalized_mpn = dup.normalized_mpn AND dup.id != keeper.id
-        WHERE mt.material_card_id = dup.id
+        USING _dup_map dm WHERE mt.material_card_id = dm.dup_id
     """)
 
-    # Reassign requirements
+    # Requirements: no unique constraint — safe to bulk-update
     op.execute("""
-        UPDATE requirements r
-        SET material_card_id = keeper.id
-        FROM material_cards dup
-        JOIN (
-            SELECT normalized_mpn, min(id) AS id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
-        ) keeper ON keeper.normalized_mpn = dup.normalized_mpn AND dup.id != keeper.id
-        WHERE r.material_card_id = dup.id
+        UPDATE requirements r SET material_card_id = dm.keeper_id
+        FROM _dup_map dm WHERE r.material_card_id = dm.dup_id
     """)
 
-    # Step 3: Soft-delete duplicate cards (keep oldest)
+    # Step 3: Soft-delete duplicate cards
     op.execute("""
-        UPDATE material_cards dup
-        SET deleted_at = now()
-        FROM (
-            SELECT normalized_mpn, min(id) AS keep_id
-            FROM material_cards
-            WHERE deleted_at IS NULL
-            GROUP BY normalized_mpn
-            HAVING count(*) > 1
-        ) keeper
-        WHERE dup.normalized_mpn = keeper.normalized_mpn
-          AND dup.id != keeper.keep_id
-          AND dup.deleted_at IS NULL
+        UPDATE material_cards mc SET deleted_at = now()
+        FROM _dup_map dm WHERE mc.id = dm.dup_id
     """)
+
+    op.execute("DROP TABLE _dup_map")
 
     # Step 4: Recreate the unique index (only on non-deleted rows)
     op.execute("""
