@@ -1,14 +1,14 @@
 """Add is_internal_part flag to material_cards.
 
 Revision ID: 047
-Revises: 046
+Revises: 046_fix_threshold_entity_types
 """
 
 from alembic import op
 import sqlalchemy as sa
 
 revision = "047"
-down_revision = "046"
+down_revision = "046_fix_threshold_entity_types"
 branch_labels = None
 depends_on = None
 
