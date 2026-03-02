@@ -55,6 +55,7 @@
     --sourcing-color:#a16207;--sourcing-accent:#eab308;--sourcing-dot:linear-gradient(135deg,#a16207,#eab308);--sourcing-border:rgba(234,179,8,.18);
     --relationships-color:#0f766e;--relationships-accent:#14b8a6;--relationships-dot:linear-gradient(135deg,#0f766e,#14b8a6);--relationships-border:rgba(20,184,166,.15);
     --insights-color:#7c3aed;--insights-accent:#8b5cf6;--insights-dot:linear-gradient(135deg,#6d28d9,#8b5cf6);--insights-border:rgba(139,92,246,.15);
+    --settings-color:#991b1b;--settings-accent:#dc2626;--settings-dot:linear-gradient(135deg,#991b1b,#dc2626);--settings-border:rgba(220,38,38,.18);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 
@@ -1113,6 +1114,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 /* Settings */
 #settingsTabs,#enrichTabs{flex-wrap:wrap;width:auto}
 #settingsTabs .tab,#enrichTabs .tab{white-space:nowrap}
+#settingsTabs .tab.on{background:linear-gradient(135deg,var(--settings-color),var(--settings-accent));box-shadow:0 2px 4px rgba(220,38,38,.2)}
 .settings-panel{margin-top:16px;padding-bottom:32px}
 .s-card{padding:22px;margin-bottom:16px;max-width:700px;border-radius:var(--radius);border:1px solid rgba(0,0,0,.04);box-shadow:var(--shadow-md)}
 .s-card h3{margin:0 0 16px;font-size:15px;font-weight:600;letter-spacing:-.01em}
@@ -1224,6 +1226,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 [data-section="sourcing"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(234,179,8,.1),rgba(234,179,8,.04));color:var(--sourcing-color);box-shadow:inset 3px 0 0 var(--sourcing-accent)}
 [data-section="relationships"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(20,184,166,.1),rgba(20,184,166,.04));color:var(--relationships-color);box-shadow:inset 3px 0 0 var(--relationships-accent)}
 [data-section="insights"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(139,92,246,.04));color:var(--insights-color);box-shadow:inset 3px 0 0 var(--insights-accent)}
+[data-section="settings"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(220,38,38,.1),rgba(220,38,38,.04));color:var(--settings-color);box-shadow:inset 3px 0 0 var(--settings-accent)}
 /* Sidebar badge — small count pill on nav buttons */
 .sb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:8px;background:var(--green);color:#fff;font-size:9px;font-weight:700;margin-left:auto;line-height:1}
 /* ── Command Center — section header style ── */
@@ -1271,10 +1274,12 @@ html .sidebar .sb-group-items{max-height:none;opacity:1;pointer-events:auto}
 [data-section="sourcing"] .sb-nav-btn.active .sb-nav-icon{color:var(--sourcing-color)}
 [data-section="relationships"] .sb-nav-btn.active .sb-nav-icon{color:var(--relationships-color)}
 [data-section="insights"] .sb-nav-btn.active .sb-nav-icon{color:var(--insights-color)}
+[data-section="settings"] .sb-nav-btn.active .sb-nav-icon{color:var(--settings-color)}
 /* Hover glow — icons glow in their group color */
 [data-section="sourcing"] .sb-nav-btn:hover .sb-nav-icon{color:var(--sourcing-color);filter:drop-shadow(0 0 6px var(--sourcing-color))}
 [data-section="relationships"] .sb-nav-btn:hover .sb-nav-icon{color:var(--relationships-color);filter:drop-shadow(0 0 6px var(--relationships-color))}
 [data-section="insights"] .sb-nav-btn:hover .sb-nav-icon{color:var(--insights-color);filter:drop-shadow(0 0 6px var(--insights-color))}
+[data-section="settings"] .sb-nav-btn:hover .sb-nav-icon{color:var(--settings-color);filter:drop-shadow(0 0 6px var(--settings-color))}
 .sidebar .sidebar-footer .un,.sidebar .sidebar-footer .rb{display:none}
 /* Tooltip on hover for collapsed icons */
 .sidebar .sidebar-nav button{position:relative}
@@ -1308,6 +1313,7 @@ body.sb-open .sidebar .sidebar-footer,.sidebar:hover .sidebar-footer{justify-con
 .sidebar:hover .sb-user-menu:hover .sb-user-popover{opacity:1;visibility:visible;transform:translateY(0)}
 /* Expanded: colored divider lines between groups — no line between OPPORTUNITY and RELATIONSHIPS */
 body.sb-open .sidebar .sb-nav-group[data-section="insights"]::before,.sidebar:hover .sb-nav-group[data-section="insights"]::before{content:'';display:block;height:2px;background:var(--insights-color);margin:2px 8px 6px;border-radius:1px}
+body.sb-open .sidebar .sb-nav-group[data-section="settings"]::before,.sidebar:hover .sb-nav-group[data-section="settings"]::before{content:'';display:block;height:2px;background:var(--settings-color);margin:2px 8px 6px;border-radius:1px}
 /* Expanded: Command Center header overrides — inherits from .sb-group-header expanded rules */
 
 /* v7 Sidebar footer sub-elements */

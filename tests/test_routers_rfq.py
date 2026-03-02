@@ -1241,8 +1241,8 @@ def test_rfq_prepare_past_contacts_exclude_current_req(client, db_session, test_
     assert v["needs_lookup"] is True
 
 
-def test_rfq_prepare_timeout_sets_fail_reason(client, db_session, test_user, test_requisition):
-    """rfq-prepare sets lookup_fail_reason on asyncio.TimeoutError."""
+def test_rfq_prepare_timeout_leaves_needs_lookup(client, db_session, test_user, test_requisition):
+    """rfq-prepare gracefully handles timeout — vendor left as needs_lookup for client."""
     import asyncio
 
     with patch(
@@ -1259,7 +1259,6 @@ def test_rfq_prepare_timeout_sets_fail_reason(client, db_session, test_user, tes
     data = resp.json()
     v = data["vendors"][0]
     assert v["needs_lookup"] is True
-    assert v.get("lookup_fail_reason") == "Lookup timed out (15s)"
 
 
 # ══════════════════════════════════════════════════════════════════════

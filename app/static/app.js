@@ -7971,9 +7971,16 @@ async function openBatchRfqModal(prebuiltGroups) {
     });
     modal.classList.add('open');
 
+    const prepareAbort = new AbortController();
+    const prepareTimeout = setTimeout(() => prepareAbort.abort(), 30000);
+    // Wire cancel button to abort the prepare call
+    const prepCancelBtn = document.querySelector('#rfqPrepare .btn-danger, #rfqPrepare [data-dismiss]');
+    const _origCancel = prepCancelBtn?.onclick;
+    if (prepCancelBtn) prepCancelBtn.onclick = () => { prepareAbort.abort(); closeModal('rfqModal'); };
     try {
         const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
-            method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) }
+            method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) },
+            signal: prepareAbort.signal
         });
         rfqAllParts = data.all_parts || [];
         rfqSubsMap = data.subs_map || {};
@@ -8005,10 +8012,15 @@ async function openBatchRfqModal(prebuiltGroups) {
             };
         });
     } catch (e) {
-        showToast('Failed to prepare RFQ: ' + e.message, 'error');
+        clearTimeout(prepareTimeout);
+        if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
+        const msg = e.name === 'AbortError' ? 'RFQ preparation timed out or was cancelled' : e.message;
+        showToast('Failed to prepare RFQ: ' + msg, 'error');
         closeModal('rfqModal');
         return;
     }
+    clearTimeout(prepareTimeout);
+    if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
 
     // Run lookups for vendors without emails (3-tier: cache → scrape → AI)
     const needsLookup = rfqVendorData.filter(v => v.lookup_status === 'pending');

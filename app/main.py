@@ -310,7 +310,7 @@ async def csp_middleware(request: Request, call_next):
     response = await call_next(request)
     csp = (
         f"default-src 'self'; "
-        f"script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdnjs.cloudflare.com; "
         f"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         f"font-src 'self' https://fonts.gstatic.com; "
         f"img-src 'self' data:; "
