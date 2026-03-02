@@ -563,6 +563,87 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
     return {"total_checked": len(low_conf), "confirmed": confirmed, "changed": changed, "no_result": no_result}
 
 
+async def nexar_backfill_untagged(db: Session, limit: int = 5000) -> dict:
+    """Backfill completely untagged cards via Nexar queries.
+
+    For cards with NO brand MaterialTag at all (after prefix/sighting passes),
+    query Nexar for manufacturer data and apply tags at 0.95 confidence.
+
+    Returns: {total_checked, tagged, no_result}
+    """
+    from app.models.tags import MaterialTag, Tag
+
+    # Find cards with NO brand tag
+    tagged_brand_ids = (
+        db.query(MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(Tag.tag_type == "brand")
+        .distinct()
+        .subquery()
+    )
+    untagged = (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
+        .order_by(MaterialCard.id)
+        .limit(limit)
+        .all()
+    )
+
+    if not untagged:
+        return {"total_checked": 0, "tagged": 0, "no_result": 0}
+
+    nexar_id = get_credential_cached("nexar", "NEXAR_CLIENT_ID")
+    nexar_sec = get_credential_cached("nexar", "NEXAR_CLIENT_SECRET")
+
+    if not nexar_id or not nexar_sec:
+        return {"total_checked": 0, "tagged": 0, "no_result": 0, "error": "no_nexar_creds"}
+
+    from app.connectors.sources import NexarConnector
+
+    connector = NexarConnector(nexar_id, nexar_sec)
+
+    tagged = 0
+    no_result = 0
+
+    for i, row in enumerate(untagged):
+        try:
+            data = await connector._run_query(connector.AGGREGATE_QUERY, row.normalized_mpn)
+            results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+
+            if not results:
+                no_result += 1
+                continue
+
+            part = results[0].get("part", {})
+            nexar_mfr = ((part.get("manufacturer") or {}).get("name") or "").strip()
+
+            if not nexar_mfr or nexar_mfr.lower() in _IGNORED_MANUFACTURERS:
+                no_result += 1
+                continue
+
+            card = db.get(MaterialCard, row.id)
+            if card:
+                _apply_enrichment_to_card(
+                    card,
+                    {"manufacturer": nexar_mfr, "source": "nexar", "confidence": 0.95, "category": None},
+                    db,
+                )
+                tagged += 1
+
+        except Exception:
+            logger.debug("Nexar backfill failed for %s", row.normalized_mpn, exc_info=True)
+            no_result += 1
+
+        if (i + 1) % 200 == 0:
+            db.commit()
+            logger.info(f"Nexar backfill: {i + 1}/{len(untagged)} — {tagged} tagged")
+            await asyncio.sleep(1)
+
+    db.commit()
+    logger.info(f"Nexar backfill: {len(untagged)} checked, {tagged} tagged, {no_result} no result")
+    return {"total_checked": len(untagged), "tagged": tagged, "no_result": no_result}
+
+
 async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int = 3) -> dict:
     """Cross-check low-confidence AI tags against connectors to upgrade confidence.
 

@@ -5257,3 +5257,109 @@ def test_job_reset_monthly_usage_handles_error():
         from app.scheduler import _job_reset_monthly_usage
 
         asyncio.run(_job_reset_monthly_usage())
+
+
+# ── Phase 7: Scheduler Optimization ──────────────────────────────────
+
+
+def test_nexar_validate_job_registered():
+    """Nexar validate job is registered."""
+    with patch("app.config.settings", _mock_settings()):
+        configure_scheduler()
+
+    job = scheduler.get_job("nexar_validate")
+    assert job is not None
+
+
+def test_connector_enrichment_2hour_interval():
+    """Connector enrichment runs every 2 hours (was 4)."""
+    with patch("app.config.settings", _mock_settings()):
+        configure_scheduler()
+
+    job = scheduler.get_job("connector_enrichment")
+    assert job is not None
+    # Check the trigger interval is 2 hours
+    trigger = job.trigger
+    assert trigger.interval.total_seconds() == 7200  # 2 hours
+
+
+def test_nexar_validate_job_6hour_interval():
+    """Nexar validate job runs every 6 hours."""
+    with patch("app.config.settings", _mock_settings()):
+        configure_scheduler()
+
+    job = scheduler.get_job("nexar_validate")
+    assert job is not None
+    trigger = job.trigger
+    assert trigger.interval.total_seconds() == 21600  # 6 hours
+
+
+def test_nexar_validate_job_runs():
+    """_job_nexar_validate calls nexar_bulk_validate and logs result."""
+    mock_db = MagicMock()
+
+    with (
+        patch("app.database.SessionLocal", return_value=mock_db),
+        patch(
+            "app.services.enrichment.nexar_bulk_validate",
+            new_callable=AsyncMock,
+            return_value={"validated": 10, "upgraded": 3},
+        ) as mock_validate,
+    ):
+        from app.scheduler import _job_nexar_validate
+
+        asyncio.run(_job_nexar_validate())
+
+    mock_validate.assert_called_once_with(mock_db, limit=2000)
+    mock_db.close.assert_called_once()
+
+
+def test_nexar_validate_job_handles_error():
+    """_job_nexar_validate rolls back on error and re-raises."""
+    mock_db = MagicMock()
+
+    with (
+        patch("app.database.SessionLocal", return_value=mock_db),
+        patch(
+            "app.services.enrichment.nexar_bulk_validate",
+            new_callable=AsyncMock,
+            side_effect=Exception("Nexar API error"),
+        ),
+    ):
+        from app.scheduler import _job_nexar_validate
+
+        with pytest.raises(Exception, match="Nexar API error"):
+            asyncio.run(_job_nexar_validate())
+
+    mock_db.rollback.assert_called_once()
+    mock_db.close.assert_called_once()
+
+
+def test_connector_enrichment_boost_cascade():
+    """_job_connector_enrichment runs boost cascade after enrichment."""
+    mock_db = MagicMock()
+    mock_db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+    with (
+        patch("app.database.SessionLocal", return_value=mock_db),
+        patch(
+            "app.services.enrichment.cross_validate_batch",
+            new_callable=AsyncMock,
+            return_value={"total": 0},
+        ),
+        patch(
+            "app.services.enrichment.boost_confidence_internal",
+            return_value={"total_boosted": 5},
+        ) as mock_boost,
+        patch(
+            "app.services.tagging_backfill.backfill_manufacturer_from_sightings",
+            return_value={"total_tagged": 3},
+        ) as mock_sighting,
+    ):
+        from app.scheduler import _job_connector_enrichment
+
+        asyncio.run(_job_connector_enrichment())
+
+    mock_boost.assert_called_once_with(mock_db)
+    mock_sighting.assert_called_once_with(mock_db)
+    mock_db.close.assert_called_once()

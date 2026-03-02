@@ -277,3 +277,59 @@ def test_admin_analyze_prefixes_endpoint(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert "candidates" in data
+
+
+# ── Phase 3 & 4 Admin Endpoints ───────────────────────────────────────
+
+
+def test_admin_nexar_validate_all_endpoint(client):
+    resp = client.post("/api/admin/tagging/nexar-validate-all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+def test_admin_nexar_backfill_untagged_endpoint(client):
+    resp = client.post("/api/admin/tagging/nexar-backfill-untagged")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+def test_admin_cross_validate_all_endpoint(client):
+    resp = client.post("/api/admin/tagging/cross-validate-all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+# ── Phase 5 & 6 Admin Endpoints ───────────────────────────────────────
+
+
+def test_admin_boost_cascade_endpoint(client):
+    resp = client.post("/api/admin/tagging/boost-cascade")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+def test_admin_triage_internal_endpoint(client):
+    resp = client.post("/api/admin/tagging/triage-internal")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+
+
+def test_admin_status_includes_internal_count(client, db_session):
+    """Status endpoint includes internal_part_count and effective_coverage."""
+    card = _make_card(db_session, "INTERNAL-001")
+    card.is_internal_part = True
+    db_session.commit()
+
+    resp = client.get("/api/admin/tagging/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "internal_part_count" in data
+    assert "effective_coverage" in data
+    assert "high_confidence_tags" in data
+    assert data["internal_part_count"] >= 1

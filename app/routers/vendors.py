@@ -1446,6 +1446,21 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
         if not s.is_unavailable
     ]
 
+    # Tags (brand + commodity)
+    from ..models.tags import MaterialTag, Tag
+
+    tag_rows = (
+        db.query(Tag.name, Tag.tag_type, MaterialTag.confidence, MaterialTag.source)
+        .join(MaterialTag, MaterialTag.tag_id == Tag.id)
+        .filter(MaterialTag.material_card_id == card.id, MaterialTag.confidence >= 0.70)
+        .order_by(MaterialTag.confidence.desc())
+        .all()
+    )
+    tags_list = [
+        {"name": name, "type": tt, "confidence": round(float(conf), 2), "source": src}
+        for name, tt, conf, src in tag_rows
+    ]
+
     offers = db.query(Offer).filter(Offer.material_card_id == card.id).order_by(Offer.created_at.desc()).limit(50).all()
     offers_list = [
         {
@@ -1492,6 +1507,7 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
         ],
         "sightings": sightings_list,
         "offers": offers_list,
+        "tags": tags_list,
         # Enrichment fields
         "lifecycle_status": card.lifecycle_status,
         "package_type": card.package_type,
@@ -1543,6 +1559,31 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
             if card_ids
             else {}
         )
+        # Batch fetch top brand tag per card
+        from ..models.tags import MaterialTag, Tag
+
+        brand_tags = {}
+        if card_ids:
+            from sqlalchemy import func as sa_func
+
+            brand_rows = (
+                db.query(
+                    MaterialTag.material_card_id,
+                    Tag.name,
+                    MaterialTag.confidence,
+                )
+                .join(Tag, MaterialTag.tag_id == Tag.id)
+                .filter(
+                    MaterialTag.material_card_id.in_(card_ids),
+                    Tag.tag_type == "brand",
+                    MaterialTag.confidence >= 0.70,
+                )
+                .order_by(MaterialTag.confidence.desc())
+                .all()
+            )
+            for mid, name, conf in brand_rows:
+                if mid not in brand_tags:  # keep highest confidence
+                    brand_tags[mid] = {"name": name, "confidence": round(float(conf), 2)}
         # Batch fetch offer counts + best price
         offer_stats = {}
         if card_ids:
@@ -1569,6 +1610,7 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
                     "offer_count": offer_stats.get(c.id, {}).get("count", 0),
                     "best_price": offer_stats.get(c.id, {}).get("best_price"),
                     "last_searched_at": c.last_searched_at.isoformat() if c.last_searched_at else None,
+                    "brand_tag": brand_tags.get(c.id),
                 }
                 for c in cards
             ],

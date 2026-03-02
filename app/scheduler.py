@@ -19,6 +19,8 @@ Job overview:
   - Performance tracking (vendor scorecards, buyer leaderboard, Avail Scores): every 12h
   - Deep email mining: every 4h
   - Deep enrichment sweep: every 12h
+  - Connector enrichment: every 2h (with boost cascade)
+  - Nexar tag validation: every 6h
 """
 
 import asyncio
@@ -314,7 +316,7 @@ def configure_scheduler():
     # Connector enrichment — upgrade low-confidence material card tags
     scheduler.add_job(
         _job_connector_enrichment,
-        IntervalTrigger(hours=4),
+        IntervalTrigger(hours=2),
         id="connector_enrichment",
         name="Enrich low-confidence material cards via connectors",
     )
@@ -341,6 +343,14 @@ def configure_scheduler():
         CronTrigger(hour=4, minute=0),
         id="sighting_mining",
         name="Mine sighting manufacturer data for untagged cards",
+    )
+
+    # Nexar bulk validation — validate AI-classified tags via Nexar
+    scheduler.add_job(
+        _job_nexar_validate,
+        IntervalTrigger(hours=6),
+        id="nexar_validate",
+        name="Validate AI tags via Nexar",
     )
 
     job_count = len(scheduler.get_jobs())
@@ -2264,7 +2274,7 @@ async def _job_connector_enrichment():  # pragma: no cover
             .join(Tag, MaterialTag.tag_id == Tag.id)
             .filter(Tag.tag_type == "brand", MaterialTag.confidence < 0.9)
             .order_by(MaterialTag.confidence.asc())
-            .limit(500)
+            .limit(2000)
             .all()
         )
         mpns = [row.normalized_mpn for row in low_conf_cards]
@@ -2274,9 +2284,21 @@ async def _job_connector_enrichment():  # pragma: no cover
             logger.info(f"Connector enrichment done: {result}")
 
         # Phase 2: Cross-validate AI tags against connectors
-        cv_result = await cross_validate_batch(db, limit=200, concurrency=3)
+        cv_result = await cross_validate_batch(db, limit=500, concurrency=3)
         if cv_result["total"] > 0:
             logger.info(f"Cross-validation done: {cv_result}")
+
+        # Phase 3: Run boost cascade to propagate new manufacturer data
+        from .services.enrichment import boost_confidence_internal
+        from .services.tagging_backfill import backfill_manufacturer_from_sightings
+
+        boost_result = boost_confidence_internal(db)
+        if boost_result.get("total_boosted", 0) > 0:
+            logger.info(f"Post-enrichment boost: {boost_result}")
+
+        sighting_result = backfill_manufacturer_from_sightings(db)
+        if sighting_result.get("total_tagged", 0) > 0:
+            logger.info(f"Post-enrichment sighting mining: {sighting_result}")
     except Exception:
         db.rollback()
         raise
@@ -2328,6 +2350,23 @@ async def _job_sighting_mining():
     try:
         result = backfill_manufacturer_from_sightings(db)
         logger.info(f"Sighting mining: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_nexar_validate():
+    """Validate AI-classified tags via Nexar. Every 6 hours."""
+    from .database import SessionLocal
+    from .services.enrichment import nexar_bulk_validate
+
+    db = SessionLocal()
+    try:
+        result = await nexar_bulk_validate(db, limit=2000)
+        logger.info(f"Nexar validate job: {result}")
     except Exception:
         db.rollback()
         raise

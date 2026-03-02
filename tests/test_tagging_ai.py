@@ -133,3 +133,32 @@ async def test_ai_backfill_updates_manufacturer(db_session):
 
     db_session.refresh(card)
     assert card.manufacturer == "Renesas"
+
+
+# ── triage_internal_parts (heuristics) ─────────────────────────────────
+
+
+def test_triage_internal_parts_heuristics():
+    """Heuristic triage catches obvious internal part numbers."""
+    from app.services.tagging_ai import triage_internal_parts
+
+    results = triage_internal_parts([
+        "123456789",        # pure numeric
+        "AB",               # too short
+        "INT-CUST-001",     # internal marker
+        "STM32F407VGT6",    # real MPN
+        "TEST-SAMPLE-XYZ",  # internal marker
+        "LM317T",           # real MPN
+        "[BRACKET]",        # unusual chars
+    ])
+
+    # Map results by mpn
+    by_mpn = {r["mpn"]: r for r in results}
+
+    assert by_mpn["123456789"]["is_internal"] is True
+    assert by_mpn["AB"]["is_internal"] is True
+    assert by_mpn["INT-CUST-001"]["is_internal"] is True
+    assert by_mpn["STM32F407VGT6"]["is_internal"] is False
+    assert by_mpn["TEST-SAMPLE-XYZ"]["is_internal"] is True
+    assert by_mpn["LM317T"]["is_internal"] is False
+    assert by_mpn["[BRACKET]"]["is_internal"] is True

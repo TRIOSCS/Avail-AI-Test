@@ -9946,6 +9946,25 @@ async function openMaterialPopup(cardId) {
 
     html += `<div class="mp-section"><div class="mp-label">Description</div><div onclick="editMaterialField(${card.id},'description',this)" style="font-size:12px;cursor:pointer" title="Click to edit">${card.description ? esc(card.description) : '<span style="color:var(--muted)">+ Add description</span>'}</div></div>`;
 
+    // ── Tags section ──
+    const tags = card.tags || [];
+    if (tags.length) {
+        const brandTags = tags.filter(t => t.type === 'brand');
+        const commodityTags = tags.filter(t => t.type === 'commodity');
+        html += '<div class="mp-section"><div class="mp-label">Tags</div><div style="display:flex;flex-wrap:wrap;gap:6px">';
+        for (const t of brandTags) {
+            const confPct = Math.round(t.confidence * 100);
+            const confColor = confPct >= 90 ? 'var(--green)' : confPct >= 70 ? 'var(--amber)' : 'var(--muted)';
+            html += `<span class="badge b-auth" style="font-size:11px" title="${esc(t.source)} (${confPct}% confidence)">${esc(t.name)} <span style="color:${confColor};font-size:9px">${confPct}%</span></span>`;
+        }
+        for (const t of commodityTags) {
+            const confPct = Math.round(t.confidence * 100);
+            const confColor = confPct >= 90 ? 'var(--green)' : confPct >= 70 ? 'var(--amber)' : 'var(--muted)';
+            html += `<span class="badge b-src" style="font-size:11px" title="${esc(t.source)} (${confPct}% confidence)">${esc(t.name)} <span style="color:${confColor};font-size:9px">${confPct}%</span></span>`;
+        }
+        html += '</div></div>';
+    }
+
     // ── Offers section ──
     html += `<div class="mp-section"><div class="mp-label">Offers (${offers.length})</div>`;
     if (offers.length) {

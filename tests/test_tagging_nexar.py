@@ -111,3 +111,12 @@ async def test_nexar_backfill_no_credentials(db_session):
 
     # Should skip all since no credentials
     assert result["total_matched"] == 0
+
+
+@pytest.mark.asyncio
+async def test_nexar_backfill_untagged_no_creds(db_session):
+    """nexar_backfill_untagged returns early when no credentials."""
+    from app.services.enrichment import nexar_backfill_untagged
+
+    result = await nexar_backfill_untagged(db_session, limit=10)
+    assert result["total_checked"] == 0
