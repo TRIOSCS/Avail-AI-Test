@@ -904,7 +904,7 @@ def test_backfill_emails_skips_vendor_name_normalizes_to_empty(admin_client, db_
 @pytest.mark.asyncio
 async def test_vendor_contact_lookup_integrity_error_direct(db_session, test_user):
     """Direct test of vendor contact lookup IntegrityError handling."""
-    from app.routers.vendors import lookup_vendor_contact
+    from app.routers.vendor_contacts import lookup_vendor_contact
     from app.schemas.vendors import VendorContactLookup
 
     # Pre-create the card
@@ -944,7 +944,7 @@ async def test_vendor_contact_lookup_integrity_error_direct(db_session, test_use
 @pytest.mark.asyncio
 async def test_standalone_stock_import_vendor_card_integrity_direct(db_session, test_user):
     """Direct test of vendor card IntegrityError during stock import (lines 1456-1458)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     # Pre-create the vendor card so an attempt to create another raises IntegrityError
     vc = VendorCard(
@@ -1046,7 +1046,7 @@ def test_vendor_search_fts_zero_results_fallback(client, db_session, test_vendor
 @pytest.mark.asyncio
 async def test_vendor_contact_lookup_flush_integrity_error(db_session, test_user):
     """Vendor contact lookup: flush IntegrityError -> rollback -> re-query (lines 704-706)."""
-    from app.routers.vendors import lookup_vendor_contact
+    from app.routers.vendor_contacts import lookup_vendor_contact
     from app.schemas.vendors import VendorContactLookup
 
     # Pre-create the card that will be "found" after the IntegrityError
@@ -1101,7 +1101,7 @@ async def test_vendor_contact_lookup_flush_integrity_error(db_session, test_user
 @pytest.mark.asyncio
 async def test_vendor_search_fts_returns_results(db_session, test_user):
     """FTS query succeeds and returns results (lines 299-300)."""
-    from app.routers.vendors import list_vendors
+    from app.routers.vendors_crud import list_vendors
 
     card = VendorCard(
         normalized_name="fts test vendor",
@@ -1154,7 +1154,7 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
 @pytest.mark.asyncio
 async def test_vendor_search_fts_zero_results(db_session, test_user):
     """FTS query succeeds but returns 0 results, falls back to ILIKE (lines 301-304)."""
-    from app.routers.vendors import list_vendors
+    from app.routers.vendors_crud import list_vendors
 
     card = VendorCard(
         normalized_name="ilike fallback vendor",
@@ -1212,7 +1212,7 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
 @pytest.mark.asyncio
 async def test_stock_import_vendor_card_integrity_error(db_session, test_user):
     """VendorCard flush IntegrityError during stock import (lines 1456-1458)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     mock_file = MagicMock()
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")
@@ -1314,7 +1314,7 @@ def test_stock_import_mpn_normalizes_to_empty(client, db_session, test_user):
 @pytest.mark.asyncio
 async def test_stock_import_material_card_integrity_error(db_session, test_user):
     """MaterialCard flush IntegrityError during stock import (lines 1487-1489)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     mock_file = MagicMock()
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")

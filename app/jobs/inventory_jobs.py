@@ -104,12 +104,10 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
 
     logger.info(f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments")
 
-    from ..scheduler import _download_and_import_stock_list as dl_import
-
     for email_info in stock_emails:
         for att_info in email_info.get("stock_files", []):
             try:
-                await dl_import(
+                await _download_and_import_stock_list(
                     user,
                     db,
                     message_id=att_info["message_id"],
@@ -177,10 +175,8 @@ async def _download_and_import_stock_list(
 
         rows = await parse_attachment(file_bytes, filename, vendor_domain=vendor_domain, db=db)
     except Exception as e:
-        from ..scheduler import _parse_stock_file as parse_stock
-
         logger.warning(f"AI attachment parser failed, using legacy parser: {e}")
-        rows = parse_stock(file_bytes, filename)
+        rows = _parse_stock_file(file_bytes, filename)
 
     if not rows:
         logger.info(f"No valid rows in {filename}")

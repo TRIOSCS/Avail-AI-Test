@@ -97,15 +97,13 @@ async def _job_contacts_sync():
         db.close()
 
     # Sync each user with its own session
-    from ..scheduler import _sync_user_contacts as sync_contacts
-
     for user_id in user_ids:
         sync_db = SessionLocal()
         try:
             user = sync_db.get(User, user_id)
             if not user:
                 continue
-            await asyncio.wait_for(sync_contacts(user, sync_db), timeout=300)
+            await asyncio.wait_for(_sync_user_contacts(user, sync_db), timeout=300)
         except asyncio.TimeoutError:
             logger.warning(f"Contacts sync timed out for user {user_id}")
             sync_db.rollback()
@@ -432,12 +430,8 @@ async def _scan_user_inbox(user, db):
     """Scan a single user's inbox for vendor replies and stock lists."""
     from ..config import settings
     from ..email_service import poll_inbox
-    from ..scheduler import (
-        _mine_vendor_contacts,
-        _scan_outbound_rfqs,
-        _scan_stock_list_attachments,
-        get_valid_token,
-    )
+    from ..scheduler import get_valid_token
+    from .inventory_jobs import _scan_stock_list_attachments
 
     is_backfill = user.last_inbox_scan is None
     if is_backfill:

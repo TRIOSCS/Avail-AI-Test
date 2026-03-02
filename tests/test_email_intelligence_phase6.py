@@ -236,7 +236,7 @@ class TestJobEmailHealthUpdate:
                 mock_batch,
             ),
         ):
-            from app.scheduler import _job_email_health_update
+            from app.jobs.email_jobs import _job_email_health_update
 
             await _job_email_health_update()
 
@@ -254,7 +254,7 @@ class TestJobEmailHealthUpdate:
                 side_effect=RuntimeError("db down"),
             ),
         ):
-            from app.scheduler import _job_email_health_update
+            from app.jobs.email_jobs import _job_email_health_update
 
             # Should not raise
             await _job_email_health_update()
@@ -325,7 +325,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 
@@ -355,7 +355,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 
@@ -389,7 +389,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 

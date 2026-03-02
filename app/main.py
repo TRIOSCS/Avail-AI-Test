@@ -175,7 +175,7 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
-    title="AVAIL — Opportunity Management",
+    title="AVAIL — Electronic Component Sourcing",
     description="Electronic component sourcing engine with vendor intelligence, RFQ automation, and CRM.",
     version=APP_VERSION,
     openapi_tags=OPENAPI_TAGS,
@@ -913,9 +913,15 @@ from .routers.auth import router as auth_router
 
 app.include_router(auth_router)
 
-from .routers.vendors import router as vendors_router
+from .routers.vendors_crud import router as vendors_crud_router
+from .routers.vendor_contacts import router as vendor_contacts_router
+from .routers.materials import router as materials_router
+from .routers.vendor_analytics import router as vendor_analytics_router
 
-app.include_router(vendors_router)
+app.include_router(vendors_crud_router)
+app.include_router(vendor_contacts_router)
+app.include_router(materials_router)
+app.include_router(vendor_analytics_router)
 from .routers.crm import router as crm_router
 
 app.include_router(crm_router)

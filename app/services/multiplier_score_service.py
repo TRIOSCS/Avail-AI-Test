@@ -82,7 +82,7 @@ def _month_range(month: date):
 def _load_quoted_offer_ids(db: Session) -> set[int]:
     """Return set of offer IDs that appear in any sent/won/lost quote line_items."""
     ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -94,7 +94,7 @@ def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
     """Return (bp_offer_ids, po_confirmed_offer_ids) from buy plan line_items."""
     bp_ids = set()
     po_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:

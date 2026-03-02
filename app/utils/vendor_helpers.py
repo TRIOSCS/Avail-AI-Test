@@ -21,6 +21,7 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
+from ..http_client import http_redirect
 from ..models import VendorCard, VendorReview
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_analysis_service import _analyze_vendor_materials
@@ -385,7 +386,6 @@ async def scrape_website_contacts(url: str) -> dict:
     re-scraping the same vendor website on every page view.
     """
     from ..cache.intel_cache import get_cached, set_cached
-    from ..http_client import http_redirect
 
     # Normalize URL for cache key
     raw_url = url

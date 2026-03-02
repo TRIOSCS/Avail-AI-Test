@@ -117,7 +117,7 @@ async def _job_inbox_scan():
     from ..config import settings
     from ..database import SessionLocal
     from ..models import User
-    from ..scheduler import _scan_user_inbox
+    from .email_jobs import _scan_user_inbox
 
     # Use a short-lived session just to identify users that need scanning
     db = SessionLocal()

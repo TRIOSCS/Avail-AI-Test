@@ -45,7 +45,7 @@ async def _job_engagement_scoring():
     """Compute unified vendor scores for all vendors."""
     from ..database import SessionLocal
     from ..models import VendorCard
-    from ..scheduler import _compute_vendor_scores_job
+    from .email_jobs import _compute_vendor_scores_job
 
     db = SessionLocal()
     try:

@@ -120,7 +120,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -128,7 +128,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     po_confirmed_offer_ids = set()
     bp_offer_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:

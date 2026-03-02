@@ -1094,7 +1094,21 @@ async function _renderCustDrawerPipeline(companyId) {
             else groups.open.push(r);
         }
 
+        // Win/loss summary
+        const wonCount = groups.won.length;
+        const lostCount = groups.lost.length;
+        const totalDecided = wonCount + lostCount;
         let html = '<div style="padding:12px 20px">';
+        if (totalDecided > 0) {
+            const winPct = Math.round((wonCount / totalDecided) * 100);
+            const winColor = winPct >= 50 ? 'var(--green)' : winPct >= 25 ? 'var(--amber)' : 'var(--red)';
+            html += `<div style="display:flex;gap:16px;align-items:center;padding:8px 12px;background:var(--bg);border-radius:8px;margin-bottom:12px;font-size:12px">
+                <span style="font-weight:700;color:${winColor}">${winPct}% win rate</span>
+                <span style="color:var(--green)">${wonCount} won</span>
+                <span style="color:var(--red)">${lostCount} lost</span>
+                <span style="color:var(--muted)">${groups.open.length + groups.quoted.length} in progress</span>
+            </div>`;
+        }
         for (const [status, reqs] of Object.entries(groups)) {
             if (!reqs.length) continue;
             const color = status === 'won' ? 'var(--green)' : status === 'lost' ? 'var(--red)' : status === 'quoted' ? 'var(--amber)' : 'var(--blue)';

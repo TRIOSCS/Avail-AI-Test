@@ -50,27 +50,6 @@ class TestExecFunction:
             assert row[0] == 42
 
 
-class TestEnablePgStatStatements:
-    def test_pg_stat_statements_calls_exec(self):
-        from app.startup import _enable_pg_stat_statements
-
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            _enable_pg_stat_statements(conn)
-
-
-class TestAddMissingColumns:
-    def test_add_missing_columns_on_sqlite(self):
-        from app.startup import _add_missing_columns
-
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            conn.execute(sqltext("CREATE TABLE buy_plans (id INTEGER PRIMARY KEY)"))
-            conn.execute(sqltext("CREATE TABLE vendor_cards (id INTEGER PRIMARY KEY, engagement_score FLOAT)"))
-            conn.commit()
-            _add_missing_columns(conn)
-
-
 class TestCreateFtsTriggers:
     def test_create_fts_triggers_on_sqlite(self):
         from app.startup import _create_fts_triggers
@@ -153,24 +132,6 @@ class TestSeedSiteContacts:
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
             _seed_site_contacts(conn)
-
-
-class TestAddCheckConstraints:
-    def test_add_check_constraints_on_sqlite(self):
-        from app.startup import _add_check_constraints
-
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            _add_check_constraints(conn)
-
-
-class TestCreatePerfIndexes:
-    def test_create_perf_indexes_on_sqlite(self):
-        from app.startup import _create_perf_indexes
-
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            _create_perf_indexes(conn)
 
 
 class TestBackfillNormalizedMpn:
@@ -319,27 +280,32 @@ class TestRunStartupMigrationsNonTesting:
         try:
             with (
                 patch("app.startup.engine", eng),
-                patch("app.startup._add_missing_columns") as m_cols,
-                patch("app.startup._enable_pg_stat_statements") as m_pg,
                 patch("app.startup._create_fts_triggers") as m_fts,
                 patch("app.startup._backfill_fts") as m_bfts,
                 patch("app.startup._seed_system_config") as m_seed,
                 patch("app.startup._seed_site_contacts") as m_site,
-                patch("app.startup._add_check_constraints") as m_chk,
-                patch("app.startup._create_perf_indexes") as m_idx,
+                patch("app.startup._create_count_triggers") as m_ct,
+                patch("app.startup._backfill_company_counts") as m_bc,
+                patch("app.startup._analyze_hot_tables") as m_analyze,
                 patch("app.startup._backfill_normalized_mpn") as m_bfill,
+                patch("app.startup._backfill_sighting_offer_normalized_mpn") as m_so,
+                patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
+                patch("app.startup._backfill_proactive_offer_qty") as m_pq,
+                patch("app.startup._exec") as m_exec,
                 patch("app.models.Base") as mock_base_cls,
             ):
                 run_startup_migrations()
-                m_cols.assert_called_once()
-                m_pg.assert_called_once()
                 m_fts.assert_called_once()
                 m_bfts.assert_called_once()
                 m_seed.assert_called_once()
                 m_site.assert_called_once()
-                m_chk.assert_called_once()
-                m_idx.assert_called_once()
+                m_ct.assert_called_once()
+                m_bc.assert_called_once()
+                m_analyze.assert_called_once()
                 m_bfill.assert_called_once()
+                m_so.assert_called_once()
+                m_sv.assert_called_once()
+                m_pq.assert_called_once()
                 mock_base_cls.metadata.create_all.assert_called_once()
         finally:
             if original is not None:

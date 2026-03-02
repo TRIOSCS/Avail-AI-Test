@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.routers.vendors import card_to_dict, get_or_create_card
+from app.utils.vendor_helpers import card_to_dict, get_or_create_card
 
 # ── Stub factories ───────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ def test_get_or_create_card_new():
 
 # ── Contact cleaning tests ───────────────────────────────────────────────
 
-from app.routers.vendors import clean_emails, clean_phones, is_private_url
+from app.utils.vendor_helpers import clean_emails, clean_phones, is_private_url
 
 
 def test_clean_emails_filters_junk():
@@ -222,7 +222,7 @@ def test_is_private_url_blocks_empty():
 
 # ── Material card tests ──────────────────────────────────────────────────
 
-from app.routers.vendors import material_card_to_dict
+from app.routers.materials import material_card_to_dict
 
 
 def _make_material_card(**overrides) -> SimpleNamespace:
@@ -991,7 +991,7 @@ def test_add_email_to_card(client, db_session, monkeypatch):
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
     # Mock credential check to avoid hitting real DB
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_contacts.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -1068,7 +1068,7 @@ def test_lookup_tier2_scrape(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": ["found@scrapetest.com"], "phones": ["+1-555-9999"]}
 
-    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
 
     resp = client.post(
         "/api/vendor-contact",
@@ -1094,7 +1094,7 @@ def test_lookup_tier3_ai(client, db_session, monkeypatch):
 
     # Mock credential check to return a key
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_contacts.get_credential_cached",
         lambda *args, **kwargs: "fake-api-key",
     )
 
@@ -1106,7 +1106,7 @@ def test_lookup_tier3_ai(client, db_session, monkeypatch):
             "website": "https://aitest.example.com",
         }
 
-    monkeypatch.setattr("app.routers.vendors.claude_json", mock_claude_json, raising=False)
+    monkeypatch.setattr("app.routers.vendor_contacts.claude_json", mock_claude_json, raising=False)
     # Also patch it where it's actually imported in the function
     monkeypatch.setattr("app.utils.claude_client.claude_json", mock_claude_json, raising=False)
 
@@ -1134,7 +1134,7 @@ def test_lookup_no_api_key(client, db_session, monkeypatch):
 
     # Mock credential check to return None
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_contacts.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -1152,7 +1152,7 @@ def test_lookup_creates_card(client, db_session, monkeypatch):
     """Lookup for nonexistent vendor creates a new VendorCard."""
     # Mock credential check to return None so we hit tier=0 quickly
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_contacts.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -1189,10 +1189,10 @@ def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
     # No API key so it won't try tier 3
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_contacts.get_credential_cached",
         lambda *args, **kwargs: None,
     )
 
@@ -1242,7 +1242,7 @@ def test_import_stock_no_file(client, monkeypatch):
 def test_analyze_materials_no_api_key(client, db_session, test_vendor_card, monkeypatch):
     """POST /api/vendors/{id}/analyze-materials without API key returns 503."""
     monkeypatch.setattr(
-        "app.routers.vendors.get_credential_cached",
+        "app.routers.vendor_analytics.get_credential_cached",
         lambda *args, **kwargs: None,
     )
     resp = client.post(f"/api/vendors/{test_vendor_card.id}/analyze-materials")
@@ -1318,9 +1318,9 @@ import socket
 from unittest.mock import AsyncMock, patch
 
 from app.models import Contact, MaterialVendorHistory, Offer, Requirement, Requisition, Sighting, VendorResponse
-from app.routers.vendors import (
+from app.routers.vendor_analytics import _vendor_parts_summary_query
+from app.utils.vendor_helpers import (
     _background_enrich_vendor,
-    _vendor_parts_summary_query,
     merge_contact_into_card,
     scrape_website_contacts,
 )
@@ -1341,7 +1341,7 @@ async def test_background_enrich_vendor_success():
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
         with patch("app.enrichment_service.apply_enrichment_to_vendor", mock_apply):
             with patch("app.database.SessionLocal", return_value=mock_session):
-                with patch("app.routers.vendors.get_credential_cached", return_value=None):
+                with patch("app.utils.vendor_helpers.get_credential_cached", return_value=None):
                     await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
     mock_enrich.assert_called_once_with("example.com", "Example Vendor")
@@ -1356,7 +1356,7 @@ async def test_background_enrich_vendor_no_enrichment():
     mock_enrich = AsyncMock(return_value=None)
 
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
-        with patch("app.routers.vendors.get_credential_cached", return_value=None):
+        with patch("app.utils.vendor_helpers.get_credential_cached", return_value=None):
             await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
     mock_enrich.assert_called_once()
@@ -1368,7 +1368,7 @@ async def test_background_enrich_vendor_exception():
     mock_enrich = AsyncMock(side_effect=Exception("Network error"))
 
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
-        with patch("app.routers.vendors.get_credential_cached", return_value=None):
+        with patch("app.utils.vendor_helpers.get_credential_cached", return_value=None):
             # Should not raise — exception is caught and logged
             await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
@@ -1384,7 +1384,7 @@ async def test_background_enrich_vendor_card_not_found():
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
         with patch("app.enrichment_service.apply_enrichment_to_vendor") as mock_apply:
             with patch("app.database.SessionLocal", return_value=mock_session):
-                with patch("app.routers.vendors.get_credential_cached", return_value=None):
+                with patch("app.utils.vendor_helpers.get_credential_cached", return_value=None):
                     await _background_enrich_vendor(999, "example.com", "Ghost Vendor")
 
     mock_apply.assert_not_called()
@@ -1405,8 +1405,8 @@ async def test_background_enrich_vendor_with_ai_analysis():
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
         with patch("app.enrichment_service.apply_enrichment_to_vendor", mock_apply):
             with patch("app.database.SessionLocal", return_value=mock_session):
-                with patch("app.routers.vendors.get_credential_cached", return_value="fake-key"):
-                    with patch("app.routers.vendors._analyze_vendor_materials", mock_analyze):
+                with patch("app.utils.vendor_helpers.get_credential_cached", return_value="fake-key"):
+                    with patch("app.utils.vendor_helpers._analyze_vendor_materials", mock_analyze):
                         await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
     mock_analyze.assert_called_once_with(1)
@@ -1426,8 +1426,8 @@ async def test_background_enrich_vendor_analysis_fails():
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
         with patch("app.enrichment_service.apply_enrichment_to_vendor", mock_apply):
             with patch("app.database.SessionLocal", return_value=mock_session):
-                with patch("app.routers.vendors.get_credential_cached", return_value="fake-key"):
-                    with patch("app.routers.vendors._analyze_vendor_materials", mock_analyze):
+                with patch("app.utils.vendor_helpers.get_credential_cached", return_value="fake-key"):
+                    with patch("app.utils.vendor_helpers._analyze_vendor_materials", mock_analyze):
                         # Should not raise
                         await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
@@ -1885,7 +1885,7 @@ async def test_scrape_website_contacts_cached():
 async def test_scrape_website_contacts_ssrf_blocked():
     """scrape_website_contacts blocks SSRF/private URLs."""
     with patch("app.cache.intel_cache.get_cached", return_value=None):
-        with patch("app.routers.vendors.is_private_url", return_value=True):
+        with patch("app.utils.vendor_helpers.is_private_url", return_value=True):
             result = await scrape_website_contacts("http://127.0.0.1/contact")
     assert result == {"emails": [], "phones": []}
 
@@ -1907,8 +1907,8 @@ async def test_scrape_website_contacts_extracts_data():
 
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
-            with patch("app.routers.vendors.is_private_url", return_value=False):
-                with patch("app.routers.vendors.http_redirect") as mock_http:
+            with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
+                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("https://vendor.com")
 
@@ -1921,8 +1921,8 @@ async def test_scrape_website_contacts_handles_errors():
     """scrape_website_contacts handles HTTP errors gracefully."""
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
-            with patch("app.routers.vendors.is_private_url", return_value=False):
-                with patch("app.routers.vendors.http_redirect") as mock_http:
+            with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
+                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
                     mock_http.get = AsyncMock(side_effect=Exception("Connection failed"))
                     result = await scrape_website_contacts("https://dead-site.com")
 
@@ -1939,8 +1939,8 @@ async def test_scrape_website_contacts_non_200():
 
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
-            with patch("app.routers.vendors.is_private_url", return_value=False):
-                with patch("app.routers.vendors.http_redirect") as mock_http:
+            with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
+                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("https://no-contact.com")
 
@@ -1957,8 +1957,8 @@ async def test_scrape_website_contacts_no_scheme():
 
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
-            with patch("app.routers.vendors.is_private_url", return_value=False):
-                with patch("app.routers.vendors.http_redirect") as mock_http:
+            with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
+                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
                     mock_http.get = AsyncMock(return_value=mock_resp)
                     result = await scrape_website_contacts("bare.com")
 
@@ -2047,10 +2047,10 @@ def test_lookup_tier2_scrape_no_emails_after_merge(client, db_session, monkeypat
     async def mock_scrape(url):
         return {"emails": ["found@scrape.com"], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
     # Mock merge to not actually add emails to card
-    monkeypatch.setattr("app.routers.vendors.merge_contact_into_card", lambda *a, **kw: False)
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.merge_contact_into_card", lambda *a, **kw: False)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post("/api/vendor-contact", json={"vendor_name": "Scrape Empty Vendor"})
     assert resp.status_code == 200
@@ -2075,8 +2075,8 @@ def test_lookup_tier2_scrape_exception(client, db_session, monkeypatch):
     async def mock_scrape(url):
         raise ConnectionError("Timeout")
 
-    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post("/api/vendor-contact", json={"vendor_name": "Scrape Fail Vendor"})
     assert resp.status_code == 200
@@ -2099,7 +2099,7 @@ def test_lookup_tier3_ai_string_emails(client, db_session, monkeypatch):
     db_session.add(vc)
     db_session.commit()
 
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         return {
@@ -2131,7 +2131,7 @@ def test_lookup_tier3_ai_returns_none(client, db_session, monkeypatch):
     db_session.add(vc)
     db_session.commit()
 
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         return None
@@ -2156,7 +2156,7 @@ def test_lookup_tier3_ai_exception(client, db_session, monkeypatch):
     db_session.add(vc)
     db_session.commit()
 
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         raise RuntimeError("API quota exceeded")
@@ -2188,8 +2188,8 @@ def test_lookup_tier3_ai_with_website_hint(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
 
-    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_contacts.scrape_website_contacts", mock_scrape)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_claude_json(**kwargs):
         prompt = kwargs.get("prompt", "")
@@ -2342,7 +2342,7 @@ def test_email_metrics_with_contacts_and_responses(client, db_session, test_vend
 def test_add_email_generic_domain(client, db_session, monkeypatch):
     """add_email_to_card with generic domain (gmail) does not set card.domain."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post(
         "/api/vendor-card/add-email",
@@ -2356,7 +2356,7 @@ def test_add_email_generic_domain(client, db_session, monkeypatch):
 def test_add_email_business_domain(client, db_session, monkeypatch):
     """add_email_to_card with business domain sets card.domain."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post(
         "/api/vendor-card/add-email",
@@ -2370,7 +2370,7 @@ def test_add_email_business_domain(client, db_session, monkeypatch):
 def test_add_email_existing_contact(client, db_session, monkeypatch):
     """add_email_to_card with existing contact does not create duplicate VendorContact."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     # First add
     resp1 = client.post(
@@ -2393,7 +2393,7 @@ def test_add_email_triggers_enrichment(client, db_session, monkeypatch):
     """add_email_to_card triggers background enrichment when credentials exist."""
     task_created = []
     monkeypatch.setattr("asyncio.create_task", lambda coro: (task_created.append(True), coro.close()))
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     resp = client.post(
         "/api/vendor-card/add-email",
@@ -2407,7 +2407,7 @@ def test_add_email_triggers_enrichment(client, db_session, monkeypatch):
 def test_add_email_replaces_existing_email(client, db_session, monkeypatch):
     """add_email_to_card replaces existing case-insensitive duplicate in emails[]."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     # Add first email
     resp1 = client.post(
@@ -2565,7 +2565,7 @@ def test_delete_material_not_found(admin_client):
 def test_import_stock_success(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with valid CSV imports rows."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
 
     csv_content = b"mpn,qty,price,manufacturer\nLM555CN,1000,0.25,Texas Instruments\nNE556N,500,0.30,Signetics"
     resp = client.post(
@@ -2582,7 +2582,7 @@ def test_import_stock_success(client, db_session, monkeypatch):
 def test_import_stock_with_website(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with vendor_website sets domain."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
 
     csv_content = b"mpn,qty,price\nABC123,100,1.50"
     resp = client.post(
@@ -2611,7 +2611,7 @@ def test_import_stock_too_large(client, db_session, monkeypatch):
 def test_import_stock_existing_vendor(client, db_session, monkeypatch):
     """POST /api/materials/import-stock with existing vendor updates sighting_count."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
 
     # Create vendor first
     from app.vendor_utils import normalize_vendor_name
@@ -2637,7 +2637,7 @@ def test_import_stock_existing_vendor(client, db_session, monkeypatch):
 def test_import_stock_update_existing_mvh(client, db_session, monkeypatch):
     """POST /api/materials/import-stock updates existing MaterialVendorHistory."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
 
     from app.utils.normalization import normalize_mpn_key
     from app.vendor_utils import normalize_vendor_name
@@ -2686,7 +2686,7 @@ def test_import_stock_enrichment_triggered(client, db_session, monkeypatch):
     """POST /api/materials/import-stock triggers enrichment for new vendor with domain."""
     task_created = []
     monkeypatch.setattr("asyncio.create_task", lambda coro: (task_created.append(True), coro.close()))
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: "fake-key")
 
     csv_content = b"mpn,qty,price\nENRICH-001,100,0.50"
     resp = client.post(
@@ -2861,7 +2861,7 @@ def test_parts_summary_not_found(db_session, test_user):
 
 def test_analyze_materials_success(client, db_session, test_vendor_card, monkeypatch):
     """POST /api/vendors/{id}/analyze-materials with API key succeeds."""
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_analytics.get_credential_cached", lambda *a, **kw: "fake-key")
 
     async def mock_analyze(card_id, db_session=None):
         # Simulate updating the card with tags
@@ -2870,7 +2870,7 @@ def test_analyze_materials_success(client, db_session, test_vendor_card, monkeyp
             card.brand_tags = ["Texas Instruments", "NXP"]
             card.commodity_tags = ["Microcontrollers", "Capacitors"]
 
-    monkeypatch.setattr("app.routers.vendors._analyze_vendor_materials", mock_analyze)
+    monkeypatch.setattr("app.routers.vendor_analytics._analyze_vendor_materials", mock_analyze)
 
     resp = client.post(f"/api/vendors/{test_vendor_card.id}/analyze-materials")
     assert resp.status_code == 200
@@ -2882,7 +2882,7 @@ def test_analyze_materials_success(client, db_session, test_vendor_card, monkeyp
 
 def test_analyze_materials_not_found(client, monkeypatch):
     """POST /api/vendors/99999/analyze-materials returns 404."""
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: "fake-key")
+    monkeypatch.setattr("app.routers.vendor_analytics.get_credential_cached", lambda *a, **kw: "fake-key")
     resp = client.post("/api/vendors/99999/analyze-materials")
     assert resp.status_code == 404
 
@@ -3173,8 +3173,8 @@ async def test_scrape_website_contacts_domain_index_error():
     # URL without // will cause IndexError on split("//", 1)[1]
     with patch("app.cache.intel_cache.get_cached", return_value=None):
         with patch("app.cache.intel_cache.set_cached"):
-            with patch("app.routers.vendors.is_private_url", return_value=False):
-                with patch("app.routers.vendors.http_redirect") as mock_http:
+            with patch("app.utils.vendor_helpers.is_private_url", return_value=False):
+                with patch("app.utils.vendor_helpers.http_redirect") as mock_http:
                     mock_http.get = AsyncMock(return_value=MagicMock(status_code=404, text=""))
                     # URL that starts with http but split logic might fail
                     # The URL gets "https://" prepended if no "http" prefix,
@@ -3314,7 +3314,7 @@ def test_vendor_parts_summary_query_null_dates():
 def test_import_stock_skips_bad_rows(client, db_session, monkeypatch):
     """POST /api/materials/import-stock skips rows that normalize_stock_row rejects."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
 
     # Create CSV with a header-only row and an empty MPN row
     csv_content = b"mpn,qty,price\n,100,0.50\nVALID001,200,0.75"
@@ -3401,7 +3401,7 @@ def test_lookup_vendor_contact_integrity_error_race(client, db_session, monkeypa
     # IntegrityError and falls back to querying. This is extremely hard
     # to reproduce in a single-threaded test.
 
-    monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
+    monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 
     resp = client.post(
         "/api/vendor-contact",

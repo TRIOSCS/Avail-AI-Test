@@ -482,6 +482,21 @@ async def create_requisition(
     return {"id": req.id, "name": req.name}
 
 
+@router.put("/api/requisitions/{req_id}/outcome")
+async def mark_outcome(req_id: int, body: dict, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Mark a requisition as won or lost."""
+    outcome = (body.get("outcome") or "").lower()
+    if outcome not in ("won", "lost"):
+        raise HTTPException(400, "outcome must be 'won' or 'lost'")
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    req.status = outcome
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"ok": True, "status": req.status}
+
+
 @router.put("/api/requisitions/{req_id}/archive")
 async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     req = get_req_for_user(db, user, req_id)
@@ -1150,7 +1165,7 @@ async def get_saved_sightings(
     # Batch-fetch all sightings for this requisition's requirements in one query
     req_ids = [r.id for r in req.requirements]
     all_sightings = (
-        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.created_at.desc()).all())
+        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.created_at.desc()).limit(5000).all())
         if req_ids
         else []
     )

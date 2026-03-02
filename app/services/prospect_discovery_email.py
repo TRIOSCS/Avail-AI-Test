@@ -85,14 +85,14 @@ async def mine_unknown_domains(
     )
 
     vendor_domains = set()
-    for row in db.query(VendorCard.emails).filter(VendorCard.emails.isnot(None)).all():
+    for row in db.query(VendorCard.emails).filter(VendorCard.emails.isnot(None)).limit(5000).all():
         if row[0]:
             for email in row[0]:
                 d = _normalize_domain(email)
                 if d:
                     vendor_domains.add(d)
 
-    prospect_domains = set(row[0].lower() for row in db.query(ProspectAccount.domain).all() if row[0])
+    prospect_domains = set(row[0].lower() for row in db.query(ProspectAccount.domain).limit(5000).all() if row[0])
 
     exclude_domains = customer_domains | vendor_domains | prospect_domains | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
 

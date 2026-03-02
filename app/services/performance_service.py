@@ -140,7 +140,7 @@ def compute_vendor_scorecard(
         # Build lookup on demand if not pre-loaded (single-vendor call)
         if quoted_offer_ids is None:
             quoted_offer_ids = set()
-            for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+            for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
                 for item in items or []:
                     oid = item.get("offer_id")
                     if oid:
@@ -161,6 +161,7 @@ def compute_vendor_scorecard(
             for (items,) in (
                 db.query(BuyPlan.line_items)
                 .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
+                .limit(10000)
                 .all()
             ):
                 for item in items or []:
@@ -253,7 +254,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     # ── Preload quote and buy-plan offer-id lookups ONCE ──
     # Load only the JSON column (not full ORM objects) to reduce memory
     quoted_offer_ids: set[int] = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -261,7 +262,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
 
     po_offer_ids: set[int] = set()
     for (items,) in (
-        db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"])).all()
+        db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"])).limit(10000).all()
     ):
         for item in items or []:
             oid = item.get("offer_id")
@@ -495,7 +496,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
     # Load only needed columns to reduce memory
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -504,7 +505,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     # Buy plans: line_items JSON contains offer_id
     buyplan_offer_ids = set()
     po_confirmed_offer_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:

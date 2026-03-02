@@ -352,7 +352,7 @@ class TestStaleFlag:
 
     def test_scheduler_has_stale_job(self):
         """The stale flagging job should be registered."""
-        from app.scheduler import _job_flag_stale_offers
+        from app.jobs.offers_jobs import _job_flag_stale_offers
 
         assert callable(_job_flag_stale_offers)
 
@@ -408,7 +408,7 @@ class TestProactiveOfferExpiry:
         assert converted.status == "converted"
 
     def test_scheduler_has_expiry_job(self):
-        from app.scheduler import _job_proactive_offer_expiry
+        from app.jobs.offers_jobs import _job_proactive_offer_expiry
 
         assert callable(_job_proactive_offer_expiry)
 

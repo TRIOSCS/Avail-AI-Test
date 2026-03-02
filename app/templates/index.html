@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#3b6ea8">
     <meta name="apple-mobile-web-app-title" content="AVAIL">
-    <title>AVAIL — Opportunity Management</title>
+    <title>AVAIL — Electronic Component Sourcing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -34,8 +34,8 @@
     <img src="/static/avail_logo.png" alt="AVAIL" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer" title="Back to Requirements">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
-            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)" title="Active requisitions — manage parts, quotes, and RFQs">Open</button>
-            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Sourcing progress — track vendor sightings, RFQ responses, and search activity">Sourcing</button>
+            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)" title="Your active requisitions — manage parts, quotes, and RFQs. Same reqs as Sourcing tab, focused on quoting workflow.">Open</button>
+            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Same active requisitions as Open tab, focused on sourcing — track vendor sightings, RFQ responses, and search activity.">Sourcing</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
         <div class="search-wrap">
@@ -199,7 +199,7 @@
                         <select id="loReqPart" required><option value="">Select part...</option></select>
                     </div>
                     <div class="field field-full" style="position:relative"><label>Vendor Name *</label>
-                        <input id="loVendor" required placeholder="Start typing vendor name..." autocomplete="off">
+                        <input id="loVendor" required placeholder="Type to search existing vendors..." autocomplete="off">
                         <div id="loVendorSuggestions" class="ac-dropdown"></div>
                     </div>
                     <div class="field"><label>Qty Available</label>

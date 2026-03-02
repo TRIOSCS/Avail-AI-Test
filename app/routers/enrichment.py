@@ -419,7 +419,7 @@ def api_backfill_emails(
             ActivityLog.contact_email != "",
             ActivityLog.vendor_card_id.isnot(None),
         )
-        .all()
+        .limit(5000).all()
     )
     for row in activity_rows:
         email = row.contact_email.strip().lower()
@@ -440,7 +440,7 @@ def api_backfill_emails(
         activity_log_created += 1
 
     # 2. VendorCard.emails consolidation
-    cards_with_emails = db.query(VendorCard).filter(VendorCard.emails.isnot(None)).all()
+    cards_with_emails = db.query(VendorCard).filter(VendorCard.emails.isnot(None)).limit(1000).all()
     for card in cards_with_emails:
         emails = card.emails or []
         if not isinstance(emails, list):
@@ -470,6 +470,7 @@ def api_backfill_emails(
             Sighting.vendor_email.isnot(None),
             Sighting.vendor_email != "",
         )
+        .limit(5000)
         .all()
     )
     for s in bb_sightings:

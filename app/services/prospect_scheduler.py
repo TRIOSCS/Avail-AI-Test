@@ -138,7 +138,7 @@ async def job_discover_prospects() -> dict:
         try:
             from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-            existing_domains = {d[0] for d in db.query(ProspectAccount.domain).all() if d[0]}
+            existing_domains = {d[0] for d in db.query(ProspectAccount.domain).limit(10000).all() if d[0]}
             results = await run_explorium_discovery_batch(batch_id, existing_domains)
             for r in results:
                 pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
@@ -256,7 +256,7 @@ async def job_refresh_scores() -> dict:
     db = None
     try:
         db = SessionLocal()
-        prospects = db.query(ProspectAccount).filter(ProspectAccount.status == "suggested").all()
+        prospects = db.query(ProspectAccount).filter(ProspectAccount.status == "suggested").limit(5000).all()
 
         refreshed = 0
         upgraded = 0
