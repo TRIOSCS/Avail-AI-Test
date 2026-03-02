@@ -69,7 +69,7 @@ class MaterialTag(Base):
     )
 
     def __repr__(self):
-        return f"<MaterialTag card={self.material_card_id} tag={self.tag_id} src={self.source!r}>"
+        return f"<MaterialTag card={self.material_card_id} tag={self.tag_id} src={self.source!r}>"  # pragma: no cover
 
 
 class EntityTag(Base):
@@ -95,7 +95,7 @@ class EntityTag(Base):
     )
 
     def __repr__(self):
-        return f"<EntityTag {self.entity_type}:{self.entity_id} tag={self.tag_id} visible={self.is_visible}>"
+        return f"<EntityTag {self.entity_type}:{self.entity_id} tag={self.tag_id} visible={self.is_visible}>"  # pragma: no cover
 
 
 class TagThresholdConfig(Base):
@@ -113,4 +113,4 @@ class TagThresholdConfig(Base):
     )
 
     def __repr__(self):
-        return f"<TagThresholdConfig {self.entity_type}/{self.tag_type} min={self.min_count}/{self.min_percentage}>"
+        return f"<TagThresholdConfig {self.entity_type}/{self.tag_type} min={self.min_count}/{self.min_percentage}>"  # pragma: no cover

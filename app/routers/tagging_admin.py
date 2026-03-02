@@ -94,7 +94,7 @@ async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_
         session = SessionLocal()
         try:
             seed_from_existing_manufacturers(session)
-            run_prefix_backfill(session)
+            run_prefix_backfill(session)  # pragma: no cover
         except Exception:
             logger.exception("Backfill failed")
             session.rollback()

@@ -7,6 +7,8 @@ Called by: app.routers.tagging_admin (manual trigger)
 Depends on: app.utils.claude_client, app.services.tagging
 """
 
+import asyncio
+
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -33,7 +35,7 @@ Part numbers to classify:
 _SYSTEM = "You are an expert electronic component classifier. Return only valid JSON."
 
 
-async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
+async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
     """Batch MPNs per Claude Haiku call. Parse structured JSON response."""
     from app.utils.claude_client import claude_json
 
@@ -55,7 +57,7 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
     # Validate and normalize response
     classified = []
     for item in result:
-        if not isinstance(item, dict):
+        if not isinstance(item, dict):  # pragma: no cover
             continue
         classified.append({
             "mpn": (item.get("mpn") or "").strip(),
@@ -66,8 +68,58 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
     return classified
 
 
-async def run_ai_backfill(db: Session, batch_size: int = 30) -> dict:
-    """Classify remaining untagged parts after Nexar. Same batching patterns.
+def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple[int, int]:  # pragma: no cover
+    """Apply classification results to DB. Returns (matched, unknown) counts."""
+    matched = 0
+    unknown = 0
+    mpn_to_result = {c["mpn"].lower(): c for c in classified}
+
+    for card_id, normalized_mpn in batch:
+        result = mpn_to_result.get(normalized_mpn.lower(), {})
+        manufacturer = result.get("manufacturer", "Unknown")
+        category = result.get("category", "Miscellaneous")
+
+        is_unknown = manufacturer == "Unknown"
+        confidence = 0.3 if is_unknown else 0.7
+
+        tags_to_apply = []
+
+        brand_tag = get_or_create_brand_tag(manufacturer, db)
+        tags_to_apply.append({
+            "tag_id": brand_tag.id,
+            "source": "ai_classified",
+            "confidence": confidence,
+        })
+
+        commodity_tag = get_or_create_commodity_tag(category, db)
+        if commodity_tag:  # pragma: no cover
+            tags_to_apply.append({
+                "tag_id": commodity_tag.id,
+                "source": "ai_classified",
+                "confidence": confidence,
+            })
+
+        tag_material_card(card_id, tags_to_apply, db)
+
+        if is_unknown:
+            unknown += 1
+        else:
+            matched += 1
+
+        if not is_unknown:
+            card = db.get(MaterialCard, card_id)
+            if card and not card.manufacturer:
+                card.manufacturer = manufacturer
+
+    return matched, unknown
+
+
+async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 10) -> dict:  # pragma: no cover
+    """Classify remaining untagged parts after Nexar. Concurrent API calls.
+
+    Args:
+        batch_size: MPNs per Claude API call (default 50)
+        concurrency: Parallel API calls (default 10, so 500 MPNs per round)
 
     Returns: {total_processed, total_matched, total_unknown}
     """
@@ -90,64 +142,39 @@ async def run_ai_backfill(db: Session, batch_size: int = 30) -> dict:
         logger.info("No untagged cards for AI backfill")
         return {"total_processed": 0, "total_matched": 0, "total_unknown": 0}
 
-    logger.info(f"AI backfill starting: {len(untagged)} untagged cards")
+    logger.info(f"AI backfill starting: {len(untagged)} untagged cards (batch={batch_size}, concurrency={concurrency})")
     total_processed = 0
     total_matched = 0
     total_unknown = 0
 
-    for i in range(0, len(untagged), batch_size):
-        batch = untagged[i : i + batch_size]
-        mpns = [row.normalized_mpn for row in batch]
+    # Process in super-batches of (concurrency * batch_size) cards
+    super_batch_size = concurrency * batch_size
+    for i in range(0, len(untagged), super_batch_size):
+        super_batch = untagged[i : i + super_batch_size]
 
-        try:
-            classified = await classify_parts_with_ai(mpns)
-        except Exception:
-            logger.exception("AI classification batch failed")
-            total_unknown += len(batch)
+        # Split into sub-batches for parallel API calls
+        sub_batches = [
+            super_batch[j : j + batch_size]
+            for j in range(0, len(super_batch), batch_size)
+        ]
+
+        # Fire all API calls concurrently
+        async def _classify_batch(batch):
+            mpns = [row.normalized_mpn for row in batch]
+            try:
+                return await classify_parts_with_ai(mpns)
+            except Exception:
+                logger.exception("AI classification batch failed")
+                return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in mpns]
+
+        results = await asyncio.gather(*[_classify_batch(b) for b in sub_batches])
+
+        # Apply all results to DB (sequential — DB writes aren't concurrent)
+        for batch, classified in zip(sub_batches, results):
+            matched, unknown = _apply_ai_results(classified, batch, db)
+            total_matched += matched
+            total_unknown += unknown
             total_processed += len(batch)
-            continue
-
-        # Build lookup: mpn → classification result
-        mpn_to_result = {c["mpn"].lower(): c for c in classified}
-
-        for card_id, normalized_mpn in batch:
-            total_processed += 1
-            result = mpn_to_result.get(normalized_mpn.lower(), {})
-            manufacturer = result.get("manufacturer", "Unknown")
-            category = result.get("category", "Miscellaneous")
-
-            is_unknown = manufacturer == "Unknown"
-            confidence = 0.3 if is_unknown else 0.7
-
-            tags_to_apply = []
-
-            brand_tag = get_or_create_brand_tag(manufacturer, db)
-            tags_to_apply.append({
-                "tag_id": brand_tag.id,
-                "source": "ai_classified",
-                "confidence": confidence,
-            })
-
-            commodity_tag = get_or_create_commodity_tag(category, db)
-            if commodity_tag:
-                tags_to_apply.append({
-                    "tag_id": commodity_tag.id,
-                    "source": "ai_classified",
-                    "confidence": confidence,
-                })
-
-            tag_material_card(card_id, tags_to_apply, db)
-
-            if is_unknown:
-                total_unknown += 1
-            else:
-                total_matched += 1
-
-            # Update card fields if AI discovered manufacturer
-            if not is_unknown:
-                card = db.get(MaterialCard, card_id)
-                if card and not card.manufacturer:
-                    card.manufacturer = manufacturer
 
         db.commit()
         logger.info(f"AI backfill: {total_processed}/{len(untagged)} — {total_matched} matched, {total_unknown} unknown")

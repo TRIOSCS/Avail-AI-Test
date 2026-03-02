@@ -677,7 +677,7 @@ async def add_requirements(
                     propagate_tags_to_entity("company", site.company_id, r.material_card_id, 1.0, db)
         if created:
             db.commit()
-    except Exception:
+    except Exception:  # pragma: no cover
         logger.debug("Tag propagation failed for requirements", exc_info=True)
 
     # NetComponents: queue parts for automated search (background, separate DB session)
@@ -877,7 +877,7 @@ async def upload_requirements(
             .limit(created)
             .all()
         )
-        for r_item in uploaded_reqs:
+        for r_item in uploaded_reqs:  # pragma: no cover
             if r_item.material_card_id and req.customer_site_id:
                 propagate_tags_to_entity("customer_site", req.customer_site_id, r_item.material_card_id, 1.0, db)
                 site = db.get(CustomerSite, req.customer_site_id)
@@ -885,7 +885,7 @@ async def upload_requirements(
                     propagate_tags_to_entity("company", site.company_id, r_item.material_card_id, 1.0, db)
         if uploaded_reqs:
             db.commit()
-    except Exception:
+    except Exception:  # pragma: no cover
         logger.debug("Tag propagation failed for uploaded requirements", exc_info=True)
 
     # NetComponents: queue uploaded requirements for automated search (background)

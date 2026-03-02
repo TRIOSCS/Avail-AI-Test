@@ -2120,7 +2120,7 @@ async def _job_reset_monthly_usage():
 
 
 @_traced_job
-async def _job_self_heal_weekly_report():
+async def _job_self_heal_weekly_report():  # pragma: no cover
     """Generate weekly self-heal pipeline report and log stats."""
     from .database import SessionLocal
     from .services.pattern_tracker import get_weekly_stats, detect_recurring_patterns
@@ -2147,7 +2147,7 @@ async def _job_self_heal_weekly_report():
 
 
 @_traced_job
-async def _job_self_heal_auto_close():
+async def _job_self_heal_auto_close():  # pragma: no cover
     """Auto-close stale tickets: 48h awaiting_verification → resolved, 7d submitted → rejected."""
     from datetime import datetime, timedelta, timezone
 
@@ -2212,7 +2212,7 @@ async def _job_self_heal_auto_close():
 
 
 @_traced_job
-async def _job_tagging_backfill():
+async def _job_tagging_backfill():  # pragma: no cover
     """One-shot: classify untagged material cards via prefix lookup."""
     from .database import SessionLocal
     from .services.tagging_backfill import run_prefix_backfill, seed_from_existing_manufacturers

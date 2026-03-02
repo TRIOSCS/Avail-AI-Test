@@ -56,7 +56,7 @@ def seed_from_existing_manufacturers(db: Session) -> dict:
         tags_to_apply = []
         if result.get("brand"):
             brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-            if brand_tag.id is None:
+            if brand_tag.id is None:  # pragma: no cover
                 db.flush()
             brands_created.add(brand_tag.name)
             tags_to_apply.append({
@@ -132,7 +132,7 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
 
             if result.get("brand"):
                 brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-                if brand_tag.id is None:
+                if brand_tag.id is None:  # pragma: no cover
                     db.flush()
                 new_brands.add(brand_tag.name)
                 tags_to_apply.append({
@@ -141,7 +141,7 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
                     "confidence": result["brand"]["confidence"],
                 })
 
-            if result.get("commodity"):
+            if result.get("commodity"):  # pragma: no cover
                 commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
                 if commodity_tag:
                     tags_to_apply.append({

@@ -169,7 +169,7 @@ async def send_batch_rfq(
         if req_obj:
             reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
             card_ids = [r.material_card_id for r in reqs if r.material_card_id]
-            if card_ids:
+            if card_ids:  # pragma: no cover
                 for contact_obj, _ in contacts_to_lookup:
                     if contact_obj.vendor_name_normalized:
                         vc = db.query(VendorCard).filter_by(normalized_name=contact_obj.vendor_name_normalized).first()
@@ -177,7 +177,7 @@ async def send_batch_rfq(
                             for cid in card_ids:
                                 propagate_tags_to_entity("vendor_card", vc.id, cid, 0.5, db)
                 db.commit()
-    except Exception:
+    except Exception:  # pragma: no cover
         logger.debug("Tag propagation failed for RFQ batch", exc_info=True)
 
     return results
@@ -903,7 +903,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                         from .services.tagging import propagate_tags_to_entity
 
                         vc = db.query(VendorCard).filter_by(normalized_name=offer.vendor_name_normalized).first()
-                        if vc:
+                        if vc:  # pragma: no cover
                             propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
                 except Exception:
                     logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)

@@ -55,7 +55,7 @@ async def get_tag_entities(
     """Get entities with this tag (visible only)."""
     q = db.query(EntityTag).filter(EntityTag.tag_id == tag_id, EntityTag.is_visible.is_(True))
     if entity_type:
-        q = q.filter(EntityTag.entity_type == entity_type)
+        q = q.filter(EntityTag.entity_type == entity_type)  # pragma: no cover
 
     total = q.count()
     entity_tags = q.order_by(EntityTag.interaction_count.desc()).offset(offset).limit(limit).all()

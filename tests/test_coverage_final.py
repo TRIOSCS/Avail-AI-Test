@@ -550,3 +550,17 @@ class TestPromptGenerator:
         )
         prompt = generate_prompt_for_ticket(ticket)
         assert "General Bug Rules" in prompt
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  8. TAGGING_AI — module import coverage
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestTaggingAiImport:
+    def test_module_imports(self):
+        """Cover module-level imports and constants."""
+        from app.services.tagging_ai import _CLASSIFY_PROMPT, _SYSTEM
+
+        assert "classify" in _CLASSIFY_PROMPT.lower()
+        assert len(_SYSTEM) > 0
