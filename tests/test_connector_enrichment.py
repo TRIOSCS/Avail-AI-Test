@@ -17,9 +17,11 @@ from app.services.enrichment import (
     _CONNECTOR_CONFIGS,
     _IGNORED_MANUFACTURERS,
     _apply_enrichment_to_card,
+    boost_confidence_internal,
     cross_validate_batch,
     enrich_batch,
     enrich_material_card,
+    nexar_bulk_validate,
 )
 from app.services.tagging_ai import _apply_chunked_batch
 
@@ -592,3 +594,223 @@ def test_admin_cross_validate_endpoint(client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
+
+
+# ── boost_confidence_internal tests ─────────────────────────────────────
+
+
+def test_boost_confidence_upgrades_confirmed_tags(db_session):
+    """Tags where card.manufacturer matches AI brand tag → boosted to 0.90."""
+    card = _make_card(db_session, "lm358n", manufacturer="Texas Instruments")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 1
+    db_session.refresh(mt)
+    assert mt.confidence == 0.90
+    assert mt.source == "ai_confirmed_internal"
+
+
+def test_boost_confidence_skips_unknown_tags(db_session):
+    """Tags at 0.3 confidence (Unknown) are not boosted."""
+    card = _make_card(db_session, "xyz999", manufacturer="Unknown")
+    tag = _make_brand_tag(db_session, "Unknown")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.3)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 0
+    db_session.refresh(mt)
+    assert mt.confidence == 0.3
+
+
+def test_boost_confidence_skips_no_manufacturer(db_session):
+    """Cards with no manufacturer field → not boosted."""
+    card = _make_card(db_session, "nomfr001")
+    tag = _make_brand_tag(db_session, "Acme Corp")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 0
+    db_session.refresh(mt)
+    assert mt.confidence == 0.7
+
+
+def test_boost_confidence_skips_mismatched_manufacturer(db_session):
+    """Card manufacturer differs from AI tag → not boosted."""
+    card = _make_card(db_session, "stm32f103", manufacturer="STMicroelectronics")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 0
+    db_session.refresh(mt)
+    assert mt.confidence == 0.7
+
+
+def test_boost_confidence_case_insensitive(db_session):
+    """Match is case-insensitive: 'texas instruments' == 'Texas Instruments'."""
+    card = _make_card(db_session, "lm741", manufacturer="texas instruments")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 1
+    db_session.refresh(mt)
+    assert mt.confidence == 0.90
+
+
+def test_boost_confidence_skips_already_high(db_session):
+    """Tags already at 0.95 are not touched."""
+    card = _make_card(db_session, "ad9361", manufacturer="Analog Devices")
+    tag = _make_brand_tag(db_session, "Analog Devices")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.95)
+
+    result = boost_confidence_internal(db_session, batch_size=100)
+
+    assert result["total_boosted"] == 0
+
+
+def test_boost_confidence_empty_db(db_session):
+    """No AI tags at all → returns 0."""
+    result = boost_confidence_internal(db_session, batch_size=100)
+    assert result["total_boosted"] == 0
+
+
+def test_boost_confidence_multiple_batches(db_session):
+    """Processes multiple cards across batches."""
+    tag = _make_brand_tag(db_session, "Murata")
+    cards = []
+    mts = []
+    for i in range(5):
+        card = _make_card(db_session, f"grm{i:03d}", manufacturer="Murata")
+        mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+        cards.append(card)
+        mts.append(mt)
+
+    result = boost_confidence_internal(db_session, batch_size=2)
+
+    assert result["total_boosted"] == 5
+    for mt in mts:
+        db_session.refresh(mt)
+        assert mt.confidence == 0.90
+
+
+# ── nexar_bulk_validate tests ───────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_nexar_validate_no_low_conf_tags(db_session):
+    """No 0.7-confidence AI tags → returns zeros."""
+    result = await nexar_bulk_validate(db_session, limit=10)
+    assert result["total_checked"] == 0
+    assert result["confirmed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_nexar_validate_no_credentials(db_session):
+    """No Nexar credentials → skips with error."""
+    card = _make_card(db_session, "test001")
+    tag = _make_brand_tag(db_session, "Acme")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    with patch("app.services.enrichment.get_credential_cached", return_value=None):
+        result = await nexar_bulk_validate(db_session, limit=10)
+
+    assert result["total_checked"] == 0
+    assert result.get("error") == "no_nexar_creds"
+
+
+@pytest.mark.asyncio
+async def test_nexar_validate_confirms_matching(db_session):
+    """Nexar confirms AI tag → confidence upgraded to 0.95."""
+    card = _make_card(db_session, "lm358n")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    mock_connector = AsyncMock()
+    mock_connector.AGGREGATE_QUERY = "query { ... }"
+    mock_connector._run_query = AsyncMock(return_value={
+        "data": {"supSearchMpn": {"results": [
+            {"part": {"manufacturer": {"name": "Texas Instruments"}}}
+        ]}}
+    })
+
+    with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
+        with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+            result = await nexar_bulk_validate(db_session, limit=10)
+
+    assert result["confirmed"] == 1
+    assert result["changed"] == 0
+    db_session.refresh(mt)
+    assert mt.confidence == 0.95
+    assert mt.source == "ai_confirmed_nexar"
+
+
+@pytest.mark.asyncio
+async def test_nexar_validate_changes_manufacturer(db_session):
+    """Nexar disagrees → applies Nexar's manufacturer."""
+    card = _make_card(db_session, "wrong001")
+    tag = _make_brand_tag(db_session, "Wrong Brand")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    mock_connector = AsyncMock()
+    mock_connector.AGGREGATE_QUERY = "query { ... }"
+    mock_connector._run_query = AsyncMock(return_value={
+        "data": {"supSearchMpn": {"results": [
+            {"part": {"manufacturer": {"name": "Correct Brand"}}}
+        ]}}
+    })
+
+    with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
+        with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+            result = await nexar_bulk_validate(db_session, limit=10)
+
+    assert result["changed"] == 1
+    assert result["confirmed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_nexar_validate_no_result(db_session):
+    """Nexar returns no results → counted as no_result."""
+    card = _make_card(db_session, "nodata001")
+    tag = _make_brand_tag(db_session, "Some Brand")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    mock_connector = AsyncMock()
+    mock_connector.AGGREGATE_QUERY = "query { ... }"
+    mock_connector._run_query = AsyncMock(return_value={
+        "data": {"supSearchMpn": {"results": []}}
+    })
+
+    with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
+        with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+            result = await nexar_bulk_validate(db_session, limit=10)
+
+    assert result["no_result"] == 1
+
+
+# ── Admin endpoint tests for boost/nexar ────────────────────────────────
+
+
+def test_admin_boost_confidence_endpoint(client, db_session):
+    """POST /api/admin/tagging/boost-confidence returns 200."""
+    resp = client.post("/api/admin/tagging/boost-confidence")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "confidence" in data["message"].lower()
+
+
+def test_admin_nexar_validate_endpoint(client, db_session):
+    """POST /api/admin/tagging/nexar-validate returns 200."""
+    resp = client.post("/api/admin/tagging/nexar-validate?limit=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert "nexar" in data["message"].lower()

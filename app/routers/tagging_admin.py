@@ -217,3 +217,50 @@ async def trigger_cross_validation(
 
     asyncio.create_task(_run())
     return {"ok": True, "message": f"Cross-validation started (limit={limit})"}
+
+
+@router.post("/boost-confidence")
+async def boost_confidence(db: Session = Depends(get_db), _user=Depends(require_user)):
+    """Boost confidence for AI tags confirmed by internal data (instant, no API calls).
+
+    Upgrades tags where MaterialCard.manufacturer matches the AI-classified brand.
+    """
+
+    def _run():
+        from app.database import SessionLocal
+        from app.services.enrichment import boost_confidence_internal
+
+        session = SessionLocal()
+        try:
+            result = boost_confidence_internal(session)
+            logger.info(f"Confidence boost result: {result}")
+        except Exception:
+            logger.exception("Confidence boost failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.get_event_loop().run_in_executor(None, _run)
+    return {"ok": True, "message": "Internal confidence boost started (no API calls)"}
+
+
+@router.post("/nexar-validate")
+async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_user)):
+    """Bulk validate AI tags via Nexar GraphQL (fast batch queries)."""
+
+    async def _run():
+        from app.database import SessionLocal
+        from app.services.enrichment import nexar_bulk_validate
+
+        session = SessionLocal()
+        try:
+            result = await nexar_bulk_validate(session, limit=limit)
+            logger.info(f"Nexar validate result: {result}")
+        except Exception:
+            logger.exception("Nexar validate failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.create_task(_run())
+    return {"ok": True, "message": f"Nexar bulk validation started (limit={limit})"}

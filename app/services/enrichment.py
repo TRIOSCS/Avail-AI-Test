@@ -195,6 +195,173 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
         tag_material_card(card.id, tags_to_apply, db)
 
 
+def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
+    """Boost confidence for AI tags confirmed by internal data (no API calls).
+
+    Phase 1: Cards where MaterialCard.manufacturer matches the AI-classified brand tag.
+    If the card's manufacturer field (set from sightings/connectors) agrees with
+    the AI tag, the AI was right — upgrade confidence from 0.7 to 0.90.
+
+    Processes in batches to avoid locking the DB.
+
+    Returns: {total_boosted, total_checked}
+    """
+    from app.models.tags import MaterialTag, Tag
+    from sqlalchemy import func
+
+    total_boosted = 0
+    last_id = 0
+
+    while True:
+        # Find AI-classified brand tags where card manufacturer confirms the tag
+        rows = (
+            db.query(MaterialTag.id)
+            .join(Tag, MaterialTag.tag_id == Tag.id)
+            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+            .filter(
+                Tag.tag_type == "brand",
+                MaterialTag.source == "ai_classified",
+                MaterialTag.confidence < 0.9,
+                MaterialTag.confidence > 0.3,  # Skip "Unknown"
+                MaterialCard.manufacturer.isnot(None),
+                MaterialCard.manufacturer != "",
+                func.lower(MaterialCard.manufacturer) == func.lower(Tag.name),
+                MaterialTag.id > last_id,
+            )
+            .order_by(MaterialTag.id)
+            .limit(batch_size)
+            .all()
+        )
+
+        if not rows:
+            break
+
+        mt_ids = [r.id for r in rows]
+        last_id = mt_ids[-1]
+
+        updated = (
+            db.query(MaterialTag)
+            .filter(MaterialTag.id.in_(mt_ids))
+            .update(
+                {"confidence": 0.90, "source": "ai_confirmed_internal"},
+                synchronize_session="fetch",
+            )
+        )
+        db.commit()
+        total_boosted += updated
+        logger.info(f"Confidence boost: {total_boosted} tags upgraded so far (batch ending at id {last_id})")
+
+    logger.info(f"Internal confidence boost complete: {total_boosted} tags upgraded to 0.90")
+    return {"total_boosted": total_boosted}
+
+
+async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
+    """Validate AI-classified tags via Nexar bulk GraphQL queries (fast, batch-friendly).
+
+    Nexar's aggregate query returns manufacturer for 20 MPNs at once, much faster
+    than individual connector searches. Tags confirmed get 0.95 confidence.
+
+    Returns: {total_checked, confirmed, changed, no_result}
+    """
+    from app.models.tags import MaterialTag, Tag
+
+    # Find AI-classified cards still at 0.7 confidence (not yet boosted)
+    low_conf = (
+        db.query(
+            MaterialCard.id,
+            MaterialCard.normalized_mpn,
+            MaterialTag.id.label("mt_id"),
+            Tag.name.label("tag_name"),
+        )
+        .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(
+            Tag.tag_type == "brand",
+            MaterialTag.source == "ai_classified",
+            MaterialTag.confidence == 0.7,  # Only unconfirmed AI tags
+        )
+        .order_by(MaterialCard.id)
+        .limit(limit)
+        .all()
+    )
+
+    if not low_conf:
+        return {"total_checked": 0, "confirmed": 0, "changed": 0, "no_result": 0}
+
+    # Try to use Nexar (fastest bulk option)
+    nexar_id = get_credential_cached("nexar", "NEXAR_CLIENT_ID")
+    nexar_sec = get_credential_cached("nexar", "NEXAR_CLIENT_SECRET")
+
+    if not nexar_id or not nexar_sec:
+        logger.info("Nexar bulk validate: no credentials, skipping")
+        return {"total_checked": 0, "confirmed": 0, "changed": 0, "no_result": 0, "error": "no_nexar_creds"}
+
+    from app.connectors.sources import NexarConnector
+
+    connector = NexarConnector(nexar_id, nexar_sec)
+
+    confirmed = 0
+    changed = 0
+    no_result = 0
+
+    # Process in batches of 20 (Nexar query limit)
+    for i in range(0, len(low_conf), 20):
+        batch = low_conf[i : i + 20]
+
+        for row in batch:
+            try:
+                data = await connector._run_query(connector.AGGREGATE_QUERY, row.normalized_mpn)
+                results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+
+                if not results:
+                    no_result += 1
+                    continue
+
+                part = results[0].get("part", {})
+                nexar_mfr = ((part.get("manufacturer") or {}).get("name") or "").strip().lower()
+
+                if not nexar_mfr or nexar_mfr in _IGNORED_MANUFACTURERS:
+                    no_result += 1
+                    continue
+
+                ai_mfr = (row.tag_name or "").lower().strip()
+                is_match = nexar_mfr == ai_mfr or nexar_mfr in ai_mfr or ai_mfr in nexar_mfr
+
+                mt = db.get(MaterialTag, row.mt_id)
+                if not mt:
+                    continue
+
+                if is_match:
+                    mt.confidence = 0.95
+                    mt.source = "ai_confirmed_nexar"
+                    confirmed += 1
+                else:
+                    # Nexar disagrees — apply Nexar's manufacturer (higher confidence)
+                    card = db.get(MaterialCard, row.id)
+                    if card:
+                        _apply_enrichment_to_card(
+                            card,
+                            {"manufacturer": nexar_mfr.title(), "source": "nexar", "confidence": 0.95, "category": None},
+                            db,
+                        )
+                        changed += 1
+            except Exception:
+                logger.debug("Nexar validate failed for %s", row.normalized_mpn, exc_info=True)
+                no_result += 1
+
+        db.commit()
+        if (i + 20) % 200 == 0:
+            logger.info(f"Nexar validate: {i + 20}/{len(low_conf)} — {confirmed} confirmed, {changed} changed")
+            await asyncio.sleep(1)  # Rate limit courtesy
+
+    db.commit()
+    logger.info(
+        f"Nexar bulk validate: {len(low_conf)} checked, {confirmed} confirmed, "
+        f"{changed} changed, {no_result} no result"
+    )
+    return {"total_checked": len(low_conf), "confirmed": confirmed, "changed": changed, "no_result": no_result}
+
+
 async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int = 3) -> dict:
     """Cross-check low-confidence AI tags against connectors to upgrade confidence.
 
