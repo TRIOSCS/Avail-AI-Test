@@ -2238,15 +2238,20 @@ async def _job_tagging_backfill():  # pragma: no cover
 
 @_traced_job
 async def _job_connector_enrichment():  # pragma: no cover
-    """Enrich low-confidence material cards via API connectors. Runs every 4h."""
+    """Enrich low-confidence material cards via API connectors. Runs every 4h.
+
+    Two phases:
+    1. Enrich untagged/low-conf cards with no manufacturer (new data)
+    2. Cross-validate existing AI tags against connectors (upgrade confidence)
+    """
     from .database import SessionLocal
     from .models.intelligence import MaterialCard
     from .models.tags import MaterialTag, Tag
-    from .services.enrichment import enrich_batch
+    from .services.enrichment import cross_validate_batch, enrich_batch
 
     db = SessionLocal()
     try:
-        # Find cards with low-confidence AI tags (< 0.9), lowest confidence first
+        # Phase 1: Enrich cards with low-confidence tags
         low_conf_cards = (
             db.query(MaterialCard.normalized_mpn)
             .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
@@ -2261,8 +2266,11 @@ async def _job_connector_enrichment():  # pragma: no cover
             logger.info(f"Connector enrichment: processing {len(mpns)} low-confidence cards")
             result = await enrich_batch(mpns, db, concurrency=3)
             logger.info(f"Connector enrichment done: {result}")
-        else:
-            logger.debug("Connector enrichment: no low-confidence cards found")
+
+        # Phase 2: Cross-validate AI tags against connectors
+        cv_result = await cross_validate_batch(db, limit=200, concurrency=3)
+        if cv_result["total"] > 0:
+            logger.info(f"Cross-validation done: {cv_result}")
     except Exception:
         db.rollback()
         raise

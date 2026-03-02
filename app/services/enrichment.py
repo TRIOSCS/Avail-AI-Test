@@ -193,3 +193,107 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
 
     if tags_to_apply:
         tag_material_card(card.id, tags_to_apply, db)
+
+
+async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int = 3) -> dict:
+    """Cross-check low-confidence AI tags against connectors to upgrade confidence.
+
+    Finds cards with ai_classified brand tags (confidence < 0.9), queries connectors
+    for the same MPN, and if the connector confirms the same manufacturer, upgrades
+    the tag confidence to 0.95.
+
+    Returns: {total, confirmed, changed_manufacturer, no_result, sources: {}}
+    """
+    from app.models.tags import MaterialTag, Tag
+
+    # Find cards with low-confidence AI brand tags
+    low_conf = (
+        db.query(
+            MaterialCard.id,
+            MaterialCard.normalized_mpn,
+            MaterialCard.manufacturer,
+            MaterialTag.id.label("mt_id"),
+            MaterialTag.confidence,
+            Tag.name.label("tag_name"),
+        )
+        .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(
+            Tag.tag_type == "brand",
+            MaterialTag.source == "ai_classified",
+            MaterialTag.confidence < 0.9,
+            MaterialTag.confidence > 0.3,  # Skip "Unknown" (0.3) — not worth validating
+        )
+        .order_by(MaterialTag.confidence.asc())
+        .limit(limit)
+        .all()
+    )
+
+    if not low_conf:
+        logger.info("Cross-validate: no low-confidence AI tags to check")
+        return {"total": 0, "confirmed": 0, "changed_manufacturer": 0, "no_result": 0, "sources": {}}
+
+    logger.info(f"Cross-validate: checking {len(low_conf)} low-confidence AI tags")
+
+    sem = asyncio.Semaphore(concurrency)
+    confirmed = 0
+    changed_mfr = 0
+    no_result = 0
+    sources: dict[str, int] = {}
+
+    for i, row in enumerate(low_conf):
+        async with sem:
+            result = await enrich_material_card(row.normalized_mpn, db)
+
+        if not result:
+            no_result += 1
+            continue
+
+        connector_mfr = result["manufacturer"].lower().strip()
+        ai_mfr = (row.tag_name or "").lower().strip()
+
+        # Check if connector confirms the AI classification
+        # Fuzzy match: either one contains the other, or exact match
+        is_confirmed = (
+            connector_mfr == ai_mfr
+            or connector_mfr in ai_mfr
+            or ai_mfr in connector_mfr
+        )
+
+        if is_confirmed:
+            # Upgrade the existing tag confidence
+            mt = db.get(MaterialTag, row.mt_id)
+            if mt and mt.confidence < result["confidence"]:
+                mt.confidence = result["confidence"]
+                mt.source = f"ai_confirmed_{result['source']}"
+                confirmed += 1
+                sources[result["source"]] = sources.get(result["source"], 0) + 1
+        else:
+            # Connector says different manufacturer — apply the new one (higher confidence wins)
+            card = db.get(MaterialCard, row.id)
+            if card:
+                _apply_enrichment_to_card(card, result, db)
+                changed_mfr += 1
+                sources[result["source"]] = sources.get(result["source"], 0) + 1
+
+        if (i + 1) % 100 == 0:
+            db.commit()
+            db.expire_all()
+            logger.info(
+                f"Cross-validate progress: {i + 1}/{len(low_conf)} "
+                f"({confirmed} confirmed, {changed_mfr} changed, {no_result} no result)"
+            )
+
+    db.commit()
+    total = len(low_conf)
+    logger.info(
+        f"Cross-validate complete: {total} checked, {confirmed} confirmed, "
+        f"{changed_mfr} changed, {no_result} no result"
+    )
+    return {
+        "total": total,
+        "confirmed": confirmed,
+        "changed_manufacturer": changed_mfr,
+        "no_result": no_result,
+        "sources": sources,
+    }

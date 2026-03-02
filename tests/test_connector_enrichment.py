@@ -17,6 +17,7 @@ from app.services.enrichment import (
     _CONNECTOR_CONFIGS,
     _IGNORED_MANUFACTURERS,
     _apply_enrichment_to_card,
+    cross_validate_batch,
     enrich_batch,
     enrich_material_card,
 )
@@ -503,3 +504,91 @@ def test_connector_configs_priority_order():
     names = [cfg["name"] for cfg in _CONNECTOR_CONFIGS]
     assert names.index("digikey") < names.index("brokerbin")
     assert names.index("mouser") < names.index("brokerbin")
+
+
+# ── Cross-validation tests ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_cross_validate_confirms_matching_tag(db_session):
+    """AI tag with matching connector result → confidence upgraded."""
+    card = _make_card(db_session, "lm358n", manufacturer="Texas Instruments")
+    tag = _make_brand_tag(db_session, "Texas Instruments")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    async def _mock_enrich(mpn, db):
+        return {"manufacturer": "Texas Instruments", "source": "digikey", "confidence": 0.95, "category": None}
+
+    with patch("app.services.enrichment.enrich_material_card", side_effect=_mock_enrich):
+        result = await cross_validate_batch(db_session, limit=10, concurrency=1)
+
+    assert result["total"] == 1
+    assert result["confirmed"] == 1
+
+    db_session.refresh(mt)
+    assert mt.confidence == 0.95
+    assert "ai_confirmed" in mt.source
+
+
+@pytest.mark.asyncio
+async def test_cross_validate_changes_wrong_manufacturer(db_session):
+    """AI tag with different connector result → new tag applied."""
+    card = _make_card(db_session, "stm32f103", manufacturer="Wrong Corp")
+    tag = _make_brand_tag(db_session, "Wrong Corp")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    async def _mock_enrich(mpn, db):
+        return {"manufacturer": "STMicroelectronics", "source": "mouser", "confidence": 0.95, "category": None}
+
+    with patch("app.services.enrichment.enrich_material_card", side_effect=_mock_enrich):
+        result = await cross_validate_batch(db_session, limit=10, concurrency=1)
+
+    assert result["total"] == 1
+    assert result["changed_manufacturer"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cross_validate_no_result(db_session):
+    """Connector returns nothing → tag left as-is."""
+    card = _make_card(db_session, "nodata999")
+    tag = _make_brand_tag(db_session, "Some Brand")
+    mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
+
+    async def _mock_enrich(mpn, db):
+        return None
+
+    with patch("app.services.enrichment.enrich_material_card", side_effect=_mock_enrich):
+        result = await cross_validate_batch(db_session, limit=10, concurrency=1)
+
+    assert result["total"] == 1
+    assert result["no_result"] == 1
+
+    db_session.refresh(mt)
+    assert mt.confidence == 0.7  # Unchanged
+
+
+@pytest.mark.asyncio
+async def test_cross_validate_skips_unknown_tags(db_session):
+    """Tags with confidence 0.3 (Unknown) are skipped."""
+    card = _make_card(db_session, "unknown001")
+    tag = _make_brand_tag(db_session, "Unknown")
+    _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.3)
+
+    result = await cross_validate_batch(db_session, limit=10, concurrency=1)
+    assert result["total"] == 0  # Skipped because confidence <= 0.3
+
+
+@pytest.mark.asyncio
+async def test_cross_validate_empty(db_session):
+    """No low-confidence tags → returns zeros."""
+    result = await cross_validate_batch(db_session, limit=10, concurrency=1)
+    assert result["total"] == 0
+    assert result["confirmed"] == 0
+
+
+def test_admin_cross_validate_endpoint(client, db_session):
+    """POST /api/admin/tagging/cross-validate returns 200."""
+    resp = client.post("/api/admin/tagging/cross-validate?limit=10")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True

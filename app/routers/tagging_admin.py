@@ -191,3 +191,29 @@ async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi
 
     asyncio.create_task(_run())
     return {"ok": True, "message": f"Applying batch {batch_id} results in background"}
+
+
+@router.post("/cross-validate")
+async def trigger_cross_validation(
+    limit: int = 500,
+    db: Session = Depends(get_db),
+    _user=Depends(require_user),
+):
+    """Cross-check low-confidence AI tags against connectors to upgrade confidence."""
+
+    async def _run():
+        from app.database import SessionLocal
+        from app.services.enrichment import cross_validate_batch
+
+        session = SessionLocal()
+        try:
+            result = await cross_validate_batch(session, limit=limit, concurrency=3)
+            logger.info(f"Cross-validation result: {result}")
+        except Exception:
+            logger.exception("Cross-validation failed")
+            session.rollback()
+        finally:
+            session.close()
+
+    asyncio.create_task(_run())
+    return {"ok": True, "message": f"Cross-validation started (limit={limit})"}
