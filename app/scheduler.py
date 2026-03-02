@@ -297,6 +297,20 @@ def configure_scheduler():
         name="Reset monthly API usage",
     )
 
+    # Self-Heal Pipeline
+    scheduler.add_job(
+        _job_self_heal_weekly_report,
+        CronTrigger(day_of_week="mon", hour=8),
+        id="self_heal_weekly_report",
+        name="Self-heal weekly report",
+    )
+    scheduler.add_job(
+        _job_self_heal_auto_close,
+        IntervalTrigger(hours=6),
+        id="self_heal_auto_close",
+        name="Auto-close stale tickets",
+    )
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -2101,5 +2115,97 @@ async def _job_reset_monthly_usage():
     except Exception:
         logger.exception("Monthly usage reset failed")
         db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_self_heal_weekly_report():
+    """Generate weekly self-heal pipeline report and log stats."""
+    from .database import SessionLocal
+    from .services.pattern_tracker import get_weekly_stats, detect_recurring_patterns
+
+    db = SessionLocal()
+    try:
+        stats = get_weekly_stats(db, weeks_back=1)
+        patterns = detect_recurring_patterns(db, min_occurrences=3)
+        logger.info(
+            "Self-heal weekly report: {} created, {} resolved, {:.0f}% success, ${:.2f} cost",
+            stats["tickets_created"], stats["tickets_resolved"],
+            stats["success_rate"], stats["total_cost"],
+        )
+        if patterns:
+            for p in patterns:
+                logger.warning(
+                    "Recurring pattern: {} on {} ({} occurrences)",
+                    p["category"], p["page"], p["count"],
+                )
+    except Exception:
+        logger.exception("Self-heal weekly report failed")
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_self_heal_auto_close():
+    """Auto-close stale tickets: 48h awaiting_verification → resolved, 7d submitted → rejected."""
+    from datetime import datetime, timedelta, timezone
+
+    from .database import SessionLocal
+    from .models.trouble_ticket import TroubleTicket
+    from .services.notification_service import create_notification
+    from .services.trouble_ticket_service import update_ticket
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+
+        # 48h awaiting_verification → auto-resolved (user didn't respond)
+        stale_verify = (
+            db.query(TroubleTicket)
+            .filter(
+                TroubleTicket.status == "awaiting_verification",
+                TroubleTicket.diagnosed_at.isnot(None),
+                TroubleTicket.diagnosed_at < now - timedelta(hours=48),
+            )
+            .all()
+        )
+        for ticket in stale_verify:
+            update_ticket(db, ticket.id, status="resolved",
+                          resolution_notes="Auto-resolved: no verification response after 48h")
+            if ticket.submitted_by:
+                create_notification(
+                    db, user_id=ticket.submitted_by, event_type="fixed",
+                    title=f"Ticket #{ticket.id} auto-resolved",
+                    body="No verification response after 48h — assumed fixed.",
+                    ticket_id=ticket.id,
+                )
+
+        # 7d submitted with no diagnosis → auto-rejected
+        stale_submitted = (
+            db.query(TroubleTicket)
+            .filter(
+                TroubleTicket.status == "submitted",
+                TroubleTicket.created_at < now - timedelta(days=7),
+            )
+            .all()
+        )
+        for ticket in stale_submitted:
+            update_ticket(db, ticket.id, status="rejected",
+                          resolution_notes="Auto-rejected: no triage after 7 days")
+            if ticket.submitted_by:
+                create_notification(
+                    db, user_id=ticket.submitted_by, event_type="failed",
+                    title=f"Ticket #{ticket.id} auto-closed",
+                    body="No triage after 7 days — ticket closed.",
+                    ticket_id=ticket.id,
+                )
+
+        closed = len(stale_verify) + len(stale_submitted)
+        if closed:
+            logger.info("Auto-closed {} stale tickets ({} verify, {} submitted)",
+                        closed, len(stale_verify), len(stale_submitted))
+    except Exception:
+        logger.exception("Self-heal auto-close failed")
     finally:
         db.close()
