@@ -187,8 +187,16 @@
     <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
         <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>
+        <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
+        <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
+            <button type="button" class="m-tab-pill active" data-view="rfq" onclick="mobileReqPillTap('rfq',this)">Open</button>
+            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
+            <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
+        </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
+    <!-- Mobile FAB — floating action button for new requisition -->
+    <button type="button" class="m-fab m-mobile-only" onclick="openNewReqModal()" aria-label="New requisition" title="New requisition">+</button>
 
     <!-- VIEW: Requisition Detail (removed — drill-down sub-tabs replaced this) -->
     <div id="view-detail" class="hidden"></div>

@@ -694,6 +694,123 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
+   Phase: Mobile Requisition List — Card Redesign
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Hide desktop-only elements ── */
+.toolbar-stats,
+.col-headers {
+    display: none !important;
+}
+
+/* ── Req card left-border status colors ── */
+.m-req-card {
+    border-left-width: 3px;
+    border-left-style: solid;
+    padding: 12px 14px;
+}
+.m-req-border-blue   { border-left-color: var(--blue); }
+.m-req-border-amber  { border-left-color: var(--amber); }
+.m-req-border-green  { border-left-color: var(--green); }
+.m-req-border-gray   { border-left-color: var(--bg3); }
+
+/* ── Card footer layout ── */
+.m-req-card-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+.m-req-card-footer .m-card-meta {
+    font-size: 12px;
+    color: var(--muted);
+}
+.m-req-card-footer .m-card-chevron {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 18px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+/* ── Part count badge ── */
+.m-req-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--surface);
+    color: var(--text2);
+    white-space: nowrap;
+}
+
+/* ── Buyer initials ── */
+.m-req-initials {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--blue-lt);
+    color: var(--blue);
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+/* ── Cards container ── */
+.m-req-cards {
+    padding: 0 12px 12px;
+}
+
+/* ── Req pill bar ── */
+.m-req-pill-bar {
+    border-bottom: 1px solid var(--border);
+    background: var(--white);
+    padding: 8px 12px;
+}
+
+/* ── Summary stats row adjustments ── */
+.m-req-summary {
+    margin: 0 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+/* ── FAB (floating action button) ── */
+.m-fab {
+    position: fixed;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    right: 16px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--blue);
+    color: #fff;
+    font-size: 28px;
+    font-weight: 300;
+    border: none;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 190;
+    -webkit-tap-highlight-color: transparent;
+    transition: transform var(--speed-fast), box-shadow var(--speed-fast);
+    padding: 0;
+    line-height: 1;
+    font-family: inherit;
+}
+.m-fab:active {
+    transform: scale(0.92);
+    box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+
+/* ══════════════════════════════════════════════════════════════
    Phase 8: Landscape + PWA Polish
    ══════════════════════════════════════════════════════════════ */
 
