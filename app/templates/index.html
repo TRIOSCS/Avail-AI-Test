@@ -1432,6 +1432,14 @@
     </div>
 </div>
 
+<!-- Archive Outcome Modal -->
+<div id="archiveOutcomeModal" class="modal-bg" onclick="if(event.target===this)closeModal('archiveOutcomeModal')">
+    <div class="modal" style="max-width:360px">
+        <h2 style="font-size:16px;margin-bottom:4px">Close Requisition</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px">How did this requisition close?</p>
+        <div style="display:flex;flex-direction:column;gap:8px" id="archiveOutcomeButtons"></div>
+    </div>
+</div>
 
 <!-- Floating trouble ticket pill — always visible -->
 <button type="button" id="troublePill" onclick="openTroubleChat()" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s;letter-spacing:.3px" onmouseover="this.style.transform='scale(1.06)';this.style.boxShadow='0 6px 20px rgba(239,68,68,.5),0 2px 6px rgba(0,0,0,.2)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15)'">

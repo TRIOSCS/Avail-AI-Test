@@ -7378,39 +7378,71 @@ async function toggleArchive(id) {
 }
 
 async function archiveFromList(reqId) {
-    try {
-        // On non-archive views, prompt for outcome before archiving
-        if (_currentMainView !== 'archive') {
-            const choice = prompt('How did this close?\nType: won, lost, or leave blank to just archive');
-            if (choice === null) return; // cancelled
-            const outcome = (choice || '').trim().toLowerCase();
-            if (outcome === 'won' || outcome === 'lost') {
-                await apiFetch(`/api/requisitions/${reqId}/outcome`, {
-                    method: 'PUT', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({outcome})
-                });
-                showToast(`Marked as ${outcome} and archived`);
-            } else {
-                await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
-                showToast('Archived');
-            }
-        } else {
+    if (_currentMainView === 'archive') {
+        // Restore from archive — no outcome needed
+        try {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
             showToast(wasRestored ? 'Restored to active' : 'Archived');
+            _reqListData = _reqListData.filter(r => r.id !== reqId);
+            const drow = document.getElementById('d-' + reqId);
+            if (drow) drow.remove();
+            const arow = document.getElementById('a-' + reqId);
+            if (arow) arow.remove();
+            const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
+            if (row) row.remove();
+            _updateToolbarStats();
+            renderReqList();
+        } catch (e) { showToast('Failed to restore: ' + (e.message || e), 'error'); }
+        return;
+    }
+    // Show outcome modal
+    const btns = document.getElementById('archiveOutcomeButtons');
+    if (!btns) return;
+    btns.textContent = '';
+    const options = [
+        { label: 'Won', outcome: 'won', style: 'background:var(--green);color:#fff' },
+        { label: 'Lost', outcome: 'lost', style: 'background:var(--red);color:#fff' },
+        { label: 'Just Archive', outcome: '', style: 'background:var(--bg3);color:var(--text)' },
+    ];
+    for (const opt of options) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.style.cssText = opt.style + ';padding:10px;font-size:13px;font-weight:600;border-radius:6px;width:100%';
+        b.textContent = opt.label;
+        b.onclick = () => _archiveWithOutcome(reqId, opt.outcome || null);
+        btns.appendChild(b);
+    }
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost';
+    cancel.style.cssText = 'font-size:12px;padding:8px;width:100%';
+    cancel.textContent = 'Cancel';
+    cancel.onclick = () => closeModal('archiveOutcomeModal');
+    btns.appendChild(cancel);
+    openModal('archiveOutcomeModal');
+}
+
+async function _archiveWithOutcome(reqId, outcome) {
+    closeModal('archiveOutcomeModal');
+    try {
+        if (outcome) {
+            await apiFetch(`/api/requisitions/${reqId}/outcome`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({outcome})
+            });
+            showToast('Marked as ' + outcome + ' and archived');
+        } else {
+            await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+            showToast('Archived');
         }
-        // Remove from in-memory list and DOM immediately
         _reqListData = _reqListData.filter(r => r.id !== reqId);
-        // Close the drill-down row for the item
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
         if (arow) arow.remove();
-        // Remove from DOM directly instead of full renderReqList
         const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
         if (row) row.remove();
         _updateToolbarStats();
-        // Re-render to update count and empty state
         renderReqList();
     } catch (e) { showToast('Failed to archive: ' + (e.message || e), 'error'); }
 }
@@ -11863,7 +11895,7 @@ function _showAiModal(title, contentHtml) {
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
-    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies, openContactTimeline, loadContactNudges,
+    addDrillRow, archiveFromList, _archiveWithOutcome, autoLogEmail, autoLogVendorCall, checkForReplies, openContactTimeline, loadContactNudges,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
     ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
     ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
