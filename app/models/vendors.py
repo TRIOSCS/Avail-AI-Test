@@ -11,7 +11,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    Numeric,
     String,
     Text,
 )
@@ -74,7 +73,7 @@ class VendorCard(Base):
     avg_response_hours = Column(Float)
     overall_win_rate = Column(Float)
     total_pos = Column(Integer, default=0)
-    total_revenue = Column(Numeric(14, 2), default=0)
+    total_revenue = Column(Float, default=0)
     last_activity_at = Column(DateTime)
 
     # AI-generated material intelligence

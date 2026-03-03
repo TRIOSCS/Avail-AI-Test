@@ -57,7 +57,7 @@ class Offer(Base):
 
     notes = Column(Text)
     status = Column(String(20), default="active")  # active | sold
-    is_stale = Column(Boolean, default=False)  # display-only: True if >14 days old
+    is_stale = Column(Boolean, nullable=False, default=False, server_default="false")  # display-only: True if >14 days old
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Audit trail

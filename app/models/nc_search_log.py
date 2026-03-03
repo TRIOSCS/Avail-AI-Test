@@ -19,7 +19,7 @@ class NcSearchLog(Base):
 
     id = Column(Integer, primary_key=True)
     queue_id = Column(Integer, ForeignKey("nc_search_queue.id", ondelete="CASCADE"), nullable=False)
-    searched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    searched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     duration_ms = Column(Integer)
     results_found = Column(Integer)
     sightings_created = Column(Integer)

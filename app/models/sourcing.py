@@ -106,7 +106,7 @@ class Sighting(Base):
     normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
-    unit_price = Column(Numeric(12, 4))
+    unit_price = Column(Float)
     currency = Column(String(10), default="USD")
     moq = Column(Integer)
     source_type = Column(String(50))
@@ -127,7 +127,7 @@ class Sighting(Base):
     source_company_id = Column(Integer, ForeignKey("companies.id"))
 
     # NC integration: when the source data was fetched
-    source_searched_at = Column(DateTime)
+    source_searched_at = Column(DateTime(timezone=True))
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

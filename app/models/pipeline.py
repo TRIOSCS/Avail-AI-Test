@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
 
@@ -60,11 +61,11 @@ class PendingBatch(Base):
     id = Column(Integer, primary_key=True)
     batch_id = Column(String, nullable=False, index=True)
     batch_type = Column(String(50), default="inbox_parse")
-    request_map = Column(JSON)
+    request_map = Column(JSONB)
     status = Column(String(20), default="processing")
     submitted_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     completed_at = Column(DateTime(timezone=True))
     result_count = Column(Integer)
-    error_message = Column(String)
+    error_message = Column(Text)
 
     __table_args__ = (Index("ix_pending_batches_status", "status", "submitted_at"),)

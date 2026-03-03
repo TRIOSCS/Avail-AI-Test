@@ -29,7 +29,7 @@ class NcClassificationCache(Base):
     commodity_class = Column(String(50), nullable=False)
     gate_decision = Column(String(20), nullable=False)
     gate_reason = Column(String(200))
-    classified_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    classified_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         UniqueConstraint(
