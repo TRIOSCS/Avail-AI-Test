@@ -8254,6 +8254,11 @@ async function openBatchRfqModal(prebuiltGroups) {
                 lookup_status: v.needs_lookup ? 'pending' : 'ready',
             };
         });
+        // Filter to only vendors the user actually selected (R2-2)
+        const selectedVendorNames = new Set(groups.map(g => (g.vendor_name || '').trim().toLowerCase()));
+        rfqVendorData = rfqVendorData.filter(v =>
+            selectedVendorNames.has((v.vendor_name || '').trim().toLowerCase())
+        );
     } catch (e) {
         clearTimeout(prepareTimeout);
         if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
