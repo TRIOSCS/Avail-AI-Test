@@ -2668,7 +2668,7 @@ const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
     if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'files'];
-    if (mainView === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'files'];
     return ['parts', 'offers', 'quotes', 'files']; // rfq tab
 }
 
