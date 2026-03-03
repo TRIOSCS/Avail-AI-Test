@@ -5550,8 +5550,8 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
             const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
             if (tf === 'exact') return !isSub;
             if (tf === 'sub') return isSub;
-            if (tf === 'available') return !s.is_unavailable;
-            if (tf === 'na') return !!s.is_unavailable;
+            if (tf === 'available') return s.qty_available != null && s.qty_available > 0;
+            if (tf === 'na') return s.qty_available == null || s.qty_available <= 0;
             return true;
         });
     }
