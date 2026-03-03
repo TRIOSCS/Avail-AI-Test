@@ -96,15 +96,9 @@ def _ensure_site(db: Session, company: Company) -> CustomerSite:
 
 def _dedup_contacts(contacts: list[dict]) -> list[dict]:
     """Deduplicate contacts by email, keeping the first (higher-priority) source."""
-    seen_emails = set()
-    result = []
-    for c in contacts:
-        email = (c.get("email") or "").lower().strip()
-        if not email or email in seen_emails:
-            continue
-        seen_emails.add(email)
-        result.append(c)
-    return result
+    from app.services.enrichment_utils import deduplicate_contacts
+
+    return deduplicate_contacts(contacts, key="email")
 
 
 def _save_contact(db: Session, site: CustomerSite, contact: dict, source: str) -> SiteContact | None:

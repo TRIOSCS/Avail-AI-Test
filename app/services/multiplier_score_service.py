@@ -69,14 +69,9 @@ MIN_ACTIVITIES_SALES = 20
 
 def _month_range(month: date):
     """Return (start_dt, end_dt) as aware datetimes for the given month."""
-    month_start = month.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
-    start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
-    return start_dt, end_dt
+    from app.services.scoring_helpers import month_range
+
+    return month_range(month)
 
 
 def _load_quoted_offer_ids(db: Session) -> set[int]:

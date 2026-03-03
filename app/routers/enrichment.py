@@ -531,7 +531,7 @@ def api_m365_status(
     db: Session = Depends(get_db),
 ):
     """Get M365 connection status for all users."""
-    users = db.query(User).filter(User.is_active == True).order_by(User.name).all()  # noqa: E712
+    users = db.query(User).filter(User.is_active == True).order_by(User.name).limit(500).all()  # noqa: E712
     return {
         "users": [
             {
