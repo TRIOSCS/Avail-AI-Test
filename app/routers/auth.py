@@ -15,7 +15,9 @@ Called by: main.py (router mount)
 Depends on: dependencies, models, config
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import APIRouter, Depends, Request
@@ -64,12 +66,18 @@ async def index(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/auth/login")
-async def login():
-    return RedirectResponse(
-        f"{AZURE_AUTH}/authorize?client_id={settings.azure_client_id}"
-        f"&response_type=code&redirect_uri={settings.app_url}/auth/callback"
-        f"&scope={SCOPES}&response_mode=query"
-    )
+async def login(request: Request):
+    state = secrets.token_urlsafe(32)
+    request.session["oauth_state"] = state
+    params = urlencode({
+        "client_id": settings.azure_client_id,
+        "response_type": "code",
+        "redirect_uri": f"{settings.app_url}/auth/callback",
+        "scope": SCOPES,
+        "response_mode": "query",
+        "state": state,
+    })
+    return RedirectResponse(f"{AZURE_AUTH}/authorize?{params}")
 
 
 from ..rate_limit import limiter
@@ -77,8 +85,13 @@ from ..rate_limit import limiter
 
 @router.get("/auth/callback")
 @limiter.limit("10/minute")
-async def callback(request: Request, code: str = "", db: Session = Depends(get_db)):
+async def callback(request: Request, code: str = "", state: str = "", db: Session = Depends(get_db)):
     if not code:
+        return RedirectResponse("/")
+    # Validate OAuth state (CSRF protection)
+    expected_state = request.session.pop("oauth_state", None)
+    if not expected_state or state != expected_state:
+        logger.warning("OAuth callback state mismatch (possible CSRF)")
         return RedirectResponse("/")
     try:
         resp = await http.post(
