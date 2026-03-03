@@ -114,10 +114,11 @@ class TestExecuteFixBudget:
 
 class TestExecuteFixFileLock:
     def test_file_lock_conflict(self, db_session, exec_user, diagnosed_ticket):
-        # Create another ticket that's fixing the same file
+        # Create another ticket that's fixing the same file.
+        # check_file_lock() filters on status == "in_progress".
         other = TroubleTicket(
             ticket_number="TT-E05", submitted_by=exec_user.id,
-            title="Other fix", description="D", status="fix_in_progress",
+            title="Other fix", description="D", status="in_progress",
             file_mapping=["app/routers/vendors.py"],
             diagnosis={"root_cause": "Other"},
         )

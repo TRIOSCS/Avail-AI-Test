@@ -238,7 +238,8 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
     """Deduplicate and merge sighting results for cleaner display.
 
     Rules:
-    - Exclude sightings with no qty_available (null or 0)
+    - Exclude sightings with qty_available=0 (confirmed zero stock)
+    - Keep sightings with qty_available=None (unknown stock — part exists)
     - Same vendor + MPN + price → merge (sum quantities, keep best row)
     - Same vendor + MPN + different price → keep separate lines
     - Historical / material-history rows pass through untouched
@@ -252,9 +253,9 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
             kept.append(d)
             continue
 
-        # Filter out rows with no quantity
+        # Filter out rows with confirmed zero stock; keep None (unknown qty)
         qty = d.get("qty_available")
-        if not qty:
+        if qty is not None and qty == 0:
             continue
 
         # Group key: vendor + mpn + price
@@ -275,8 +276,9 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
         group.sort(key=lambda x: x.get("score", 0), reverse=True)
         best = dict(group[0])
 
-        # Sum quantities across all rows in group
-        best["qty_available"] = sum(g.get("qty_available") or 0 for g in group)
+        # Sum quantities across all rows in group; stay None if all unknown
+        known_qtys = [g["qty_available"] for g in group if g.get("qty_available") is not None]
+        best["qty_available"] = sum(known_qtys) if known_qtys else None
 
         # Keep best confidence
         best["confidence"] = max((g.get("confidence") or 0) for g in group)

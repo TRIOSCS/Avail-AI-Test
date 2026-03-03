@@ -176,6 +176,32 @@ class TestPlanContext:
         assert ctx["quote_number"] == ""
         assert ctx["submitter"] is None
 
+    def test_site_without_company(self, db_session):
+        """When quote.customer_site exists but .company is None, falls back to site_name."""
+        from app.services.buyplan_v3_notifications import _plan_context
+
+        user = _make_user(db_session, "site-test@trioscs.com", "Site User", "buyer")
+
+        # Mock the quote to have customer_site with no company
+        mock_site = MagicMock()
+        mock_site.company = None
+        mock_site.site_name = "Orphan HQ"
+
+        mock_quote = MagicMock()
+        mock_quote.quote_number = "Q-SITE-001"
+        mock_quote.customer_site = mock_site
+
+        # Mock plan referencing the quote
+        mock_plan = MagicMock(submitted_by_id=user.id, quote_id=999)
+
+        with patch.object(db_session, "get", side_effect=lambda model, pk: {
+            "User": user,
+            "Quote": mock_quote,
+        }.get(model.__name__)):
+            ctx = _plan_context(mock_plan, db_session)
+
+        assert ctx["customer_name"] == "Orphan HQ"
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # _lines_html
@@ -296,7 +322,7 @@ class TestTeamsHelpers:
     async def test_teams_channel(self):
         from app.services.buyplan_v3_notifications import _teams_channel
 
-        with patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock) as mock:
+        with patch("app.services.teams_notifications.post_teams_channel", new_callable=AsyncMock) as mock:
             await _teams_channel("Hello teams")
         mock.assert_awaited_once_with("Hello teams")
 
@@ -305,7 +331,7 @@ class TestTeamsHelpers:
         from app.services.buyplan_v3_notifications import _teams_dm
 
         user = _make_user(db_session)
-        with patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock) as mock:
+        with patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock:
             await _teams_dm(user, "DM message", db_session)
         mock.assert_awaited_once_with(user, "DM message", db_session)
 

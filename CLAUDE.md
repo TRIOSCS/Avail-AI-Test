@@ -28,7 +28,7 @@ AvailAI is an electronic component sourcing engine. It searches multiple supplie
 - `app/connectors/` = external API integrations (Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, Sourcengine, email_mining)
 - `app/config.py` = Settings class reading from env vars
 - `app/dependencies.py` = auth middleware (require_user, require_buyer, require_fresh_token)
-- `app/startup.py` = boot-time setup (create tables, FTS triggers, seed data, backfills)
+- `app/startup.py` = boot-time setup (FTS triggers, seed data, backfills — NO schema DDL)
 - `app/scheduler.py` = background tasks (token refresh, inbox scan, contacts sync)
 - `specs/` = business rules (if present)
 - `tests/` = pytest tests
@@ -84,7 +84,39 @@ alembic upgrade head                              # Apply migrations
 alembic revision --autogenerate -m "description"  # Generate new migration
 ```
 
-Schema is defined in `app/models/` (split into domain modules) and synced at boot via `Base.metadata.create_all(checkfirst=True)` in `app/startup.py`. Alembic is for schema evolution during development. The production DB is stamped at revision `001_initial`.
+Schema is defined in `app/models/` (split into domain modules). Alembic manages all schema evolution. The entrypoint runs `alembic upgrade head` before app start. Production DB is at migration `048`.
+
+## Database & Migration Rules
+
+### ABSOLUTE RULES — NEVER VIOLATE
+1. **ALL schema changes go through Alembic.** Never use raw DDL (ALTER TABLE, CREATE INDEX, ADD COLUMN, ADD CONSTRAINT, DROP anything) in:
+   - startup.py
+   - any service file
+   - any router file
+   - any ad-hoc script
+   The ONLY place DDL belongs is inside `alembic/versions/` migration files.
+
+2. **Never use Base.metadata.create_all() for schema changes.** It exists only as a legacy safety net with logging. If a table is missing, write a migration — don't rely on create_all().
+
+3. **Never run raw SQL against production** outside of a migration. No `docker compose exec db psql` schema changes. No scripts that ALTER tables.
+
+4. **Migration workflow — every time:**
+   a. Make your model change in `app/models/`
+   b. Run: `alembic revision --autogenerate -m "description"` (inside Docker)
+   c. REVIEW the generated migration (autogenerate is not perfect)
+   d. Test: `alembic upgrade head` then `alembic downgrade -1` then `alembic upgrade head`
+   e. Commit the migration file with the model change
+   f. Deploy: entrypoint runs `alembic upgrade head` automatically
+
+5. **If `alembic revision --autogenerate` generates a non-empty migration when you haven't changed models, there is schema drift.** Stop and investigate before proceeding.
+
+6. **startup.py is for runtime operations ONLY:**
+   - FTS triggers (PostgreSQL-specific, can't be expressed in Alembic cleanly)
+   - Seed data (system_config defaults, initial admin user)
+   - ANALYZE on hot tables
+   - Backfill queries that run on NULL values (idempotent)
+   - Count triggers (PG-specific, recreated idempotently)
+   - NOTHING that creates, alters, or drops tables/columns/indexes/constraints
 
 ### Deploy / Update
 ```bash

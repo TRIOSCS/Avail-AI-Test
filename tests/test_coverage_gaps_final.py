@@ -497,17 +497,17 @@ class TestOfferWonHistorySiteNoCompany:
 class TestNCEnqueueError:
     """Upload requirements: NC enqueue failure in background is handled."""
 
-    def test_nc_enqueue_failure_does_not_break_upload(self, client, db_session, test_requisition):
+    @patch("app.database.SessionLocal")
+    def test_nc_enqueue_failure_does_not_break_upload(self, mock_sl, client, db_session, test_requisition):
         """NC enqueue exception is caught and logged, upload still succeeds (lines 896-899)."""
         csv_bytes = b"mpn,qty\nTEST123,100\nTEST456,200"
-        with patch(
-            "app.services.nc_worker.queue_manager.enqueue_for_nc_search",
-            side_effect=RuntimeError("NC queue down"),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/upload",
-                files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
-            )
+        # Mock SessionLocal to return a mock session that raises on query
+        mock_bg_db = mock_sl.return_value
+        mock_bg_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/upload",
+            files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["created"] >= 1

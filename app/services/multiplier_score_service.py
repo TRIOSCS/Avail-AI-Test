@@ -69,20 +69,15 @@ MIN_ACTIVITIES_SALES = 20
 
 def _month_range(month: date):
     """Return (start_dt, end_dt) as aware datetimes for the given month."""
-    month_start = month.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
-    start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
-    return start_dt, end_dt
+    from app.services.scoring_helpers import month_range
+
+    return month_range(month)
 
 
 def _load_quoted_offer_ids(db: Session) -> set[int]:
     """Return set of offer IDs that appear in any sent/won/lost quote line_items."""
     ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -94,7 +89,7 @@ def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
     """Return (bp_offer_ids, po_confirmed_offer_ids) from buy plan line_items."""
     bp_ids = set()
     po_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:

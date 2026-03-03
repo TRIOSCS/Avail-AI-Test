@@ -34,7 +34,7 @@ class Tag(Base):
     name = Column(String(255), nullable=False)
     tag_type = Column(String(20), nullable=False)  # 'brand' or 'commodity'
     parent_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     parent = relationship("Tag", remote_side=[id], foreign_keys=[parent_id])
     material_tags = relationship("MaterialTag", back_populates="tag", cascade="all, delete-orphan")
@@ -58,7 +58,7 @@ class MaterialTag(Base):
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
     confidence = Column(Float, nullable=False, default=0.0)
     source = Column(String(30), nullable=False)  # existing_data, prefix_lookup, nexar, ai_classified
-    classified_at = Column(DateTime, nullable=True)
+    classified_at = Column(DateTime(timezone=True), nullable=True)
 
     tag = relationship("Tag", back_populates="material_tags")
 
@@ -83,8 +83,8 @@ class EntityTag(Base):
     interaction_count = Column(Float, nullable=False, default=0)
     total_entity_interactions = Column(Float, nullable=False, default=0)
     is_visible = Column(Boolean, nullable=False, default=False)
-    first_seen_at = Column(DateTime, nullable=True)
-    last_seen_at = Column(DateTime, nullable=True)
+    first_seen_at = Column(DateTime(timezone=True), nullable=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
     tag = relationship("Tag", back_populates="entity_tags")
 

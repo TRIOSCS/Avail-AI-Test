@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -16,16 +17,16 @@ class ApiSource(Base):
     category = Column(String(50), nullable=False)
     source_type = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="pending")
-    is_active = Column(Boolean, default=False, nullable=False, server_default="false")
+    is_active = Column(Boolean, default=False, server_default="false")
     description = Column(String(500))
     setup_notes = Column(Text)
     signup_url = Column(String(500))
     env_vars = Column(JSON, default=list)
-    credentials = Column(JSON, default=dict)
+    credentials = Column(JSONB, default=dict)
     last_success = Column(DateTime)
     last_error = Column(String(500))
     last_error_at = Column(DateTime)
-    error_count_24h = Column(Integer, default=0, server_default="0")
+    error_count_24h = Column(Integer, default=0, nullable=False, server_default="0")
     total_searches = Column(Integer, default=0)
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)

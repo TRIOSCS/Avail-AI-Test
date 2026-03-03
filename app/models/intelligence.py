@@ -15,7 +15,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -39,7 +39,7 @@ class MaterialCard(Base):
     rohs_status = Column(String(50))  # compliant, non-compliant, exempt
     pin_count = Column(Integer)
     datasheet_url = Column(String(1000))
-    cross_references = Column(JSON, default=list)  # [{mpn, manufacturer}]
+    cross_references = Column(JSONB, default=list)  # [{mpn, manufacturer}]
     specs_summary = Column(Text)  # Key electrical specs in plain text
     enrichment_source = Column(String(50))  # "gradient_agent", "manual", etc.
     enriched_at = Column(DateTime)
@@ -318,7 +318,7 @@ class ActivityLog(Base):
         Index(
             "ix_activity_external",
             "external_id",
-            unique=True,
+            unique=False,
             postgresql_where=Column("external_id").isnot(None),
         ),
         Index(

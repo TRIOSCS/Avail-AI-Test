@@ -119,7 +119,7 @@ async def get_site(site_id: int, user: User = Depends(require_user), db: Session
                 SiteContact.customer_site_id == site_id,
             )
             .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-            .all()
+            .limit(500).all()
         )
 
     reqs, contacts = await asyncio.gather(
@@ -248,7 +248,7 @@ async def list_site_contacts(
     )
     if not include_archived:
         q = q.filter(SiteContact.is_active == True)  # noqa: E712
-    contacts = q.order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
+    contacts = q.order_by(SiteContact.is_primary.desc(), SiteContact.full_name).limit(500).all()
     return [
         {
             "id": c.id,

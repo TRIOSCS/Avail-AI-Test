@@ -71,14 +71,9 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     Returns dict with b1–b5, o1–o5 scores, labels, raw values, and totals.
     """
-    month_start = month.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
+    from app.services.scoring_helpers import month_range
 
-    start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
+    start_dt, end_dt = month_range(month)
 
     # ── Fetch user's reqs for the month ──
     # Include reqs the user created, sent RFQs on, or logged offers for
@@ -120,7 +115,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # Pre-load offer IDs in quotes and buy plans (same pattern as existing leaderboard)
     quoted_offer_ids = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).all():
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -128,7 +123,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     po_confirmed_offer_ids = set()
     bp_offer_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).all():
+    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
         for item in items or []:
             oid = item.get("offer_id")
             if oid:
@@ -445,14 +440,9 @@ def _buyer_b4_pipeline_hygiene(db, req_ids, user_reqs):
 
 def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     """Compute all 10 sales metrics for a given month."""
-    month_start = month.replace(day=1)
-    if month_start.month == 12:
-        month_end = month_start.replace(year=month_start.year + 1, month=1)
-    else:
-        month_end = month_start.replace(month=month_start.month + 1)
+    from app.services.scoring_helpers import month_range
 
-    start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
+    start_dt, end_dt = month_range(month)
     outbound_types = ("email_sent", "call_outbound")
 
     # ── B1: Account Coverage ──

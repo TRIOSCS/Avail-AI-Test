@@ -13,7 +13,7 @@ Handles notifications for all V3 buy plan state transitions:
 - Resubmit → email + in-app to managers
 
 Called by: routers/crm/buy_plans_v3.py
-Depends on: models, config, utils/graph_client, buyplan_service (_post_teams_channel, _send_teams_dm)
+Depends on: models, config, utils/graph_client, teams_notifications (post_teams_channel, send_teams_dm)
 """
 
 import asyncio
@@ -136,17 +136,17 @@ async def _send_email(user: User, subject: str, html_body: str, db: Session):
 
 
 async def _teams_channel(message: str):
-    """Post to Teams channel (delegates to V1 helper)."""
-    from .buyplan_service import _post_teams_channel
+    """Post to Teams channel (delegates to shared teams_notifications module)."""
+    from app.services.teams_notifications import post_teams_channel
 
-    await _post_teams_channel(message)
+    await post_teams_channel(message)
 
 
 async def _teams_dm(user: User, message: str, db: Session):
-    """Send Teams DM (delegates to V1 helper)."""
-    from .buyplan_service import _send_teams_dm
+    """Send Teams DM (delegates to shared teams_notifications module)."""
+    from app.services.teams_notifications import send_teams_dm
 
-    await _send_teams_dm(user, message, db)
+    await send_teams_dm(user, message, db)
 
 
 # ── Notification Functions ───────────────────────────────────────────

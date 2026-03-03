@@ -121,7 +121,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         )
     except Exception:
         db.rollback()
-        vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).all()
+        vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).limit(1000).all()  # Safety limit
     if vcs:
         card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
         card_map = {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()} if card_ids else {}

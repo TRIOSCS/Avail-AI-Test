@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -30,11 +31,11 @@ class EnrichmentJob(Base):
     processed_items = Column(Integer, default=0)
     enriched_items = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
-    scope = Column(JSON, default=dict)
+    scope = Column(JSONB, default=dict)
     started_by_id = Column(Integer, ForeignKey("users.id"))
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
-    error_log = Column(JSON, default=list)
+    error_log = Column(JSONB, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     started_by = relationship("User", foreign_keys=[started_by_id])

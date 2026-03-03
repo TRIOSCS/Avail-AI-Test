@@ -172,7 +172,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
     # Khoury"), not the company name. We match responses to vendor cards by the
     # email domain (e.g. trioscs.com → "trio supply chain solutions").
     domain_to_norm = {}
-    for card in db.query(VendorCard).filter(VendorCard.domain.isnot(None)).all():
+    for card in db.query(VendorCard).filter(VendorCard.domain.isnot(None)).limit(5000).all():
         domain_to_norm[card.domain.lower()] = card.normalized_name
         for alias in card.domain_aliases or []:
             if alias:

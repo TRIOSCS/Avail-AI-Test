@@ -125,42 +125,42 @@ class TestSchedulerProspectingJobs:
 
     def test_job_pool_health(self):
         with patch("app.services.prospect_scheduler.job_pool_health_report", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_pool_health_report
+            from app.jobs.prospecting_jobs import _job_pool_health_report
 
             asyncio.get_event_loop().run_until_complete(_job_pool_health_report())
             mock.assert_called_once()
 
     def test_job_discover_prospects(self):
         with patch("app.services.prospect_scheduler.job_discover_prospects", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_discover_prospects
+            from app.jobs.prospecting_jobs import _job_discover_prospects
 
             asyncio.get_event_loop().run_until_complete(_job_discover_prospects())
             mock.assert_called_once()
 
     def test_job_enrich_pool(self):
         with patch("app.services.prospect_scheduler.job_enrich_pool", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_enrich_pool
+            from app.jobs.prospecting_jobs import _job_enrich_pool
 
             asyncio.get_event_loop().run_until_complete(_job_enrich_pool())
             mock.assert_called_once()
 
     def test_job_find_contacts(self):
         with patch("app.services.prospect_scheduler.job_find_contacts", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_find_contacts
+            from app.jobs.prospecting_jobs import _job_find_contacts
 
             asyncio.get_event_loop().run_until_complete(_job_find_contacts())
             mock.assert_called_once()
 
     def test_job_refresh_scores(self):
         with patch("app.services.prospect_scheduler.job_refresh_scores", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_refresh_scores
+            from app.jobs.prospecting_jobs import _job_refresh_scores
 
             asyncio.get_event_loop().run_until_complete(_job_refresh_scores())
             mock.assert_called_once()
 
     def test_job_expire_and_resurface(self):
         with patch("app.services.prospect_scheduler.job_expire_and_resurface", new_callable=AsyncMock) as mock:
-            from app.scheduler import _job_expire_and_resurface
+            from app.jobs.prospecting_jobs import _job_expire_and_resurface
 
             asyncio.get_event_loop().run_until_complete(_job_expire_and_resurface())
             mock.assert_called_once()
@@ -176,7 +176,7 @@ class TestSchedulerIntegrityCheck:
         }
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.services.integrity_service.run_integrity_check", return_value=mock_report):
-                from app.scheduler import _job_integrity_check
+                from app.jobs.maintenance_jobs import _job_integrity_check
 
                 asyncio.get_event_loop().run_until_complete(_job_integrity_check())
 
@@ -184,7 +184,7 @@ class TestSchedulerIntegrityCheck:
         mock_db = MagicMock()
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.services.integrity_service.run_integrity_check", side_effect=Exception("db down")):
-                from app.scheduler import _job_integrity_check
+                from app.jobs.maintenance_jobs import _job_integrity_check
 
                 # Should not raise
                 asyncio.get_event_loop().run_until_complete(_job_integrity_check())
@@ -199,7 +199,7 @@ class TestSchedulerMaterialEnrichment:
                 new_callable=AsyncMock,
                 return_value={"enriched": 5, "errors": 0, "pending": 10},
             ):
-                from app.scheduler import _job_material_enrichment
+                from app.jobs.tagging_jobs import _job_material_enrichment
 
                 asyncio.get_event_loop().run_until_complete(_job_material_enrichment())
 
@@ -211,7 +211,7 @@ class TestSchedulerMaterialEnrichment:
                 new_callable=AsyncMock,
                 side_effect=Exception("fail"),
             ):
-                from app.scheduler import _job_material_enrichment
+                from app.jobs.tagging_jobs import _job_material_enrichment
 
                 asyncio.get_event_loop().run_until_complete(_job_material_enrichment())
 
@@ -223,7 +223,7 @@ class TestSchedulerMonthlyEnrichment:
         mock_query.filter.return_value.first.return_value = SimpleNamespace(id=99)
         mock_db.query.return_value = mock_query
         with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.scheduler import _job_monthly_enrichment_refresh
+            from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
 
             asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
         mock_db.close.assert_called_once()
@@ -238,7 +238,7 @@ class TestSchedulerMonthlyEnrichment:
                 with patch(
                     "app.services.deep_enrichment_service.run_backfill_job", new_callable=AsyncMock, return_value=42
                 ):
-                    from app.scheduler import _job_monthly_enrichment_refresh
+                    from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
 
                     asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
 
@@ -246,7 +246,7 @@ class TestSchedulerMonthlyEnrichment:
         mock_db = MagicMock()
         mock_db.query.side_effect = Exception("db error")
         with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.scheduler import _job_monthly_enrichment_refresh
+            from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
 
             asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
 

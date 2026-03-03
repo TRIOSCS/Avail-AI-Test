@@ -31,11 +31,11 @@ class NcSearchQueue(Base):
     priority = Column(SmallInteger, default=3)
     status = Column(String(20), default="pending")
     search_count = Column(Integer, default=0)
-    last_searched_at = Column(DateTime)
+    last_searched_at = Column(DateTime(timezone=True))
     results_count = Column(Integer)
     error_message = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index(

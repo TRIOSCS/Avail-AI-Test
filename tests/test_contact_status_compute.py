@@ -63,7 +63,7 @@ class TestContactStatusCompute:
         return site
 
     def _run_job(self, db_session):
-        from app.scheduler import _job_contact_status_compute
+        from app.jobs.email_jobs import _job_contact_status_compute
 
         # Patch SessionLocal so the job uses our test session, and patch close() to no-op
         with patch("app.database.SessionLocal", _FakeSessionLocal(db_session)):

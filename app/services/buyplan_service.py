@@ -18,9 +18,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..http_client import http
 from ..models import ActivityLog, BuyPlan, Offer, User
-from ..services.credential_service import get_credential_cached
 
 # ── Background Task Helper ─────────────────────────────────────────────
 
@@ -612,73 +610,23 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
 
 
 async def _post_teams_channel(message: str):
-    """Post a message to the configured Teams channel via webhook."""
-    if not get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"):
-        logger.debug("Teams webhook not configured — skipping channel post")
-        return
-    try:
-        resp = await http.post(
-            get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"),
-            json={
-                "type": "message",
-                "attachments": [
-                    {
-                        "contentType": "application/vnd.microsoft.card.adaptive",
-                        "content": {
-                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                            "type": "AdaptiveCard",
-                            "version": "1.4",
-                            "body": [{"type": "TextBlock", "text": message, "wrap": True}],
-                        },
-                    }
-                ],
-            },
-            timeout=15,
-        )
-        if resp.status_code not in (200, 202):
-            logger.warning(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
-    except Exception as e:
-        logger.error(f"Teams channel post failed: {e}")
+    """Post a message to the configured Teams channel via webhook.
+
+    Delegates to shared teams_notifications module.
+    """
+    from app.services.teams_notifications import post_teams_channel
+
+    await post_teams_channel(message)
 
 
 async def _send_teams_dm(user: User, message: str, db: Session = None):
-    """Send a direct Teams message to a user via Graph API."""
-    if not user.access_token and not db:
-        logger.debug(f"No token for {user.email}, skipping Teams DM")
-        return
-    try:
-        from ..utils.graph_client import GraphClient
+    """Send a direct Teams message to a user via Graph API.
 
-        if db:
-            from ..scheduler import get_valid_token
+    Delegates to shared teams_notifications module.
+    """
+    from app.services.teams_notifications import send_teams_dm
 
-            token = await get_valid_token(user, db)
-        else:
-            token = user.access_token
-        if not token:
-            logger.debug(f"No valid token for {user.email}, skipping Teams DM")
-            return
-        gc = GraphClient(token)
-        # Create or get 1:1 chat with the user (self-chat acts as notification)
-        chat = await gc.post_json(
-            "/chats",
-            {
-                "chatType": "oneOnOne",
-                "members": [
-                    {
-                        "@odata.type": "#microsoft.graph.aadUserConversationMember",
-                        "roles": ["owner"],
-                        "user@odata.bind": f"https://graph.microsoft.com/v1.0/users/{user.email}",
-                    }
-                ],
-            },
-        )
-        chat_id = chat.get("id")
-        if chat_id:
-            await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
-            logger.info(f"Teams DM sent to {user.email}")
-    except Exception as e:
-        logger.debug(f"Teams DM to {user.email} failed (may not have Chat permissions): {e}")
+    await send_teams_dm(user, message, db)
 
 
 # ── PO Email Verification ────────────────────────────────────────────────

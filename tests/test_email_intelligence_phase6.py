@@ -236,7 +236,7 @@ class TestJobEmailHealthUpdate:
                 mock_batch,
             ),
         ):
-            from app.scheduler import _job_email_health_update
+            from app.jobs.email_jobs import _job_email_health_update
 
             await _job_email_health_update()
 
@@ -254,7 +254,7 @@ class TestJobEmailHealthUpdate:
                 side_effect=RuntimeError("db down"),
             ),
         ):
-            from app.scheduler import _job_email_health_update
+            from app.jobs.email_jobs import _job_email_health_update
 
             # Should not raise
             await _job_email_health_update()
@@ -316,7 +316,7 @@ class TestJobCalendarScan:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch(
-                "app.scheduler.get_valid_token",
+                "app.utils.token_manager.get_valid_token",
                 new_callable=AsyncMock,
                 return_value="valid-token",
             ),
@@ -325,7 +325,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 
@@ -355,7 +355,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 
@@ -380,7 +380,7 @@ class TestJobCalendarScan:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch(
-                "app.scheduler.get_valid_token",
+                "app.utils.token_manager.get_valid_token",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -389,7 +389,7 @@ class TestJobCalendarScan:
                 mock_scan,
             ),
         ):
-            from app.scheduler import _job_calendar_scan
+            from app.jobs.email_jobs import _job_calendar_scan
 
             await _job_calendar_scan()
 

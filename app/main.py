@@ -175,7 +175,7 @@ OPENAPI_TAGS = [
 ]
 
 app = FastAPI(
-    title="AVAIL — Opportunity Management",
+    title="AVAIL — Electronic Component Sourcing",
     description="Electronic component sourcing engine with vendor intelligence, RFQ automation, and CRM.",
     version=APP_VERSION,
     openapi_tags=OPENAPI_TAGS,
@@ -294,27 +294,24 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 # Secret key validation moved to lifespan (fail-fast)
 
 
-# L0: CSP middleware — generates a per-request nonce for inline scripts
-import secrets
-
-
+# L0: CSP middleware — restrict script/style sources
 @app.middleware("http")
 async def csp_middleware(request: Request, call_next):
-    """Add Content-Security-Policy header with a per-request nonce.
+    """Add Content-Security-Policy header.
 
-    The nonce is stored on request.state so templates can embed it in
-    <script> tags, replacing the old 'unsafe-inline' directive.
+    Uses 'unsafe-inline' for script-src because the app relies on inline
+    onclick handlers throughout the SPA template.  A nonce cannot be used
+    alongside 'unsafe-inline' — browsers that support nonces silently
+    ignore 'unsafe-inline', which breaks all inline event handlers.
     """
-    nonce = secrets.token_urlsafe(16)
-    request.state.csp_nonce = nonce
     response = await call_next(request)
     csp = (
-        f"default-src 'self'; "
-        f"script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
-        f"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        f"font-src 'self' https://fonts.gstatic.com; "
-        f"img-src 'self' data:; "
-        f"connect-src 'self'"
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'"
     )
     response.headers["Content-Security-Policy"] = csp
     return response
@@ -913,9 +910,15 @@ from .routers.auth import router as auth_router
 
 app.include_router(auth_router)
 
-from .routers.vendors import router as vendors_router
+from .routers.vendors_crud import router as vendors_crud_router
+from .routers.vendor_contacts import router as vendor_contacts_router
+from .routers.materials import router as materials_router
+from .routers.vendor_analytics import router as vendor_analytics_router
 
-app.include_router(vendors_router)
+app.include_router(vendors_crud_router)
+app.include_router(vendor_contacts_router)
+app.include_router(materials_router)
+app.include_router(vendor_analytics_router)
 from .routers.crm import router as crm_router
 
 app.include_router(crm_router)

@@ -6,8 +6,10 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#3b6ea8">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-title" content="AVAIL">
-    <title>AVAIL — Opportunity Management</title>
+    <title>AVAIL — Electronic Component Sourcing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -34,9 +36,9 @@
     <img src="/static/avail_logo.png" alt="AVAIL" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer" title="Back to Requirements">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
-            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">Open</button>
-            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
-            <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
+            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)" title="Your active requisitions — manage parts, quotes, and RFQs. Same reqs as Sourcing tab, focused on quoting workflow.">Open</button>
+            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Same active requisitions as Open tab, focused on sourcing — track vendor sightings, RFQ responses, and search activity.">Sourcing</button>
+            <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
         <div class="search-wrap">
             <input type="text" class="sbox" id="mainSearch" placeholder="Search customer, part, requirement&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
@@ -77,23 +79,25 @@
 
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
-    <button type="button" class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
-    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer">
-    <div class="search-wrap mobile-search-wrap">
-        <input type="text" class="sbox mobile-search" id="mobileMainSearch"
-               placeholder="Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
-        <button type="button" class="search-btn" id="mobileSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
-    </div>
-    <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
-        &#x1f514;<span id="mobileNotifBadge" class="notif-badge" style="position:absolute;top:-4px;right:-4px;display:none">0</span>
+    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="mobileTabNav('reqs',document.querySelector('.m-bottomnav-tab[data-nav=reqs]'))" style="cursor:pointer">
+    <div class="m-topbar-spacer"></div>
+    <button type="button" class="m-topbar-btn m-search-toggle" id="mobileSearchToggle" onclick="_toggleMobileSearch()">
+        <svg viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
+    <button type="button" class="m-topbar-btn" onclick="_showMobileUserMenu()" id="mobileUserBtn">
+        <span class="m-avatar" id="mobileUserAvatar"></span>
+    </button>
+</div>
+<div class="m-search-bar hidden" id="mobileSearchBar">
+    <input type="text" class="sbox" id="mobileMainSearch" placeholder="Search customer, part, requirement…" aria-label="Search" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter'){triggerMainSearch();_toggleMobileSearch()}">
+    <button type="button" class="m-search-cancel" onclick="_toggleMobileSearch()">Cancel</button>
 </div>
 <!-- Mobile action toolbar — view pills + quick actions -->
 <div class="mobile-toolbar" id="mobileToolbar">
     <div class="fpills fpills-sm" id="mobilePills">
-        <button type="button" class="fp fp-sm on" data-view="rfq" onclick="setMainView('rfq',this);_syncMobilePills(this)">Open</button>
-        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)">Sourcing</button>
-        <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)">Archive</button>
+        <button type="button" class="fp fp-sm on" data-view="rfq" onclick="setMainView('rfq',this);_syncMobilePills(this)" title="Active requisitions">Open</button>
+        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)" title="Sourcing progress">Sourcing</button>
+        <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)" title="Completed RFQs">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
     <select id="mobileUserFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user"></select>
@@ -151,11 +155,10 @@
         </div>
         <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
         {% if is_admin %}
-        <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
+        <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--settings-color);--section-dot:var(--settings-dot);--section-border:var(--settings-border)">
             <div class="sb-section-dot"></div>
             <div class="sb-group-items" style="padding-top:4px">
-                <button type="button" class="sb-nav-btn" id="navTickets" data-tip="Tickets" onclick="sidebarNav('tickets',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"/></svg></span> Tickets</button>
-                <button type="button" class="sb-nav-btn" id="navApiHealth" data-tip="API Health" onclick="sidebarNav('apihealth',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span> API Health<span id="apiHealthBadge" class="sb-badge" style="display:none;background:var(--red);color:#fff"></span></button>
+                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings<span id="apiHealthBadge" class="sb-badge u-hidden" style="background:var(--red);color:#fff"></span></button>
             </div>
         </div>
         {% endif %}
@@ -169,12 +172,11 @@
             {% if is_admin %}<span class="rb">Admin</span>{% endif %}
             <div class="sb-user-popover">
                 <div class="sb-user-popover-name">{{ user_name }}{% if is_admin %} <span class="rb">Admin</span>{% endif %}</div>
-                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
                 <button type="button" onclick="var csrf=document.cookie.match(/csrftoken=([^;]+)/);fetch('/auth/logout',{method:'POST',headers:csrf?{'x-csrftoken':csrf[1]}:{}}).then(()=>location.reload()).catch(()=>showToast('Logout failed','error'))"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Logout</button>
                 <div style="font-size:10px;color:var(--muted);padding:4px 0;border-top:1px solid var(--border);margin-top:4px">v{{ app_version }}</div>
             </div>
         </div>
-        <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
+        <span id="m365Status" class="u-hidden" style="font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
     </div>
 </aside>
 
@@ -184,8 +186,17 @@
 
     <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
+        <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>
+        <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
+        <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
+            <button type="button" class="m-tab-pill active" data-view="rfq" onclick="mobileReqPillTap('rfq',this)">Open</button>
+            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
+            <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
+        </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
+    <!-- Mobile FAB — floating action button for new requisition -->
+    <button type="button" class="m-fab m-mobile-only" onclick="openNewReqModal()" aria-label="New requisition" title="New requisition">+</button>
 
     <!-- VIEW: Requisition Detail (removed — drill-down sub-tabs replaced this) -->
     <div id="view-detail" class="hidden"></div>
@@ -194,6 +205,7 @@
     <div id="logOfferModal" class="modal-bg" onclick="if(event.target===this)closeLogOfferModal()">
         <div class="modal modal-lg">
             <h2>Log Confirmed Offer</h2>
+            <div id="loReqContext" style="display:none;padding:6px 12px;background:var(--bg);border-radius:6px;margin-bottom:8px;font-size:13px"></div>
             <form id="logOfferForm" onsubmit="event.preventDefault();submitLogOffer()">
                 <input type="hidden" id="loReqId">
                 <div class="lo-form">
@@ -201,7 +213,7 @@
                         <select id="loReqPart" required><option value="">Select part...</option></select>
                     </div>
                     <div class="field field-full" style="position:relative"><label>Vendor Name *</label>
-                        <input id="loVendor" required placeholder="Start typing vendor name..." autocomplete="off">
+                        <input id="loVendor" required placeholder="Type to search existing vendors..." autocomplete="off">
                         <div id="loVendorSuggestions" class="ac-dropdown"></div>
                     </div>
                     <div class="field"><label>Qty Available</label>
@@ -251,11 +263,11 @@
     </div>
 
     <!-- VIEW: Customers (full-width table + slide drawer) -->
-    <div id="view-customers" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-customers" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Accounts</h2>
             <div class="crm-header-actions">
-                <label id="custMyOnlyLabel" style="display:none;font-size:11px;gap:4px;cursor:pointer;align-items:center">
+                <label id="custMyOnlyLabel" class="u-hidden" style="font-size:11px;gap:4px;cursor:pointer;align-items:center">
                     <input type="checkbox" id="custMyOnly" onchange="loadCustomers()"> My accounts
                 </label>
                 <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Account</button>
@@ -309,7 +321,7 @@
     </div>
 
     <!-- VIEW: Prospecting (accounts-first hierarchy) -->
-    <div id="view-prospecting" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-prospecting" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header" style="gap:12px;flex-wrap:wrap">
             <h2>Prospecting</h2>
             <div id="prospectCapBar" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)"></div>
@@ -358,7 +370,7 @@
     </div>
 
     <!-- VIEW: Suggested (unified prospect pool from prospect_accounts) -->
-    <div id="view-suggested" style="display:none;flex-direction:column;height:100%;min-height:0">
+    <div id="view-suggested" class="u-hidden" style="flex-direction:column;height:100%;min-height:0">
         <div class="crm-header">
             <h2>Suggested Accounts</h2>
         </div>
@@ -449,9 +461,10 @@
     </div>
 
     <!-- VIEW: Vendors (full-width table + slide drawer) -->
-    <div id="view-vendors" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-vendors" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Vendors</h2>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()" style="margin-left:auto">+ Add Vendor</button>
         </div>
         <div class="crm-toolbar">
             <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
@@ -496,15 +509,15 @@
             <input class="sbox sbox-wide" id="materialSearch" placeholder="Search by MPN or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
             <button type="button" class="tb-btn" onclick="toggleStockImport()">Import Stock</button>
         </div>
-        <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
+        <div id="stockImportArea" data-role="buyer" style="margin-bottom:12px" class="card u-hidden">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
                 <div class="site-typeahead" style="flex:1;min-width:150px"><input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" autocomplete="off" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"><div class="site-typeahead-list" id="stockVendorNameList"></div></div>
-                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" aria-label="Vendor website URL" class="ac-website-inline" style="display:none;flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
-                <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
+                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" aria-label="Vendor website URL" class="ac-website-inline u-hidden" style="flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" class="u-hidden" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
                 <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
-            <div id="stockFileReady" style="display:none;margin-top:8px">
+            <div id="stockFileReady" class="u-hidden" style="margin-top:8px">
                 <div style="display:flex;gap:8px;align-items:center">
                     <span style="font-size:12px;color:var(--text2)">📄 <span id="stockFileName"></span></span>
                     <button type="button" class="btn btn-primary btn-sm" onclick="doStockImport()">Import</button>
@@ -542,7 +555,7 @@
                 <button type="button" class="btn btn-ghost btn-sm" id="proactiveRefreshBtn" onclick="refreshProactiveMatches()">Refresh Matches</button>
             </div>
         </div>
-        <div id="proactiveStatsBar" style="display:none;margin:0 16px 12px"></div>
+        <div id="proactiveStatsBar" class="u-hidden" style="margin:0 16px 12px"></div>
         <div class="tabs" id="proactiveTabs">
             <button type="button" class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
             <button type="button" class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
@@ -565,7 +578,7 @@
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
-            <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
+            <div id="nrSiteSelected" class="u-hidden" style="margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
                 <span id="nrSiteSelectedLabel" class="u-fw-600"></span>
                 <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
             </div>
@@ -577,7 +590,7 @@
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="nrAsap" onchange="if(this.checked)document.getElementById('nrDeadline').value=''"> ASAP</label>
             </div>
         </div>
-        <div class="field" id="nrContactField" style="margin-top:10px;display:none">
+        <div class="field" id="nrContactField" class="u-hidden" style="margin-top:10px">
             <label>Requesting Contact</label>
             <select id="nrContactSelect" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
                 <option value="">— Select contact —</option>
@@ -600,7 +613,7 @@
                 <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin:0">Checking vendor contacts…</p>
             </div>
             <div id="rfqPrepareVendors" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
-            <div id="rfqPrepareCancel" style="display:none;margin-bottom:8px"></div>
+            <div id="rfqPrepareCancel" class="u-hidden" style="margin-bottom:8px"></div>
             <button type="button" class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
         </div>
         <div id="rfqReady" class="hidden">
@@ -627,7 +640,7 @@
                 <label>Message <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:6px" onclick="navigator.clipboard.writeText(document.getElementById('rfqBody').value);showToast('Body copied','success')" title="Copy body to clipboard">Copy</button></label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
             </div>
-            <div id="aiDraftWrap" style="display:none;margin-bottom:8px;text-align:right">
+            <div id="aiDraftWrap" class="u-hidden" style="margin-bottom:8px;text-align:right">
                 <button type="button" class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="aiDraftRfq(this)">AI Draft</button>
             </div>
             <div class="mactions">
@@ -649,7 +662,7 @@
             <h3 style="margin-bottom:12px">Send Results</h3>
             <div id="rfqResultsList" style="max-height:340px;overflow-y:auto;margin-bottom:12px"></div>
             <div class="mactions">
-                <button type="button" class="btn btn-danger" id="rfqRetryBtn" onclick="rfqRetryFailed()" style="display:none">Retry Failed</button>
+                <button type="button" class="btn btn-danger u-hidden" id="rfqRetryBtn" onclick="rfqRetryFailed()">Retry Failed</button>
                 <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Close</button>
             </div>
         </div>
@@ -740,7 +753,7 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" style="display:none;margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
+        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" class="u-hidden" style="margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
         <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
@@ -854,7 +867,7 @@
         <label style="display:block;margin-bottom:8px;font-size:12px;font-weight:600">Recipient</label>
         <select id="sqContactSelect" onchange="onSqContactChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:8px">
         </select>
-        <div id="sqManualRow" style="display:none;margin-bottom:8px">
+        <div id="sqManualRow" class="u-hidden" style="margin-bottom:8px">
             <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:2px">Email address</label>
             <input id="sqManualEmail" type="email" placeholder="name@company.com" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
         </div>
@@ -1092,7 +1105,7 @@
 </div>
 
     <!-- VIEW: Contact Intelligence (full-width table) -->
-    <div id="view-contacts" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-contacts" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Contacts</h2>
             <div class="crm-header-actions">
@@ -1160,32 +1173,28 @@
 
 
     <!-- VIEW: Settings (admin only) -->
-    <div id="view-tickets" class="hidden"></div>
-
-    <div id="view-apihealth" class="hidden">
-        <div class="vendor-header">
-            <h2>API Health Monitor</h2>
-            <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
-        </div>
-        <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
-    </div>
-
     <div id="view-settings" class="hidden">
         <div class="vendor-header">
             <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button type="button" class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
+            <button type="button" class="tab on" onclick="switchSettingsTab('profile',this)">My Profile</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
             <button type="button" class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
-            <!-- Trouble Tickets tab removed — unified into sidebar Tickets view -->
+            <button type="button" class="tab" onclick="switchSettingsTab('tickets',this)">Tickets</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('apihealth',this)">API Health</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
-        <div id="settings-users" class="settings-panel">
+        <div id="settings-profile" class="settings-panel">
+            <p class="empty">Loading profile...</p>
+        </div>
+
+        <div id="settings-users" class="settings-panel hidden">
             <div id="adminUsersList"><p class="empty">Loading...</p></div>
             <div class="card s-card" style="margin-top:16px">
                 <h3>Create New User</h3>
@@ -1335,7 +1344,15 @@
             </div>
         </div>
 
-        <!-- settings-tickets panel removed — unified into sidebar Tickets view -->
+        <div id="settings-tickets" class="settings-panel hidden"></div>
+
+        <div id="settings-apihealth" class="settings-panel hidden">
+            <div class="vendor-header" style="margin-bottom:12px">
+                <h3 style="margin:0">API Health Monitor</h3>
+                <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+            </div>
+            <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+        </div>
 
         <div id="settings-transfer" class="settings-panel hidden">
             <div style="display:flex;gap:16px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap">
@@ -1368,6 +1385,23 @@
 
     </div><!-- end view-settings -->
     </div><!-- end main-scroll -->
+
+    <!-- Mobile Offers Feed -->
+    <div id="view-offers" class="u-hidden m-mobile-only" style="display:none">
+        <div class="m-tabs-scroll" id="offerFeedTabs">
+            <button class="m-tab-pill active" onclick="_setOfferFeedFilter('pending',this)">Pending</button>
+            <button class="m-tab-pill" onclick="_setOfferFeedFilter('all',this)">All</button>
+            <button class="m-tab-pill" onclick="_setOfferFeedFilter('accepted',this)">Accepted</button>
+        </div>
+        <div class="m-summary" id="offerFeedSummary"></div>
+        <div id="offerFeedList"></div>
+    </div>
+
+    <!-- Mobile Alerts Feed -->
+    <div id="view-alerts" class="u-hidden m-mobile-only" style="display:none">
+        <div id="alertsFeedList"></div>
+    </div>
+
 </main><!-- end main -->
 
 <!-- Mobile bottom navigation — 5 tabs, hidden on desktop via m-mobile-only -->
@@ -1375,18 +1409,21 @@
     <button type="button" class="m-bottomnav-tab active" data-nav="reqs" onclick="mobileTabNav('reqs',this)">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         <span>Reqs</span>
+        <span class="m-bottomnav-badge" id="bnBadgeReqs"></span>
     </button>
     <button type="button" class="m-bottomnav-tab" data-nav="customers" onclick="mobileTabNav('customers',this)">
         <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
         <span>Accounts</span>
     </button>
-    <button type="button" class="m-bottomnav-tab" data-nav="vendors" onclick="mobileTabNav('vendors',this)">
-        <svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg>
-        <span>Vendors</span>
+    <button type="button" class="m-bottomnav-tab" data-nav="offers" onclick="mobileTabNav('offers',this)">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Offers</span>
+        <span class="m-bottomnav-badge" id="bnBadgeOffers"></span>
     </button>
-    <button type="button" class="m-bottomnav-tab" data-nav="suggested" onclick="mobileTabNav('suggested',this)">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-        <span>Prospect</span>
+    <button type="button" class="m-bottomnav-tab" data-nav="alerts" onclick="mobileTabNav('alerts',this)">
+        <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span>Alerts</span>
+        <span class="m-bottomnav-badge" id="bnBadgeAlerts"></span>
     </button>
     <button type="button" class="m-bottomnav-tab" data-nav="more" onclick="toggleMobileMore(this)">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
@@ -1395,13 +1432,12 @@
 </nav>
 <!-- Mobile "More" popover -->
 <div class="m-more-popover m-mobile-only" id="mobileMorePopover">
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('vendors')"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg> Vendors</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('materials')"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Materials</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('buyplans')"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg> Buy Plans</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('proactive')"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> Proactive</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Command Center</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Dashboard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('scorecard')"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg> Scorecard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('contacts')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Contacts</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('prospecting')"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Prospecting</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('settings')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
 </div>
 
@@ -1433,6 +1469,14 @@
     </div>
 </div>
 
+<!-- Archive Outcome Modal -->
+<div id="archiveOutcomeModal" class="modal-bg" onclick="if(event.target===this)closeModal('archiveOutcomeModal')">
+    <div class="modal" style="max-width:360px">
+        <h2 style="font-size:16px;margin-bottom:4px">Close Requisition</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:16px">How did this requisition close?</p>
+        <div style="display:flex;flex-direction:column;gap:8px" id="archiveOutcomeButtons"></div>
+    </div>
+</div>
 
 <!-- Floating trouble ticket pill — always visible -->
 <button type="button" id="troublePill" onclick="openTroubleChat()" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s;letter-spacing:.3px" onmouseover="this.style.transform='scale(1.06)';this.style.boxShadow='0 6px 20px rgba(239,68,68,.5),0 2px 6px rgba(0,0,0,.2)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15)'">
@@ -1444,9 +1488,16 @@
 <!-- System notification bell — placeholder, wired up when notification service is registered -->
 {% endif %}
 
-<script type="application/json" id="app-config" nonce="{{ csp_nonce }}">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" nonce="{{ csp_nonce }}"></script>
+<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(function(e) {
+    console.warn('SW registration failed:', e);
+  });
+}
+</script>
 </body>
 </html>

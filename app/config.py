@@ -2,7 +2,7 @@
 
 import os
 
-APP_VERSION = "3.0.0"
+APP_VERSION = "3.0.1"
 
 # Microsoft Graph API scopes — single source of truth for auth + token refresh.
 # These must match exactly to prevent scope loss after token refresh.

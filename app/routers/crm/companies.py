@@ -86,8 +86,34 @@ async def list_companies(
         total = query.count()
         companies = query.offset(offset).limit(limit).all()
 
+        # Compute per-company win_rate and last_req_date
+        company_ids = [c.id for c in companies]
+        stats_map: dict[int, dict] = {}
+        if company_ids:
+            from sqlalchemy import case as sa_case
+
+            stats_rows = (
+                db.query(
+                    CustomerSite.company_id,
+                    sqlfunc.count(sa_case((Requisition.status == "won", 1))).label("won_count"),
+                    sqlfunc.count(sa_case((Requisition.status.in_(["won", "lost"]), 1))).label("decided_count"),
+                    sqlfunc.max(Requisition.created_at).label("last_req_date"),
+                )
+                .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
+                .filter(CustomerSite.company_id.in_(company_ids))
+                .group_by(CustomerSite.company_id)
+                .all()
+            )
+            for row in stats_rows:
+                wr = round(row.won_count / row.decided_count * 100) if row.decided_count > 0 else None
+                stats_map[row.company_id] = {
+                    "win_rate": wr,
+                    "last_req_date": row.last_req_date.isoformat() if row.last_req_date else None,
+                }
+
         items = []
         for c in companies:
+            st = stats_map.get(c.id, {})
             items.append(
                 {
                     "id": c.id,
@@ -123,6 +149,8 @@ async def list_companies(
                     else None,
                     "site_count": c.site_count or 0,
                     "open_req_count": c.open_req_count or 0,
+                    "win_rate": st.get("win_rate"),
+                    "last_req_date": st.get("last_req_date"),
                 }
             )
         return {"items": items, "total": total, "limit": limit, "offset": offset}
