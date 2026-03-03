@@ -942,7 +942,7 @@ async def test_scheduler_internal_boost_job(db_session):
     """_job_internal_boost calls boost_confidence_internal."""
     with patch("app.database.SessionLocal", return_value=db_session):
         with patch("app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}) as mock_boost:
-            from app.scheduler import _job_internal_boost
+            from app.jobs.tagging_jobs import _job_internal_boost
             await _job_internal_boost()
             mock_boost.assert_called_once_with(db_session)
 
@@ -952,7 +952,7 @@ async def test_scheduler_prefix_backfill_job(db_session):
     """_job_prefix_backfill calls run_prefix_backfill."""
     with patch("app.database.SessionLocal", return_value=db_session):
         with patch("app.services.tagging_backfill.run_prefix_backfill", return_value={"total_processed": 0}) as mock_pf:
-            from app.scheduler import _job_prefix_backfill
+            from app.jobs.tagging_jobs import _job_prefix_backfill
             await _job_prefix_backfill()
             mock_pf.assert_called_once_with(db_session)
 
@@ -965,7 +965,7 @@ async def test_scheduler_sighting_mining_job(db_session):
             "app.services.tagging_backfill.backfill_manufacturer_from_sightings",
             return_value={"total_tagged": 0},
         ) as mock_sm:
-            from app.scheduler import _job_sighting_mining
+            from app.jobs.tagging_jobs import _job_sighting_mining
             await _job_sighting_mining()
             mock_sm.assert_called_once_with(db_session)
 

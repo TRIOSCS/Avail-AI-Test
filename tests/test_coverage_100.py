@@ -221,7 +221,7 @@ class TestVendorFuzzyFallback:
 
     def test_get_or_create_card_without_thefuzz(self, db_session):
         """get_or_create_card skips fuzzy when thefuzz missing (lines 144-145)."""
-        from app.routers.vendors import get_or_create_card
+        from app.utils.vendor_helpers import get_or_create_card
 
         with patch.dict(sys.modules, {"thefuzz": None, "thefuzz.fuzz": None}):
             card = get_or_create_card("Brand New Vendor ZZZ", db_session)

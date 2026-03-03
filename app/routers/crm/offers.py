@@ -349,7 +349,7 @@ async def create_offer(
 
     # Background vendor enrichment — fire after commit so card is persisted
     if _enrich_new_card:
-        from ...routers.vendors import _background_enrich_vendor
+        from ...utils.vendor_helpers import _background_enrich_vendor
 
         asyncio.create_task(_background_enrich_vendor(*_enrich_new_card))
 

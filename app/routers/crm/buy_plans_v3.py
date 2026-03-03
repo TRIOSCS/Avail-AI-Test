@@ -209,7 +209,8 @@ async def list_verification_group(
     db: Session = Depends(get_db),
 ):
     """List all members of the ops verification group."""
-    members = db.query(VerificationGroupMember).options(joinedload(VerificationGroupMember.user)).all()
+    # Safety cap — verification group is small by design but guard against unbounded growth
+    members = db.query(VerificationGroupMember).options(joinedload(VerificationGroupMember.user)).limit(1000).all()
     return {
         "items": [
             {

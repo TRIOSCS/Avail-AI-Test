@@ -134,7 +134,8 @@ def test_add_requirement_teams_alert_exception(client, db_session, test_requisit
 # ── 3. Skip empty row in upload requirements (requisitions.py line 779) ──
 
 
-def test_upload_requirements_file_with_empty_mpn_rows(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_file_with_empty_mpn_rows(mock_sl, client, db_session, test_requisition):
     """Upload requirements CSV where some rows have empty MPN -- should be skipped."""
     csv_content = b"mpn,qty,target_price\nLM317T,1000,0.50\n,500,0.30\n   ,200,0.25\nNE555P,800,0.40"
     with patch("app.file_utils.parse_tabular_file") as mock_parse:
@@ -809,7 +810,8 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
 # ── 18. Upload with substitutes containing empty MPN (line 779) ──
 
 
-def test_upload_requirements_with_empty_substitute(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_with_empty_substitute(mock_sl, client, db_session, test_requisition):
     """Upload requirements CSV with substitutes that have empty MPNs -- should skip them."""
     csv_content = b'mpn,qty,substitutes\nLM317T,1000,"LM337T,,  ,NE555P"'
     with patch("app.file_utils.parse_tabular_file") as mock_parse:
@@ -902,7 +904,7 @@ def test_backfill_emails_skips_vendor_name_normalizes_to_empty(admin_client, db_
 @pytest.mark.asyncio
 async def test_vendor_contact_lookup_integrity_error_direct(db_session, test_user):
     """Direct test of vendor contact lookup IntegrityError handling."""
-    from app.routers.vendors import lookup_vendor_contact
+    from app.routers.vendor_contacts import lookup_vendor_contact
     from app.schemas.vendors import VendorContactLookup
 
     # Pre-create the card
@@ -942,7 +944,7 @@ async def test_vendor_contact_lookup_integrity_error_direct(db_session, test_use
 @pytest.mark.asyncio
 async def test_standalone_stock_import_vendor_card_integrity_direct(db_session, test_user):
     """Direct test of vendor card IntegrityError during stock import (lines 1456-1458)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     # Pre-create the vendor card so an attempt to create another raises IntegrityError
     vc = VendorCard(
@@ -983,7 +985,8 @@ async def test_standalone_stock_import_vendor_card_integrity_direct(db_session, 
 # ── 24. Upload requirements with substitutes that skip normalize_mpn (line 779) ──
 
 
-def test_upload_requirements_csv_with_bad_substitutes(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_csv_with_bad_substitutes(mock_sl, client, db_session, test_requisition):
     """Upload CSV where a row has substitutes with blank entries that get skipped (line 779)."""
     # The file_utils parse returns rows, and the upload code handles subs processing
     # We need rows where substitutes column contains empty/invalid entries
@@ -1043,7 +1046,7 @@ def test_vendor_search_fts_zero_results_fallback(client, db_session, test_vendor
 @pytest.mark.asyncio
 async def test_vendor_contact_lookup_flush_integrity_error(db_session, test_user):
     """Vendor contact lookup: flush IntegrityError -> rollback -> re-query (lines 704-706)."""
-    from app.routers.vendors import lookup_vendor_contact
+    from app.routers.vendor_contacts import lookup_vendor_contact
     from app.schemas.vendors import VendorContactLookup
 
     # Pre-create the card that will be "found" after the IntegrityError
@@ -1098,7 +1101,7 @@ async def test_vendor_contact_lookup_flush_integrity_error(db_session, test_user
 @pytest.mark.asyncio
 async def test_vendor_search_fts_returns_results(db_session, test_user):
     """FTS query succeeds and returns results (lines 299-300)."""
-    from app.routers.vendors import list_vendors
+    from app.routers.vendors_crud import list_vendors
 
     card = VendorCard(
         normalized_name="fts test vendor",
@@ -1151,7 +1154,7 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
 @pytest.mark.asyncio
 async def test_vendor_search_fts_zero_results(db_session, test_user):
     """FTS query succeeds but returns 0 results, falls back to ILIKE (lines 301-304)."""
-    from app.routers.vendors import list_vendors
+    from app.routers.vendors_crud import list_vendors
 
     card = VendorCard(
         normalized_name="ilike fallback vendor",
@@ -1209,7 +1212,7 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
 @pytest.mark.asyncio
 async def test_stock_import_vendor_card_integrity_error(db_session, test_user):
     """VendorCard flush IntegrityError during stock import (lines 1456-1458)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     mock_file = MagicMock()
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")
@@ -1311,7 +1314,7 @@ def test_stock_import_mpn_normalizes_to_empty(client, db_session, test_user):
 @pytest.mark.asyncio
 async def test_stock_import_material_card_integrity_error(db_session, test_user):
     """MaterialCard flush IntegrityError during stock import (lines 1487-1489)."""
-    from app.routers.vendors import import_stock_list_standalone
+    from app.routers.materials import import_stock_list_standalone
 
     mock_file = MagicMock()
     mock_file.read = AsyncMock(return_value=b"mpn,qty,price\nLM317T,100,0.50")
@@ -1495,7 +1498,8 @@ def test_build_quote_email_html_zero_price(db_session, test_user):
 # =========================================================================
 
 
-def test_upload_requirements_substitute_normalizes_to_none(client, db_session, test_requisition):
+@patch("app.database.SessionLocal")
+def test_upload_requirements_substitute_normalizes_to_none(mock_sl, client, db_session, test_requisition):
     """Upload where a substitute normalize_mpn returns None (line 779)."""
     # A substitute like "-" will normalize_mpn → None, triggering the continue
     csv_content = b"mpn,qty,sub_1,sub_2\nLM317T,1000,-,LM337T"

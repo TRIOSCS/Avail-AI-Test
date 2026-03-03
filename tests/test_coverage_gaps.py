@@ -914,7 +914,8 @@ class TestRequisitionUploadExtended:
         )
         assert resp.status_code == 413
 
-    def test_upload_with_sub_columns(self, client, test_requisition):
+    @patch("app.database.SessionLocal")
+    def test_upload_with_sub_columns(self, mock_sl, client, test_requisition):
         csv_bytes = "mpn,qty,sub_1,sub_2\nABC123,100,DEF456,GHI789".encode()
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/upload",
@@ -923,7 +924,8 @@ class TestRequisitionUploadExtended:
         assert resp.status_code == 200
         assert resp.json()["created"] >= 1
 
-    def test_upload_with_empty_mpn_rows(self, client, test_requisition):
+    @patch("app.database.SessionLocal")
+    def test_upload_with_empty_mpn_rows(self, mock_sl, client, test_requisition):
         csv_bytes = "mpn,qty\n,100\nABC123,200\n,50".encode()
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/upload",
@@ -932,7 +934,8 @@ class TestRequisitionUploadExtended:
         assert resp.status_code == 200
         assert resp.json()["created"] >= 1
 
-    def test_upload_with_invalid_substitute(self, client, test_requisition):
+    @patch("app.database.SessionLocal")
+    def test_upload_with_invalid_substitute(self, mock_sl, client, test_requisition):
         csv_bytes = 'mpn,qty,substitutes\nABC123,100,",,,  "'.encode()
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/upload",

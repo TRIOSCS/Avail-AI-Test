@@ -390,7 +390,7 @@ async def rfq_prepare(
             subs_map[r.primary_mpn] = [s for s in r.substitutes if s]
 
     # Build exhaustion map: {normalized_vendor: [parts_already_asked]}
-    contacts = db.query(Contact).filter_by(requisition_id=req_id).all()
+    contacts = db.query(Contact).filter_by(requisition_id=req_id).limit(1000).all()  # Safety limit
     exhaustion = {}
     for c in contacts:
         vk = normalize_vendor_name(c.vendor_name)
@@ -478,7 +478,8 @@ async def rfq_prepare(
             base.update({"emails": [], "phones": [], "needs_lookup": True})
         results.append(base)
 
-    # ── Auto-lookup contacts for vendors missing emails (full waterfall) ──
+    # ── Quick server-side contact lookup (3s cap per vendor, 10s total) ──
+    # Full enrichment happens client-side; this is just a fast pre-check.
     needs_lookup_indices = [i for i, r in enumerate(results) if r.get("needs_lookup")]
     if needs_lookup_indices:
         from ..enrichment_service import find_suggested_contacts
@@ -498,34 +499,35 @@ async def rfq_prepare(
                             domain=domain or "",
                             name=r["vendor_name"],
                         ),
-                        timeout=15,
+                        timeout=3,
                     )
                     emails = list(dict.fromkeys(c["email"] for c in contacts if c.get("email")))
                     phones = list(dict.fromkeys(c["phone"] for c in contacts if c.get("phone")))
-                    # Track which sources contributed
                     sources = sorted(set(c.get("source", "") for c in contacts if c.get("email")))
                     if emails:
                         r["emails"] = emails
                         r["phones"] = phones
                         r["needs_lookup"] = False
                         r["contact_source"] = "+".join(sources) if sources else "enrichment"
-                        # Persist to VendorCard for future cache hits
                         if card:
                             merge_emails_into_card(card, emails)
                             if phones:
                                 merge_phones_into_card(card, phones)
                 except asyncio.TimeoutError:
                     logger.debug("Contact auto-lookup timed out for %s", r["vendor_name"])
-                    r["lookup_fail_reason"] = "Lookup timed out (15s)"
                 except Exception as e:
                     logger.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
-                    r["lookup_fail_reason"] = "Lookup failed"
 
-        await asyncio.gather(
-            *[_contact_lookup(i) for i in needs_lookup_indices],
-            return_exceptions=True,
-        )
-        # Persist any card updates from successful lookups
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *[_contact_lookup(i) for i in needs_lookup_indices],
+                    return_exceptions=True,
+                ),
+                timeout=10,
+            )
+        except asyncio.TimeoutError:
+            logger.info("Server-side contact pre-check hit 10s cap, deferring to client")
         db.commit()
 
     return {"vendors": results, "all_parts": all_parts, "subs_map": subs_map}

@@ -1,10 +1,9 @@
 """
-startup.py — Database Startup Migrations (Idempotent)
+startup.py — Runtime Database Operations (Idempotent)
 
-Tables, columns, and indexes are defined in the ORM models (models.py) and created
-via Base.metadata.create_all(checkfirst=True). This file only handles PostgreSQL-
-specific operations that can't be expressed in the ORM: triggers, seeds, backfills,
-and CHECK constraints.
+Schema DDL (columns, indexes, constraints, extensions) lives in Alembic migrations.
+This file handles PostgreSQL-specific runtime operations that must run every boot:
+triggers, seeds, backfills, and ANALYZE.
 
 Called by: main.py lifespan
 Depends on: database.py (engine), models.py (Base)
@@ -24,21 +23,30 @@ def run_startup_migrations() -> None:
         logger.info("TESTING mode — skipping startup migrations")
         return
 
-    # Create all tables/columns/indexes defined in ORM models (no-op if they exist)
+    # Legacy safety net: create_all is NOT the source of truth for schema.
+    # All schema changes MUST go through Alembic migrations.
+    # This only runs as a fallback and logs a warning if it creates anything new.
+    from sqlalchemy import inspect as sa_inspect
+
     from .models import Base
 
+    inspector = sa_inspect(engine)
+    existing_tables = set(inspector.get_table_names())
     Base.metadata.create_all(bind=engine, checkfirst=True)
-    logger.info("ORM schema sync complete (create_all checkfirst=True)")
+    new_tables = set(sa_inspect(engine).get_table_names()) - existing_tables
+    if new_tables:
+        logger.warning(
+            f"create_all created tables not managed by Alembic: {new_tables} "
+            "— write a migration to track these properly!"
+        )
+    else:
+        logger.info("create_all check passed (no new tables created)")
 
     with engine.connect() as conn:
-        _add_missing_columns(conn)
-        _enable_pg_stat_statements(conn)
         _create_fts_triggers(conn)
         _backfill_fts(conn)
         _seed_system_config(conn)
         _seed_site_contacts(conn)
-        _add_check_constraints(conn)
-        _create_perf_indexes(conn)
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
         _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
@@ -97,149 +105,6 @@ def _create_default_user_if_env_set() -> None:
         db.close()
 
 
-def _add_missing_columns(conn) -> None:
-    """Add columns that exist in ORM models but not yet in the DB.
-
-    create_all(checkfirst=True) only creates missing tables, not missing
-    columns on existing tables.  This bridges the gap without a full Alembic
-    migration.
-    """
-    stmts = [
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
-        # Unified vendor score columns
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score FLOAT",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS advancement_score FLOAT",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS is_new_vendor BOOLEAN DEFAULT TRUE",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score_computed_at TIMESTAMP",
-        # Add password_hash to users for optional password auth (encrypted at rest)
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT",
-        # Contact intelligence columns on vendor_contacts
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)",
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)",
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS phone_mobile VARCHAR(100)",
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS relationship_score FLOAT",
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS activity_trend VARCHAR(20)",
-        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS score_computed_at TIMESTAMP",
-        # Activity log additions
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quote_id INTEGER",
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS auto_logged BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMP",
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
-        # Prospecting pool: site-level ownership columns
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP",
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS ownership_cleared_at TIMESTAMP",
-        # Contact archive + note log columns
-        "ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS site_contact_id INTEGER REFERENCES site_contacts(id)",
-        # Customer AI material tags (mirrors vendor_cards pattern)
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
-        # API health: active/planned classification
-        "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
-        # Prospecting module: company record origin
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'manual'",
-        # Proactive matching: CPH-enriched columns on proactive_matches
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS material_card_id INTEGER REFERENCES material_cards(id) ON DELETE SET NULL",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS match_score INTEGER DEFAULT 0",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS margin_pct FLOAT",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_purchase_count INTEGER DEFAULT 0",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_price FLOAT",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_purchased_at TIMESTAMP",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS our_cost FLOAT",
-        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS dismiss_reason VARCHAR(255)",
-        # Vendor name normalization on sightings
-        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS vendor_name_normalized VARCHAR(255)",
-    ]
-    for stmt in stmts:
-        _exec(conn, stmt)
-
-    # FK constraint migration: SET NULL on offers.vendor_card_id
-    _exec(
-        conn,
-        """
-        DO $$ BEGIN
-          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
-            WHERE constraint_name='offers_vendor_card_id_fkey' AND table_name='offers')
-          THEN
-            ALTER TABLE offers DROP CONSTRAINT offers_vendor_card_id_fkey;
-            ALTER TABLE offers ADD CONSTRAINT offers_vendor_card_id_fkey
-              FOREIGN KEY (vendor_card_id) REFERENCES vendor_cards(id) ON DELETE SET NULL;
-          END IF;
-        END $$
-    """,
-    )
-    # FK constraint migration: SET NULL on offers.vendor_response_id
-    _exec(
-        conn,
-        """
-        DO $$ BEGIN
-          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
-            WHERE constraint_name='offers_vendor_response_id_fkey' AND table_name='offers')
-          THEN
-            ALTER TABLE offers DROP CONSTRAINT offers_vendor_response_id_fkey;
-            ALTER TABLE offers ADD CONSTRAINT offers_vendor_response_id_fkey
-              FOREIGN KEY (vendor_response_id) REFERENCES vendor_responses(id) ON DELETE SET NULL;
-          END IF;
-        END $$
-    """,
-    )
-
-    # Backfill vendor_score from engagement_score as initial data
-    _exec(
-        conn,
-        """
-        UPDATE vendor_cards
-        SET vendor_score = engagement_score,
-            advancement_score = engagement_score,
-            is_new_vendor = CASE WHEN engagement_score IS NULL THEN TRUE ELSE FALSE END
-        WHERE vendor_score IS NULL AND engagement_score IS NOT NULL
-    """,
-    )
-
-    # Backfill first_name/last_name from full_name
-    _exec(
-        conn,
-        """
-        UPDATE vendor_contacts
-        SET first_name = SPLIT_PART(full_name, ' ', 1),
-            last_name = CASE
-                WHEN POSITION(' ' IN full_name) > 0
-                THEN SUBSTRING(full_name FROM POSITION(' ' IN full_name) + 1)
-                ELSE NULL
-            END
-        WHERE full_name IS NOT NULL AND first_name IS NULL
-    """,
-    )
-
-    # Backfill occurred_at from created_at
-    _exec(
-        conn,
-        """
-        UPDATE activity_log SET occurred_at = created_at WHERE occurred_at IS NULL
-    """,
-    )
-
-    # Backfill customer_sites.last_activity_at from parent company
-    _exec(
-        conn,
-        """
-        UPDATE customer_sites cs
-        SET last_activity_at = c.last_activity_at
-        FROM companies c
-        WHERE cs.company_id = c.id
-          AND cs.last_activity_at IS NULL
-          AND c.last_activity_at IS NOT NULL
-    """,
-    )
-
-    # Backfill site_contacts.is_active
-    _exec(conn, "UPDATE site_contacts SET is_active = TRUE WHERE is_active IS NULL")
-
-    # Backfill api_sources.is_active from status
-    _exec(conn, "UPDATE api_sources SET is_active = TRUE WHERE status = 'live' AND is_active = FALSE")
-
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:
     """Execute a single DDL statement with rollback on failure."""
@@ -249,14 +114,6 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:
     except Exception as e:
         logger.warning("DDL failed: %s", e)
         conn.rollback()
-
-
-# ── pg_stat_statements extension ─────────────────────────────────────
-
-
-def _enable_pg_stat_statements(conn) -> None:
-    """Enable pg_stat_statements extension for query performance monitoring."""
-    _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 
 
 # ── Full-text search triggers (PostgreSQL-specific) ─────────────────
@@ -458,177 +315,7 @@ def _backfill_normalized_mpn() -> None:
             conn.rollback()
 
 
-# ── CHECK constraints (PostgreSQL NOT VALID) ─────────────────────────
-
-
-def _add_check_constraints(conn) -> None:
-    """Add CHECK constraints (NOT VALID) — only new inserts/updates are checked."""
-    constraints = [
-        # ── requirements ──
-        ("requirements", "chk_req_target_qty", "target_qty IS NULL OR target_qty >= 1"),
-        ("requirements", "chk_req_target_price", "target_price IS NULL OR target_price >= 0"),
-        ("requirements", "chk_req_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        (
-            "requirements",
-            "chk_req_packaging",
-            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')",
-        ),
-        # ── sightings ──
-        ("sightings", "chk_sight_qty", "qty_available IS NULL OR qty_available > 0"),
-        ("sightings", "chk_sight_price", "unit_price IS NULL OR unit_price > 0"),
-        ("sightings", "chk_sight_moq", "moq IS NULL OR moq > 0"),
-        ("sightings", "chk_sight_confidence", "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)"),
-        ("sightings", "chk_sight_score", "score IS NULL OR score >= 0"),
-        ("sightings", "chk_sight_lead_time", "lead_time_days IS NULL OR lead_time_days >= 0"),
-        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
-        (
-            "sightings",
-            "chk_sight_packaging",
-            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')",
-        ),
-        # ── offers ──
-        ("offers", "chk_offer_qty", "qty_available IS NULL OR qty_available > 0"),
-        ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
-        ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
-        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
-        (
-            "offers",
-            "chk_offer_packaging",
-            "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')",
-        ),
-        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review','rejected')"),
-    ]
-    # NOTE: table/constraint names are hardcoded literals above — not user input.
-    # DDL identifiers cannot use bind params. This is safe as-is.
-    for table, name, check in constraints:
-        _exec(
-            conn,
-            f"""
-            DO $$ BEGIN
-                IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = '{name}'
-                ) THEN
-                    ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({check}) NOT VALID;
-                END IF;
-            END $$;
-        """,
-        )
-
-
-# ── Performance indexes (idempotent) ─────────────────────────────────
-
-
-def _create_perf_indexes(conn) -> None:
-    """Create functional/composite indexes for hot query paths."""
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_norm
-        ON sightings (vendor_name_normalized)
-    """,
-    )
-    # Drop legacy expression index — vendor_name_normalized index handles all queries now
-    _exec(conn, "DROP INDEX IF EXISTS ix_sightings_vendor_lower")
-    # pg_trgm for fast ILIKE search on requisitions + requirements
-    _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_requisitions_name_trgm
-        ON requisitions USING gin (name gin_trgm_ops)
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_requisitions_customer_name_trgm
-        ON requisitions USING gin (customer_name gin_trgm_ops)
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_requirements_mpn_trgm
-        ON requirements USING gin (primary_mpn gin_trgm_ops)
-    """,
-    )
-    # Generated column + trigram index for substitutes search
-    _exec(
-        conn,
-        """
-        ALTER TABLE requirements
-        ADD COLUMN IF NOT EXISTS substitutes_text TEXT
-        GENERATED ALWAYS AS (substitutes::text) STORED
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_requirements_subs_trgm
-        ON requirements USING gin (substitutes_text gin_trgm_ops)
-    """,
-    )
-    # Phase 1: Additional performance indexes for hot query paths
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_vendor_cards_blacklisted
-        ON vendor_cards (is_blacklisted) WHERE is_blacklisted = TRUE
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_requirements_primary_mpn
-        ON requirements (LOWER(primary_mpn))
-    """,
-    )
-    # ix_sightings_mpn_matched removed — 0 scans, not worth the write overhead
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_offers_vendor_card
-        ON offers (vendor_card_id) WHERE vendor_card_id IS NOT NULL
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_contacts_vendor_name
-        ON contacts (vendor_name) WHERE vendor_name IS NOT NULL
-    """,
-    )
-    _exec(
-        conn,
-        """
-        CREATE INDEX IF NOT EXISTS ix_vendor_responses_vendor_name
-        ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
-    """,
-    )
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
-    # ix_vendor_cards_created_at removed — 0 scans
-    _exec(
-        conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)"
-    )
-
-    # GIN FTS indexes removed — 0 scans, 146 MB combined. Re-add if FTS search is implemented.
-
-    # ix_vendor_contacts_phone removed — 0 scans
-
-    # FK indexes — prevent slow JOINs / cascade deletes
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_customer_site_id ON activity_log (customer_site_id)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_site_contact_id ON activity_log (site_contact_id)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requisitions_updated_by_id ON requisitions (updated_by_id)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_approved_by_id ON offers (approved_by_id)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_updated_by_id ON offers (updated_by_id)")
-
-    # Proactive matching indexes
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_material_card ON proactive_matches (material_card_id)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_score ON proactive_matches (match_score)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_status_sales ON proactive_matches (status, salesperson_id)")
-
-    # Phase 3: soft-delete column for material cards
-    _exec(conn, "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+# ── One-time backfills ───────────────────────────────────────────────
 
 
 def _backfill_sighting_offer_normalized_mpn() -> None:

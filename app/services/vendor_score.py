@@ -63,10 +63,13 @@ def compute_vendor_score(
     advancement_score = (stage_points_sum / (offer_count * MAX_STAGE_POINTS)) * 100
     advancement_score = min(100.0, max(0.0, advancement_score))
 
-    review_factor = (avg_rating / 5.0) * 100 if avg_rating is not None else 50.0
-    review_factor = min(100.0, max(0.0, review_factor))
-
-    vendor_score = advancement_score * ADVANCEMENT_WEIGHT + review_factor * REVIEW_WEIGHT
+    # When no reviews exist, use advancement_score alone instead of
+    # defaulting review_factor to 50 (which makes all scores converge)
+    if avg_rating is not None:
+        review_factor = min(100.0, max(0.0, (avg_rating / 5.0) * 100))
+        vendor_score = advancement_score * ADVANCEMENT_WEIGHT + review_factor * REVIEW_WEIGHT
+    else:
+        vendor_score = advancement_score
     vendor_score = round(min(100.0, max(0.0, vendor_score)), 1)
 
     return {
@@ -126,7 +129,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     now = datetime.now(timezone.utc)
 
     # ── Preload all offer_ids grouped by vendor_card_id ──
-    offer_rows = db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name).all()
+    offer_rows = db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name).limit(50000).all()
 
     # Map vendor_card_id → set of offer_ids
     card_offer_ids: dict[int, set[int]] = {}
@@ -143,7 +146,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
             name_offer_ids.setdefault(norm, set()).add(oid)
 
     # ── Preload quote line_items to find offer_ids used in quotes ──
-    quotes = db.query(Quote.line_items, Quote.status).filter(Quote.status.in_(QUOTE_USED_STATUSES)).all()
+    quotes = db.query(Quote.line_items, Quote.status).filter(Quote.status.in_(QUOTE_USED_STATUSES)).limit(10000).all()
     quote_offer_id_set: set[int] = set()
     for line_items, _status in quotes:
         if line_items:
@@ -153,7 +156,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
                     quote_offer_id_set.add(oid)
 
     # ── Preload buyplan line_items ──
-    buyplans = db.query(BuyPlan.line_items, BuyPlan.status).filter(BuyPlan.status != "cancelled").all()
+    buyplans = db.query(BuyPlan.line_items, BuyPlan.status).filter(BuyPlan.status != "cancelled").limit(10000).all()
     awarded_offer_id_set: set[int] = set()
     po_confirmed_offer_id_set: set[int] = set()
     for line_items, bp_status in buyplans:
@@ -235,7 +238,7 @@ def _get_quote_offer_ids(db: Session, offer_ids: set[int]) -> set[int]:
     """Get offer_ids that appear in sent/won/lost Quote line_items."""
     from app.models import Quote
 
-    quotes = db.query(Quote.line_items).filter(Quote.status.in_(QUOTE_USED_STATUSES)).all()
+    quotes = db.query(Quote.line_items).filter(Quote.status.in_(QUOTE_USED_STATUSES)).limit(10000).all()
     found: set[int] = set()
     for (line_items,) in quotes:
         if line_items:
@@ -250,7 +253,7 @@ def _get_buyplan_offer_ids(db: Session, offer_ids: set[int], statuses: set[str])
     """Get offer_ids that appear in BuyPlan line_items with given statuses."""
     from app.models import BuyPlan
 
-    plans = db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(statuses)).all()
+    plans = db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(statuses)).limit(10000).all()
     found: set[int] = set()
     for (line_items,) in plans:
         if line_items:

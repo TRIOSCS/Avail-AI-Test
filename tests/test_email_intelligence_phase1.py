@@ -195,7 +195,7 @@ class TestContactsSyncDelta:
         db_session.commit()
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.scheduler import _sync_user_contacts
+            from app.jobs.email_jobs import _sync_user_contacts
 
             asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 
@@ -214,7 +214,7 @@ class TestContactsSyncDelta:
         db_session.commit()
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.scheduler import _sync_user_contacts
+            from app.jobs.email_jobs import _sync_user_contacts
 
             asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 
@@ -238,7 +238,7 @@ class TestContactsSyncDelta:
         db_session.commit()
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.scheduler import _sync_user_contacts
+            from app.jobs.email_jobs import _sync_user_contacts
 
             asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 

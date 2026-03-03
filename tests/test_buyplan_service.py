@@ -1709,7 +1709,7 @@ class TestRunBuyplanBg:
 class TestPostTeamsChannel:
     @pytest.mark.asyncio
     async def test_skips_when_no_webhook(self):
-        with patch("app.services.buyplan_service.get_credential_cached", return_value=None):
+        with patch("app.services.teams_notifications.get_credential_cached", return_value=None):
             await _post_teams_channel("Test message")
 
     @pytest.mark.asyncio
@@ -1718,8 +1718,8 @@ class TestPostTeamsChannel:
         mock_resp.status_code = 200
 
         with (
-            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.buyplan_service.http") as mock_http,
+            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.teams_notifications.http") as mock_http,
         ):
             mock_http.post = AsyncMock(return_value=mock_resp)
             await _post_teams_channel("Buy plan notification")
@@ -1734,8 +1734,8 @@ class TestPostTeamsChannel:
     @pytest.mark.asyncio
     async def test_handles_webhook_error(self):
         with (
-            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.buyplan_service.http") as mock_http,
+            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.teams_notifications.http") as mock_http,
         ):
             mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
             await _post_teams_channel("Test message")
@@ -1747,8 +1747,8 @@ class TestPostTeamsChannel:
         mock_resp.text = "Forbidden"
 
         with (
-            patch("app.services.buyplan_service.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.buyplan_service.http") as mock_http,
+            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
+            patch("app.services.teams_notifications.http") as mock_http,
         ):
             mock_http.post = AsyncMock(return_value=mock_resp)
             await _post_teams_channel("Test message")

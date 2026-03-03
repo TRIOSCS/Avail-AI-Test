@@ -57,6 +57,22 @@ window.safeRemove = safeRemove;
     else if (mql.addListener) mql.addListener(handler);
 })();
 
+// ── DOM wait utility ─────────────────────────────────────────────────
+// Waits for an element to appear in the DOM (replaces brittle setTimeout chains)
+function waitForElement(selector, timeoutMs) {
+    if (timeoutMs === undefined) timeoutMs = 2000;
+    return new Promise(function(resolve) {
+        var el = document.querySelector(selector);
+        if (el) { resolve(el); return; }
+        var observer = new MutationObserver(function() {
+            var el = document.querySelector(selector);
+            if (el) { observer.disconnect(); resolve(el); }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(function() { observer.disconnect(); resolve(null); }, timeoutMs);
+    });
+}
+
 // ── Responsive table utility (Phase 7) ────────────────────────────────
 // On mobile: converts rows to .m-card with .m-kv key-value pairs
 // On desktop: returns standard HTML table
@@ -100,19 +116,25 @@ function toggleMobileSidebar() {
 var _mobileNavStack = [];
 
 function mobileTabNav(page, btn) {
-    // Close more popover if open
     var pop = document.getElementById('mobileMorePopover');
     if (pop) pop.classList.remove('open');
-    // Highlight active tab
     document.querySelectorAll('.m-bottomnav-tab').forEach(function(t) {
         t.classList.toggle('active', t === btn);
     });
-    // Push to nav stack
     _mobileNavStack = [page];
-    // Map tab to sidebar nav route
-    var navMap = { reqs:'reqs', customers:'customers', vendors:'vendors', prospecting:'prospecting' };
+    if (page === 'offers') {
+        showView('view-offers');
+        if (typeof loadOfferFeed === 'function') loadOfferFeed();
+        return;
+    }
+    if (page === 'alerts') {
+        showView('view-alerts');
+        if (typeof loadAlertsFeed === 'function') loadAlertsFeed();
+        return;
+    }
+    var navMap = { reqs:'reqs', customers:'customers' };
     if (navMap[page]) {
-        var navBtn = document.getElementById({reqs:'navReqs',customers:'navCustomers',vendors:'navVendors',prospecting:'navProspecting'}[page]);
+        var navBtn = document.getElementById({reqs:'navReqs', customers:'navCustomers'}[page]);
         sidebarNav(navMap[page], navBtn);
     }
 }
@@ -125,7 +147,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {materials:'navMaterials',buyplans:'navBuyPlans',proactive:'navProactive',dashboard:'navCmdCenter',prospecting:'navProspecting',settings:'navSettings'};
+    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',dashboard:'navCmdCenter',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -140,6 +162,22 @@ function mobileBack() {
         _mobileNavStack.pop();
         var prev = _mobileNavStack[_mobileNavStack.length - 1];
         mobileTabNav(prev, document.querySelector('.m-bottomnav-tab[data-nav="' + prev + '"]'));
+    }
+}
+
+function _toggleMobileSearch() {
+    var bar = document.getElementById('mobileSearchBar');
+    if (!bar) return;
+    bar.classList.toggle('hidden');
+    if (!bar.classList.contains('hidden')) {
+        var input = bar.querySelector('input');
+        if (input) setTimeout(function() { input.focus(); }, 100);
+    }
+}
+
+function _showMobileUserMenu() {
+    if (confirm('Sign out of AvailAI?')) {
+        window.location.href = '/auth/logout';
     }
 }
 
@@ -186,14 +224,28 @@ document.addEventListener('DOMContentLoaded', function() {
         var syncSearch = function() { var active = mql.matches ? ds.value : ms.value; ds.value = active; ms.value = active; };
         if (mql.addEventListener) mql.addEventListener('change', syncSearch);
         else if (mql.addListener) mql.addListener(syncSearch);
+        // Also sync on window resize to catch edge cases (e.g. split-screen changes)
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 768) {
+                ds.value = ms.value || ds.value;
+            } else {
+                ms.value = ds.value || ms.value;
+            }
+        });
     }
     var nb = document.getElementById('notifBadge');
     var mb = document.getElementById('mobileNotifBadge');
     if (nb && mb) {
         new MutationObserver(function() {
             mb.textContent = nb.textContent;
-            mb.style.display = nb.style.display;
-        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style']});
+            if (nb.style.display === 'none') { mb.classList.add('u-hidden'); mb.style.display = ''; }
+            else { mb.classList.remove('u-hidden'); mb.style.display = nb.style.display; }
+        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style','class']});
+    }
+    // Initialize mobile user avatar
+    var mobileAvatar = document.getElementById('mobileUserAvatar');
+    if (mobileAvatar && window.__userName) {
+        mobileAvatar.textContent = window.__userName.split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
     }
 });
 
@@ -571,7 +623,7 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
         if (!websiteId) return;
         const el = document.getElementById(websiteId);
         const row = el?.closest('.ac-website-row') || el;
-        if (row) row.style.display = show ? '' : 'none';
+        if (row) { if (show) { row.classList.remove('u-hidden'); row.style.display = ''; } else { row.classList.add('u-hidden'); row.style.display = ''; } }
     }
 
     const doSearch = debounce(async function(query) {
@@ -672,15 +724,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-buyplans': () => window.showBuyPlans(),
             'view-proactive': () => window.showProactiveOffers(),
             'view-scorecard': () => showScorecard(),
-            'view-settings': () => window.showSettings(),
+            'view-settings': () => {
+                var settingsTab = (initBaseHash === 'tickets' || initBaseHash === 'apihealth') ? initBaseHash : undefined;
+                window.showSettings(settingsTab);
+            },
             'view-prospecting': () => window.showProspecting(),
             'view-suggested': () => window.showSuggested(),
             'view-dashboard': () => showDashboard(),
             'view-contacts': () => showContacts(),
-            'view-tickets': () => { if (typeof window.showTickets === 'function') window.showTickets(); },
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts','view-tickets':'navTickets'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -694,6 +748,23 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (_initSection && _initGradient) _initGradient.dataset.section = _initSection.dataset.section;
     }
     await loadRequisitions();
+    // ── Onboarding welcome message for first-time users ──
+    if (!safeGet('onboardingDismissed')) {
+        const reqList = document.getElementById('reqList');
+        if (reqList) {
+            const welcomeHtml = `<div id="onboardingBanner" style="margin:12px 0;padding:16px 20px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:8px;position:relative">
+                <button onclick="this.parentElement.remove();safeSet('onboardingDismissed','1')" style="position:absolute;top:8px;right:12px;background:none;border:none;font-size:16px;color:#64748b;cursor:pointer" title="Dismiss">\u2715</button>
+                <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:8px">Welcome to AVAIL</div>
+                <div style="font-size:12px;color:#334155;line-height:1.6">
+                    <b>Open</b> \u2014 Active requisitions: add parts, send RFQs, manage quotes<br>
+                    <b>Sourcing</b> \u2014 Track vendor sightings, response rates, and search progress<br>
+                    <b>Archive</b> \u2014 Completed RFQs: won, lost, and closed deals<br>
+                    <span style="color:#64748b;margin-top:4px;display:inline-block">Click any row to expand details \u00b7 Use the search bar to find parts or customers \u00b7 Click column headers to sort</span>
+                </div>
+            </div>`;
+            reqList.insertAdjacentHTML('afterbegin', welcomeHtml);
+        }
+    }
     // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
     if (!initView || initView === 'view-list') {
         var restoreId = initDrillId;
@@ -772,6 +843,12 @@ async function checkM365Status() {
 const _m365Timer = setInterval(checkM365Status, 300000);
 window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
+// ── Mobile Offer Feed (stub) ────────────────────────────────────────────
+function _setOfferFeedFilter(filter, btn) {
+    document.querySelectorAll('#offerFeedTabs .m-tab-pill').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
 // ── API Health Polling ──────────────────────────────────────────────────
 window._apiHealthErrors = [];
 async function pollApiHealth() {
@@ -786,9 +863,13 @@ async function pollApiHealth() {
         if (badge) {
             if (alerts.length > 0) {
                 badge.textContent = alerts.length;
+                badge.title = alerts.map(a => a.source_name || a.message || 'Unknown').join(', ');
+                badge.classList.remove('u-hidden');
                 badge.style.display = 'inline-block';
             } else {
-                badge.style.display = 'none';
+                badge.classList.add('u-hidden');
+                badge.style.display = '';
+                badge.title = '';
             }
         }
 
@@ -887,7 +968,7 @@ function applyRoleGating() {
 
     // ── Settings: admin only ──
     const navSettings = document.getElementById('navSettings');
-    if (navSettings) navSettings.style.display = isAdmin ? '' : 'none';
+    if (navSettings) { if (isAdmin) navSettings.classList.remove('u-hidden'); else navSettings.classList.add('u-hidden'); }
 
     // "My Accounts" toggle: admin/manager/trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
@@ -911,12 +992,14 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-apihealth', 'view-tickets'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested','view-apihealth':'apihealth','view-tickets':'tickets'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
+_hashToView['tickets'] = 'view-settings'; // tickets moved into settings
+_hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
 let _navFromPopstate = false;
 
 let _lastPushedHash = '';
@@ -966,16 +1049,18 @@ window.addEventListener('popstate', (e) => {
         'view-buyplans': () => window.showBuyPlans(),
         'view-proactive': () => window.showProactiveOffers(),
         'view-scorecard': () => showScorecard(),
-        'view-settings': () => window.showSettings(),
+        'view-settings': () => {
+            var settingsTab = (baseHash === 'tickets' || baseHash === 'apihealth') ? baseHash : undefined;
+            window.showSettings(settingsTab);
+        },
         'view-contacts': () => showContacts(),
         'view-dashboard': () => showDashboard(),
         'view-prospecting': () => window.showProspecting(),
         'view-suggested': () => window.showSuggested(),
-        'view-tickets': () => { if (typeof window.showTickets === 'function') window.showTickets(); },
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-tickets':'navTickets'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting','view-suggested':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -995,9 +1080,10 @@ export function showView(viewId) {
         const el = document.getElementById(id);
         if (!el) continue;
         if (id === viewId) {
-            el.classList.remove('hidden');
+            el.classList.remove('hidden', 'u-hidden');
             el.style.display = '';
         } else {
+            el.classList.add('u-hidden');
             el.style.display = 'none';
         }
     }
@@ -1063,7 +1149,7 @@ function showDetail(id, name, tab) {
 function showVendors() {
     showView('view-vendors');
     const viewEl = document.getElementById('view-vendors');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     currentReqId = null;
     if (window._setTopViewLabel) window._setTopViewLabel('Vendors');
     loadVendorList();
@@ -1071,7 +1157,10 @@ function showVendors() {
 
 function showMaterials() {
     showView('view-materials');
+    navHighlight(document.getElementById('navMaterials'));
     currentReqId = null;
+    const imp = document.getElementById('stockImportArea');
+    if (imp) imp.classList.add('u-hidden');
     loadMaterialList();
 }
 
@@ -1182,6 +1271,11 @@ function sortContactList(col) {
     renderContacts((document.getElementById('contactFilter')?.value || '').trim());
 }
 
+function _sanitizeContactField(val) {
+    if (!val) return '';
+    return val.replace(/^[!:;\-.\s]+/, '').trim();
+}
+
 function renderContacts(q) {
     const list = document.getElementById('contactList');
     if (!list) return;
@@ -1256,6 +1350,8 @@ function renderContacts(q) {
         </tr></thead><tbody>`;
 
     for (const c of contacts) {
+        const cleanName = _sanitizeContactField(c.full_name) || 'Unknown';
+        const cleanTitle = _sanitizeContactField(c.title);
         const days = daysSince(c.last_interaction_at || c.first_seen_at);
         const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '—';
         const verifiedBadge = c.is_verified ? ' <span style="color:var(--green);font-size:9px">✓</span>' : '';
@@ -1277,7 +1373,7 @@ function renderContacts(q) {
             <td>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span class="health-dot health-dot-${healthColor}"></span>
-                    <span style="font-weight:600">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
+                    <span style="font-weight:600">${esc(cleanName)}${verifiedBadge}</span>
                 </div>
             </td>
             <td>${isCustomer && c.company_id
@@ -1287,7 +1383,7 @@ function renderContacts(q) {
                     : esc(c.company_name || c.vendor_name || '')}</td>
             <td>${typeBadge}</td>
             <td>${statusDropdown}</td>
-            <td class="muted-cell">${esc(c.title || '—')}</td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(cleanTitle)}">${esc(cleanTitle.length > 50 ? cleanTitle.slice(0, 50) + '…' : cleanTitle) || '—'}</td>
             <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
             <td>${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.phone)+'</a>' : '<span class="muted-cell">—</span>'}</td>
             <td>${c.interaction_count || 0}</td>
@@ -1377,7 +1473,7 @@ function closeContactDrawer() {
 function showContacts() {
     showView('view-contacts');
     const viewEl = document.getElementById('view-contacts');
-    if (viewEl) viewEl.style.display = 'flex';
+    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
     _contactCache = [];
     loadContacts();
 }
@@ -1917,7 +2013,7 @@ function showDashboard() {
             toggle.className = 'cc-persp-toggle';
             toggle.id = 'ccPerspectivePills';
             const eff = _effectivePerspective();
-            toggle.innerHTML = `<button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
+            toggle.innerHTML = `<span style="font-size:10px;color:var(--muted);margin-right:4px" title="Switch between purchasing and sales dashboards">View:</span><button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)" title="Buyer/sourcing focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)" title="Sales/quoting focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
             const h2 = header.querySelector('h2');
             if (h2) h2.after(toggle);
         }
@@ -1927,9 +2023,41 @@ function showDashboard() {
     loadDashboard();
 }
 
-function goToReq(reqId) {
+let _reqBreadcrumb = null;
+
+function goToReq(reqId, breadcrumb) {
+    if (breadcrumb) _reqBreadcrumb = breadcrumb;
+    else _reqBreadcrumb = null;
     sidebarNav('reqs');
     setTimeout(() => { if (typeof toggleDrillDown === 'function') toggleDrillDown(reqId); }, 300);
+}
+
+function _renderBreadcrumb() {
+    const el = document.getElementById('reqBreadcrumb');
+    if (!el) return;
+    if (!_reqBreadcrumb) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.textContent = '';
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.style.cssText = 'font-size:12px;padding:4px 10px;display:flex;align-items:center;gap:4px;color:var(--blue)';
+    btn.onclick = _goBackFromBreadcrumb;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Back to ' + esc(_reqBreadcrumb.label);
+    el.appendChild(btn);
+}
+
+function _goBackFromBreadcrumb() {
+    if (!_reqBreadcrumb) return;
+    const bc = _reqBreadcrumb;
+    _reqBreadcrumb = null;
+    const el = document.getElementById('reqBreadcrumb');
+    if (el) el.style.display = 'none';
+    if (bc.view === 'customers' && bc.companyId) {
+        sidebarNav('customers');
+        setTimeout(() => { if (typeof openCustDrawer === 'function') openCustDrawer(bc.companyId); }, 300);
+    } else if (bc.view) {
+        sidebarNav(bc.view);
+    }
 }
 
 function _ccUrgencyClass(score) {
@@ -2226,22 +2354,22 @@ async function loadBuyerDashboard(el) {
         // ── Stat Row (matches sales layout) — personal + team averages inline ──
         html += '<div class="cc-stat-row cc-stat-row-buyer">'
             + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs &middot; Team ' + (tk.sourcing_ratio || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer&rarr;Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">BP&rarr;PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of offers that resulted in a sent quote"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer \u2192 Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of sent quotes that the customer accepted (won)"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of buy plans that resulted in a confirmed purchase order"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">Buy Plan \u2192 PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
             + '</div>';
 
         // ── Pipeline Bar ──
         html += '<div class="cc-pipeline-bar">'
-            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'open\'})"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'quoted\'})"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--green)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'won\'})"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
             + '<span class="cc-pipe-sep">/</span>'
-            + '<span class="cc-pipe-item" style="color:var(--red)"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--red)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'lost\'})"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--purple)" onclick="showBuyPlans()"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
             + '</div>';
 
         // ── 6-Tile Cards Grid (mirrors sales layout) ──
@@ -2280,13 +2408,13 @@ async function loadBuyerDashboard(el) {
                 const o = allOffers[i];
                 const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
                 const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
-                html += '<div class="cc-row" onclick="goToReq(' + o.requisition_id + ')">'
+                html += '<div class="cc-row" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));expandToSubTab(' + o.requisition_id + ',\'offers\')">'
                     + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
                     + '<div class="cc-row-body">'
                     + '<span class="cc-row-name">' + esc(o.vendor_name) + '</span>'
                     + '<span class="cc-row-detail"><span class="mono">' + esc(o.mpn) + '</span> &middot; ' + price + ' &middot; ' + (o.age_label || o.source || '') + '</span>'
                     + '</div>'
-                    + '<span class="cc-row-badge">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
+                    + '<span class="cc-row-badge" title="' + (o._src === 'review' ? 'Needs your review — click to open offers tab' : 'Active offer with recent activity') + '">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
                     + '</div>';
             }
             html += '</div>';
@@ -2529,6 +2657,59 @@ export async function loadRequisitions(query = '', append = false) {
 let _reqSortCol = null;
 let _reqSortDir = 'asc';
 
+// Column visibility — persisted in localStorage
+const _defaultHiddenCols = {};
+let _hiddenCols = JSON.parse(localStorage.getItem('reqHiddenCols') || '{}');
+
+function _isColHidden(col) { return !!_hiddenCols[col]; }
+function toggleColVisibility(col) {
+    _hiddenCols[col] = !_hiddenCols[col];
+    if (!_hiddenCols[col]) delete _hiddenCols[col];
+    localStorage.setItem('reqHiddenCols', JSON.stringify(_hiddenCols));
+    renderReqList();
+}
+function _toggleColGear() {
+    const wrap = document.getElementById('colGearWrap');
+    if (!wrap) return;
+    if (wrap.innerHTML) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = _colGearDropdown();
+    // Close on outside click
+    const close = (e) => { if (!wrap.contains(e.target)) { wrap.innerHTML = ''; document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function _applyColVisCSS() {
+    let style = document.getElementById('colVisStyle');
+    if (!style) { style = document.createElement('style'); style.id = 'colVisStyle'; document.head.appendChild(style); }
+    const v = _currentMainView;
+    // Map column keys to 1-based nth-child positions per view
+    let colMap;
+    if (v === 'sourcing') colMap = {score:3,deadline:4,offers:5,reqs:6,sourced:7,sent:8,resp:9,searched:10,age:11};
+    else if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
+    else colMap = {reqs:3,quote:4,sourced:5,offers:6,sales:7,age:8,deadline:9};
+    const rules = [];
+    for (const [k, nth] of Object.entries(colMap)) {
+        if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
+    }
+    style.textContent = rules.join('\n');
+}
+
+function _colGearDropdown() {
+    const v = _currentMainView;
+    let cols;
+    if (v === 'sourcing') cols = [{k:'score',l:'Sourcing Score'},{k:'deadline',l:'Bid Due'},{k:'offers',l:'Offers'},{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Resp %'},{k:'searched',l:'Searched'},{k:'age',l:'Age'}];
+    else if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'sourced',l:'Sourcing'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'},{k:'deadline',l:'Bid Due'}];
+    let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
+    html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
+    for (const c of cols) {
+        const checked = !_isColHidden(c.k) ? 'checked' : '';
+        html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:12px;cursor:pointer"><input type="checkbox" ${checked} onchange="toggleColVisibility('${c.k}')">${c.l}</label>`;
+    }
+    html += '</div>';
+    return html;
+}
+
 function _sortArrow(col) {
     if (_reqSortCol !== col) return '\u21c5';
     return _reqSortDir === 'asc' ? '\u25b2' : '\u25bc';
@@ -2552,7 +2733,9 @@ const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
     if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'files'];
-    if (mainView === 'archive') return ['parts', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'files'];
+    // Mobile: include buy plans and activity tabs for full drill-down
+    if (window.__isMobile) return ['parts', 'offers', 'quotes', 'buyplans', 'activity'];
     return ['parts', 'offers', 'quotes', 'files']; // rfq tab
 }
 
@@ -2561,7 +2744,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', files:'Files'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files'};
     return map[tab] || tab;
 }
 
@@ -2571,10 +2754,15 @@ async function expandToSubTab(reqId, tabName) {
         _openMobileDrillDown(reqId);
         return;
     }
-    const drow = document.getElementById('d-' + reqId);
-    if (!drow) return;
+    let drow = document.getElementById('d-' + reqId);
+    if (!drow) {
+        drow = await waitForElement('#d-' + reqId, 2000);
+        if (!drow) return;
+    }
     if (!drow.classList.contains('open')) {
         await toggleDrillDown(reqId);
+        // Wait for drill-down animation to complete
+        await new Promise(function(r) { setTimeout(r, 350); });
     }
     _switchDdTab(reqId, tabName);
 }
@@ -2657,6 +2845,22 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
+            case 'buyplans': {
+                // Buy plans are linked via quotes — fetch quotes first, then buy plans per quote
+                const quotes = _ddTabCache[reqId]?.quotes || await apiFetch(`/api/requisitions/${reqId}/quotes`);
+                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                _ddTabCache[reqId].quotes = quotes;
+                const qArr = Array.isArray(quotes) ? quotes : [];
+                const plans = [];
+                for (const q of qArr) {
+                    try {
+                        const bp = await apiFetch(`/api/buy-plans/for-quote/${q.id}`);
+                        if (bp) plans.push(bp);
+                    } catch(_) { /* no buy plan for this quote */ }
+                }
+                data = plans;
+                break;
+            }
             case 'files':
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
@@ -2669,6 +2873,24 @@ async function _loadDdSubTab(reqId, tabName, panel) {
 }
 
 function _renderDdTab(reqId, tabName, data, panel) {
+    // Mobile: use card-based renderers for touch-friendly display
+    if (window.__isMobile) {
+        switch (tabName) {
+            case 'details': _renderDdDetails(reqId, panel); break;
+            case 'parts': _renderMobilePartsList(_ddReqCache[reqId] || [], reqId, panel); break;
+            case 'sightings':
+                if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
+                _renderSourcingDrillDown(reqId, panel);
+                break;
+            case 'activity': _renderMobileActivityList(reqId, data, panel); break;
+            case 'offers': _renderMobileOffersList(data, reqId, panel); break;
+            case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
+            case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
+            case 'files': _renderDdFiles(reqId, data, panel); break;
+            default: panel.innerHTML = '';
+        }
+        return;
+    }
     switch (tabName) {
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts': _renderDrillDownTable(reqId, panel); break;
@@ -2690,7 +2912,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
 function _renderDdActivity(reqId, data, panel) {
     const vendors = data.vendors || [];
     if (!vendors.length) {
-        panel.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--muted)">No activity yet</span><button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();checkForReplies(${reqId},this)">&#x21bb; Check for Replies</button></div>`;
+        panel.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--muted)">No activity yet</span><button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check for Replies</button><span style="font-size:10px;color:var(--muted);font-style:italic">Scans your inbox for vendor responses</span></div>`;
         return;
     }
     // Summary stats
@@ -2710,7 +2932,7 @@ function _renderDdActivity(reqId, data, panel) {
         <span><b>${totalReplies}</b> replies</span>
         <span><b>${totalCalls}</b> calls</span>
         <span><b>${totalNotes}</b> notes</span>
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();checkForReplies(${reqId},this)">&#x21bb; Check for Replies</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check Inbox</button>
         <div class="fpills fpills-sm" style="margin-left:auto">
             <button class="fp fp-sm${af==='all'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='all';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">All</button>
             <button class="fp fp-sm${af==='email'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='email';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">✉ Email</button>
@@ -3029,7 +3251,7 @@ function _renderDdOffers(reqId, data, panel) {
             pendingCount += (g.offers || []).filter(o => o.status === 'pending_review').length;
         }
     }
-    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet — log one from the vendor tab or send an RFQ</span>'; return; }
+    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet — use <b>+ Log Offer</b> above to record a vendor offer, or send RFQs from the <b>Sightings</b> tab to request quotes</span>'; return; }
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
 
@@ -3216,6 +3438,10 @@ function ddInlineEditOffer(reqId, offerId, field, td) {
 
     td.textContent = '';
     td.appendChild(el);
+    const hint = document.createElement('span');
+    hint.style.cssText = 'font-size:9px;color:var(--muted);display:block;margin-top:1px';
+    hint.textContent = 'Enter \u2713  Esc \u2717';
+    td.appendChild(hint);
     el.focus();
     if (el.select) el.select();
 
@@ -3698,7 +3924,7 @@ function _renderDdQuotes(reqId, data, panel) {
     // data is now an array of quotes (newest first from API)
     const quotes = Array.isArray(data) ? data : (data && data.id ? [data] : []);
     if (!quotes.length) {
-        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quotes yet — select offers and use Build Quote</span>';
+        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quotes yet — select offers in the <b>Offers</b> tab and click <b>Build Quote</b> to create a customer quote</span>';
         return;
     }
 
@@ -4074,11 +4300,19 @@ async function ddSendQuote(reqId) {
     const prefillEmail = q.contact_email || '';
     const prefillName = q.contact_name || '';
     const senderEmail = window.userEmail || 'your account';
-    // Build contact options from site_contacts
+    // Build contact options from site_contacts, auto-select matching or first
     let contactOpts = '';
+    let autoSelectedEmail = prefillEmail;
     if (q.site_contacts && q.site_contacts.length) {
         for (const c of q.site_contacts) {
-            if (c.email) contactOpts += `<option value="${escAttr(c.email)}" data-name="${escAttr(c.full_name||'')}">${esc(c.full_name || c.email)}${c.title ? ' (' + esc(c.title) + ')' : ''}</option>`;
+            if (!c.email) continue;
+            const selected = (prefillEmail && c.email.toLowerCase() === prefillEmail.toLowerCase()) ? ' selected' : '';
+            contactOpts += `<option value="${escAttr(c.email)}" data-name="${escAttr(c.full_name||'')}"${selected}>${esc(c.full_name || c.email)}${c.title ? ' (' + esc(c.title) + ')' : ''}</option>`;
+        }
+        // If no prefill match, auto-select first contact
+        if (!prefillEmail && q.site_contacts[0]?.email) {
+            autoSelectedEmail = q.site_contacts[0].email;
+            contactOpts = contactOpts.replace('<option value="' + escAttr(autoSelectedEmail) + '"', '<option value="' + escAttr(autoSelectedEmail) + '" selected');
         }
     }
     const html = `<div class="modal-bg open" id="ddSendQuoteBg" onclick="if(event.target===this){this.remove()}">
@@ -4129,6 +4363,11 @@ async function ddSendQuote(reqId) {
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // Auto-populate from selected contact (if auto-selected)
+    const _autoSel = document.getElementById('ddSendContact-' + reqId);
+    if (_autoSel && _autoSel.value && _autoSel.value !== '' && _autoSel.value !== '__add_new__') {
+        ddOnContactSelect(reqId);
+    }
     // Auto-load preview
     ddRefreshPreview(reqId);
 }
@@ -4731,6 +4970,312 @@ async function _mobileDdSwitchTab(reqId, tabName, btn) {
     }
 }
 
+// ── Mobile drill-down card renderers ──────────────────────────────────
+// Card-based views optimized for touch on small screens.
+
+function _renderMobilePartsList(parts, reqId, panel) {
+    const reqs = Array.isArray(parts) ? parts : [];
+    if (!reqs.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No parts on this requisition</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + reqs.length + ' Part' + (reqs.length !== 1 ? 's' : '') + '</div>';
+    for (const r of reqs) {
+        const bestPrice = r.best_offer_price != null
+            ? '$' + parseFloat(r.best_offer_price).toFixed(4)
+            : (r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) + ' target' : '');
+        const sourceCount = r.offer_count || r.sighting_count || 0;
+        const subs = (r.substitutes || []).filter(Boolean);
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px">';
+        html += '<div class="m-card-header">';
+        html += '<span class="mono" style="font-weight:700;font-size:14px">' + esc(r.primary_mpn || '---') + '</span>';
+        html += _reqBadge(r);
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Qty Needed</span>';
+        html += '<span style="font-size:13px;font-weight:600">' + (r.target_qty ? Number(r.target_qty).toLocaleString() : '---') + '</span>';
+        html += '</div>';
+        if (bestPrice) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Best Price</span>';
+            html += '<span style="font-size:13px;font-weight:600;color:var(--teal)">' + esc(bestPrice) + '</span>';
+            html += '</div>';
+        }
+        if (sourceCount > 0) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Sources</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + sourceCount + '</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+        if (r.manufacturer || r.brand) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Mfr: ' + esc(r.manufacturer || r.brand) + '</div>';
+        }
+        if (subs.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Subs: ' + subs.map(s => '<span class="mono" style="color:var(--blue)">' + esc(s) + '</span>').join(', ') + '</div>';
+        }
+        if (r.condition && r.condition !== 'Any') {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">Condition: ' + esc(r.condition) + '</div>';
+        }
+        if (r.notes) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px;border-top:1px solid var(--border);padding-top:4px">' + esc(r.notes) + '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileOffersList(data, reqId, panel) {
+    const groups = data?.groups || data || [];
+    let totalOffers = 0;
+    if (Array.isArray(groups)) {
+        for (const g of groups) totalOffers += (g.offers || []).length;
+    }
+    if (!totalOffers) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No offers yet</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + totalOffers + ' Offer' + (totalOffers !== 1 ? 's' : '') + '</div>';
+    const grpArr = Array.isArray(groups) ? groups : [];
+    for (const g of grpArr) {
+        const offers = (g.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        if (!offers.length) continue;
+        const reqMpn = g.mpn || g.label || '';
+        html += '<div style="margin-bottom:12px">';
+        html += '<div style="font-size:12px;font-weight:600;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">';
+        html += '<span class="mono">' + esc(reqMpn) + '</span>';
+        html += '<span style="font-size:11px;color:var(--muted)">need ' + (g.target_qty || 0).toLocaleString() + '</span>';
+        html += '</div>';
+        for (const o of offers) {
+            const oid = o.id || o.offer_id;
+            const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '---';
+            const isPending = o.status === 'pending_review';
+            const borderColor = isPending ? 'var(--amber)' : 'var(--border)';
+            let priceColor = 'var(--teal)';
+            if (g.target_price != null && o.unit_price != null) {
+                const pctD = ((o.unit_price - g.target_price) / g.target_price) * 100;
+                priceColor = pctD <= 0 ? 'var(--green)' : pctD <= 15 ? 'var(--amber)' : 'var(--red)';
+            }
+            html += '<div class="m-card" style="cursor:default;margin-bottom:6px;border-left:3px solid ' + borderColor + '">';
+            html += '<div class="m-card-header">';
+            html += '<span style="font-weight:600;font-size:13px">' + esc(o.vendor_name || 'Unknown') + '</span>';
+            if (isPending) html += '<span class="m-chip m-chip-amber" style="font-size:10px">DRAFT</span>';
+            html += '</div>';
+            html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Price</span>';
+            html += '<span style="font-size:14px;font-weight:700;color:' + priceColor + '">' + price + '</span>';
+            html += '</div>';
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Qty</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + (o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '---')) + '</span>';
+            html += '</div>';
+            if (o.lead_time) {
+                html += '<div style="display:flex;flex-direction:column;gap:2px">';
+                html += '<span style="font-size:11px;color:var(--muted)">Lead</span>';
+                html += '<span style="font-size:13px">' + esc(o.lead_time) + '</span>';
+                html += '</div>';
+            }
+            html += '</div>';
+            if (o.condition || o.date_code) {
+                html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+                if (o.condition) html += 'Cond: ' + esc(o.condition);
+                if (o.condition && o.date_code) html += ' | ';
+                if (o.date_code) html += 'DC: ' + esc(o.date_code);
+                html += '</div>';
+            }
+            // Action chips
+            if (isPending) {
+                html += '<div style="display:flex;gap:8px;margin-top:8px">';
+                html += '<button class="m-chip m-chip-green" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddApproveOffer(' + reqId + ',' + oid + ')">Accept</button>';
+                html += '<button class="m-chip m-chip-red" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddRejectOffer(' + reqId + ',' + oid + ')">Reject</button>';
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileQuotesList(data, reqId, panel) {
+    const quotes = Array.isArray(data) ? data : (data && data.id ? [data] : []);
+    if (!quotes.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No quotes yet</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + quotes.length + ' Quote' + (quotes.length !== 1 ? 's' : '') + '</div>';
+    const statusColors = {draft:'var(--muted)',sent:'var(--blue)',revised:'var(--amber)',won:'var(--green)',lost:'var(--red)'};
+    const statusLabels = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+    for (const q of quotes) {
+        const lines = q.line_items || [];
+        const subtotal = q.subtotal || lines.reduce((s, l) => s + ((l.sell_price || l.unit_sell || 0) * (l.qty || 0)), 0);
+        const marginPct = q.total_margin_pct != null ? q.total_margin_pct : 0;
+        const sc = statusColors[q.status] || 'var(--muted)';
+        const sl = statusLabels[q.status] || q.status || 'Draft';
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + sc + '">';
+        html += '<div class="m-card-header">';
+        html += '<span class="mono" style="font-weight:700;font-size:13px">' + esc(q.quote_number || 'Q-' + q.id) + '</span>';
+        html += '<span class="m-chip" style="background:' + sc + '20;color:' + sc + ';font-size:10px">' + sl + '</span>';
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Customer</span>';
+        html += '<span style="font-size:13px;font-weight:600">' + esc(q.customer_name || '---') + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Total</span>';
+        html += '<span style="font-size:14px;font-weight:700;color:var(--teal)">$' + Number(subtotal).toLocaleString(undefined, {minimumFractionDigits: 2}) + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Margin</span>';
+        html += '<span style="font-size:13px;font-weight:600;color:' + (marginPct >= 20 ? 'var(--green)' : marginPct >= 10 ? 'var(--amber)' : 'var(--red)') + '">' + Number(marginPct).toFixed(1) + '%</span>';
+        html += '</div>';
+        html += '</div>';
+        html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+        html += lines.length + ' line' + (lines.length !== 1 ? 's' : '');
+        if (q.revision && q.revision > 1) html += ' | Rev ' + q.revision;
+        if (q.created_at) html += ' | ' + fmtRelative(q.created_at);
+        html += '</div>';
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileBuyPlansList(data, reqId, panel) {
+    const plans = Array.isArray(data) ? data : [];
+    if (!plans.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No buy plans yet</div>';
+        return;
+    }
+    const statusColors = {draft:'var(--muted)',pending:'var(--amber)',approved:'var(--green)',po_entered:'var(--blue)',po_confirmed:'var(--blue)',completed:'var(--green)',rejected:'var(--red)',cancelled:'var(--red)'};
+    const statusLabels = {draft:'Draft',pending:'Pending',approved:'Approved',po_entered:'PO Entered',po_confirmed:'PO Confirmed',completed:'Completed',rejected:'Rejected',cancelled:'Cancelled'};
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + plans.length + ' Buy Plan' + (plans.length !== 1 ? 's' : '') + '</div>';
+    for (const bp of plans) {
+        const sc = statusColors[bp.status] || 'var(--muted)';
+        const sl = statusLabels[bp.status] || bp.status || 'Draft';
+        const lines = bp.lines || bp.line_items || [];
+        const total = bp.total_cost || lines.reduce((s, l) => s + ((l.unit_price || l.buy_price || 0) * (l.qty || 0)), 0);
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + sc + '">';
+        html += '<div class="m-card-header">';
+        html += '<span style="font-weight:600;font-size:13px">' + esc(bp.vendor_name || bp.primary_vendor || 'Vendor') + '</span>';
+        html += '<span class="m-chip" style="background:' + sc + '20;color:' + sc + ';font-size:10px">' + sl + '</span>';
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Total Cost</span>';
+        html += '<span style="font-size:14px;font-weight:700;color:var(--teal)">$' + Number(total).toLocaleString(undefined, {minimumFractionDigits: 2}) + '</span>';
+        html += '</div>';
+        if (lines.length) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Lines</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + lines.length + '</span>';
+            html += '</div>';
+        }
+        if (bp.po_number) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">PO #</span>';
+            html += '<span class="mono" style="font-size:13px;font-weight:600">' + esc(bp.po_number) + '</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+        if (bp.created_at || bp.submitted_by_name) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+            if (bp.submitted_by_name) html += 'By ' + esc(bp.submitted_by_name);
+            if (bp.submitted_by_name && bp.created_at) html += ' | ';
+            if (bp.created_at) html += fmtRelative(bp.created_at);
+            html += '</div>';
+        }
+        // Submit button for draft plans
+        if (bp.status === 'draft' || bp.status === 'pending') {
+            html += '<div style="margin-top:8px">';
+            if (bp.status === 'draft') {
+                html += '<button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px;width:100%" onclick="event.stopPropagation();if(typeof openBuyPlanDetailV3===\'function\')openBuyPlanDetailV3(' + bp.id + ')">Open Detail</button>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileActivityList(reqId, data, panel) {
+    const vendors = (data && data.vendors) ? data.vendors : [];
+    if (!vendors.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">'
+            + 'No activity yet'
+            + '<div style="margin-top:8px"><button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" '
+            + 'onclick="event.stopPropagation();checkForReplies(' + reqId + ',this)">Check for Replies</button></div>'
+            + '</div>';
+        return;
+    }
+    // Summary counts
+    let totalContacts = 0, totalReplies = 0;
+    for (const v of vendors) {
+        totalContacts += (v.contacts || []).length;
+        totalReplies += (v.responses || []).length;
+    }
+    let html = '<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;font-size:12px">';
+    html += '<span><b>' + totalContacts + '</b> RFQs sent</span>';
+    html += '<span><b>' + totalReplies + '</b> replies</span>';
+    html += '<button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:11px;padding:4px 10px;margin-left:auto" onclick="event.stopPropagation();checkForReplies(' + reqId + ',this)">Check Inbox</button>';
+    html += '</div>';
+    // Timeline cards per vendor
+    for (const v of vendors) {
+        const contacts = v.contacts || [];
+        const responses = v.responses || [];
+        const activities = v.activities || [];
+        const hasReply = responses.length > 0;
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + (hasReply ? 'var(--green)' : 'var(--amber)') + '">';
+        html += '<div class="m-card-header">';
+        html += '<span style="font-weight:600;font-size:13px">' + esc(v.vendor_name || 'Vendor') + '</span>';
+        if (hasReply) {
+            html += '<span class="m-chip m-chip-green" style="font-size:10px">' + responses.length + ' repl' + (responses.length !== 1 ? 'ies' : 'y') + '</span>';
+        } else {
+            html += '<span class="m-chip m-chip-amber" style="font-size:10px">Awaiting</span>';
+        }
+        html += '</div>';
+        // Contact info
+        if (contacts.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+            html += contacts.map(c => esc(c.contact_name || c.email || '')).filter(Boolean).join(', ');
+            html += '</div>';
+        }
+        // Recent activities
+        const allEvents = [];
+        for (const c of contacts) {
+            allEvents.push({type: 'rfq', date: c.sent_at || c.created_at, label: 'RFQ sent to ' + esc(c.contact_name || c.email || 'contact')});
+        }
+        for (const r of responses) {
+            allEvents.push({type: 'reply', date: r.received_at || r.created_at, label: 'Reply received' + (r.subject ? ': ' + esc(r.subject) : '')});
+        }
+        for (const a of activities) {
+            const ch = a.channel === 'phone' ? 'Call' : a.activity_type === 'note' ? 'Note' : 'Email';
+            allEvents.push({type: 'activity', date: a.created_at, label: ch + (a.summary ? ': ' + esc(a.summary) : '')});
+        }
+        allEvents.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+        if (allEvents.length) {
+            html += '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">';
+            const show = allEvents.slice(0, 3);
+            for (const ev of show) {
+                const dotColor = ev.type === 'reply' ? 'var(--green)' : ev.type === 'rfq' ? 'var(--blue)' : 'var(--muted)';
+                html += '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;font-size:11px">';
+                html += '<span style="color:' + dotColor + ';flex-shrink:0;margin-top:2px">&#9679;</span>';
+                html += '<span style="flex:1;color:var(--text)">' + ev.label + '</span>';
+                html += '<span style="color:var(--muted);flex-shrink:0;font-size:10px">' + (ev.date ? fmtRelative(ev.date) : '') + '</span>';
+                html += '</div>';
+            }
+            if (allEvents.length > 3) {
+                html += '<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">+' + (allEvents.length - 3) + ' more events</div>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
 function _renderDdDetails(reqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + reqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
@@ -4766,7 +5311,9 @@ function _renderDdDetails(reqId, targetPanel) {
             // Left: core need
             html += '<div class="det-part-core">';
             html += `<div class="det-part-mpn mono">${esc(r.primary_mpn || '—')}</div>`;
-            if (r.brand) html += `<div class="det-part-brand">${esc(r.brand)}</div>`;
+            const displayBrand = r.brand || r.manufacturer;
+            if (displayBrand) html += '<div class="det-part-brand">' + esc(displayBrand) + '</div>';
+            if (r.manufacturer && r.manufacturer !== r.brand && r.brand) html += '<div style="font-size:11px;color:var(--muted)">Mfr: ' + esc(r.manufacturer) + '</div>';
             if (subs.length) {
                 html += `<div class="det-part-subs"><span class="det-k">Substitutes</span>`;
                 for (const s of subs) html += `<span class="det-sub mono">${esc(s)}</span>`;
@@ -4809,10 +5356,12 @@ function _renderDdDetails(reqId, targetPanel) {
 }
 
 function _reqBadge(r) {
-    if (r.offer_count > 0) return '<span class="req-badge req-badge-offers"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6-2 6 2v5a6 6 0 0 1-6 5 6 6 0 0 1-6-5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>OFFERS</span>';
-    if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>SOURCING</span>';
-    if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10.5" y2="10"/></svg>STALLED</span>';
-    return '<span class="req-badge req-badge-norfq"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="8" x2="12" y2="8"/></svg>NO RFQ</span>';
+    // Full pipeline: NO RFQ → SEARCHING → RFQ SENT → OFFERS (count) → QUOTED
+    if (r.offer_count > 0) return `<span class="req-badge req-badge-offers" style="cursor:pointer" title="${r.offer_count} vendor offer${r.offer_count !== 1 ? 's' : ''} received — click to view" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6-2 6 2v5a6 6 0 0 1-6 5 6 6 0 0 1-6-5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>OFFERS (${r.offer_count})</span>`;
+    if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching" title="RFQ sent — vendor activity within 48h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>RFQ SENT</span>';
+    if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled" title="RFQ sent but no vendor activity in 48+ hours"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10.5" y2="10"/></svg>STALLED</span>';
+    if (r.sighting_count > 0) return `<span class="req-badge req-badge-searching" title="${r.sighting_count} vendor${r.sighting_count !== 1 ? 's' : ''} found — review sightings and send RFQ"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>SOURCING (${r.sighting_count})</span>`;
+    return '<span class="req-badge req-badge-norfq" title="No RFQ sent yet — search for vendors first"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="8" x2="12" y2="8"/></svg>NO RFQ</span>';
 }
 
 function _renderDrillDownTable(rfqId, targetPanel) {
@@ -4825,7 +5374,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
-            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th style="width:24px"></th>
+            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
         </tr></thead><tbody></tbody></table>`;
         _appendAddRow(rfqId, dd);
         return;
@@ -4834,7 +5383,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th style="width:24px"></th>
+        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
@@ -4895,6 +5444,10 @@ function editDrillCell(td, rfqId, reqId, field) {
 
     td.textContent = '';
     td.appendChild(el);
+    const hint = document.createElement('span');
+    hint.style.cssText = 'font-size:9px;color:var(--muted);display:block;margin-top:1px';
+    hint.textContent = 'Enter \u2713  Esc \u2717';
+    td.appendChild(hint);
     el.focus();
     if (el.select) el.select();
 
@@ -5196,8 +5749,16 @@ function _parseTsvInput(text) {
     const mpnAliases = ['mpn', 'partnumber', 'partno', 'pn', 'mfgpart', 'mfgpartnumber', 'part', 'mfpn'];
     const qtyAliases = ['qty', 'quantity', 'targetqty', 'reqd', 'required', 'need'];
     const priceAliases = ['price', 'targetprice', 'target', 'unitprice', 'unit'];
+    const condAliases = ['condition', 'cond', 'cond.'];
+    const dcAliases = ['datecode', 'dc', 'datecodes', 'date_code', 'date_codes'];
+    const subsAliases = ['subs', 'substitutes', 'alts', 'alternates', 'sub', 'substitute'];
+    const fwAliases = ['firmware', 'fw', 'firmwareversion'];
+    const hwAliases = ['hardware', 'hw', 'hardwarecodes', 'hardware_codes', 'hwrev'];
+    const pkgAliases = ['packaging', 'pkg', 'package'];
+    const notesAliases = ['notes', 'note', 'comments', 'comment', 'remarks'];
 
     let mpnCol = -1, qtyCol = -1, priceCol = -1;
+    let condCol = -1, dcCol = -1, subsCol = -1, fwCol = -1, hwCol = -1, pkgCol = -1, notesCol = -1;
     let dataStart = 0;
 
     // Check if first row is a header
@@ -5207,6 +5768,13 @@ function _parseTsvInput(text) {
             if (mpnCol < 0 && mpnAliases.includes(c)) mpnCol = i;
             if (qtyCol < 0 && qtyAliases.includes(c)) qtyCol = i;
             if (priceCol < 0 && priceAliases.includes(c)) priceCol = i;
+            if (condCol < 0 && condAliases.includes(c)) condCol = i;
+            if (dcCol < 0 && dcAliases.includes(c)) dcCol = i;
+            if (subsCol < 0 && subsAliases.includes(c)) subsCol = i;
+            if (fwCol < 0 && fwAliases.includes(c)) fwCol = i;
+            if (hwCol < 0 && hwAliases.includes(c)) hwCol = i;
+            if (pkgCol < 0 && pkgAliases.includes(c)) pkgCol = i;
+            if (notesCol < 0 && notesAliases.includes(c)) notesCol = i;
         });
         dataStart = 1;
     }
@@ -5230,6 +5798,13 @@ function _parseTsvInput(text) {
             const p = parseFloat(r[priceCol].replace(/[^0-9.]/g, ''));
             if (p > 0) obj.target_price = p;
         }
+        if (condCol >= 0 && r[condCol]) obj.condition = r[condCol].trim();
+        if (dcCol >= 0 && r[dcCol]) obj.date_codes = r[dcCol].trim();
+        if (subsCol >= 0 && r[subsCol]) obj.substitutes = r[subsCol].split(/[,;]/).map(s => s.trim()).filter(Boolean);
+        if (fwCol >= 0 && r[fwCol]) obj.firmware = r[fwCol].trim();
+        if (hwCol >= 0 && r[hwCol]) obj.hardware_codes = r[hwCol].trim();
+        if (pkgCol >= 0 && r[pkgCol]) obj.packaging = r[pkgCol].trim();
+        if (notesCol >= 0 && r[notesCol]) obj.notes = r[notesCol].trim();
         results.push(obj);
     }
     return results;
@@ -5245,9 +5820,29 @@ function _previewPaste() {
         preview.textContent = 'No parts detected';
         btn.disabled = true;
     } else {
-        const sample = parts.slice(0, 3).map(p => p.primary_mpn).join(', ');
-        const more = parts.length > 3 ? ` and ${parts.length - 3} more` : '';
-        preview.innerHTML = `<b>${parts.length}</b> part${parts.length !== 1 ? 's' : ''} detected: ${esc(sample)}${more}`;
+        // Build a mini table showing detected columns
+        const extraCols = parts.some(p => p.condition || p.date_codes || p.substitutes || p.firmware || p.hardware_codes || p.packaging || p.notes);
+        let tbl = `<b>${parts.length}</b> part${parts.length !== 1 ? 's' : ''} detected`;
+        if (extraCols) {
+            const cols = ['MPN','Qty','Price'];
+            if (parts.some(p => p.condition)) cols.push('Cond');
+            if (parts.some(p => p.date_codes)) cols.push('DC');
+            if (parts.some(p => p.packaging)) cols.push('Pkg');
+            if (parts.some(p => p.substitutes)) cols.push('Subs');
+            if (parts.some(p => p.firmware)) cols.push('FW');
+            if (parts.some(p => p.hardware_codes)) cols.push('HW');
+            if (parts.some(p => p.notes)) cols.push('Notes');
+            tbl += ` (columns: ${cols.join(', ')})`;
+        }
+        tbl += ':<br>';
+        const show = parts.slice(0, 5);
+        tbl += '<table style="font-size:11px;margin-top:4px;width:100%;border-collapse:collapse"><tr style="color:var(--muted)"><th style="text-align:left;padding:2px 6px">MPN</th><th style="text-align:right;padding:2px 6px">Qty</th><th style="text-align:right;padding:2px 6px">Price</th></tr>';
+        for (const p of show) {
+            tbl += `<tr><td style="padding:2px 6px">${esc(p.primary_mpn)}</td><td style="text-align:right;padding:2px 6px">${p.target_qty || 1}</td><td style="text-align:right;padding:2px 6px">${p.target_price ? '$' + p.target_price.toFixed(2) : '\u2014'}</td></tr>`;
+        }
+        if (parts.length > 5) tbl += `<tr><td colspan="3" style="padding:2px 6px;color:var(--muted);font-style:italic">\u2026 and ${parts.length - 5} more</td></tr>`;
+        tbl += '</table>';
+        preview.innerHTML = tbl;
         btn.disabled = false;
     }
 }
@@ -5352,6 +5947,37 @@ function _ddFilterSightings(reqId, field, value) {
         if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
     }, 200);
 }
+function _ddShowVendorSuggestions(reqId, query) {
+    const dd = document.getElementById('ddVendorAc-' + reqId);
+    if (!dd) return;
+    if (query.length < 1) { dd.classList.remove('open'); return; }
+    const data = _ddSightingsCache[reqId] || {};
+    const seen = new Set();
+    const vendors = [];
+    for (const [, group] of Object.entries(data)) {
+        for (const s of (group.sightings || [])) {
+            const vn = (s.vendor_name || '').trim();
+            if (!vn) continue;
+            const key = vn.toLowerCase();
+            if (seen.has(key)) continue;
+            if (!key.includes(query.toLowerCase())) continue;
+            seen.add(key);
+            vendors.push(vn);
+            if (vendors.length >= 15) break;
+        }
+        if (vendors.length >= 15) break;
+    }
+    if (!vendors.length) { dd.classList.remove('open'); return; }
+    dd.innerHTML = vendors.map(v => `<div class="ac-item" onmousedown="_ddSelectVendor(${reqId},'${esc(v.replace(/'/g, "\\'"))}')">${esc(v)}</div>`).join('');
+    dd.classList.add('open');
+}
+function _ddSelectVendor(reqId, vendor) {
+    const inp = document.querySelector('[data-sfilter="' + reqId + '-vendor"]');
+    if (inp) inp.value = vendor;
+    _ddFilterSightings(reqId, 'vendor', vendor);
+    const dd = document.getElementById('ddVendorAc-' + reqId);
+    if (dd) dd.classList.remove('open');
+}
 function _ddApplyFilters(sightings, reqId, groupLabel) {
     const f = _ddSightingFilters[reqId];
     const tf = _ddTypeFilter[reqId] || 'all';
@@ -5360,7 +5986,7 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
         result = result.filter(s => {
             if (f.vendor && !(s.vendor_name || '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
             if (f.source && !(s.source_type || '').toLowerCase().includes(f.source.toLowerCase())) return false;
-            if (f.condition && !(s.condition || '').toLowerCase().includes(f.condition.toLowerCase())) return false;
+            if (f.condition && !((s.condition || '') + ' ' + (s.date_code || '')).toLowerCase().includes(f.condition.toLowerCase())) return false;
             return true;
         });
     }
@@ -5370,7 +5996,7 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
             if (tf === 'exact') return !isSub;
             if (tf === 'sub') return isSub;
             if (tf === 'available') return !s.is_unavailable;
-            if (tf === 'na') return !!s.is_unavailable;
+            if (tf === 'na') return s.is_unavailable || s.qty_available == null || s.qty_available <= 0;
             return true;
         });
     }
@@ -5393,7 +6019,8 @@ function _ddVendorScoreRing(s) {
     const vs = Math.round(vc.vendor_score);
     const color = vs >= 66 ? 'var(--green)' : vs >= 33 ? 'var(--amber)' : 'var(--red)';
     const bg = vs >= 66 ? 'var(--green-light)' : vs >= 33 ? 'var(--amber-light)' : 'var(--red-light)';
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid ${color};background:${bg};font-size:7px;font-weight:700;color:${color};margin-right:4px;cursor:default;vertical-align:middle" title="Vendor Score: ${vs}/100">${vs}</span>`;
+    const tier = vs >= 66 ? 'Proven' : vs >= 33 ? 'Developing' : 'Caution';
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid ${color};background:${bg};font-size:7px;font-weight:700;color:${color};margin-right:4px;cursor:default;vertical-align:middle" title="Vendor Score: ${vs}/100 (${tier}) — based on order history, response rate, and reliability">${vs}</span>`;
 }
 
 function _ddVendorLinkPill(s) {
@@ -5414,7 +6041,7 @@ function _ddCopyContact(text, type) {
     navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(e => console.warn('clipboard copy failed:', e));
 }
 
-function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
+function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showContact) {
     let html = '';
     for (const s of sightings) {
         // Historical offer rows — rendered at same size as regular sightings
@@ -5429,7 +6056,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
             html += `<tr style="background:var(--blue-light,#f0f9ff)">
                 <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:var(--blue,#0284c7);color:#fff;font-weight:700">HIST</span></td>
                 <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a> <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
-                <td style="font-size:10px;color:var(--muted)">\u2014</td>
+                ${showContact !== false ? '<td style="font-size:10px;color:var(--muted)">\u2014</td>' : ''}
                 <td class="mono">${hSub}${esc(ho.mpn || '\u2014')}</td>
                 <td class="mono">${hQty}</td>
                 <td class="mono" style="color:var(--teal)">${hPrice}</td>
@@ -5446,11 +6073,11 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
         const checked = sel.has(s.id) ? 'checked' : '';
         const dimStyle = !hasEmail ? 'opacity:.7' : '';
-        const disabledAttr = '';
+        const disabledAttr = !hasEmail ? 'disabled title="Vendor needs an email address before sending RFQ"' : '';
         const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) + (s.price_outlier ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:#fee2e2;color:#991b1b;font-weight:600" title="Suspected outlier">!</span>' : '') : '\u2014'; // nosec: numeric values only
         const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
-        const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
+        const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600" title="Click to add an email address for this vendor">+ add email</a>` : '';
         const ring = _ddVendorScoreRing(s);
         const linkPill = _ddVendorLinkPill(s);
         const inlineBadges = _ddVendorInlineBadges(s);
@@ -5460,7 +6087,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         const unavail = s.is_unavailable;
         const unavailBadge = unavail ? ' <span class="badge b-unavail">NOT AVAIL</span>' : '';
         const unavailBtn = s.id
-            ? `<button class="btn-unavail" onclick="event.stopPropagation();markUnavailable(${s.id},${!unavail},${reqId})" title="${unavail ? 'Mark available' : 'Mark as not available'}">${unavail ? '\u21a9 Avail' : '\u2715 N/A'}</button>`
+            ? `<button class="btn-unavail" onclick="event.stopPropagation();markUnavailable(${s.id},${!unavail},${reqId})" title="${unavail ? 'Mark as available again' : 'Mark as unavailable — vendor confirmed stock is sold or wrong part'}">${unavail ? '\u21a9 Available' : '\u2715 Unavailable'}</button>`
             : '';
         // Contact info
         const cEmail = s.vendor_email || (s.vendor_card && s.vendor_card.emails && s.vendor_card.emails[0]) || '';
@@ -5486,8 +6113,8 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         const staleOpacity = s.is_stale && !unavail ? 'opacity:0.55;' : '';
         html += `<tr style="${staleOpacity}${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
-            <td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>
+            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
+            ${showContact !== false ? `<td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>` : ''}
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
@@ -5525,7 +6152,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     const scoreMap = _ddScoreCache[reqId] || {};
 
     const sel = _ddSelectedSightings[reqId] || new Set();
-    const DD_LIMIT = 100;
+    const DD_LIMIT = 250;
     const showAll = dd.dataset.showAll === '1';
     const f = _ddSightingFilters[reqId] || {};
     const tf = _ddTypeFilter[reqId] || 'all';
@@ -5537,10 +6164,11 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     // Filter bar
     let html = `<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
         <div class="src-type-pills">${_tfPill('all','All')}${_tfPill('exact','Exact')}${_tfPill('sub','Substitute')}${_tfPill('available','Available')}${_tfPill('na','N/A')}</div>
-        <input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)">
+        <span style="position:relative"><input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value);_ddShowVendorSuggestions(${reqId},this.value)" onblur="setTimeout(()=>{const d=document.getElementById('ddVendorAc-${reqId}');if(d)d.classList.remove('open')},150)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)"><div id="ddVendorAc-${reqId}" class="ac-dropdown"></div></span>
         <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         ${hasFilters ? `<a onclick="event.stopPropagation();_ddClearFilters(${reqId})" style="font-size:10px;color:var(--blue);cursor:pointer">\u2715 Clear</a>` : ''}
+        <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;margin-left:auto;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
     </div>`;
 
     for (const [rId, group] of groups) {
@@ -5575,8 +6203,16 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         // Apply filters
         const filtered = _ddApplyFilters(sightings, reqId, label);
 
-        // Sort by score descending (best sources first)
+        // Look up target qty for this requirement group
+        const _reqs = _ddReqCache[reqId] || [];
+        const _req = _reqs.find(r => r.id == rId);
+        const targetQty = _req?.target_qty || 0;
+
+        // Sort: full-fill vendors first, then by score descending
         filtered.sort((a, b) => {
+            const aFill = targetQty > 0 && a.qty_available >= targetQty ? 1 : 0;
+            const bFill = targetQty > 0 && b.qty_available >= targetQty ? 1 : 0;
+            if (aFill !== bFill) return bFill - aFill;
             const sa = a.vendor_card?.vendor_score ?? a.score ?? 0;
             const sb = b.vendor_card?.vendor_score ?? b.score ?? 0;
             return sb - sa;
@@ -5590,8 +6226,6 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
         // Look up target price from requirement cache
-        const _reqs = _ddReqCache[reqId] || [];
-        const _req = _reqs.find(r => r.id == rId);
         const groupTargetPrice = _req?.target_price ?? null;
         const targetPriceLabel = groupTargetPrice != null ? ` \u00b7 target $${Number(groupTargetPrice).toFixed(2)}` : '';
 
@@ -5612,15 +6246,16 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         }
 
         const visible = showAll ? filtered : filtered.slice(0, DD_LIMIT);
-        const visibleIds = visible.filter(s => !s._historical && s.id).map(s => s.id);
+        const visibleIds = visible.filter(s => !s._historical && s.id && !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails))).map(s => s.id);
         const allChecked = visibleIds.length > 0 && visibleIds.every(id => sel.has(id));
+        const hasAnyContact = visible.some(s => s.vendor_email || (s.vendor_card && (s.vendor_card.has_emails || (s.vendor_card.emails && s.vendor_card.emails.length))) || s.vendor_phone || (s.vendor_card && s.vendor_card.phones && s.vendor_card.phones.length));
         html += `<table class="dtbl" style="margin:0"><thead><tr>
-            <th style="width:24px"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="event.stopPropagation();ddToggleGroupSightings(${reqId},[${visibleIds.join(',')}],this.checked)" title="Select all in group"></th><th>Vendor</th><th>Contact</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Lead</th><th>Age</th>
+            <th style="width:24px"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="event.stopPropagation();ddToggleGroupSightings(${reqId},[${visibleIds.join(',')}],this.checked)" title="Select all in group"></th><th>Vendor</th>${hasAnyContact ? '<th>Contact</th>' : ''}<th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Lead</th><th>Age</th>
         </tr></thead><tbody>`;
-        html += _ddRenderTierRows(visible, reqId, sel, label, groupTargetPrice);
+        html += _ddRenderTierRows(visible, reqId, sel, label, groupTargetPrice, hasAnyContact);
         html += '</tbody></table>';
         if (!showAll && filtered.length > DD_LIMIT) {
-            html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${filtered.length} sources\u2026</a>`;
+            html += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;margin:6px 0 0 12px;color:var(--blue)">Show all ${filtered.length} sources (${filtered.length - DD_LIMIT} more)</button>`;
         }
 
         html += '</div>';
@@ -5659,11 +6294,33 @@ function ddToggleSighting(reqId, sightingId) {
 
 function _updateDdBulkButton(reqId) {
     const btn = document.getElementById('bulkRfqBtn-' + reqId);
-    if (!btn) return;
+    const btn2 = document.getElementById('ddBulkRfqBtn-' + reqId);
     const sel = _ddSelectedSightings[reqId];
     const count = sel ? sel.size : 0;
-    btn.style.display = count > 0 ? '' : 'none';
-    btn.textContent = `Send Bulk RFQ (${count})`;
+    // Group selected sightings by normalized vendor name
+    const data = _ddSightingsCache[reqId] || {};
+    const vendorMap = {}; // normalized name -> { hasEmail: bool }
+    for (const [, group] of Object.entries(data)) {
+        for (const s of (group.sightings || [])) {
+            if (!sel || !sel.has(s.id)) continue;
+            const vn = (s.vendor_name || '').trim().toLowerCase();
+            if (!vn || vn === 'no seller listed') continue;
+            const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
+            if (!vendorMap[vn]) vendorMap[vn] = { hasEmail: false };
+            if (hasEmail) vendorMap[vn].hasEmail = true;
+        }
+    }
+    const totalVendors = Object.keys(vendorMap).length;
+    const withEmail = Object.values(vendorMap).filter(v => v.hasEmail).length;
+    const vLabel = totalVendors === 1 ? 'vendor' : 'vendors';
+    const label = withEmail < totalVendors
+        ? `Prepare RFQ (${withEmail} of ${totalVendors} ${vLabel})`
+        : `Prepare RFQ (${totalVendors} ${vLabel})`;
+    for (const b of [btn, btn2]) {
+        if (!b) continue;
+        b.style.display = count > 0 ? '' : 'none';
+        b.textContent = label;
+    }
 }
 
 function ddPromptVendorEmail(reqId, sightingId, vendorName) {
@@ -5713,7 +6370,7 @@ function _ddPromptFallback(reqId, sightingId, vendorName) {
 
 function ddSendBulkRfq(reqId) {
     const sel = _ddSelectedSightings[reqId];
-    if (!sel || !sel.size) return;
+    if (!sel || !sel.size) { showToast('Select sightings first', 'warn'); return; }
     const data = _ddSightingsCache[reqId] || {};
     // Collect selected sightings and group by vendor
     const groups = {};
@@ -5815,6 +6472,16 @@ async function ddResearchAll(reqId) {
 // ── Log Offer Modal ─────────────────────────────────────────────────────
 async function openLogOfferFromList(reqId) {
     const loReqId = document.getElementById('loReqId'); if (loReqId) loReqId.value = reqId;
+    // Show RFQ context banner
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    const ctxEl = document.getElementById('loReqContext');
+    if (ctxEl && reqInfo) {
+        const custName = reqInfo.customer_name || reqInfo.name || 'REQ-' + String(reqId).padStart(3, '0');
+        ctxEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">For</span> <b>${esc(custName)}</b> <span class="mono" style="font-size:11px;color:var(--muted)">(REQ-${String(reqId).padStart(3,'0')})</span>`;
+        ctxEl.style.display = '';
+    } else if (ctxEl) {
+        ctxEl.style.display = 'none';
+    }
     // Load requirements to populate part picker
     const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(e => { showToast('Failed to load requirements','warn'); return []; });
     _ddReqCache[reqId] = reqs;
@@ -5824,6 +6491,8 @@ async function openLogOfferFromList(reqId) {
         for (const r of (reqs || [])) {
             sel.innerHTML += `<option value="${r.id}" data-mpn="${escAttr(r.primary_mpn || '')}">${esc(r.primary_mpn || 'Part #' + r.id)}${r.target_qty ? ' (qty ' + r.target_qty + ')' : ''}</option>`;
         }
+        // Auto-select if only one part
+        if (reqs && reqs.length === 1) sel.value = String(reqs[0].id);
     }
     // Clear form fields
     const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
@@ -5965,6 +6634,7 @@ async function submitLogOffer() {
 }
 
 function renderReqList() {
+    _renderBreadcrumb();
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
@@ -6002,6 +6672,7 @@ function renderReqList() {
                 case 'reqs': va = a.requirement_count || 0; vb = b.requirement_count || 0; break;
                 case 'sourced': va = a.sourced_count || 0; vb = b.sourced_count || 0; break;
                 case 'offers': va = a.reply_count || 0; vb = b.reply_count || 0; break;
+                case 'quote': { const qo = {won:4,sent:3,revised:2,draft:1,lost:0}; va = qo[a.quote_status] ?? -1; vb = qo[b.quote_status] ?? -1; break; }
                 case 'status': va = a.status || ''; vb = b.status || ''; break;
                 case 'sales': va = a.created_by_name || ''; vb = b.created_by_name || ''; break;
                 case 'age': va = a.created_at || ''; vb = b.created_at || ''; break;
@@ -6031,10 +6702,24 @@ function renderReqList() {
     // Update counts
     const countEl = document.getElementById('reqStatusCount');
     if (countEl) countEl.textContent = `${data.length}`;
+    // Show shared count hint for sourcing view
+    const hintEl = document.getElementById('viewHint');
+    if (hintEl) hintEl.remove();
+    if (v === 'sourcing' && data.length > 0) {
+        const hint = document.createElement('div');
+        hint.id = 'viewHint';
+        hint.style.cssText = 'font-size:10px;color:var(--muted);text-align:center;padding:2px 0';
+        hint.textContent = data.length + ' active req' + (data.length !== 1 ? 's' : '') + ' \u2014 same as Open tab, sourcing-focused columns';
+        el.parentElement?.insertBefore(hint, el);
+    }
 
     if (!data.length) {
-        const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted',archive:'Archive'};
-        el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || '') + ' requisitions</p>';
+        if (_currentMainView === 'archive') {
+            el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
+        } else {
+            const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
+            el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || '') + ' requisitions</p>';
+        }
         return;
     }
 
@@ -6042,13 +6727,13 @@ function renderReqList() {
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const v = _currentMainView;
-    const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select></th>`;
+    const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select> <span style="position:relative;display:inline-block"><button class="btn-icon" onclick="event.stopPropagation();_toggleColGear()" title="Show/hide columns" style="font-size:14px;cursor:pointer;background:none;border:none;color:var(--muted);padding:0 2px">&#x2699;</button><span id="colGearWrap"></span></span></th>`;
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
-            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Sourcing ${sa('score')}</th>
+            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score (0-100). Green = strong, Yellow = needs attention, Red = weak. Hover over any score for a detailed breakdown.">Sourcing ${sa('score')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
@@ -6065,8 +6750,8 @@ function renderReqList() {
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('status')"${thClass('status')}>Outcome ${sa('status')}</th>
-            <th onclick="sortReqList('matches')"${thClass('matches')}>Matches ${sa('matches')}</th>
+            <th onclick="sortReqList('status')"${thClass('status')} title="Final outcome — Won, Lost, or Closed">Outcome ${sa('status')}</th>
+            <th onclick="sortReqList('matches')"${thClass('matches')} title="Proactive material matches found">Matches ${sa('matches')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
@@ -6076,9 +6761,9 @@ function renderReqList() {
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-            <th>Quote</th>
-            <th>Sourcing</th>
-            <th>Offers</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress — parts sourced / total">Sourcing ${sa('sourced')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} title="Vendor offers received">Offers ${sa('offers')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
@@ -6119,18 +6804,37 @@ function renderReqList() {
     }
     // Mobile: render cards instead of table
     if (window.__isMobile) {
-        let mobileHtml = data.map(r => _renderReqRowMobile(r)).join('');
-        el.innerHTML = mobileHtml + loadMoreHtml;
+        renderMobileReqList(data, loadMoreHtml);
+        _populateUserFilter();
+        _updateToolbarStats();
+        return;
     } else {
         el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     }
     _populateUserFilter();
     _updateToolbarStats();
-    // Restore previously open drill-downs
+    _applyColVisCSS();
+    // Restore previously open drill-downs (CSS only to avoid content reload flash)
     if (_openDrillIds.length) {
         const stillPresent = _openDrillIds.filter(id => _reqListData.some(r => r.id === id));
         if (stillPresent.length) {
-            setTimeout(() => { stillPresent.forEach(id => toggleDrillDown(id)); }, 50);
+            setTimeout(() => {
+                stillPresent.forEach(id => {
+                    const drow = document.getElementById('d-' + id);
+                    const arrow = document.getElementById('a-' + id);
+                    if (drow && !drow.classList.contains('open')) {
+                        drow.classList.add('open');
+                        if (arrow) arrow.classList.add('open');
+                        // Reload sub-tab content into the panel
+                        const defaultTab = _ddActiveTab[id] || _ddDefaultTab(_currentMainView);
+                        _ddActiveTab[id] = defaultTab;
+                        drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === defaultTab));
+                        const panel = drow.querySelector('.dd-panel');
+                        if (panel) _loadDdSubTab(id, defaultTab, panel);
+                    }
+                });
+                _updateDrillToggleLabel();
+            }, 50);
         }
     }
 }
@@ -6173,8 +6877,8 @@ function _updateToolbarStats() {
 
     const qf = _toolbarQuickFilter;
     const html =
-        `<span class="tb-stat${qf === 'green' ? ' active' : ''}" onclick="setToolbarQuickFilter('green')"><span class="tb-dot tb-dot-green"></span><span class="tb-ct">${nGreen}</span> Offers</span>` +
-        `<span class="tb-stat${qf === 'yellow' ? ' active' : ''}" onclick="setToolbarQuickFilter('yellow')"><span class="tb-dot tb-dot-amber"></span><span class="tb-ct">${nYellow}</span> Due</span>`;
+        `<span class="tb-stat${qf === 'green' ? ' active' : ''}" onclick="setToolbarQuickFilter('green')" title="Requisitions with vendor offers or replies — click to filter"><span class="tb-dot tb-dot-green"></span><span class="tb-ct">${nGreen}</span> Offers</span>` +
+        `<span class="tb-stat${qf === 'yellow' ? ' active' : ''}" onclick="setToolbarQuickFilter('yellow')" title="Requisitions with bid deadline within 3 days — click to filter"><span class="tb-dot tb-dot-amber"></span><span class="tb-ct">${nYellow}</span> Due</span>`;
     const el = document.getElementById('toolbarStats');
     if (el) el.innerHTML = html;
     const mel = document.getElementById('mobileToolbarStats');
@@ -6222,26 +6926,32 @@ function _renderReqRow(r) {
     if (dp.length === 2 && dp[0].trim() === dp[1].trim()) cust = dp[0].trim();
     if (!cust) cust = r.name || '';
 
-    // New-offers dot
+    // Activity indicator dot — new offers, recent replies, or recent updates
     let dot = '';
     if (r.has_new_offers && r.latest_offer_at) {
         const h = (Date.now() - new Date(r.latest_offer_at).getTime()) / 3600000;
-        if (h < 12) dot = ' <span class="new-offers-dot" title="New offers"></span>';
-        else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
+        if (h < 12) dot = ' <span class="new-offers-dot" title="New offers received"></span>';
+        else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers (review pending)"></span>';
+    } else if (r.latest_reply_at) {
+        const rh = (Date.now() - new Date(r.latest_reply_at).getTime()) / 3600000;
+        if (rh < 4) dot = ' <span class="new-offers-dot" title="New vendor reply ' + _timeAgo(r.latest_reply_at) + '"></span>';
+        else if (rh < 24) dot = ' <span class="new-offers-dot amber" title="Vendor reply ' + _timeAgo(r.latest_reply_at) + '"></span>';
     }
 
     // Name cell — editable on RFQ tab only, read-only on sourcing/archive
     const nameCell = v === 'rfq'
-        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted)" onclick="event.stopPropagation();editReqName(${r.id},this)">${esc(r.name || '')}</span></td>`
-        : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span></td>`
+        : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})" title="Click to expand details">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
-    // Last Searched — relative timestamp
+    // Last Searched — relative timestamp with absolute tooltip
     let searched = '';
     if (r.last_searched_at) {
         const h = (Date.now() - new Date(r.last_searched_at).getTime()) / 3600000;
-        if (h < 1) searched = '<' + Math.max(1, Math.round(h * 60)) + 'm ago';
-        else if (h < 24) searched = Math.round(h) + 'h ago';
-        else searched = Math.round(h / 24) + 'd ago';
+        const rel = h < 1 ? '<' + Math.max(1, Math.round(h * 60)) + 'm ago'
+            : h < 24 ? Math.round(h) + 'h ago'
+            : Math.round(h / 24) + 'd ago';
+        const abs = fmtDateTime(r.last_searched_at);
+        searched = `<span title="${escAttr(abs)}">${rel}</span>`;
     } else {
         searched = '<span style="color:var(--muted)">\u2014</span>';
     }
@@ -6284,8 +6994,10 @@ function _renderReqRow(r) {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
         const wonVal = r.quote_won_value ? ` <span style="font-size:10px;color:var(--green)">\u00b7 ${fmtDollars(r.quote_won_value)}</span>` : '';
         const pmCnt = r.proactive_match_count || 0;
-        const matchBadge = pmCnt > 0
-            ? `<span style="color:var(--green);font-weight:600">${pmCnt}</span>`
+        const offerCnt = r.offer_count || 0;
+        const matchVal = offerCnt > 0 ? offerCnt : pmCnt;
+        const matchBadge = matchVal > 0
+            ? `<span style="color:var(--green);font-weight:600">${matchVal}</span>`
             : '<span style="color:var(--muted)">\u2014</span>';
         dataCells = `
             <td class="mono">${total}</td>
@@ -6299,7 +7011,7 @@ function _renderReqRow(r) {
     } else {
         // RFQ: Parts, Quote, Sourcing, Offers, Sales, Age, Bid Due
         // Quote status cell
-        let qCell = '<span style="color:var(--muted)">\u2014</span>';
+        let qCell = '<span style="color:var(--muted)" title="No quote created yet">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
         else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
         else if (r.quote_status === 'sent') qCell = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
@@ -6308,13 +7020,13 @@ function _renderReqRow(r) {
         // Source Progress cell — compact sourcing status
         const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
         let srcCell;
-        if (total === 0) srcCell = '<span style="color:var(--muted)">\u2014</span>';
+        if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
         else {
             const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
             srcCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
         }
         // Offers cell — show confirmed offers, fall back to reply count
-        let offCell = '<span style="color:var(--muted)">\u2014</span>';
+        let offCell = '<span style="color:var(--muted)" title="No vendor offers received yet">\u2014</span>';
         const _oCnt = r.offer_count || 0;
         const _rCnt = r.reply_count || 0;
         if (_oCnt > 0) {
@@ -6335,15 +7047,17 @@ function _renderReqRow(r) {
         // RFQ tab button state machine: blue Source → yellow Sourcing → green Offers
         let rfqBtn;
         if (r.status === 'draft') {
-            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Submit to sourcing">&#x25b6; Source</button>`;
+            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing — search supplier APIs for parts">&#x25b6; Source</button>`;
         } else if (r.status === 'quoted' || r.status === 'quoting') {
+            const hasQuoteSent = r.quote_status === 'sent';
             rfqBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="View quote">Quoted</button>`;
+            if (hasQuoteSent) rfqBtn += ` <button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
         } else if (offers > 0 && r.has_new_offers) {
             rfqBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers — click to review">Offers (${offers})</button>`;
         } else if (offers > 0) {
             rfqBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View offers">Offers (${offers})</button>`;
         } else {
-            rfqBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'parts')" title="Sourcing in progress">Sourcing</button>`;
+            rfqBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sourcing in progress — click to view sightings">Sourcing</button>`;
         }
         actions = `<td style="white-space:nowrap">${rfqBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
         colspan = 10;
@@ -6359,7 +7073,7 @@ function _renderReqRow(r) {
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
                 <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs">&#x1f50d; Search All</button>
-                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
+                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
         </div>`;
     } else if (v === 'archive') {
@@ -6368,6 +7082,8 @@ function _renderReqRow(r) {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Source</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
@@ -6384,79 +7100,99 @@ function _renderReqRow(r) {
     <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
         ${ddHeader}
         <div class="dd-tabs">${_renderDdTabPills(r.id)}</div>
-        <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
+        <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} part${total !== 1 ? 's' : ''} \u2014 click row or arrow to expand</span></div>
     </td></tr>`;
 }
 
 // ── Mobile card renderer for RFQ list ─────────────────────────────────
-function _renderReqRowMobile(r) {
-    const total = r.requirement_count || 0;
-    const sourced = r.sourced_count || 0;
-    const offers = r.offer_count || 0;
-    const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+// ── Mobile Requisition List — card layout with summary stats ───────────
+// All user-supplied data is escaped via esc() to prevent XSS.
+function renderMobileReqList(data, loadMoreHtml) {
+    const el = document.getElementById('reqList');
+    if (!el) return;
 
-    // Status badge
-    const badgeMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-green',quoted:'m-chip-purple',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
-    const bc = badgeMap[r.status] || 'm-chip';
-    const _statusLabelsM = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+    // Summary stats: count by bucket
+    const allReqs = _reqListData;
+    let openCount = 0, sourcingCount = 0, archivedCount = 0;
+    for (const r of allReqs) {
+        const s = r.status;
+        if (s === 'archived' || s === 'won' || s === 'lost' || s === 'closed') archivedCount++;
+        else if (s === 'active' || s === 'sourcing') sourcingCount++;
+        else openCount++;
+    }
 
-    // Customer display
-    let cust = r.customer_display || '';
-    const dp = cust.split(' \u2014 ');
+    const summaryHtml = '<div class="m-summary m-req-summary">'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + openCount + '</div><div class="m-summary-label">Open</div></div>'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + sourcingCount + '</div><div class="m-summary-label">Sourcing</div></div>'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + archivedCount + '</div><div class="m-summary-label">Archived</div></div>'
+        + '</div>';
+
+    // Cards — all user content is esc()-encoded inside _renderReqCardMobile
+    const cardsHtml = data.length
+        ? data.map(function(r) { return _renderReqCardMobile(r); }).join('')
+        : '<div class="m-empty">No requisitions found</div>';
+
+    el.innerHTML = summaryHtml + '<div class="m-req-cards">' + cardsHtml + '</div>' + (loadMoreHtml || '');
+
+    // Sync pill tabs to current view
+    _syncMobileReqPills();
+}
+
+function _syncMobileReqPills() {
+    var pills = document.querySelectorAll('#mobileReqPills .m-tab-pill');
+    pills.forEach(function(p) { p.classList.toggle('active', p.dataset.view === _currentMainView); });
+}
+
+function mobileReqPillTap(view, btn) {
+    setMainView(view);
+    var pills = document.querySelectorAll('#mobileReqPills .m-tab-pill');
+    pills.forEach(function(p) { p.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+}
+
+function _renderReqCardMobile(r) {
+    var total = r.requirement_count || 0;
+
+    // Left border color by status
+    var borderMap = {active:'m-req-border-blue',sourcing:'m-req-border-blue',offers:'m-req-border-amber',offers_received:'m-req-border-amber',quoted:'m-req-border-green',quoting:'m-req-border-green',draft:'m-req-border-gray',won:'m-req-border-green',lost:'m-req-border-gray',archived:'m-req-border-gray',closed:'m-req-border-gray'};
+    var borderCls = borderMap[r.status] || 'm-req-border-gray';
+
+    // Status chip
+    var chipMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-amber',offers_received:'m-chip-amber',quoted:'m-chip-green',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
+    var chipCls = chipMap[r.status] || 'm-chip';
+    var labelMap = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',offers_received:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+    var statusLabel = labelMap[r.status] || esc(r.status || '');
+
+    // Customer + buyer initials
+    var cust = r.customer_display || '';
+    var dp = cust.split(' \u2014 ');
     if (dp.length === 2 && dp[0].trim() === dp[1].trim()) cust = dp[0].trim();
-    if (!cust) cust = r.name || '';
+    if (!cust) cust = '';
+    var buyerName = r.created_by_name || '';
+    var initials = '';
+    if (buyerName) {
+        var parts = buyerName.trim().split(/\s+/);
+        initials = parts.map(function(p) { return p[0]; }).join('').toUpperCase().slice(0, 2);
+    }
+    var subtitle = (cust ? esc(cust) : '') + (cust && initials ? ' &middot; ' : '') + (initials ? '<span class="m-req-initials">' + esc(initials) + '</span>' : '');
 
-    // Age
-    let age = '';
+    // Date
+    var dateStr = '';
     if (r.created_at) {
-        const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
-        age = days === 0 ? 'Today' : days === 1 ? '1d ago' : days + 'd ago';
+        var days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
+        dateStr = days === 0 ? 'Today' : days === 1 ? '1d' : days + 'd';
     }
 
-    // Deadline
-    let dlText = '', dlClass = '';
-    if (r.deadline === 'ASAP') { dlText = 'ASAP'; dlClass = 'm-chip-amber'; }
-    else if (r.deadline) {
-        const d = new Date(r.deadline);
-        const now = new Date(); now.setHours(0,0,0,0);
-        const diff = Math.round((d - now) / 86400000);
-        if (diff < 0) { dlText = 'OVERDUE'; dlClass = 'm-chip-red'; }
-        else if (diff === 0) { dlText = 'DUE TODAY'; dlClass = 'm-chip-red'; }
-        else if (diff <= 3) { dlText = fmtDate(r.deadline); dlClass = 'm-chip-amber'; }
-        else { dlText = fmtDate(r.deadline); dlClass = ''; }
-    }
-
-    // Top 3 MPNs from requirements
-    const mpns = (r.top_mpns || []).slice(0, 3);
-    const mpnChips = mpns.map(m => `<span class="m-chip">${esc(m)}</span>`).join('');
-
-    // Assignee
-    const assignee = r.created_by_name || '';
-
-    // Source progress bar
-    const barColor = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--amber)' : 'var(--red)';
-    const progBar = total > 0
-        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:100px"><div class="m-score-bar"><div class="m-score-fill" style="width:${pct}%;background:${barColor}"></div></div><span style="font-size:11px;color:var(--muted)">${sourced}/${total}</span></div>`
-        : '';
-
-    return `<div class="m-card" onclick="toggleDrillDown(${r.id})">
-        <div class="m-card-header">
-            <span class="m-card-title">${esc(cust)}</span>
-            <span class="m-chip ${bc}">${_statusLabelsM[r.status] || r.status}</span>
-        </div>
-        <div class="m-card-subtitle">${esc(r.name || '')}</div>
-        <div class="m-card-body">
-            <span style="font-size:12px"><b>${total}</b> parts</span>
-            <span style="font-size:12px"><b>${offers}</b> offers</span>
-            ${dlText ? `<span class="m-chip ${dlClass}" style="font-size:10px">${dlText}</span>` : ''}
-            ${progBar}
-        </div>
-        ${mpnChips ? `<div class="m-chip-row" style="margin-bottom:4px">${mpnChips}</div>` : ''}
-        <div class="m-card-footer">
-            <span class="m-card-meta">${assignee ? esc(assignee) : ''}</span>
-            <span class="m-card-meta">${age}</span>
-        </div>
-    </div>`;
+    return '<div class="m-card m-req-card ' + borderCls + '" onclick="toggleDrillDown(' + r.id + ')">'
+        + '<div class="m-card-title">' + esc(r.name || 'Untitled') + '</div>'
+        + '<div class="m-card-subtitle">' + (subtitle || '&mdash;') + '</div>'
+        + '<div class="m-req-card-footer">'
+        + '<span class="m-card-meta">' + esc(dateStr) + '</span>'
+        + '<span class="m-chip ' + chipCls + '">' + statusLabel + '</span>'
+        + (total > 0 ? '<span class="m-req-badge">' + total + ' part' + (total !== 1 ? 's' : '') + '</span>' : '')
+        + '<span class="m-card-chevron">\u203a</span>'
+        + '</div>'
+        + '</div>';
 }
 
 // ── Inline Deadline Editor ───────────────────────────────────────────────
@@ -6763,8 +7499,6 @@ function setMainView(view, btn) {
         const cont = document.getElementById(id);
         if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     });
-    _activeFilters = {};
-    _myReqsOnly = false;
     _toolbarQuickFilter = '';
     const maBtn = document.getElementById('myAccountsBtn');
     if (maBtn) maBtn.classList.remove('on');
@@ -6957,8 +7691,8 @@ export function sidebarNav(page, el) {
         dashboard: () => showDashboard(),
         prospecting: () => window.showProspecting(),
         suggested: () => window.showSuggested(),
-        apihealth: () => window.showApiHealth(),
-        tickets: () => { if (typeof window.showTickets === 'function') window.showTickets(); else showView('view-tickets'); }
+        apihealth: () => window.showSettings('apihealth'),
+        tickets: () => window.showSettings('tickets')
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }
@@ -7084,10 +7818,11 @@ async function createRequisition() {
         const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
         _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
         _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
-        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) nrSS.style.display = 'none';
-        const nrCF = document.getElementById('nrContactField'); if (nrCF) nrCF.style.display = 'none';
+        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
+        const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         await loadRequisitions();
-        toggleDrillDown(data.id);
+        expandToSubTab(data.id, 'parts');
+        showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
@@ -7095,8 +7830,22 @@ function clearNrSite() {
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrSiteId', 'value', ''); _s('nrSiteSearch', 'value', '');
     const ss = document.getElementById('nrSiteSearch'); if (ss) ss.style.display = '';
-    const sel = document.getElementById('nrSiteSelected'); if (sel) sel.style.display = 'none';
-    const cf = document.getElementById('nrContactField'); if (cf) cf.style.display = 'none';
+    const sel = document.getElementById('nrSiteSelected'); if (sel) { sel.classList.add('u-hidden'); sel.style.display = ''; }
+    const cf = document.getElementById('nrContactField'); if (cf) { cf.classList.add('u-hidden'); cf.style.display = ''; }
+}
+
+async function markReqOutcome(id, outcome) {
+    if (!confirm(`Mark this requisition as ${outcome.toUpperCase()}?`)) return;
+    try {
+        await apiFetch(`/api/requisitions/${id}/outcome`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({outcome})
+        });
+        showToast(`Requisition marked as ${outcome}`, 'success');
+        const q = document.getElementById('mainSearch')?.value?.trim() || '';
+        loadRequisitions(q);
+    } catch (e) { showToast('Failed to update outcome', 'error'); }
 }
 
 async function toggleArchive(id) {
@@ -7116,22 +7865,71 @@ async function toggleArchive(id) {
 }
 
 async function archiveFromList(reqId) {
+    if (_currentMainView === 'archive') {
+        // Restore from archive — no outcome needed
+        try {
+            const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+            const wasRestored = resp.status === 'active';
+            showToast(wasRestored ? 'Restored to active' : 'Archived');
+            _reqListData = _reqListData.filter(r => r.id !== reqId);
+            const drow = document.getElementById('d-' + reqId);
+            if (drow) drow.remove();
+            const arow = document.getElementById('a-' + reqId);
+            if (arow) arow.remove();
+            const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
+            if (row) row.remove();
+            _updateToolbarStats();
+            renderReqList();
+        } catch (e) { showToast('Failed to restore: ' + (e.message || e), 'error'); }
+        return;
+    }
+    // Show outcome modal
+    const btns = document.getElementById('archiveOutcomeButtons');
+    if (!btns) return;
+    btns.textContent = '';
+    const options = [
+        { label: 'Won', outcome: 'won', style: 'background:var(--green);color:#fff' },
+        { label: 'Lost', outcome: 'lost', style: 'background:var(--red);color:#fff' },
+        { label: 'Just Archive', outcome: '', style: 'background:var(--bg3);color:var(--text)' },
+    ];
+    for (const opt of options) {
+        const b = document.createElement('button');
+        b.className = 'btn';
+        b.style.cssText = opt.style + ';padding:10px;font-size:13px;font-weight:600;border-radius:6px;width:100%';
+        b.textContent = opt.label;
+        b.onclick = () => _archiveWithOutcome(reqId, opt.outcome || null);
+        btns.appendChild(b);
+    }
+    const cancel = document.createElement('button');
+    cancel.className = 'btn btn-ghost';
+    cancel.style.cssText = 'font-size:12px;padding:8px;width:100%';
+    cancel.textContent = 'Cancel';
+    cancel.onclick = () => closeModal('archiveOutcomeModal');
+    btns.appendChild(cancel);
+    openModal('archiveOutcomeModal');
+}
+
+async function _archiveWithOutcome(reqId, outcome) {
+    closeModal('archiveOutcomeModal');
     try {
-        const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
-        const wasRestored = resp.status === 'active';
-        showToast(wasRestored ? 'Restored to active' : 'Archived');
-        // Remove from in-memory list and DOM immediately
+        if (outcome) {
+            await apiFetch(`/api/requisitions/${reqId}/outcome`, {
+                method: 'PUT', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({outcome})
+            });
+            showToast('Marked as ' + outcome + ' and archived');
+        } else {
+            await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+            showToast('Archived');
+        }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
-        // Close the drill-down row for the item
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
         if (arow) arow.remove();
-        // Remove from DOM directly instead of full renderReqList
         const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
         if (row) row.remove();
         _updateToolbarStats();
-        // Re-render to update count and empty state
         renderReqList();
     } catch (e) { showToast('Failed to archive: ' + (e.message || e), 'error'); }
 }
@@ -7148,20 +7946,24 @@ async function cloneFromList(reqId) {
 }
 
 async function requoteFromList(reqId) {
+    if (!confirm('Create a new open requisition with the same parts and customer?')) return;
     try {
         const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
-        // Rename from "(copy)" to "(re-quote)"
         const reName = resp.name.replace('(copy)', '(re-quote)');
         if (reName !== resp.name) {
             await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
         }
-        showToast(`Re-quoted as "${reName}"`);
-        // Switch to sourcing view and open the cloned req
+        showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
         const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
         if (srcBtn) setMainView('sourcing', srcBtn);
         await loadRequisitions();
-        expandToSubTab(resp.id, 'sightings');
-    } catch (e) { showToast('Failed to re-quote', 'error'); }
+        const found = _reqListData.find(r => r.id === resp.id);
+        if (found) {
+            expandToSubTab(resp.id, 'sightings');
+        } else {
+            showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
+        }
+    } catch (e) { showToast('Failed to re-quote: ' + (e.message || e), 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
@@ -7361,9 +8163,9 @@ function showFileReady(inputId, readyId, nameId) {
     const nameEl = document.getElementById(nameId);
     if (file) {
         if (nameEl) nameEl.textContent = file.name;
-        if (readyEl) readyEl.style.display = '';
+        if (readyEl) { readyEl.classList.remove('u-hidden'); readyEl.style.display = ''; }
     } else {
-        if (readyEl) readyEl.style.display = 'none';
+        if (readyEl) { readyEl.classList.add('u-hidden'); readyEl.style.display = 'none'; }
     }
 }
 
@@ -7919,7 +8721,7 @@ let rfqSubsMap = {}; // { primary_mpn: [sub1, sub2, ...] }
 
 async function openBatchRfqModal(prebuiltGroups) {
     const groups = prebuiltGroups || getSelectedByVendor();
-    if (!groups.length) return;
+    if (!groups.length) { showToast('Select sightings first to send RFQs', 'warn'); return; }
 
     const modal = document.getElementById('rfqModal');
     const rfqPrep = document.getElementById('rfqPrepare'); if (rfqPrep) rfqPrep.style.display = '';
@@ -7934,9 +8736,16 @@ async function openBatchRfqModal(prebuiltGroups) {
     });
     modal.classList.add('open');
 
+    const prepareAbort = new AbortController();
+    const prepareTimeout = setTimeout(() => prepareAbort.abort(), 30000);
+    // Wire cancel button to abort the prepare call
+    const prepCancelBtn = document.querySelector('#rfqPrepare .btn-danger, #rfqPrepare [data-dismiss]');
+    const _origCancel = prepCancelBtn?.onclick;
+    if (prepCancelBtn) prepCancelBtn.onclick = () => { prepareAbort.abort(); closeModal('rfqModal'); };
     try {
         const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
-            method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) }
+            method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) },
+            signal: prepareAbort.signal
         });
         rfqAllParts = data.all_parts || [];
         rfqSubsMap = data.subs_map || {};
@@ -7967,11 +8776,21 @@ async function openBatchRfqModal(prebuiltGroups) {
                 lookup_status: v.needs_lookup ? 'pending' : 'ready',
             };
         });
+        // Filter to only vendors the user actually selected (R2-2)
+        const selectedVendorNames = new Set(groups.map(g => (g.vendor_name || '').trim().toLowerCase()));
+        rfqVendorData = rfqVendorData.filter(v =>
+            selectedVendorNames.has((v.vendor_name || '').trim().toLowerCase())
+        );
     } catch (e) {
-        showToast('Failed to prepare RFQ: ' + e.message, 'error');
+        clearTimeout(prepareTimeout);
+        if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
+        const msg = e.name === 'AbortError' ? 'RFQ preparation timed out or was cancelled' : e.message;
+        showToast('Failed to prepare RFQ: ' + msg, 'error');
         closeModal('rfqModal');
         return;
     }
+    clearTimeout(prepareTimeout);
+    if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
 
     // Run lookups for vendors without emails (3-tier: cache → scrape → AI)
     const needsLookup = rfqVendorData.filter(v => v.lookup_status === 'pending');
@@ -7983,9 +8802,20 @@ async function openBatchRfqModal(prebuiltGroups) {
         const rfqCancelWrap = document.getElementById('rfqPrepareCancel');
         if (rfqCancelWrap) {
             rfqCancelWrap.innerHTML = '<button class="btn btn-danger btn-sm" id="rfqCancelLookup">Cancel Lookup</button>';
-            rfqCancelWrap.style.display = '';
+            rfqCancelWrap.classList.remove('u-hidden');
             document.getElementById('rfqCancelLookup').onclick = () => abortCtrl.abort();
         }
+        // Show "Skip remaining" button after 5 seconds (R2-3)
+        const skipTimer = setTimeout(() => {
+            if (rfqCancelWrap && !abortCtrl.signal.aborted) {
+                const skipBtn = document.createElement('button');
+                skipBtn.className = 'btn btn-warning btn-sm';
+                skipBtn.style.marginLeft = '8px';
+                skipBtn.textContent = 'Skip remaining';
+                skipBtn.onclick = () => abortCtrl.abort();
+                rfqCancelWrap.appendChild(skipBtn);
+            }
+        }, 5000);
         try {
             const rfqStatus = document.getElementById('rfqPrepareStatus');
             if (rfqStatus) rfqStatus.textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
@@ -7995,9 +8825,14 @@ async function openBatchRfqModal(prebuiltGroups) {
             await Promise.all(needsLookup.map(async (v) => {
                 if (abortCtrl.signal.aborted) { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                 try {
-                    const data = await apiFetch('/api/vendor-contact', {
+                    const timeoutMs = 15000;
+                    const fetchPromise = apiFetch('/api/vendor-contact', {
                         method: 'POST', body: { vendor_name: v.vendor_name }, signal: abortCtrl.signal
                     });
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Lookup timed out')), timeoutMs)
+                    );
+                    const data = await Promise.race([fetchPromise, timeoutPromise]);
                     v.emails = data.emails || [];
                     v.phones = data.phones || [];
                     v.card_id = data.card_id;
@@ -8012,22 +8847,23 @@ async function openBatchRfqModal(prebuiltGroups) {
                     if (e.name === 'AbortError') { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                     console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
                     v.lookup_status = 'no_email';
-                    v.lookup_fail_reason = 'Lookup error: ' + (e.message || 'unknown');
+                    v.lookup_fail_reason = e.message === 'Lookup timed out' ? 'Lookup timed out (15s)' : 'Lookup error: ' + (e.message || 'unknown');
                 }
                 done++;
                 const st = document.getElementById('rfqPrepareStatus'); if (st) st.textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
                 _renderRfqPrepareProgress();
             }));
         } finally {
+            clearTimeout(skipTimer);
             delete modal.dataset.loading;
-            if (rfqCancelWrap) rfqCancelWrap.style.display = 'none';
+            if (rfqCancelWrap) rfqCancelWrap.classList.add('u-hidden');
         }
     }
 
     const prep2 = document.getElementById('rfqPrepare'); if (prep2) prep2.style.display = 'none';
     const rdy2 = document.getElementById('rfqReady'); if (rdy2) rdy2.style.display = '';
-    renderRfqVendors();
-    renderRfqMessage();
+    try { renderRfqVendors(); } catch(e) { console.error('renderRfqVendors failed:', e); showToast('Error rendering vendor list — try again', 'error'); }
+    try { renderRfqMessage(); } catch(e) { console.error('renderRfqMessage failed:', e); }
 }
 
 function _renderRfqPrepareProgress() {
@@ -8045,6 +8881,8 @@ function _renderRfqPrepareProgress() {
 
 function renderRfqVendors() {
     const el = document.getElementById('rfqVendorList');
+    if (!el) { console.error('renderRfqVendors: rfqVendorList not found'); return; }
+    if (!rfqVendorData || !rfqVendorData.length) { el.innerHTML = '<p style="padding:12px;color:var(--muted)">No vendors to display</p>'; return; }
     el.innerHTML = rfqVendorData.map((v, i) => {
         let emailHtml;
         if (v.lookup_status === 'loading') {
@@ -8347,17 +9185,33 @@ function buildVendorBody(v) {
 
     let body = 'Hi,\n\n';
 
+    // Build qty lookup from cached requirements
+    const _reqQtys = {};
+    const _cachedReqs = _ddReqCache[currentReqId] || [];
+    for (const rq of _cachedReqs) {
+        if (rq.primary_mpn) _reqQtys[rq.primary_mpn.toUpperCase()] = rq.target_qty || 0;
+    }
+
     body += 'We are sourcing the following parts — please send your best offer if available:\n\n';
     body += allSendParts.map(p => {
+        const qty = _reqQtys[p.toUpperCase()];
+        const qtyStr = qty ? `  Qty: ${Number(qty).toLocaleString()}` : '';
         const subs = (rfqSubsMap[p] || []).filter(s => s.toUpperCase() !== p.toUpperCase());
         if (subs.length) {
-            return `  ${p}  (also acceptable: ${subs.join(', ')})`;
+            return `  ${p}${qtyStr}  (also acceptable: ${subs.join(', ')})`;
         }
-        return `  ${p}`;
+        return `  ${p}${qtyStr}`;
     }).join('\n');
     body += '\n';
 
     if (condLine) body += '\n' + condLine;
+
+    // Add bid due date if available
+    const _reqInfo = _reqListData.find(r => r.id === currentReqId);
+    if (_reqInfo && _reqInfo.deadline) {
+        const dl = _reqInfo.deadline === 'ASAP' ? 'ASAP' : fmtDate(_reqInfo.deadline);
+        body += `\nBid due: ${dl}\n`;
+    }
 
     body += `
 Please include with your quote:
@@ -8378,21 +9232,37 @@ function renderRfqMessage() {
     rfqLoadTemplates();
     // Restore saved draft if available
     const draftKey = `rfq_draft_${currentReqId}`;
-    const saved = safeGet(draftKey);
+    let saved = safeGet(draftKey);
     const rfqSubj = document.getElementById('rfqSubject');
     const rfqBod = document.getElementById('rfqBody');
 
     if (saved) {
         try {
             const draft = JSON.parse(saved);
-            if (rfqSubj) rfqSubj.value = draft.subject || '';
-            if (rfqBod) rfqBod.value = draft.body || '';
-        } catch { /* ignore corrupt draft */ }
-    } else {
-        // Subject uses all unique parts across all vendors being sent
+            if (draft.subject && draft.subject.trim() && draft.body && draft.body.trim()) {
+                if (rfqSubj) rfqSubj.value = draft.subject;
+                if (rfqBod) rfqBod.value = draft.body;
+            } else {
+                localStorage.removeItem(draftKey);
+                saved = null;
+            }
+        } catch {
+            localStorage.removeItem(draftKey);
+            saved = null;
+        }
+    }
+    if (!saved) {
+        // Subject uses all unique parts across all vendors being sent, with qty for small lists
         const allParts = [...new Set(rfqAllParts)];
         const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
-        if (rfqSubj) rfqSubj.value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
+        const _cachedR = _ddReqCache[currentReqId] || [];
+        const _qtyMap = {};
+        for (const rq of _cachedR) { if (rq.primary_mpn) _qtyMap[rq.primary_mpn.toUpperCase()] = rq.target_qty || 0; }
+        const partLabels = allParts.slice(0, 5).map(p => {
+            const q = _qtyMap[p.toUpperCase()];
+            return q ? `${p} x${Number(q).toLocaleString()}` : p;
+        });
+        if (rfqSubj) rfqSubj.value = `RFQ: ${partLabels.join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
 
         // Preview body shows a sample for the first vendor with parts to send
         const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
@@ -8409,7 +9279,7 @@ function renderRfqMessage() {
 
     // Show AI Draft button for admins
     const aiWrap = document.getElementById('aiDraftWrap');
-    if (aiWrap) aiWrap.style.display = '';
+    if (aiWrap) aiWrap.classList.remove('u-hidden');
 }
 
 function _saveRfqDraft() {
@@ -8595,7 +9465,7 @@ function _rfqShowResults(results) {
     }).join('');
 
     const retryBtn = document.getElementById('rfqRetryBtn');
-    if (retryBtn) retryBtn.style.display = _rfqLastFailedGroups.length ? '' : 'none';
+    if (retryBtn) { if (_rfqLastFailedGroups.length) retryBtn.classList.remove('u-hidden'); else retryBtn.classList.add('u-hidden'); }
 
     const sent = results.filter(r => r.status === 'sent').length;
     const failedCount = results.length - sent;
@@ -9534,7 +10404,7 @@ function filterVendorList() {
         </tr></thead><tbody>`;
 
     for (const c of filtered) {
-        const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
+        const score = c.vendor_score != null ? Math.round(c.vendor_score) : null;
         const tier = vendorTier(c);
         const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
         const lastAgo = c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—';
@@ -9546,7 +10416,7 @@ function filterVendorList() {
                 ${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px;font-weight:600">BLOCKED</span>' : ''}
             </td>
             <td><span class="tier-badge tier-badge-${tier}">${tier}</span></td>
-            <td><span style="font-weight:600;font-family:'JetBrains Mono',monospace">${score}</span></td>
+            <td>${score != null ? '<span style="font-weight:600;font-family:\'JetBrains Mono\',monospace">' + score + '</span>' : '<span style="color:var(--muted);font-size:10px">New</span>'}</td>
             <td>${responseRate}</td>
             <td>${c.total_pos || 0}</td>
             <td>${c.sighting_count || 0}</td>
@@ -9650,15 +10520,14 @@ function _renderVendorDrawerOverview(vendorId) {
     if (title) title.textContent = v.display_name;
     const mVTitle = document.getElementById('vendorDrawerMobileTitle');
     if (mVTitle) mVTitle.textContent = v.display_name;
-    const score = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+    const score = v.vendor_score != null ? Math.round(v.vendor_score) : null;
     const tier = vendorTier(v);
 
     let html = `<div class="drawer-section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
             <div style="display:flex;align-items:center;gap:8px">
                 <span class="tier-badge tier-badge-${tier}">${tier}</span>
-                <span style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace">${score}</span>
-                <span style="font-size:12px;color:var(--muted)">score</span>
+                ${score != null ? '<span style="font-size:14px;font-weight:700;font-family:\'JetBrains Mono\',monospace">' + score + '</span><span style="font-size:12px;color:var(--muted)">score</span>' : '<span style="font-size:12px;color:var(--muted)">New vendor — no score yet</span>'}
             </div>
             <div style="display:flex;gap:6px">
                 <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${v.id})">Full Details</button>
@@ -9688,9 +10557,10 @@ async function _renderVendorDrawerScorecard(vendorId) {
         const respVelocity = v.response_velocity_hours != null
             ? Math.max(0, Math.min(100, Math.round(100 - (v.response_velocity_hours / 72) * 100)))
             : null;
+        const hasOutreach = (v.total_outreach || 0) > 0;
         const ghostScore = v.ghost_rate != null
             ? Math.round((1 - v.ghost_rate) * 100)
-            : null;
+            : (hasOutreach ? 0 : null);
         const pricingScore = v.overall_win_rate != null
             ? Math.round(v.overall_win_rate * 100)
             : null;
@@ -9699,14 +10569,15 @@ async function _renderVendorDrawerScorecard(vendorId) {
             : null;
         const cancelRate = v.cancellation_rate || 0;
         const rmaRate = v.rma_rate || 0;
-        const deliveryScore = Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100);
+        const hasDeliveryData = v.cancellation_rate != null || v.rma_rate != null || (v.offer_count || 0) >= 5;
+        const deliveryScore = hasDeliveryData ? Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100) : null;
 
         const factors = [
-            { label: 'Response Velocity', score: respVelocity, detail: v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data' },
-            { label: 'Ghost Rate', score: ghostScore, detail: v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data' },
+            { label: 'Response Velocity', score: hasOutreach ? respVelocity : 0, detail: hasOutreach ? (v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data') : 'No RFQ history' },
+            { label: 'Ghost Rate', score: hasOutreach ? ghostScore : 0, detail: hasOutreach ? (v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data') : 'No RFQ history' },
             { label: 'Pricing Competitiveness', score: pricingScore, detail: v.overall_win_rate != null ? Math.round(v.overall_win_rate * 100) + '% win rate' : 'No data' },
             { label: 'Volume Consistency', score: volumeScore, detail: (v.sighting_count || 0) + ' sightings' },
-            { label: 'Delivery Reliability', score: deliveryScore, detail: 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' },
+            { label: 'Delivery Reliability', score: hasOutreach ? deliveryScore : 0, detail: hasOutreach ? (hasDeliveryData ? 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' : 'No data') : 'No RFQ history' },
         ];
 
         let html = '<div class="drawer-section">';
@@ -9724,15 +10595,15 @@ async function _renderVendorDrawerScorecard(vendorId) {
                 <div class="factor-bar">
                     <div class="factor-bar-fill" style="width:${hasData ? score : 0}%;background:${hasData ? barColor : 'var(--muted)'}"></div>
                 </div>
-                ${hasData ? '<div style="text-align:right;font-size:10px;font-weight:700;color:' + barColor + '">' + score + '/100</div>' : '<div style="text-align:right;font-size:10px;color:var(--muted)">No data</div>'}
+                ${hasData ? '<div style="text-align:right;font-size:10px;font-weight:700;color:' + barColor + '">' + score + '/100</div>' : '<div style="text-align:right;font-size:10px;color:var(--muted)">' + (f.detail === 'No RFQ history' ? '0/100' : 'No data') + '</div>'}
             </div>`;
         }
 
         // Overall score
-        const overall = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+        const overall = v.vendor_score != null ? Math.round(v.vendor_score) : null;
         html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between">
             <span style="font-size:13px;font-weight:700">Overall Score</span>
-            <span style="font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${overall >= 70 ? 'var(--green)' : overall >= 40 ? 'var(--amber)' : 'var(--red)'}">${overall}</span>
+            ${overall != null ? '<span style="font-size:20px;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:' + (overall >= 70 ? 'var(--green)' : overall >= 40 ? 'var(--amber)' : 'var(--red)') + '">' + overall + '</span>' : '<span style="font-size:14px;color:var(--muted)">New</span>'}
         </div>`;
         html += '</div>';
         body.innerHTML = html;
@@ -9949,7 +10820,7 @@ async function openMaterialPopup(cardId) {
         <div class="mp-header-meta">
             ${card.manufacturer ? `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="font-weight:600;cursor:pointer" title="Click to edit">${esc(card.manufacturer)}</span> · ` : `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="cursor:pointer;color:var(--muted)" title="Click to add">+ Add manufacturer</span> · `}
             ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
-            ${window.__isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="margin-left:12px;font-size:10px">Delete</button>` : ''}
+            ${window.__isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="margin-left:16px;font-size:9px;color:var(--muted)" title="Admin: permanently delete this material card">Delete</button>` : ''}
         </div>
     </div>`;
 
@@ -9989,7 +10860,7 @@ async function openMaterialPopup(cardId) {
         for (const o of offers) {
             const statusCls = o.status === 'active' ? 'b-auth' : 'b-src';
             html += `<tr>
-                <td class="mp-tbl-vendor">${esc(o.vendor_name)}</td>
+                <td class="mp-tbl-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${o.unit_price != null ? '$' + Number(o.unit_price).toFixed(2) : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
@@ -10010,7 +10881,7 @@ async function openMaterialPopup(cardId) {
         html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Vendor</th><th>Qty</th><th>Price</th><th>Source</th><th>Auth</th><th>Condition</th><th>Date</th></tr></thead><tbody>';
         for (const s of sightings) {
             html += `<tr>
-                <td class="mp-tbl-vendor">${esc(s.vendor_name)}</td>
+                <td class="mp-tbl-vendor" title="${escAttr(s.vendor_name)}">${esc(s.vendor_name)}</td>
                 <td>${s.qty_available != null ? s.qty_available.toLocaleString() : '—'}</td>
                 <td>${s.unit_price != null ? '$' + Number(s.unit_price).toFixed(2) : '—'}</td>
                 <td>${s.source_type ? `<span class="badge b-src">${esc(s.source_type.toUpperCase())}</span>` : '—'}</td>
@@ -10607,7 +11478,7 @@ function openRepliedEmailsModal() {
 // ── Stock List Import ────────────────────────────────────────────────────
 function toggleStockImport() {
     const el = document.getElementById('stockImportArea');
-    el.style.display = el.style.display === 'none' ? '' : 'none';
+    el.classList.toggle('u-hidden');
 }
 
 async function doStockImport() {
@@ -10625,7 +11496,7 @@ async function doStockImport() {
     }
 
     statusEl.className = 'ustatus load'; statusEl.textContent = 'Importing...'; statusEl.style.display = 'block';
-    const sfr = document.getElementById('stockFileReady'); if (sfr) sfr.style.display = 'none';
+    const sfr = document.getElementById('stockFileReady'); if (sfr) sfr.classList.add('u-hidden');
 
     try {
         const form = new FormData();
@@ -10961,19 +11832,19 @@ function _notifClickAction(n) {
     const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
     // Offer pending review → navigate to RFQ view then open offers tab
     if (n.type === 'offer_pending_review' && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)},300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'offers')`;
     // Buy plan notifications → open buy plan detail V3
     if (n.type && n.type.startsWith('buyplan_') && n.buy_plan_id)
         return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetailV3(${n.buy_plan_id}),300)`;
     // Quote won/lost → navigate to RFQ view then open quotes tab
     if ((n.type === 'quote_won' || n.type === 'quote_lost') && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'quotes'),400)},300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'quotes')`;
     // Vendor-related → open vendor popup
     if (n.vendor_card_id)
         return close + `openVendorPopup(${n.vendor_card_id})`;
     // Requisition-related → navigate to RFQ view then expand drill-down
     if (n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>toggleDrillDown(${n.requisition_id}),300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'sourcing')`;
     // Company-related → go to company
     if (n.company_id)
         return close + `goToCompany(${n.company_id})`;
@@ -11014,7 +11885,10 @@ async function loadNotifications() {
                 <div id="${gid}" class="${collapsed ? 'hidden' : ''}">
             `;
             group.slice(0, 5).forEach(n => {
-                const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
+                // Clean up raw API metadata from notes before display
+                let cleanNotes = n.notes || '';
+                cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\s{2,}/g, ' ').trim();
+                const notesHtml = cleanNotes ? `<div class="notif-item-notes">${esc(cleanNotes)}</div>` : '';
                 const hasLink = n.requisition_id || n.company_id || n.vendor_card_id || n.buy_plan_id;
                 html += `<div class="notif-item" onclick="${_notifClickAction(n)}">
                     <div class="notif-item-body">
@@ -11095,6 +11969,41 @@ document.addEventListener('keydown', function(e) {
         e.preventDefault();
         const sb = document.getElementById('mainSearch');
         if (sb) sb.focus();
+    }
+    // Keyboard shortcuts — only when not in an input/modal
+    const _tag = document.activeElement?.tagName;
+    const _inInput = _tag === 'INPUT' || _tag === 'TEXTAREA' || _tag === 'SELECT';
+    const _inModal = _modalStack.length > 0;
+    if (!_inInput && !_inModal) {
+        // n — New Requisition
+        if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault(); openNewReqModal(); return;
+        }
+        // 1/2/3 — Switch tabs: Open / Sourcing / Archive
+        if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
+            if (btn) setMainView('rfq', btn);
+            return;
+        }
+        if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            const btn = document.querySelector('#mainPills .fp[data-view="sourcing"]');
+            if (btn) setMainView('sourcing', btn);
+            return;
+        }
+        if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            const btn = document.querySelector('#mainPills .fp[data-view="archive"]');
+            if (btn) setMainView('archive', btn);
+            return;
+        }
+        // ? — Show keyboard shortcuts help
+        if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            showToast('Shortcuts: / Search, n New Req, 1 Open, 2 Sourcing, 3 Archive, ? Help', 'info', 5000);
+            return;
+        }
     }
     // Tab — focus trap inside open modals
     if (e.key === 'Tab' && _modalStack.length > 0) {
@@ -11476,7 +12385,7 @@ function _showAiModal(title, contentHtml) {
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
-    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies, openContactTimeline, loadContactNudges,
+    addDrillRow, archiveFromList, _archiveWithOutcome, autoLogEmail, autoLogVendorCall, checkForReplies, openContactTimeline, loadContactNudges,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
     ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
     ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
@@ -11549,7 +12458,7 @@ Object.assign(window, {
     // Dashboard / Command Center
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
-    showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
+    showDashboard, loadDashboard, loadBuyerDashboard, goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
     // Scorecard
     showScorecard, setScPeriod,
     // Unified state helpers
@@ -11557,4 +12466,10 @@ Object.assign(window, {
     // Mobile navigation & drill-down
     mobileTabNav, mobileMoreNav, toggleMobileMore, mobileBack,
     _openMobileDrillDown, _closeMobileDrillDown, _mobileDdSwitchTab,
+    _renderMobilePartsList, _renderMobileOffersList, _renderMobileQuotesList,
+    _renderMobileBuyPlansList, _renderMobileActivityList,
+    // Mobile top bar — search toggle & user menu
+    _toggleMobileSearch, _showMobileUserMenu,
+    // Mobile req list — card redesign
+    renderMobileReqList, mobileReqPillTap, _syncMobileReqPills, _renderReqCardMobile,
 });

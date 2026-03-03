@@ -57,6 +57,7 @@ def scan_new_offers_for_matches(db: Session) -> dict:
             Offer.created_at > _last_proactive_scan,
             Offer.mpn.isnot(None),
         )
+        .limit(5000)  # Safety limit — prevents unbounded result sets
         .all()
     )
 

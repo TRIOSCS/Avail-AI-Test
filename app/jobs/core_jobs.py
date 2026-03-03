@@ -1,0 +1,219 @@
+"""Core background jobs — archive, token refresh, inbox scan, batch results, webhooks.
+
+Called by: app/jobs/__init__.py via register_core_jobs()
+Depends on: app.database, app.models, app.email_service, app.services.webhook_service
+"""
+
+import asyncio
+from datetime import datetime, timedelta, timezone
+
+from apscheduler.triggers.interval import IntervalTrigger
+from loguru import logger
+
+from ..scheduler import _traced_job
+from ..utils.token_manager import _utc
+
+
+def register_core_jobs(scheduler, settings):
+    """Register core jobs with the scheduler."""
+    scheduler.add_job(
+        _job_auto_archive, IntervalTrigger(minutes=5), id="auto_archive", name="Auto-archive stale requisitions"
+    )
+    scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5), id="token_refresh", name="Token refresh")
+    scheduler.add_job(
+        _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
+    )
+    scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
+    if settings.activity_tracking_enabled:
+        scheduler.add_job(
+            _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
+        )
+
+
+@_traced_job
+async def _job_auto_archive():
+    """Auto-archive stale requisitions (no activity for 30 days)."""
+    from ..database import SessionLocal
+    from ..models import Requisition
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=30)
+        archived_count = (
+            db.query(Requisition)
+            .filter(
+                Requisition.status == "active",
+                Requisition.last_searched_at.isnot(None),
+                Requisition.last_searched_at < cutoff,
+            )
+            .update({"status": "archived"}, synchronize_session="fetch")
+        )
+        if archived_count:
+            db.commit()
+            logger.info(f"Auto-archived {archived_count} stale requisition(s)")
+    except Exception as e:
+        logger.error(f"Auto-archive error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_token_refresh():
+    """Refresh tokens for all users with refresh tokens."""
+    from ..database import SessionLocal
+    from ..models import User
+    from ..utils.token_manager import refresh_user_token
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        users_to_refresh = []
+        for user in users:
+            needs_refresh = False
+            if user.token_expires_at:
+                exp = _utc(user.token_expires_at)
+                needs_refresh = now > exp - timedelta(minutes=15)
+            elif not user.access_token:
+                needs_refresh = True
+
+            if needs_refresh:
+                users_to_refresh.append(user)
+
+        # Refresh all users in parallel
+        async def _safe_refresh(user):
+            from ..cache.intel_cache import _get_redis
+
+            lock_key = f"lock:token_refresh:{user.id}"
+            r = _get_redis()
+            if r:
+                acquired = r.set(lock_key, "1", nx=True, ex=60)
+                if not acquired:
+                    logger.debug("Token refresh skipped for %s — lock held", user.email)
+                    return
+            try:
+                await refresh_user_token(user, db)
+            except Exception as e:
+                logger.error(f"Token refresh error for {user.email}: {e}")
+            finally:
+                if r:
+                    try:
+                        r.delete(lock_key)
+                    except Exception:
+                        pass
+
+        if users_to_refresh:
+            await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])
+    except Exception as e:
+        logger.error(f"Token refresh job error: {e}")
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_inbox_scan():
+    """Scan inboxes for all connected users."""
+    from ..config import settings
+    from ..database import SessionLocal
+    from ..models import User
+    from .email_jobs import _scan_user_inbox
+
+    # Use a short-lived session just to identify users that need scanning
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
+
+        users_to_scan = []
+        for user in users:
+            if not user.access_token or not user.m365_connected:
+                continue
+            should_scan = False
+            if not user.last_inbox_scan:
+                should_scan = True
+            elif now - _utc(user.last_inbox_scan) > scan_interval:
+                should_scan = True
+            if should_scan:
+                # Detach user data we need so we can close this session
+                users_to_scan.append(user.id)
+    except Exception as e:
+        logger.error(f"Inbox scan job error: {e}")
+        return
+    finally:
+        db.close()
+
+    # Scan each user with its own session (returned to pool after each scan)
+    sem = asyncio.Semaphore(3)
+
+    async def _safe_scan(user_id):
+        async with sem:
+            scan_db = SessionLocal()
+            try:
+                user = scan_db.get(User, user_id)
+                if not user:
+                    return
+                await asyncio.wait_for(_scan_user_inbox(user, scan_db), timeout=90)
+            except asyncio.TimeoutError:
+                logger.error(f"Inbox scan TIMEOUT for user {user_id} (90s) — skipping")
+                scan_db.rollback()
+                try:
+                    user = scan_db.get(User, user_id)
+                    if user:
+                        user.m365_error_reason = "Inbox scan timed out"
+                        scan_db.commit()
+                except Exception:
+                    scan_db.rollback()
+            except Exception as e:
+                logger.error(f"Inbox scan error for user {user_id}: {e}")
+                scan_db.rollback()
+            finally:
+                scan_db.close()
+
+    if users_to_scan:
+        await asyncio.gather(*[_safe_scan(uid) for uid in users_to_scan])
+
+
+@_traced_job
+async def _job_batch_results():
+    """Process pending AI batch results."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from ..email_service import process_batch_results
+
+        batch_applied = await asyncio.wait_for(process_batch_results(db), timeout=120)
+        if batch_applied:
+            logger.info(f"Batch processing: {batch_applied} results applied")
+    except asyncio.TimeoutError:
+        logger.error("Batch results processing timed out (120s)")
+        db.rollback()
+    except Exception as e:
+        logger.error(f"Batch results processing error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_webhook_subscriptions():
+    """Manage Graph webhook subscriptions."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from ..services.webhook_service import (
+            ensure_all_users_subscribed,
+            renew_expiring_subscriptions,
+        )
+
+        await renew_expiring_subscriptions(db)
+        await ensure_all_users_subscribed(db)
+    except Exception as e:
+        logger.error(f"Webhook subscription error: {e}")
+        db.rollback()
+    finally:
+        db.close()

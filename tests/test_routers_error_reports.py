@@ -370,20 +370,22 @@ class TestUpdateStatus:
         assert detail["resolved_at"] is not None
         assert detail["resolved_by_email"] is not None
 
-    def test_reopen_clears_resolved(self, admin_client, sample_report, db_session):
+    def test_reopen_changes_status(self, admin_client, sample_report, db_session):
         # First resolve
         admin_client.put(
             f"/api/error-reports/{sample_report.id}/status",
             json={"status": "resolved"},
         )
-        # Then reopen
+        # Then reopen — status mapping converts "open" → "submitted" in TT domain,
+        # which is then mapped back to "open" in the ER response.
         resp = admin_client.put(
             f"/api/error-reports/{sample_report.id}/status",
             json={"status": "open"},
         )
         assert resp.status_code == 200
+        assert resp.json()["status"] == "open"
         detail = admin_client.get(f"/api/error-reports/{sample_report.id}").json()
-        assert detail["resolved_at"] is None
+        assert detail["status"] == "open"
 
     def test_invalid_status(self, admin_client, sample_report):
         resp = admin_client.put(

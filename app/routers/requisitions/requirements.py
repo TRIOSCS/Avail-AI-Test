@@ -1,0 +1,872 @@
+"""Requirements, search, sightings, and stock import endpoints.
+
+Business Rules:
+- Requirements are line-items within a requisition (parent/child)
+- Search triggers all active connectors in parallel via asyncio.gather
+- Stock import creates sightings matched to requirements by MPN
+- NC/ICS browser-based searches enqueued as background tasks
+- Duplicate detection warns when same MPN quoted for same customer within 30 days
+
+Called by: requisitions.__init__ (sub-router)
+Depends on: models, schemas, search_service, file_utils, normalization utils
+"""
+
+import asyncio
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
+from loguru import logger
+from sqlalchemy import func as sqlfunc
+from sqlalchemy.orm import Session, joinedload
+
+from ...database import get_db
+from ...dependencies import get_req_for_user, require_buyer, require_user
+from ...models import (
+    ChangeLog,
+    Contact,
+    CustomerSite,
+    MaterialCard,
+    Offer,
+    Requirement,
+    Requisition,
+    Sighting,
+    User,
+    VendorResponse,
+)
+from ...rate_limit import limiter
+from ...schemas.requisitions import (
+    RequirementCreate,
+    RequirementUpdate,
+    SearchOptions,
+    SightingUnavailableIn,
+)
+from ...utils.normalization import (
+    normalize_condition,
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_packaging,
+    normalize_price,
+    normalize_quantity,
+)
+from ...vendor_utils import normalize_vendor_name
+
+router = APIRouter(tags=["requisitions"])
+
+
+def _enqueue_ics_nc_batch(requirement_ids: list[int]):
+    """Queue requirements for ICS and NC browser-based searches (background task)."""
+    from ...database import SessionLocal
+    from ...services.ics_worker.queue_manager import enqueue_for_ics_search
+    from ...services.nc_worker.queue_manager import enqueue_for_nc_search
+
+    bg_db = SessionLocal()
+    try:
+        for rid in requirement_ids:
+            try:
+                enqueue_for_nc_search(rid, bg_db)
+            except Exception:
+                logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+            try:
+                enqueue_for_ics_search(rid, bg_db)
+            except Exception:
+                logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+    finally:
+        bg_db.close()
+
+
+@router.get("/api/requisitions/{req_id}/requirements")
+async def list_requirements(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """List requirements for a requisition with sighting counts."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    vendor_counts = {}
+    offer_counts = {}
+    if req.requirements:
+        req_ids = [r.id for r in req.requirements]
+        rows = (
+            db.query(
+                Sighting.requirement_id,
+                sqlfunc.count(sqlfunc.distinct(Sighting.vendor_name_normalized)),
+            )
+            .filter(
+                Sighting.requirement_id.in_(req_ids),
+                Sighting.vendor_name.isnot(None),
+            )
+            .group_by(Sighting.requirement_id)
+            .all()
+        )
+        for rid, cnt in rows:
+            vendor_counts[rid] = cnt
+
+        offer_rows = (
+            db.query(Offer.requirement_id, sqlfunc.count(Offer.id))
+            .filter(
+                Offer.requirement_id.in_(req_ids),
+                Offer.status.in_(["active", "won"]),
+            )
+            .group_by(Offer.requirement_id)
+            .all()
+        )
+        for rid, cnt in offer_rows:
+            offer_counts[rid] = cnt
+
+    contact_count = (db.query(sqlfunc.count(Contact.id)).filter(Contact.requisition_id == req_id).scalar()) or 0
+    last_activity_row = db.query(sqlfunc.max(Contact.created_at)).filter(Contact.requisition_id == req_id).scalar()
+    hours_since = None
+    if last_activity_row:
+        delta = datetime.now(timezone.utc) - last_activity_row.replace(tzinfo=timezone.utc)
+        hours_since = delta.total_seconds() / 3600
+
+    results = []
+    for r in req.requirements:
+        results.append(
+            {
+                "id": r.id,
+                "primary_mpn": r.primary_mpn,
+                "target_qty": r.target_qty,
+                "target_price": float(r.target_price) if r.target_price else None,
+                "substitutes": r.substitutes or [],
+                "sighting_count": vendor_counts.get(r.id, 0),
+                "offer_count": offer_counts.get(r.id, 0),
+                "contact_count": contact_count,
+                "hours_since_activity": round(hours_since, 1) if hours_since is not None else None,
+                "brand": r.brand or "",
+                "firmware": r.firmware or "",
+                "date_codes": r.date_codes or "",
+                "hardware_codes": r.hardware_codes or "",
+                "packaging": r.packaging or "",
+                "condition": r.condition or "",
+                "notes": r.notes or "",
+                "sale_notes": r.sale_notes or "",
+            }
+        )
+    return results
+
+
+@router.post("/api/requisitions/{req_id}/requirements")
+async def add_requirements(
+    req_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    raw = await request.json()
+    items = raw if isinstance(raw, list) else [raw]
+    created = []
+    for item in items:
+        try:
+            parsed = RequirementCreate.model_validate(item)
+        except (ValueError, TypeError):
+            continue
+        seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
+        deduped_subs = []
+        for s in parsed.substitutes:
+            key = normalize_mpn_key(s)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(s)
+        from ...search_service import resolve_material_card
+
+        mat_card = resolve_material_card(parsed.primary_mpn, db)
+
+        r = Requirement(
+            requisition_id=req_id,
+            primary_mpn=parsed.primary_mpn,
+            normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
+            material_card_id=mat_card.id if mat_card else None,
+            target_qty=parsed.target_qty,
+            target_price=parsed.target_price,
+            substitutes=deduped_subs[:20],
+            condition=parsed.condition or "",
+            date_codes=parsed.date_codes or "",
+            firmware=parsed.firmware or "",
+            hardware_codes=parsed.hardware_codes or "",
+            packaging=parsed.packaging or "",
+            notes=parsed.notes or "",
+        )
+        db.add(r)
+        created.append(r)
+    db.commit()
+
+    # Tag propagation
+    try:
+        from ...services.tagging import propagate_tags_to_entity
+
+        for r in created:
+            if r.material_card_id and req.customer_site_id:
+                propagate_tags_to_entity("customer_site", req.customer_site_id, r.material_card_id, 1.0, db)
+                site = db.get(CustomerSite, req.customer_site_id)
+                if site and site.company_id:
+                    propagate_tags_to_entity("company", site.company_id, r.material_card_id, 1.0, db)
+        if created:
+            db.commit()
+    except Exception:  # pragma: no cover
+        logger.debug("Tag propagation failed for requirements", exc_info=True)
+
+    # NC enqueue
+    def _nc_enqueue_batch(requirement_ids: list[int]):
+        from ...database import SessionLocal
+        from ...services.nc_worker.queue_manager import enqueue_for_nc_search
+
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                try:
+                    enqueue_for_nc_search(rid, bg_db)
+                except Exception:
+                    logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
+    # ICS enqueue
+    def _ics_enqueue_batch(requirement_ids: list[int]):
+        from ...database import SessionLocal
+        from ...services.ics_worker.queue_manager import enqueue_for_ics_search
+
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                try:
+                    enqueue_for_ics_search(rid, bg_db)
+                except Exception:
+                    logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
+    if created:
+        background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
+        background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
+
+    # Teams: hot requirement alert
+    try:
+        from ...config import settings as cfg
+        from ...services.teams import send_hot_requirement_alert
+
+        for r in created:
+            price = float(r.target_price or 0)
+            qty = r.target_qty or 0
+            if qty * price >= cfg.teams_hot_threshold:
+                customer = (
+                    req.customer_site.company.name
+                    if req.customer_site and req.customer_site.company
+                    else (req.customer_name or "")
+                )
+                asyncio.create_task(
+                    send_hot_requirement_alert(
+                        requirement_id=r.id,
+                        mpn=r.primary_mpn,
+                        target_qty=qty,
+                        target_price=price,
+                        customer_name=customer,
+                        requisition_id=req_id,
+                    )
+                )
+    except (AttributeError, ValueError, RuntimeError):
+        logger.debug("Teams hot-requirement alert failed", exc_info=True)
+
+    # Duplicate detection
+    duplicates = []
+    if req.customer_site_id and created:
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        card_ids = [r.material_card_id for r in created if r.material_card_id]
+        if card_ids:
+            dup_rows = (
+                db.query(Requirement.primary_mpn, Requisition.id, Requisition.name)
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .filter(
+                    Requirement.material_card_id.in_(card_ids),
+                    Requisition.customer_site_id == req.customer_site_id,
+                    Requisition.id != req_id,
+                    Requisition.created_at >= cutoff,
+                    Requisition.status.notin_(["archived"]),
+                )
+                .all()
+            )
+            seen = set()
+            for mpn, rid, rname in dup_rows:
+                key = f"{mpn}:{rid}"
+                if key not in seen:
+                    seen.add(key)
+                    duplicates.append({"mpn": mpn, "req_id": rid, "req_name": rname})
+
+    return {
+        "created": [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created],
+        "duplicates": duplicates,
+    }
+
+
+@router.post("/api/requisitions/{req_id}/upload")
+async def upload_requirements(
+    req_id: int,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "File too large — 10MB maximum")
+    fname = (file.filename or "").lower()
+    try:
+        from ...file_utils import parse_tabular_file
+
+        rows = parse_tabular_file(content, fname)
+    except (ValueError, KeyError, TypeError) as e:
+        raise HTTPException(400, f"Could not parse file: {str(e)[:200]}")
+
+    created = 0
+    for row in rows:
+        raw_mpn = (
+            row.get("primary_mpn")
+            or row.get("mpn")
+            or row.get("part_number")
+            or row.get("part")
+            or row.get("pn")
+            or row.get("oem_pn")
+            or row.get("oem")
+            or row.get("sku")
+            or ""
+        )
+        mpn = normalize_mpn(raw_mpn)
+        if not mpn:
+            continue
+        qty_raw = row.get("target_qty") or row.get("qty") or row.get("quantity") or "1"
+        qty = normalize_quantity(qty_raw) or 1
+        subs = []
+        sub_str = row.get("substitutes") or row.get("subs") or ""
+        if sub_str:
+            subs = [s.strip() for s in sub_str.replace("\n", ",").split(",") if s.strip()]
+        for i in range(1, 21):
+            s = row.get(f"sub_{i}") or row.get(f"sub{i}") or ""
+            if s:
+                subs.append(s)
+        seen_keys = {normalize_mpn_key(mpn)}
+        deduped_subs = []
+        for s in subs:
+            ns = normalize_mpn(s)
+            if not ns:
+                continue
+            key = normalize_mpn_key(ns)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(ns)
+
+        condition = normalize_condition(row.get("condition") or row.get("cond") or "")
+        packaging = normalize_packaging(row.get("packaging") or row.get("package") or row.get("pkg") or "")
+        date_codes = (row.get("date_codes") or row.get("date_code") or row.get("dc") or "").strip() or None
+        manufacturer = (row.get("manufacturer") or row.get("brand") or row.get("mfr") or "").strip() or None
+        notes = (row.get("notes") or row.get("note") or "").strip() or None
+        target_price_raw = row.get("target_price") or row.get("price") or ""
+        target_price = normalize_price(target_price_raw)
+
+        from ...search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
+        r = Requirement(
+            requisition_id=req_id,
+            primary_mpn=mpn,
+            normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=mat_card.id if mat_card else None,
+            target_qty=qty,
+            target_price=target_price,
+            substitutes=deduped_subs[:20],
+            condition=condition,
+            packaging=packaging,
+            date_codes=date_codes,
+            brand=manufacturer,
+            notes=notes,
+        )
+        db.add(r)
+        created += 1
+    db.commit()
+
+    # Tag propagation for uploaded requirements
+    try:
+        from ...services.tagging import propagate_tags_to_entity
+
+        uploaded_reqs = (
+            db.query(Requirement)
+            .filter(Requirement.requisition_id == req_id)
+            .order_by(Requirement.id.desc())
+            .limit(created)
+            .all()
+        )
+        for r_item in uploaded_reqs:  # pragma: no cover
+            if r_item.material_card_id and req.customer_site_id:
+                propagate_tags_to_entity("customer_site", req.customer_site_id, r_item.material_card_id, 1.0, db)
+                site = db.get(CustomerSite, req.customer_site_id)
+                if site and site.company_id:
+                    propagate_tags_to_entity("company", site.company_id, r_item.material_card_id, 1.0, db)
+        if uploaded_reqs:
+            db.commit()
+    except Exception:  # pragma: no cover
+        logger.debug("Tag propagation failed for uploaded requirements", exc_info=True)
+
+    # NC enqueue for uploaded requirements
+    def _nc_enqueue_uploaded(requisition_id: int, count: int):
+        from ...database import SessionLocal
+        from ...services.nc_worker.queue_manager import enqueue_for_nc_search
+
+        bg_db = SessionLocal()
+        try:
+            for r_item in (
+                bg_db.query(Requirement)
+                .filter(
+                    Requirement.requisition_id == requisition_id,
+                )
+                .order_by(Requirement.id.desc())
+                .limit(count)
+                .all()
+            ):
+                try:  # pragma: no cover
+                    enqueue_for_nc_search(r_item.id, bg_db)
+                except Exception:  # pragma: no cover
+                    logger.debug("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
+        finally:
+            bg_db.close()
+
+    if created:
+        background_tasks.add_task(_nc_enqueue_uploaded, req_id, created)
+
+    return {"created": created, "total_rows": len(rows)}
+
+
+@router.delete("/api/requirements/{item_id}")
+async def delete_requirement(item_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    r = db.get(Requirement, item_id)
+    if not r:
+        raise HTTPException(404, "Requirement not found")
+    req = get_req_for_user(db, user, r.requisition_id)
+    if not req:
+        raise HTTPException(403, "Not authorized for this requisition")
+    db.delete(r)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/api/requirements/{item_id}")
+async def update_requirement(
+    item_id: int,
+    data: RequirementUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    r = db.get(Requirement, item_id)
+    if not r:
+        raise HTTPException(404, "Requirement not found")
+    req = get_req_for_user(db, user, r.requisition_id)
+    if not req:
+        raise HTTPException(403, "Not authorized for this requisition")
+    _req_track_fields = [
+        "primary_mpn",
+        "target_qty",
+        "target_price",
+        "firmware",
+        "date_codes",
+        "hardware_codes",
+        "packaging",
+        "condition",
+        "notes",
+        "sale_notes",
+    ]
+    old_vals = {f: getattr(r, f) for f in _req_track_fields}
+    if data.primary_mpn is not None:
+        r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
+        r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
+        from ...search_service import resolve_material_card
+
+        mat_card = resolve_material_card(data.primary_mpn, db)
+        r.material_card_id = mat_card.id if mat_card else None
+    if data.target_qty is not None:
+        r.target_qty = data.target_qty
+    if data.substitutes is not None:
+        seen_keys = {normalize_mpn_key(r.primary_mpn)}
+        deduped = []
+        for s in data.substitutes:
+            ns = normalize_mpn(s) or s.strip()
+            key = normalize_mpn_key(ns)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(ns)
+        r.substitutes = deduped[:20]
+    if data.target_price is not None:
+        r.target_price = data.target_price
+    if data.firmware is not None:
+        r.firmware = data.firmware.strip()
+    if data.date_codes is not None:
+        r.date_codes = data.date_codes.strip()
+    if data.hardware_codes is not None:
+        r.hardware_codes = data.hardware_codes.strip()
+    if data.packaging is not None:
+        r.packaging = normalize_packaging(data.packaging) or data.packaging.strip()
+    if data.condition is not None:
+        r.condition = normalize_condition(data.condition) or data.condition.strip()
+    if data.notes is not None:
+        r.notes = data.notes.strip()
+    if data.sale_notes is not None:
+        r.sale_notes = data.sale_notes.strip()
+    new_vals = {f: getattr(r, f) for f in _req_track_fields}
+    for f in _req_track_fields:
+        old_v = str(old_vals.get(f) or "")
+        new_v = str(new_vals.get(f) or "")
+        if old_v != new_v:
+            db.add(
+                ChangeLog(
+                    entity_type="requirement",
+                    entity_id=item_id,
+                    user_id=user.id,
+                    field_name=f,
+                    old_value=old_v,
+                    new_value=new_v,
+                )
+            )
+    db.commit()
+    return {"ok": True}
+
+
+# ── Search ───────────────────────────────────────────────────────────────
+
+
+@router.post("/api/requisitions/{req_id}/search")
+@limiter.limit("20/minute")
+async def search_all(
+    req_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: SearchOptions | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    from . import _enrich_with_vendor_cards, search_requirement
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    requirement_ids = body.requirement_ids if body else None
+    reqs_to_search = [r for r in req.requirements if not requirement_ids or r.id in requirement_ids]
+
+    search_tasks = [search_requirement(r, db) for r in reqs_to_search]
+    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+    results = {}
+    merged_source_stats: dict[str, dict] = {}
+    for r, search_result in zip(reqs_to_search, search_results):
+        if isinstance(search_result, Exception):
+            logger.error(f"Search failed for requirement {r.id}: {search_result}")
+            sightings = []
+            req_stats = []
+        else:
+            sightings = search_result["sightings"]
+            req_stats = search_result["source_stats"]
+        label = r.primary_mpn or f"Req #{r.id}"
+        results[str(r.id)] = {"label": label, "sightings": sightings}
+        for stat in req_stats:
+            name = stat["source"]
+            if name not in merged_source_stats:
+                merged_source_stats[name] = dict(stat)
+            else:
+                existing = merged_source_stats[name]
+                existing["results"] += stat["results"]
+                existing["ms"] = max(existing["ms"], stat["ms"])
+                if stat["error"] and not existing["error"]:
+                    existing["error"] = stat["error"]
+                    existing["status"] = stat["status"]
+
+    req.last_searched_at = datetime.now(timezone.utc)
+    if req.status in ("draft", "archived"):
+        req.status = "active"
+    db.commit()
+
+    req_ids = [r.id for r in reqs_to_search]
+    background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
+
+    _enrich_with_vendor_cards(results, db)
+
+    results["source_stats"] = list(merged_source_stats.values())
+    return results
+
+
+@router.post("/api/requirements/{item_id}/search")
+@limiter.limit("20/minute")
+async def search_one(
+    item_id: int,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    from . import _enrich_with_vendor_cards, search_requirement
+
+    r = db.get(Requirement, item_id)
+    if not r:
+        raise HTTPException(404, "Requirement not found")
+    req = get_req_for_user(db, user, r.requisition_id)
+    if not req:
+        raise HTTPException(403, "Access denied")
+    search_result = await search_requirement(r, db)
+    sightings = search_result["sightings"]
+    source_stats = search_result["source_stats"]
+    results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
+    _enrich_with_vendor_cards(results, db)
+
+    background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
+
+    return {"sightings": results[str(r.id)]["sightings"], "source_stats": source_stats}
+
+
+# ── Saved sightings (no re-search) ──────────────────────────────────────
+@router.get("/api/requisitions/{req_id}/sightings")
+async def get_saved_sightings(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return previously saved sightings from DB without triggering a new search."""
+    from . import _deduplicate_sightings, _enrich_with_vendor_cards, _get_material_history, _history_to_result, sighting_to_dict
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    now = datetime.now(timezone.utc)
+    results: dict = {}
+    req_ids = [r.id for r in req.requirements]
+    all_sightings = (
+        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.created_at.desc()).limit(5000).all())
+        if req_ids
+        else []
+    )
+    sightings_by_req: dict[int, list] = {}
+    for s in all_sightings:
+        sightings_by_req.setdefault(s.requirement_id, []).append(s)
+
+    req_card_map: dict[int, set[int]] = {}
+    all_card_ids: set[int] = set()
+    primary_card_ids: dict[int, int | None] = {}
+
+    all_sub_keys: set[str] = set()
+    req_sub_keys: dict[int, list[str]] = {}
+    for r in req.requirements:
+        primary_card_ids[r.id] = r.material_card_id
+        sub_keys = []
+        for sub in r.substitutes or []:
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    sub_keys.append(sub_key)
+                    all_sub_keys.add(sub_key)
+        req_sub_keys[r.id] = sub_keys
+
+    sub_card_lookup: dict[str, int] = {}
+    if all_sub_keys:
+        rows = (
+            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+            .filter(MaterialCard.normalized_mpn.in_(all_sub_keys))
+            .all()
+        )
+        sub_card_lookup = {row.normalized_mpn: row.id for row in rows}
+
+    for r in req.requirements:
+        card_ids: set[int] = set()
+        if r.material_card_id:
+            card_ids.add(r.material_card_id)
+        for sub_key in req_sub_keys.get(r.id, []):
+            card_id = sub_card_lookup.get(sub_key)
+            if card_id:  # pragma: no cover
+                card_ids.add(card_id)
+        req_card_map[r.id] = card_ids
+        all_card_ids |= card_ids
+
+    hist_by_req: dict[int, list] = {}
+    if all_card_ids:
+        hist_query = (
+            db.query(Offer)
+            .filter(
+                Offer.requisition_id != req_id,
+                Offer.material_card_id.in_(all_card_ids),
+                Offer.status.in_(["active", "won"]),
+            )
+            .options(joinedload(Offer.entered_by))
+            .order_by(Offer.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        for ho in hist_query:  # pragma: no cover
+            for r in req.requirements:
+                if ho.material_card_id in req_card_map.get(r.id, set()):
+                    if r.id not in hist_by_req:
+                        hist_by_req[r.id] = []
+                    is_sub = ho.material_card_id != primary_card_ids.get(r.id)
+                    hist_by_req[r.id].append(
+                        {
+                            "id": ho.id,
+                            "vendor_name": ho.vendor_name,
+                            "mpn": ho.mpn,
+                            "manufacturer": ho.manufacturer,
+                            "qty_available": ho.qty_available,
+                            "unit_price": float(ho.unit_price) if ho.unit_price else None,
+                            "lead_time": ho.lead_time,
+                            "condition": ho.condition,
+                            "source": ho.source,
+                            "status": ho.status,
+                            "entered_by": ho.entered_by.name if ho.entered_by else None,
+                            "created_at": ho.created_at.isoformat() if ho.created_at else None,
+                            "from_requisition_id": ho.requisition_id,
+                            "is_substitute": is_sub,
+                        }
+                    )
+                    break
+
+    for r in req.requirements:
+        rows = sightings_by_req.get(r.id, [])
+        label = r.primary_mpn or f"Req #{r.id}"
+        sighting_dicts = []
+        for s in rows:
+            d = sighting_to_dict(s)
+            d["is_historical"] = False
+            d["is_material_history"] = False
+            sighting_dicts.append(d)
+
+        fresh_vendors = {s.vendor_name.lower() for s in rows}
+        card_ids = list(req_card_map.get(r.id, set()))
+        history = _get_material_history(card_ids, fresh_vendors, db)
+        for h in history:
+            sighting_dicts.append(_history_to_result(h, now))
+
+        hist_offers = hist_by_req.get(r.id, [])
+        sighting_dicts = _deduplicate_sightings(sighting_dicts)
+        if not sighting_dicts and not hist_offers:
+            continue
+        sighting_dicts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        results[str(r.id)] = {
+            "label": label,
+            "sightings": sighting_dicts,
+            "historical_offers": hist_offers,
+        }
+    _enrich_with_vendor_cards(results, db)
+    return results
+
+
+# ── Mark sighting as unavailable ─────────────────────────────────────────
+@router.put("/api/sightings/{sighting_id}/unavailable")
+async def mark_unavailable(
+    sighting_id: int,
+    data: SightingUnavailableIn,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    s = db.get(Sighting, sighting_id)
+    if not s:
+        raise HTTPException(404, "Sighting not found")
+    req = db.query(Requisition).join(Requirement).filter(Requirement.id == s.requirement_id).first()
+    if not req or not get_req_for_user(db, user, req.id):
+        raise HTTPException(403, "Not authorized for this sighting")
+    s.is_unavailable = data.unavailable
+    db.commit()
+    return {"ok": True, "is_unavailable": s.is_unavailable}
+
+
+# ── Vendor Stock List Import ─────────────────────────────────────────────
+@router.post("/api/requisitions/{req_id}/import-stock")
+async def import_stock_list(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Import a vendor stock list CSV/Excel as sightings for matching requirements."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    file = form.get("file")
+    vendor_name = form.get("vendor_name", "Manual Import")
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "File too large — 10MB maximum")
+    fname = file.filename.lower()
+
+    from ...file_utils import parse_tabular_file
+
+    rows = parse_tabular_file(content, fname)
+
+    from ...file_utils import normalize_stock_row
+    from ...search_service import resolve_material_card
+    from ...utils.normalization import normalize_condition as norm_cond
+    from ...utils.normalization import normalize_date_code, normalize_lead_time
+    from ...utils.normalization import normalize_packaging as norm_pkg
+
+    req_mpns = {}
+    for r in req.requirements:
+        all_mpns = [r.primary_mpn] if r.primary_mpn else []
+        for sub in r.substitutes or []:
+            if sub and sub.strip():
+                all_mpns.append(sub.strip())
+        for m in all_mpns:
+            req_mpns[normalize_mpn_key(m)] = r
+
+    matched = 0
+    imported = 0
+
+    try:
+        for row in rows:
+            parsed = normalize_stock_row(row)
+            if not parsed:
+                continue
+            mpn = parsed["mpn"]
+            imported += 1
+
+            r = req_mpns.get(normalize_mpn_key(mpn))
+            if not r:
+                continue
+
+            display_mpn = normalize_mpn(mpn) or mpn
+
+            mat_card = resolve_material_card(mpn, db)
+
+            s = Sighting(
+                requirement_id=r.id,
+                material_card_id=mat_card.id if mat_card else None,
+                vendor_name=vendor_name.strip(),
+                vendor_name_normalized=normalize_vendor_name(vendor_name),
+                mpn_matched=display_mpn,
+                manufacturer=parsed.get("manufacturer"),
+                qty_available=parsed.get("qty"),
+                unit_price=parsed.get("price"),
+                currency=parsed.get("currency", "USD"),
+                condition=norm_cond(parsed.get("condition")),
+                packaging=norm_pkg(parsed.get("packaging")),
+                date_code=normalize_date_code(parsed.get("date_code")),
+                lead_time_days=normalize_lead_time(parsed.get("lead_time")),
+                source_type="stock_list",
+                confidence=70,
+                raw_data=row,
+                created_at=datetime.now(timezone.utc),
+            )
+            s.score = 50  # Neutral score for manual imports
+            db.add(s)
+            matched += 1
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Stock import failed for requisition %s", req_id)
+        raise HTTPException(500, "Stock import failed — no data was saved")
+    return {"imported_rows": imported, "matched_sightings": matched}

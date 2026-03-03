@@ -95,3 +95,55 @@ def test_error_response_format(client):
     assert "status_code" in data
     assert data["status_code"] == 404
     assert "request_id" in data
+
+
+# ── CSP tests ────────────────────────────────────────────────────────
+
+
+import re
+
+
+def test_csp_header_present_on_all_responses(client):
+    """Content-Security-Policy header is set on every response."""
+    resp = client.get("/health")
+    csp = resp.headers.get("Content-Security-Policy")
+    assert csp is not None
+    assert "default-src 'self'" in csp
+    assert "script-src" in csp
+
+
+def test_csp_script_src_allows_unsafe_inline(client):
+    """CSP script-src includes 'unsafe-inline' for inline event handlers."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    script_src = re.search(r"script-src\s+([^;]+)", csp)
+    assert script_src, "CSP must have a script-src directive"
+    script_src_value = script_src.group(1)
+    assert "'unsafe-inline'" in script_src_value
+    # Must NOT have a nonce — nonces cause browsers to ignore 'unsafe-inline',
+    # which breaks all onclick/oninput/onchange handlers in the SPA template.
+    nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", script_src_value)
+    assert nonce_match is None, "script-src must not contain a nonce (breaks inline handlers)"
+
+
+def test_csp_header_on_html_page(client):
+    """CSP header is present on the HTML index page."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    csp = resp.headers.get("Content-Security-Policy")
+    assert csp is not None
+    assert "'unsafe-inline'" in csp
+
+
+def test_csp_includes_cdnjs_allowlist(client):
+    """CSP script-src allows cdnjs.cloudflare.com for html2canvas."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "https://cdnjs.cloudflare.com" in csp
+
+
+def test_csp_style_src_allows_google_fonts(client):
+    """CSP style-src allows Google Fonts."""
+    resp = client.get("/health")
+    csp = resp.headers["Content-Security-Policy"]
+    assert "https://fonts.googleapis.com" in csp

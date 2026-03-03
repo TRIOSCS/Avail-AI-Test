@@ -414,7 +414,7 @@ def compute_all_contact_scores(db: Session) -> dict:
     cutoff_60d = now - timedelta(days=60)
     cutoff_90d = now - timedelta(days=90)
 
-    contacts = db.query(VendorContact).all()
+    contacts = db.query(VendorContact).limit(5000).all()
     if not contacts:
         return {"updated": 0, "skipped": 0}
 

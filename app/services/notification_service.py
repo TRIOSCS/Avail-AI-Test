@@ -24,6 +24,8 @@ def create_notification(
     ticket_id: int | None = None,
 ) -> Notification:
     """Create a new notification for a user."""
+    if title and len(title) > 500:
+        title = title[:497] + "..."
     notif = Notification(
         user_id=user_id,
         ticket_id=ticket_id,
