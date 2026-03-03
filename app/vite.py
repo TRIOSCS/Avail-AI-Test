@@ -49,7 +49,7 @@ def _manifest_css(entry_key: str) -> list[str]:
     return []
 
 
-def vite_css_tags(app_version: str = "", csp_nonce: str = "") -> Markup:
+def vite_css_tags(app_version: str = "") -> Markup:
     """Return <link> tags for CSS assets."""
     if os.environ.get("VITE_DEV"):
         # Vite dev server injects CSS via JS — no link tags needed
@@ -93,20 +93,15 @@ def vite_crm_url(app_version: str = "") -> str:
     return f"/static/crm.js{bust}"
 
 
-def vite_js_tags(app_version: str = "", csp_nonce: str = "") -> Markup:
-    """Return <script> tags for JS entry points.
-
-    When csp_nonce is provided, each <script> tag includes a nonce attribute
-    so the browser's Content-Security-Policy allows execution.
-    """
-    na = f' nonce="{csp_nonce}"' if csp_nonce else ""
+def vite_js_tags(app_version: str = "") -> Markup:
+    """Return <script> tags for JS entry points."""
     if os.environ.get("VITE_DEV"):
         return Markup(
-            f'<script type="module" src="{VITE_DEV_ORIGIN}/@vite/client"{na}></script>\n'
-            f'    <script type="module" src="{VITE_DEV_ORIGIN}/app.js"{na}></script>\n'
-            f'    <script type="module" src="{VITE_DEV_ORIGIN}/crm.js"{na}></script>\n'
-            f'    <script type="module" src="{VITE_DEV_ORIGIN}/tickets.js"{na}></script>\n'
-            f'    <script type="module" src="{VITE_DEV_ORIGIN}/touch.js"{na}></script>'
+            f'<script type="module" src="{VITE_DEV_ORIGIN}/@vite/client"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/app.js"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/crm.js"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/tickets.js"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/touch.js"></script>'
         )
 
     # Try manifest (production)
@@ -115,25 +110,25 @@ def vite_js_tags(app_version: str = "", csp_nonce: str = "") -> Markup:
     tickets_url = _manifest_url("tickets.js")
     touch_url = _manifest_url("touch.js")
     if app_url and crm_url:
-        tags = f'<script type="module" src="{app_url}"{na}></script>\n    <script type="module" src="{crm_url}"{na}></script>'
+        tags = f'<script type="module" src="{app_url}"></script>\n    <script type="module" src="{crm_url}"></script>'
         if tickets_url:
-            tags += f'\n    <script type="module" src="{tickets_url}"{na}></script>'
+            tags += f'\n    <script type="module" src="{tickets_url}"></script>'
         if touch_url:
-            tags += f'\n    <script type="module" src="{touch_url}"{na}></script>'
+            tags += f'\n    <script type="module" src="{touch_url}"></script>'
         return Markup(tags)
 
     # Fallback: raw source with importmap
     bust = f"?v={app_version}" if app_version else ""
     return Markup(
-        f'<script type="importmap"{na}>\n'
+        '<script type="importmap">\n'
         "{\n"
         '  "imports": {\n'
         f'    "app": "/static/app.js{bust}"\n'
         "  }\n"
         "}\n"
         "</script>\n"
-        f'    <script type="module" src="/static/app.js{bust}"{na}></script>\n'
-        f'    <script type="module" src="/static/crm.js{bust}"{na}></script>\n'
-        f'    <script type="module" src="/static/tickets.js{bust}"{na}></script>\n'
-        f'    <script defer src="/static/touch.js{bust}"{na}></script>'
+        f'    <script type="module" src="/static/app.js{bust}"></script>\n'
+        f'    <script type="module" src="/static/crm.js{bust}"></script>\n'
+        f'    <script type="module" src="/static/tickets.js{bust}"></script>\n'
+        f'    <script defer src="/static/touch.js{bust}"></script>'
     )

@@ -234,6 +234,7 @@ def compute_email_health_score(db: Session, vendor_card_id: int, lookback_days: 
                     EmailIntelligence.sender_domain == domain,
                     EmailIntelligence.thread_summary.isnot(None),
                 )
+                .limit(1000)  # Safety limit — prevents unbounded result sets
                 .all()
             )
             for (summary,) in thread_records:

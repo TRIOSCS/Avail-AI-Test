@@ -97,7 +97,7 @@ def test_error_response_format(client):
     assert "request_id" in data
 
 
-# ── CSP nonce tests ──────────────────────────────────────────────────
+# ── CSP tests ────────────────────────────────────────────────────────
 
 
 import re
@@ -112,29 +112,18 @@ def test_csp_header_present_on_all_responses(client):
     assert "script-src" in csp
 
 
-def test_csp_header_contains_nonce(client):
-    """CSP script-src includes a nonce directive (not unsafe-inline)."""
+def test_csp_script_src_allows_unsafe_inline(client):
+    """CSP script-src includes 'unsafe-inline' for inline event handlers."""
     resp = client.get("/health")
     csp = resp.headers["Content-Security-Policy"]
-    # Extract the script-src directive specifically
     script_src = re.search(r"script-src\s+([^;]+)", csp)
     assert script_src, "CSP must have a script-src directive"
     script_src_value = script_src.group(1)
-    assert "'unsafe-inline'" not in script_src_value, "script-src must not contain unsafe-inline"
+    assert "'unsafe-inline'" in script_src_value
+    # Must NOT have a nonce — nonces cause browsers to ignore 'unsafe-inline',
+    # which breaks all onclick/oninput/onchange handlers in the SPA template.
     nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", script_src_value)
-    assert nonce_match, "script-src must contain a nonce"
-    assert len(nonce_match.group(1)) >= 16  # token_urlsafe(16) produces 22 chars
-
-
-def test_csp_nonce_unique_per_request(client):
-    """Each request generates a unique CSP nonce."""
-    nonces = set()
-    for _ in range(5):
-        resp = client.get("/health")
-        csp = resp.headers["Content-Security-Policy"]
-        nonce = re.search(r"'nonce-([A-Za-z0-9_-]+)'", csp).group(1)
-        nonces.add(nonce)
-    assert len(nonces) == 5, "Every request must get a unique nonce"
+    assert nonce_match is None, "script-src must not contain a nonce (breaks inline handlers)"
 
 
 def test_csp_header_on_html_page(client):
@@ -143,8 +132,7 @@ def test_csp_header_on_html_page(client):
     assert resp.status_code == 200
     csp = resp.headers.get("Content-Security-Policy")
     assert csp is not None
-    nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", csp)
-    assert nonce_match, "CSP header on HTML pages must include a nonce"
+    assert "'unsafe-inline'" in csp
 
 
 def test_csp_includes_cdnjs_allowlist(client):

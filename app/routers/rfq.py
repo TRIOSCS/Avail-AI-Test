@@ -390,7 +390,7 @@ async def rfq_prepare(
             subs_map[r.primary_mpn] = [s for s in r.substitutes if s]
 
     # Build exhaustion map: {normalized_vendor: [parts_already_asked]}
-    contacts = db.query(Contact).filter_by(requisition_id=req_id).all()
+    contacts = db.query(Contact).filter_by(requisition_id=req_id).limit(1000).all()  # Safety limit
     exhaustion = {}
     for c in contacts:
         vk = normalize_vendor_name(c.vendor_name)

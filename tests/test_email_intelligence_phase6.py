@@ -316,7 +316,7 @@ class TestJobCalendarScan:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch(
-                "app.scheduler.get_valid_token",
+                "app.utils.token_manager.get_valid_token",
                 new_callable=AsyncMock,
                 return_value="valid-token",
             ),
@@ -380,7 +380,7 @@ class TestJobCalendarScan:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch(
-                "app.scheduler.get_valid_token",
+                "app.utils.token_manager.get_valid_token",
                 new_callable=AsyncMock,
                 return_value=None,
             ),

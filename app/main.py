@@ -294,27 +294,24 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 # Secret key validation moved to lifespan (fail-fast)
 
 
-# L0: CSP middleware — generates a per-request nonce for inline scripts
-import secrets
-
-
+# L0: CSP middleware — restrict script/style sources
 @app.middleware("http")
 async def csp_middleware(request: Request, call_next):
-    """Add Content-Security-Policy header with a per-request nonce.
+    """Add Content-Security-Policy header.
 
-    The nonce is stored on request.state so templates can embed it in
-    <script> tags, replacing the old 'unsafe-inline' directive.
+    Uses 'unsafe-inline' for script-src because the app relies on inline
+    onclick handlers throughout the SPA template.  A nonce cannot be used
+    alongside 'unsafe-inline' — browsers that support nonces silently
+    ignore 'unsafe-inline', which breaks all inline event handlers.
     """
-    nonce = secrets.token_urlsafe(16)
-    request.state.csp_nonce = nonce
     response = await call_next(request)
     csp = (
-        f"default-src 'self'; "
-        f"script-src 'self' 'unsafe-inline' 'nonce-{nonce}' https://cdnjs.cloudflare.com; "
-        f"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        f"font-src 'self' https://fonts.gstatic.com; "
-        f"img-src 'self' data:; "
-        f"connect-src 'self'"
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data:; "
+        "connect-src 'self'"
     )
     response.headers["Content-Security-Policy"] = csp
     return response
