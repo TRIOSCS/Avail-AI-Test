@@ -8710,17 +8710,26 @@ function renderRfqMessage() {
     rfqLoadTemplates();
     // Restore saved draft if available
     const draftKey = `rfq_draft_${currentReqId}`;
-    const saved = safeGet(draftKey);
+    let saved = safeGet(draftKey);
     const rfqSubj = document.getElementById('rfqSubject');
     const rfqBod = document.getElementById('rfqBody');
 
     if (saved) {
         try {
             const draft = JSON.parse(saved);
-            if (rfqSubj) rfqSubj.value = draft.subject || '';
-            if (rfqBod) rfqBod.value = draft.body || '';
-        } catch { /* ignore corrupt draft */ }
-    } else {
+            if (draft.subject && draft.subject.trim() && draft.body && draft.body.trim()) {
+                if (rfqSubj) rfqSubj.value = draft.subject;
+                if (rfqBod) rfqBod.value = draft.body;
+            } else {
+                localStorage.removeItem(draftKey);
+                saved = null;
+            }
+        } catch {
+            localStorage.removeItem(draftKey);
+            saved = null;
+        }
+    }
+    if (!saved) {
         // Subject uses all unique parts across all vendors being sent, with qty for small lists
         const allParts = [...new Set(rfqAllParts)];
         const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
