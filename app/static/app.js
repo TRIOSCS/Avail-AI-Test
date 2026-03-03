@@ -2325,15 +2325,15 @@ async function loadBuyerDashboard(el) {
 
         // ── Pipeline Bar ──
         html += '<div class="cc-pipeline-bar">'
-            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'open\'})"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'quoted\'})"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--green)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'won\'})"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
             + '<span class="cc-pipe-sep">/</span>'
-            + '<span class="cc-pipe-item" style="color:var(--red)"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--red)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'lost\'})"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
             + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
+            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--purple)" onclick="showBuyPlans()"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
             + '</div>';
 
         // ── 6-Tile Cards Grid (mirrors sales layout) ──
@@ -5958,7 +5958,7 @@ function _ddPromptFallback(reqId, sightingId, vendorName) {
 
 function ddSendBulkRfq(reqId) {
     const sel = _ddSelectedSightings[reqId];
-    if (!sel || !sel.size) return;
+    if (!sel || !sel.size) { showToast('Select sightings first', 'warn'); return; }
     const data = _ddSightingsCache[reqId] || {};
     // Collect selected sightings and group by vendor
     const groups = {};
@@ -8270,7 +8270,7 @@ let rfqSubsMap = {}; // { primary_mpn: [sub1, sub2, ...] }
 
 async function openBatchRfqModal(prebuiltGroups) {
     const groups = prebuiltGroups || getSelectedByVendor();
-    if (!groups.length) return;
+    if (!groups.length) { showToast('Select sightings first to send RFQs', 'warn'); return; }
 
     const modal = document.getElementById('rfqModal');
     const rfqPrep = document.getElementById('rfqPrepare'); if (rfqPrep) rfqPrep.style.display = '';

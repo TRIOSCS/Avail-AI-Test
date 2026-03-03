@@ -1088,6 +1088,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .flex-between{display:flex;justify-content:space-between;align-items:center}
 .flex-wrap{flex-wrap:wrap}
 .hidden{display:none!important}
+.cc-pipe-click{cursor:pointer;border-radius:4px;padding:2px 6px;transition:background var(--speed)}.cc-pipe-click:hover{background:var(--bg2)}
 .text-muted{font-size:11px;color:var(--muted)}
 /* Performance Tracking */
 .perf-table{width:100%;border-collapse:collapse;font-size:12px}
