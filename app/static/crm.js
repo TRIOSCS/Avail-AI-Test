@@ -310,10 +310,12 @@ function renderCustomers() {
     if (!el) return;
     const countEl = document.getElementById('custListCount');
     if (!crmCustomers.length) {
+        // Safe static HTML - no user input
         el.innerHTML = '<p class="crm-empty">No accounts yet — click <b>+ New Account</b> to get started</p>';
         if (countEl) countEl.textContent = '';
         return;
     }
+    if (window.__isMobile) { renderMobileAccountList(crmCustomers); return; }
 
     // Apply view filters
     let filtered = [...crmCustomers];
@@ -410,16 +412,7 @@ function renderCustomers() {
         html += '<div style="text-align:center;padding:12px"><button class="btn btn-ghost" onclick="loadMoreCustomers()">Load More (' + crmCustomers.length + ' of ' + _custTotal + ')</button></div>';
     }
 
-    // Mobile: render cards instead of table
-    if (window.__isMobile) {
-        let mHtml = '';
-        for (const c of filtered) {
-            mHtml += _renderCustCardMobile(c);
-        }
-        el.innerHTML = mHtml || '<p class="m-empty">No accounts match filters</p>';
-    } else {
-        el.innerHTML = html;
-    }
+    el.innerHTML = html;
 }
 
 function _renderCustCardMobile(c) {
@@ -443,6 +436,89 @@ function _renderCustCardMobile(c) {
         <div class="m-card-footer">
             <span class="m-card-meta">${owner ? esc(owner) : '<span style="color:var(--muted)">Unassigned</span>'}</span>
         </div>
+    </div>`;
+}
+
+// ── Mobile Account List ───────────────────────────────────────────────
+// Renders a card-based account list for mobile viewports.
+// Called from renderCustomers() when window.__isMobile is true.
+// Uses m-card CSS classes defined in mobile.css.
+
+function renderMobileAccountList(companies) {
+    const el = document.getElementById('custList');
+    if (!el) return;
+    const countEl = document.getElementById('custListCount');
+
+    // Apply same view filters as desktop
+    let filtered = [...companies];
+    if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
+    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'stale') {
+        const daysSince = window.daysSince || (() => 999);
+        filtered = filtered.filter(c => daysSince(c.last_enriched_at) > 30);
+    }
+
+    // Sort alphabetically by name (mobile default)
+    if (_custSortCol) {
+        filtered.sort((a, b) => {
+            let va, vb;
+            switch (_custSortCol) {
+                case 'name': va = (a.name || ''); vb = (b.name || ''); break;
+                case 'owner': va = (a.account_owner_name || 'zzz'); vb = (b.account_owner_name || 'zzz'); break;
+                case 'reqs': va = (a.open_req_count || 0); vb = (b.open_req_count || 0); break;
+                default: va = (a.name || ''); vb = (b.name || ''); break;
+            }
+            if (typeof va === 'string') return _custSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _custSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+
+    if (countEl) countEl.textContent = filtered.length + (_custTotal > crmCustomers.length ? ' of ' + _custTotal : '') + ' accounts';
+
+    // Build card list - all user content escaped via esc()
+    let html = '';
+    for (const c of filtered) {
+        html += _renderCustCardMobile(c);
+    }
+
+    // Load More button if there are more pages
+    if (_custOffset < _custTotal) {
+        html += '<div style="text-align:center;padding:12px"><button class="m-card" style="text-align:center;font-weight:600;color:var(--blue);cursor:pointer" onclick="loadMoreCustomers()">Load More (' + crmCustomers.length + ' of ' + _custTotal + ')</button></div>';
+    }
+
+    // Safe: all user content in cards is escaped via esc() in _renderCustCardMobile
+    el.innerHTML = html || '<p class="m-empty" style="text-align:center;padding:24px;color:var(--muted)">No accounts match filters</p>';
+}
+
+// ── Mobile Contact Card ───────────────────────────────────────────────
+// Renders a single contact as a mobile-friendly card with tap-to-call
+// and tap-to-email links. Used in the company drawer contacts tab on mobile.
+
+function _renderMobileContact(ct, companyId) {
+    const initials = (ct.full_name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const location = [ct.site_city, ct.site_state].filter(Boolean).join(', ');
+
+    // Build action links for phone and email (tap-friendly)
+    let actionsHtml = '';
+    if (ct.phone) {
+        actionsHtml += `<a href="tel:${escAttr(ct.phone)}" onclick="event.stopPropagation();autoLogCrmCall('${escAttr(ct.phone)}',${companyId || 0})" style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--green-bg,#f0fdf4);border-radius:8px;color:var(--green,#16a34a);text-decoration:none;font-size:13px;font-weight:500">${esc(ct.phone)}</a>`;
+    }
+    if (ct.email) {
+        actionsHtml += `<a href="mailto:${escAttr(ct.email)}" onclick="event.stopPropagation();autoLogEmail('${escAttr(ct.email)}','${escAttr(ct.full_name || '')}')" style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--blue-bg,#eff6ff);border-radius:8px;color:var(--blue,#2563eb);text-decoration:none;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis">${esc(ct.email)}</a>`;
+    }
+
+    return `<div class="m-card" style="margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+            <div style="width:40px;height:40px;border-radius:50%;background:var(--blue-bg,#eff6ff);color:var(--blue,#2563eb);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0">${initials}</div>
+            <div style="flex:1;min-width:0">
+                <div class="m-card-title" style="margin:0">${esc(ct.full_name)}${ct.is_primary ? ' <span style="background:var(--blue);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;vertical-align:middle">Primary</span>' : ''}</div>
+                ${ct.title ? `<div class="m-card-subtitle" style="margin:0">${esc(ct.title)}</div>` : ''}
+                <div class="m-card-meta" style="margin:0">${esc(ct.site_name || '')}${location ? ' · ' + esc(location) : ''}</div>
+            </div>
+        </div>
+        ${actionsHtml ? `<div style="display:flex;flex-direction:column;gap:6px">${actionsHtml}</div>` : ''}
     </div>`;
 }
 
@@ -1307,8 +1383,10 @@ function filterDrawerContacts(query) {
             || (ct.email || '').toLowerCase().includes(q);
     }) : _drawerContacts;
     const cid = _selectedCustId || 0;
+    const cardBuilder = window.__isMobile ? _renderMobileContact : _buildContactCardHtml;
+    // Safe: all user content escaped via esc() in card builders
     grid.innerHTML = filtered.length
-        ? filtered.map(ct => _buildContactCardHtml(ct, cid)).join('')
+        ? filtered.map(ct => cardBuilder(ct, cid)).join('')
         : '<p class="crm-empty" style="padding:20px;grid-column:1/-1">No contacts match your search</p>';
 }
 
@@ -1364,6 +1442,13 @@ async function _renderCustDrawerContacts(companyId) {
 
         if (!allContacts.length) {
             html += `<div class="drawer-section"><p class="crm-empty">No contacts yet — add contacts to your sites to build your stakeholder map</p></div>`;
+        } else if (window.__isMobile) {
+            // Mobile: render tap-friendly contact cards with call/email links
+            html += '<div id="drawerContactsGrid" style="padding:8px 0">';
+            for (const ct of allContacts) {
+                html += _renderMobileContact(ct, companyId);
+            }
+            html += '</div>';
         } else {
             html += '<div class="contacts-grid" id="drawerContactsGrid">';
             for (const ct of allContacts) {
@@ -1372,6 +1457,7 @@ async function _renderCustDrawerContacts(companyId) {
             html += '</div>';
         }
 
+        // Safe: all user content escaped via esc() in card builders
         body.innerHTML = html;
     } catch (e) {
         body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load contacts</p></div>';
@@ -8368,6 +8454,170 @@ async function apolloEnrichSelected() {
     }
 }
 
+// ── Mobile Offer Feed ─────────────────────────────────────────────────
+// Cross-requisition offer feed for the mobile bottom-nav "Offers" tab.
+// Fetches requisitions, then batch-loads offers for reqs that have them.
+
+let _offerFeedData = [];       // Flat array of offer objects with req metadata
+let _offerFeedFilter = 'pending'; // 'pending' | 'all' | 'accepted'
+let _offerFeedLoading = false;
+
+async function loadOfferFeed() {
+    if (_offerFeedLoading) return;
+    _offerFeedLoading = true;
+    var listEl = document.getElementById('offerFeedList');
+    var summaryEl = document.getElementById('offerFeedSummary');
+    if (listEl) listEl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading offers\u2026</div>';
+    if (summaryEl) summaryEl.innerHTML = '';
+    try {
+        // 1. Fetch requisitions to find which ones have offers
+        var reqResp = await apiFetch('/api/requisitions?limit=200');
+        var reqs = reqResp.requisitions || reqResp || [];
+        var withOffers = reqs.filter(function(r) { return (r.offer_count || 0) > 0; });
+        // 2. Batch-fetch offers for up to 20 reqs with most offers (sorted desc)
+        var topReqs = withOffers
+            .sort(function(a, b) { return (b.offer_count || 0) - (a.offer_count || 0); })
+            .slice(0, 20);
+        // Fetch in parallel with concurrency limit of 6
+        var allOffers = [];
+        var fetchChunks = [];
+        for (var i = 0; i < topReqs.length; i += 6) fetchChunks.push(topReqs.slice(i, i + 6));
+        for (var ci = 0; ci < fetchChunks.length; ci++) {
+            var chunk = fetchChunks[ci];
+            var results = await Promise.allSettled(
+                chunk.map(function(r) {
+                    return apiFetch('/api/requisitions/' + r.id + '/offers')
+                        .then(function(data) { return { reqId: r.id, reqName: r.name, customer: r.customer_display, data: data }; });
+                })
+            );
+            for (var ri = 0; ri < results.length; ri++) {
+                if (results[ri].status !== 'fulfilled') continue;
+                var val = results[ri].value;
+                var groups = val.data.groups || [];
+                for (var gi = 0; gi < groups.length; gi++) {
+                    var grp = groups[gi];
+                    var grpOffers = grp.offers || [];
+                    for (var oi = 0; oi < grpOffers.length; oi++) {
+                        allOffers.push(Object.assign({}, grpOffers[oi], {
+                            _reqId: val.reqId,
+                            _reqName: val.reqName || 'Untitled',
+                            _customer: val.customer || '',
+                            _targetQty: grp.target_qty,
+                            _reqMpn: grp.mpn,
+                        }));
+                    }
+                }
+            }
+        }
+        // Sort by created_at descending (newest first)
+        allOffers.sort(function(a, b) {
+            var da = a.created_at ? new Date(a.created_at).getTime() : 0;
+            var db2 = b.created_at ? new Date(b.created_at).getTime() : 0;
+            return db2 - da;
+        });
+        _offerFeedData = allOffers;
+        _renderOfferFeed();
+    } catch (e) {
+        logCatchError('loadOfferFeed', e);
+        if (listEl) listEl.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load offers</p>';
+    } finally {
+        _offerFeedLoading = false;
+    }
+}
+
+function _renderOfferFeed(filter) {
+    if (filter) _offerFeedFilter = filter;
+    var listEl = document.getElementById('offerFeedList');
+    var summaryEl = document.getElementById('offerFeedSummary');
+    if (!listEl) return;
+
+    var all = _offerFeedData;
+    // Count by status category
+    var pendingStatuses = ['active', 'pending_review'];
+    var acceptedStatuses = ['won', 'sold'];
+    var pendingCount = all.filter(function(o) { return pendingStatuses.indexOf(o.status || 'active') !== -1; }).length;
+    var acceptedCount = all.filter(function(o) { return acceptedStatuses.indexOf(o.status) !== -1; }).length;
+    var totalCount = all.length;
+
+    // Update summary
+    if (summaryEl) {
+        summaryEl.innerHTML = '<div style="display:flex;gap:12px;padding:8px 0;font-size:12px;color:var(--muted)">'
+            + '<span><b style="color:var(--amber)">' + pendingCount + '</b> pending</span>'
+            + '<span><b style="color:var(--green)">' + acceptedCount + '</b> accepted</span>'
+            + '<span><b>' + totalCount + '</b> total</span>'
+            + '</div>';
+    }
+
+    // Update bottom nav badge
+    var badge = document.getElementById('bnBadgeOffers');
+    if (badge) {
+        badge.textContent = pendingCount > 0 ? String(pendingCount) : '';
+        badge.style.display = pendingCount > 0 ? '' : 'none';
+    }
+
+    // Apply filter
+    var filtered = all;
+    if (_offerFeedFilter === 'pending') {
+        filtered = all.filter(function(o) { return pendingStatuses.indexOf(o.status || 'active') !== -1; });
+    } else if (_offerFeedFilter === 'accepted') {
+        filtered = all.filter(function(o) { return acceptedStatuses.indexOf(o.status) !== -1; });
+    }
+    // else 'all' — show everything
+
+    if (!filtered.length) {
+        var msg = _offerFeedFilter === 'pending' ? 'No pending offers'
+            : _offerFeedFilter === 'accepted' ? 'No accepted offers'
+            : 'No offers yet';
+        listEl.innerHTML = '<p class="empty" style="padding:32px 16px;text-align:center;color:var(--muted)">' + esc(msg) + '</p>';
+        return;
+    }
+
+    // Render offer cards
+    var cards = filtered.map(function(o) {
+        var price = o.unit_price != null ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
+        var qty = o.qty_available != null ? Number(o.qty_available).toLocaleString() : '\u2014';
+        var total = (o.unit_price != null && o.qty_available != null)
+            ? '$' + (Number(o.unit_price) * Number(o.qty_available)).toFixed(2)
+            : '\u2014';
+        var dateStr = o.created_at ? fmtRelative(o.created_at) : '';
+        var statusCls = acceptedStatuses.indexOf(o.status) !== -1 ? 'color:var(--green)'
+            : o.status === 'expired' ? 'color:var(--muted)'
+            : o.status === 'rejected' ? 'color:var(--red)'
+            : 'color:var(--amber)';
+        var statusLabel = (o.status || 'active').replace('_', ' ');
+
+        return '<div class="m-card" style="margin-bottom:8px;padding:12px;cursor:pointer" '
+            + 'onclick="sidebarNav(\'reqs\');setTimeout(function(){toggleDrillDown(' + o._reqId + ')},300)">'
+            + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">'
+            + '<span style="font-weight:600;font-size:13px">' + esc(o.vendor_name || 'Unknown') + '</span>'
+            + '<span style="font-size:10px;' + statusCls + ';text-transform:uppercase;font-weight:600">' + esc(statusLabel) + '</span>'
+            + '</div>'
+            + '<div style="font-size:12px;color:var(--text);margin-bottom:4px">'
+            + '<span style="font-weight:500">' + esc(o.mpn || '') + '</span>'
+            + '</div>'
+            + '<div style="display:flex;gap:12px;font-size:11px;color:var(--muted);margin-bottom:6px">'
+            + '<span>Qty: <b style="color:var(--text)">' + qty + '</b></span>'
+            + '<span>Unit: <b style="color:var(--text)">' + price + '</b></span>'
+            + '<span>Total: <b style="color:var(--text)">' + total + '</b></span>'
+            + '</div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted)">'
+            + '<span title="' + escAttr(o._reqName) + '">' + esc(o._customer ? o._customer + ' \u2014 ' : '') + esc(o._reqName) + '</span>'
+            + '<span>' + esc(dateStr) + '</span>'
+            + '</div>'
+            + '</div>';
+    });
+
+    listEl.innerHTML = cards.join('');
+}
+
+function _setOfferFeedFilterCrm(filter, btn) {
+    // Update pill active states
+    document.querySelectorAll('#offerFeedTabs .m-tab-pill').forEach(function(b) { b.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    // Re-render with new filter
+    _renderOfferFeed(filter);
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     _refreshCustPipeline,
@@ -8454,4 +8704,8 @@ Object.assign(window, {
     renderApiHealthDashboard, testSourceNow,
     // Apollo integration
     apolloDiscover, apolloEnrichSelected, apolloToggleAll,
+    // Mobile account & contact rendering
+    renderMobileAccountList, _renderMobileContact,
+    // Mobile offer feed
+    loadOfferFeed, _renderOfferFeed, _setOfferFeedFilter: _setOfferFeedFilterCrm,
 });
