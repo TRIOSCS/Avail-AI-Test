@@ -58,7 +58,8 @@ def run_startup_migrations() -> None:
         _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()
-    # _create_default_user_if_env_set()  # Disabled for server push; re-enable when needed
+    if os.environ.get("TESTING") == "1" or os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
+        _create_default_user_if_env_set()
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
