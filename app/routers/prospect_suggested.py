@@ -34,6 +34,8 @@ async def list_suggested(
     region: str = "",
     industry: str = "",
     employee_size: str = "",
+    revenue_range: str = "",
+    discovery_source: str = "",
     min_fit_score: int = 0,
     min_readiness_score: int = 0,
     readiness_level: str = "",
@@ -46,9 +48,10 @@ async def list_suggested(
 ):
     """List prospect accounts from the unified pool.
 
-    Filters: search, region, industry, employee_size, min_fit_score,
-             min_readiness_score, readiness_level, status.
-    Sort: readiness_desc (default), fit_desc, composite_desc, name_asc.
+    Filters: search, region, industry, employee_size, revenue_range,
+             discovery_source, min_fit_score, min_readiness_score,
+             readiness_level, status.
+    Sort: readiness_desc (default), fit_desc, composite_desc, name_asc, recent_desc.
     """
     page = max(1, page)
     per_page = min(max(1, per_page), 100)
@@ -75,6 +78,13 @@ async def list_suggested(
     if employee_size:
         safe = escape_like(employee_size.strip())
         query = query.filter(ProspectAccount.employee_count_range.ilike(f"%{safe}%"))
+
+    if revenue_range:
+        safe = escape_like(revenue_range.strip())
+        query = query.filter(ProspectAccount.revenue_range.ilike(f"%{safe}%"))
+
+    if discovery_source:
+        query = query.filter(ProspectAccount.discovery_source == discovery_source.strip())
 
     if min_fit_score > 0:
         query = query.filter(ProspectAccount.fit_score >= min_fit_score)
@@ -103,6 +113,8 @@ async def list_suggested(
     elif sort == "composite_desc":
         # 60% fit + 40% readiness
         query = query.order_by((ProspectAccount.fit_score * 0.6 + ProspectAccount.readiness_score * 0.4).desc())
+    elif sort == "recent_desc":
+        query = query.order_by(ProspectAccount.created_at.desc())
     else:  # readiness_desc (default)
         query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
 
@@ -147,12 +159,32 @@ async def suggested_stats(
         or 0
     )
 
+    industries = sorted(
+        r[0]
+        for r in db.query(ProspectAccount.industry)
+        .filter(ProspectAccount.status == "suggested", ProspectAccount.industry.isnot(None))
+        .distinct()
+        .all()
+        if r[0]
+    )
+
+    regions = sorted(
+        r[0]
+        for r in db.query(ProspectAccount.region)
+        .filter(ProspectAccount.status == "suggested", ProspectAccount.region.isnot(None))
+        .distinct()
+        .all()
+        if r[0]
+    )
+
     return {
         "total_available": total,
         "call_now_count": call_now,
         "nurture_count": nurture,
         "high_fit_count": high_fit,
         "claimed_this_month": claimed,
+        "industries": industries,
+        "regions": regions,
     }
 
 
