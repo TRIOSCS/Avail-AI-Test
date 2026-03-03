@@ -6462,8 +6462,10 @@ function renderReqList() {
     }
     // Mobile: render cards instead of table
     if (window.__isMobile) {
-        let mobileHtml = data.map(r => _renderReqRowMobile(r)).join('');
-        el.innerHTML = mobileHtml + loadMoreHtml;
+        renderMobileReqList(data, loadMoreHtml);
+        _populateUserFilter();
+        _updateToolbarStats();
+        return;
     } else {
         el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     }
@@ -6761,74 +6763,94 @@ function _renderReqRow(r) {
 }
 
 // ── Mobile card renderer for RFQ list ─────────────────────────────────
-function _renderReqRowMobile(r) {
-    const total = r.requirement_count || 0;
-    const sourced = r.sourced_count || 0;
-    const offers = r.offer_count || 0;
-    const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+// ── Mobile Requisition List — card layout with summary stats ───────────
+// All user-supplied data is escaped via esc() to prevent XSS.
+function renderMobileReqList(data, loadMoreHtml) {
+    const el = document.getElementById('reqList');
+    if (!el) return;
 
-    // Status badge
-    const badgeMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-green',quoted:'m-chip-purple',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
-    const bc = badgeMap[r.status] || 'm-chip';
-    const _statusLabelsM = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+    // Summary stats: count by bucket
+    const allReqs = _reqListData;
+    let openCount = 0, sourcingCount = 0, archivedCount = 0;
+    for (const r of allReqs) {
+        const s = r.status;
+        if (s === 'archived' || s === 'won' || s === 'lost' || s === 'closed') archivedCount++;
+        else if (s === 'active' || s === 'sourcing') sourcingCount++;
+        else openCount++;
+    }
 
-    // Customer display
-    let cust = r.customer_display || '';
-    const dp = cust.split(' \u2014 ');
+    const summaryHtml = '<div class="m-summary m-req-summary">'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + openCount + '</div><div class="m-summary-label">Open</div></div>'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + sourcingCount + '</div><div class="m-summary-label">Sourcing</div></div>'
+        + '<div class="m-summary-stat"><div class="m-summary-num">' + archivedCount + '</div><div class="m-summary-label">Archived</div></div>'
+        + '</div>';
+
+    // Cards — all user content is esc()-encoded inside _renderReqCardMobile
+    const cardsHtml = data.length
+        ? data.map(function(r) { return _renderReqCardMobile(r); }).join('')
+        : '<div class="m-empty">No requisitions found</div>';
+
+    el.innerHTML = summaryHtml + '<div class="m-req-cards">' + cardsHtml + '</div>' + (loadMoreHtml || '');
+
+    // Sync pill tabs to current view
+    _syncMobileReqPills();
+}
+
+function _syncMobileReqPills() {
+    var pills = document.querySelectorAll('#mobileReqPills .m-tab-pill');
+    pills.forEach(function(p) { p.classList.toggle('active', p.dataset.view === _currentMainView); });
+}
+
+function mobileReqPillTap(view, btn) {
+    setMainView(view);
+    var pills = document.querySelectorAll('#mobileReqPills .m-tab-pill');
+    pills.forEach(function(p) { p.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+}
+
+function _renderReqCardMobile(r) {
+    var total = r.requirement_count || 0;
+
+    // Left border color by status
+    var borderMap = {active:'m-req-border-blue',sourcing:'m-req-border-blue',offers:'m-req-border-amber',offers_received:'m-req-border-amber',quoted:'m-req-border-green',quoting:'m-req-border-green',draft:'m-req-border-gray',won:'m-req-border-green',lost:'m-req-border-gray',archived:'m-req-border-gray',closed:'m-req-border-gray'};
+    var borderCls = borderMap[r.status] || 'm-req-border-gray';
+
+    // Status chip
+    var chipMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-amber',offers_received:'m-chip-amber',quoted:'m-chip-green',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
+    var chipCls = chipMap[r.status] || 'm-chip';
+    var labelMap = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',offers_received:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+    var statusLabel = labelMap[r.status] || esc(r.status || '');
+
+    // Customer + buyer initials
+    var cust = r.customer_display || '';
+    var dp = cust.split(' \u2014 ');
     if (dp.length === 2 && dp[0].trim() === dp[1].trim()) cust = dp[0].trim();
-    if (!cust) cust = r.name || '';
+    if (!cust) cust = '';
+    var buyerName = r.created_by_name || '';
+    var initials = '';
+    if (buyerName) {
+        var parts = buyerName.trim().split(/\s+/);
+        initials = parts.map(function(p) { return p[0]; }).join('').toUpperCase().slice(0, 2);
+    }
+    var subtitle = (cust ? esc(cust) : '') + (cust && initials ? ' &middot; ' : '') + (initials ? '<span class="m-req-initials">' + esc(initials) + '</span>' : '');
 
-    // Age
-    let age = '';
+    // Date
+    var dateStr = '';
     if (r.created_at) {
-        const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
-        age = days === 0 ? 'Today' : days === 1 ? '1d ago' : days + 'd ago';
+        var days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
+        dateStr = days === 0 ? 'Today' : days === 1 ? '1d' : days + 'd';
     }
 
-    // Deadline
-    let dlText = '', dlClass = '';
-    if (r.deadline === 'ASAP') { dlText = 'ASAP'; dlClass = 'm-chip-amber'; }
-    else if (r.deadline) {
-        const d = new Date(r.deadline);
-        const now = new Date(); now.setHours(0,0,0,0);
-        const diff = Math.round((d - now) / 86400000);
-        if (diff < 0) { dlText = 'OVERDUE'; dlClass = 'm-chip-red'; }
-        else if (diff === 0) { dlText = 'DUE TODAY'; dlClass = 'm-chip-red'; }
-        else if (diff <= 3) { dlText = fmtDate(r.deadline); dlClass = 'm-chip-amber'; }
-        else { dlText = fmtDate(r.deadline); dlClass = ''; }
-    }
-
-    // Top 3 MPNs from requirements
-    const mpns = (r.top_mpns || []).slice(0, 3);
-    const mpnChips = mpns.map(m => `<span class="m-chip">${esc(m)}</span>`).join('');
-
-    // Assignee
-    const assignee = r.created_by_name || '';
-
-    // Source progress bar
-    const barColor = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--amber)' : 'var(--red)';
-    const progBar = total > 0
-        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:100px"><div class="m-score-bar"><div class="m-score-fill" style="width:${pct}%;background:${barColor}"></div></div><span style="font-size:11px;color:var(--muted)">${sourced}/${total}</span></div>`
-        : '';
-
-    return `<div class="m-card" onclick="toggleDrillDown(${r.id})">
-        <div class="m-card-header">
-            <span class="m-card-title">${esc(cust)}</span>
-            <span class="m-chip ${bc}">${_statusLabelsM[r.status] || r.status}</span>
-        </div>
-        <div class="m-card-subtitle">${esc(r.name || '')}</div>
-        <div class="m-card-body">
-            <span style="font-size:12px"><b>${total}</b> parts</span>
-            <span style="font-size:12px"><b>${offers}</b> offers</span>
-            ${dlText ? `<span class="m-chip ${dlClass}" style="font-size:10px">${dlText}</span>` : ''}
-            ${progBar}
-        </div>
-        ${mpnChips ? `<div class="m-chip-row" style="margin-bottom:4px">${mpnChips}</div>` : ''}
-        <div class="m-card-footer">
-            <span class="m-card-meta">${assignee ? esc(assignee) : ''}</span>
-            <span class="m-card-meta">${age}</span>
-        </div>
-    </div>`;
+    return '<div class="m-card m-req-card ' + borderCls + '" onclick="toggleDrillDown(' + r.id + ')">'
+        + '<div class="m-card-title">' + esc(r.name || 'Untitled') + '</div>'
+        + '<div class="m-card-subtitle">' + (subtitle || '&mdash;') + '</div>'
+        + '<div class="m-req-card-footer">'
+        + '<span class="m-card-meta">' + esc(dateStr) + '</span>'
+        + '<span class="m-chip ' + chipCls + '">' + statusLabel + '</span>'
+        + (total > 0 ? '<span class="m-req-badge">' + total + ' part' + (total !== 1 ? 's' : '') + '</span>' : '')
+        + '<span class="m-card-chevron">\u203a</span>'
+        + '</div>'
+        + '</div>';
 }
 
 // ── Inline Deadline Editor ───────────────────────────────────────────────
@@ -12104,4 +12126,6 @@ Object.assign(window, {
     _openMobileDrillDown, _closeMobileDrillDown, _mobileDdSwitchTab,
     // Mobile top bar — search toggle & user menu
     _toggleMobileSearch, _showMobileUserMenu,
+    // Mobile req list — card redesign
+    renderMobileReqList, mobileReqPillTap, _syncMobileReqPills, _renderReqCardMobile,
 });
