@@ -116,19 +116,25 @@ function toggleMobileSidebar() {
 var _mobileNavStack = [];
 
 function mobileTabNav(page, btn) {
-    // Close more popover if open
     var pop = document.getElementById('mobileMorePopover');
     if (pop) pop.classList.remove('open');
-    // Highlight active tab
     document.querySelectorAll('.m-bottomnav-tab').forEach(function(t) {
         t.classList.toggle('active', t === btn);
     });
-    // Push to nav stack
     _mobileNavStack = [page];
-    // Map tab to sidebar nav route
-    var navMap = { reqs:'reqs', customers:'customers', vendors:'vendors', prospecting:'prospecting' };
+    if (page === 'offers') {
+        showView('view-offers');
+        if (typeof loadOfferFeed === 'function') loadOfferFeed();
+        return;
+    }
+    if (page === 'alerts') {
+        showView('view-alerts');
+        if (typeof loadAlertsFeed === 'function') loadAlertsFeed();
+        return;
+    }
+    var navMap = { reqs:'reqs', customers:'customers' };
     if (navMap[page]) {
-        var navBtn = document.getElementById({reqs:'navReqs',customers:'navCustomers',vendors:'navVendors',prospecting:'navProspecting'}[page]);
+        var navBtn = document.getElementById({reqs:'navReqs', customers:'navCustomers'}[page]);
         sidebarNav(navMap[page], navBtn);
     }
 }
@@ -141,7 +147,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {materials:'navMaterials',buyplans:'navBuyPlans',proactive:'navProactive',dashboard:'navCmdCenter',prospecting:'navProspecting',settings:'navSettings'};
+    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',dashboard:'navCmdCenter',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -156,6 +162,22 @@ function mobileBack() {
         _mobileNavStack.pop();
         var prev = _mobileNavStack[_mobileNavStack.length - 1];
         mobileTabNav(prev, document.querySelector('.m-bottomnav-tab[data-nav="' + prev + '"]'));
+    }
+}
+
+function _toggleMobileSearch() {
+    var bar = document.getElementById('mobileSearchBar');
+    if (!bar) return;
+    bar.classList.toggle('hidden');
+    if (!bar.classList.contains('hidden')) {
+        var input = bar.querySelector('input');
+        if (input) setTimeout(function() { input.focus(); }, 100);
+    }
+}
+
+function _showMobileUserMenu() {
+    if (confirm('Sign out of AvailAI?')) {
+        window.location.href = '/auth/logout';
     }
 }
 
@@ -219,6 +241,11 @@ document.addEventListener('DOMContentLoaded', function() {
             if (nb.style.display === 'none') { mb.classList.add('u-hidden'); mb.style.display = ''; }
             else { mb.classList.remove('u-hidden'); mb.style.display = nb.style.display; }
         }).observe(nb, {childList:true, attributes:true, attributeFilter:['style','class']});
+    }
+    // Initialize mobile user avatar
+    var mobileAvatar = document.getElementById('mobileUserAvatar');
+    if (mobileAvatar && window.__userName) {
+        mobileAvatar.textContent = window.__userName.split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
     }
 });
 
@@ -816,6 +843,12 @@ async function checkM365Status() {
 const _m365Timer = setInterval(checkM365Status, 300000);
 window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
+// ── Mobile Offer Feed (stub) ────────────────────────────────────────────
+function _setOfferFeedFilter(filter, btn) {
+    document.querySelectorAll('#offerFeedTabs .m-tab-pill').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+}
+
 // ── API Health Polling ──────────────────────────────────────────────────
 window._apiHealthErrors = [];
 async function pollApiHealth() {
@@ -959,10 +992,10 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['tickets'] = 'view-settings'; // tickets moved into settings
@@ -12069,4 +12102,6 @@ Object.assign(window, {
     // Mobile navigation & drill-down
     mobileTabNav, mobileMoreNav, toggleMobileMore, mobileBack,
     _openMobileDrillDown, _closeMobileDrillDown, _mobileDdSwitchTab,
+    // Mobile top bar — search toggle & user menu
+    _toggleMobileSearch, _showMobileUserMenu,
 });
