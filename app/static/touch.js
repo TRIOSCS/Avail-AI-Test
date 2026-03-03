@@ -451,6 +451,129 @@ function _attachAlertSwipeHandlers() {
     });
 }
 
+// ── Pull-to-Refresh ──────────────────────────────────────────────────
+
+/** Default no-op; app.js mobileTabNav overrides per active tab */
+window._mobileRefreshCallback = function() {};
+
+/**
+ * _initPullToRefresh — Attach pull-to-refresh gesture on .main-scroll.
+ * When the user pulls down from scrollTop===0 past 80px, fires
+ * window._mobileRefreshCallback() and shows a transient indicator.
+ */
+function _initPullToRefresh() {
+    var scroller = document.querySelector('.main-scroll');
+    if (!scroller) return;
+
+    var indicator = null;
+    var startX = 0;
+    var startY = 0;
+    var pulling = false;
+    var refreshing = false;
+    var pullDist = 0;
+    var dirLocked = false;
+    var THRESHOLD = 80;
+
+    function _ensureIndicator() {
+        if (indicator) return indicator;
+        indicator = document.createElement('div');
+        indicator.className = 'm-ptr-indicator';
+        indicator.textContent = '\u2193 Pull to refresh';
+        scroller.parentNode.insertBefore(indicator, scroller);
+        return indicator;
+    }
+
+    scroller.addEventListener('touchstart', function(e) {
+        if (refreshing) return;
+        if (scroller.scrollTop > 0) return;
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        pulling = true;
+        pullDist = 0;
+        dirLocked = false;
+    }, { passive: true });
+
+    scroller.addEventListener('touchmove', function(e) {
+        if (!pulling || refreshing) return;
+        var dy = e.touches[0].clientY - startY;
+
+        // If scrolled down or pulling upward, cancel
+        if (scroller.scrollTop > 0 || dy <= 0) {
+            pulling = false;
+            if (indicator) {
+                indicator.style.height = '0';
+                indicator.style.opacity = '0';
+            }
+            return;
+        }
+
+        // Lock direction on first significant movement
+        if (!dirLocked) {
+            var dx = Math.abs(e.touches[0].clientX - startX);
+            if (dx > 10 && dx > dy) {
+                // Horizontal swipe — cancel pull
+                pulling = false;
+                return;
+            }
+            if (dy > 10) dirLocked = true;
+        }
+        pullDist = Math.min(dy * 0.5, 120); // dampen
+
+        e.preventDefault();
+
+        var ind = _ensureIndicator();
+        ind.style.height = pullDist + 'px';
+        ind.style.opacity = pullDist > 20 ? '1' : '0';
+        ind.textContent = pullDist >= THRESHOLD ? '\u2191 Release to refresh' : '\u2193 Pull to refresh';
+    }, { passive: false });
+
+    scroller.addEventListener('touchend', function() {
+        if (!pulling || refreshing) return;
+        pulling = false;
+
+        if (pullDist >= THRESHOLD) {
+            // Trigger refresh
+            refreshing = true;
+            var ind = _ensureIndicator();
+            ind.style.height = '44px';
+            ind.style.opacity = '1';
+            ind.textContent = 'Refreshing\u2026';
+
+            // Call the callback (may be async)
+            try {
+                var result = window._mobileRefreshCallback();
+                if (result && typeof result.then === 'function') {
+                    result.then(_hideIndicator).catch(_hideIndicator);
+                } else {
+                    // Not a promise — hide after a short delay
+                    setTimeout(_hideIndicator, 600);
+                }
+            } catch (err) {
+                _hideIndicator();
+            }
+        } else {
+            // Snap back
+            if (indicator) {
+                indicator.style.height = '0';
+                indicator.style.opacity = '0';
+            }
+        }
+    }, { passive: true });
+
+    function _hideIndicator() {
+        refreshing = false;
+        if (indicator) {
+            indicator.style.height = '0';
+            indicator.style.opacity = '0';
+        }
+    }
+}
+
+// Initialize pull-to-refresh on mobile
+document.addEventListener('DOMContentLoaded', function() {
+    if ('ontouchstart' in window) _initPullToRefresh();
+});
+
 // ── Expose alert functions to window ─────────────────────────────────
 window.loadAlertsFeed = loadAlertsFeed;
 window._renderAlertsFeed = _renderAlertsFeed;

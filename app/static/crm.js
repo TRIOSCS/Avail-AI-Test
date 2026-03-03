@@ -8618,6 +8618,605 @@ function _setOfferFeedFilterCrm(filter, btn) {
     _renderOfferFeed(filter);
 }
 
+// ── Mobile Bottom Sheet Helpers ───────────────────────────────────────
+// Shared close helper — removes any open mobile bottom sheet from the DOM.
+
+function _closeMobileSheet() {
+    var bg = document.querySelector('.m-bottom-sheet-bg');
+    if (bg) bg.remove();
+}
+
+// ── Mobile Quote Form ─────────────────────────────────────────────────
+// Bottom sheet for creating/editing a quote on mobile.
+// Shows accepted offers as checkboxes, markup %, live total, save/submit.
+
+async function _openMobileQuoteForm(reqId) {
+    _closeMobileSheet();
+    if (!reqId) return;
+
+    // Fetch offers for the requisition
+    var offersData;
+    try {
+        offersData = await apiFetch('/api/requisitions/' + reqId + '/offers');
+    } catch (e) {
+        logCatchError('_openMobileQuoteForm', e);
+        showToast('Failed to load offers', 'error');
+        return;
+    }
+
+    var groups = offersData.groups || [];
+    var allOffers = [];
+    for (var gi = 0; gi < groups.length; gi++) {
+        var grp = groups[gi];
+        var offers = grp.offers || [];
+        for (var oi = 0; oi < offers.length; oi++) {
+            var o = offers[oi];
+            if (o.status === 'expired' || o.status === 'rejected') continue;
+            allOffers.push({
+                id: o.id,
+                mpn: o.mpn || grp.mpn || '',
+                vendor_name: o.vendor_name || '',
+                unit_price: o.unit_price,
+                qty_available: o.qty_available || 0,
+                manufacturer: o.manufacturer || '',
+                lead_time: o.lead_time || ''
+            });
+        }
+    }
+
+    // Try to get customer name from the requisition
+    var customerName = '';
+    try {
+        var reqInfo = await apiFetch('/api/requisitions/' + reqId);
+        customerName = reqInfo.customer_display || reqInfo.customer_name || '';
+    } catch (_e) { /* ignore */ }
+
+    // Build offer checkboxes
+    var offersHtml = '';
+    if (!allOffers.length) {
+        offersHtml = '<p style="color:var(--muted);text-align:center;padding:16px 0">No active offers available</p>';
+    } else {
+        for (var i = 0; i < allOffers.length; i++) {
+            var of2 = allOffers[i];
+            var priceStr = of2.unit_price != null ? '$' + Number(of2.unit_price).toFixed(4) : '\u2014';
+            var qtyStr = of2.qty_available ? Number(of2.qty_available).toLocaleString() : '\u2014';
+            offersHtml += '<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'
+                + '<input type="checkbox" class="mq-offer-check" data-offer-id="' + of2.id + '" '
+                + 'data-unit-price="' + (of2.unit_price || 0) + '" data-qty="' + (of2.qty_available || 0) + '" '
+                + 'checked onchange="_mqUpdateTotals()" '
+                + 'style="width:20px;height:20px;margin-top:2px;flex-shrink:0">'
+                + '<div style="flex:1;min-width:0">'
+                + '<div style="font-weight:600;font-size:13px">' + esc(of2.mpn) + '</div>'
+                + '<div style="font-size:12px;color:var(--muted)">' + esc(of2.vendor_name) + (of2.manufacturer ? ' \u2014 ' + esc(of2.manufacturer) : '') + '</div>'
+                + '<div style="font-size:12px;color:var(--text2)">Qty: ' + qtyStr + ' \u00b7 ' + priceStr + (of2.lead_time ? ' \u00b7 ' + esc(of2.lead_time) : '') + '</div>'
+                + '</div>'
+                + '</label>';
+        }
+    }
+
+    // Build sheet HTML
+    var bg = document.createElement('div');
+    bg.className = 'm-bottom-sheet-bg';
+    bg.addEventListener('click', function(e) { if (e.target === bg) _closeMobileSheet(); });
+
+    var sheet = document.createElement('div');
+    sheet.className = 'm-bottom-sheet';
+    sheet.innerHTML = '<div class="m-swipe-handle" style="text-align:center;padding:8px 0">'
+        + '<div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto"></div>'
+        + '</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 12px">'
+        + '<h3 style="margin:0;font-size:16px;font-weight:700">Build Quote</h3>'
+        + '<button onclick="_closeMobileSheet()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px 8px;line-height:1">\u00d7</button>'
+        + '</div>'
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Customer</label>'
+        + '<input type="text" id="mqCustomerName" value="' + escAttr(customerName) + '" '
+        + 'style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box" '
+        + 'placeholder="Customer name" readonly>'
+        + '</div>'
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Select Offers</label>'
+        + '<div id="mqOfferList" style="max-height:200px;overflow-y:auto;-webkit-overflow-scrolling:touch">'
+        + offersHtml
+        + '</div>'
+        + '</div>'
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Markup %</label>'
+        + '<input type="number" id="mqMarkup" value="20" min="0" max="99" step="1" '
+        + 'style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box" '
+        + 'oninput="_mqUpdateTotals()">'
+        + '</div>'
+        + '<div id="mqTotalsRow" style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid var(--border);margin-bottom:16px;font-size:13px">'
+        + '<div>Cost: <strong id="mqCostTotal">$0.00</strong></div>'
+        + '<div>Sell: <strong id="mqSellTotal">$0.00</strong></div>'
+        + '<div>Margin: <strong id="mqMarginPct">0.0%</strong></div>'
+        + '</div>'
+        + '<button class="m-action-btn m-action-btn-ghost" onclick="_mqSaveDraft()" style="min-height:44px;font-size:16px">Save Draft</button>'
+        + '<button class="m-action-btn m-action-btn-primary" onclick="_mqSubmitQuote()" style="min-height:44px;font-size:16px">Submit Quote</button>';
+
+    bg.appendChild(sheet);
+    document.body.appendChild(bg);
+
+    // Trigger initial total calculation
+    _mqUpdateTotals();
+}
+
+// Live total calculation for mobile quote sheet
+function _mqUpdateTotals() {
+    var checks = document.querySelectorAll('.mq-offer-check:checked');
+    var markup = parseFloat(document.getElementById('mqMarkup')?.value) || 0;
+    var totalCost = 0;
+    for (var i = 0; i < checks.length; i++) {
+        var price = parseFloat(checks[i].dataset.unitPrice) || 0;
+        var qty = parseInt(checks[i].dataset.qty) || 0;
+        totalCost += price * qty;
+    }
+    var totalSell = totalCost * (1 + markup / 100);
+    var marginPct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+
+    var costEl = document.getElementById('mqCostTotal');
+    var sellEl = document.getElementById('mqSellTotal');
+    var marginEl = document.getElementById('mqMarginPct');
+    if (costEl) costEl.textContent = '$' + totalCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    if (sellEl) sellEl.textContent = '$' + totalSell.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    if (marginEl) marginEl.textContent = marginPct.toFixed(1) + '%';
+}
+
+// Save draft for mobile quote
+async function _mqSaveDraft() {
+    var checks = document.querySelectorAll('.mq-offer-check:checked');
+    var offerIds = [];
+    for (var i = 0; i < checks.length; i++) {
+        offerIds.push(parseInt(checks[i].dataset.offerId));
+    }
+    if (!offerIds.length) { showToast('Select at least one offer', 'error'); return; }
+    try {
+        crmQuote = await apiFetch('/api/requisitions/' + currentReqId + '/quote', {
+            method: 'POST', body: { offer_ids: offerIds }
+        });
+        // Apply markup to all line items
+        var markup = parseFloat(document.getElementById('mqMarkup')?.value) || 0;
+        if (crmQuote && crmQuote.line_items) {
+            crmQuote.line_items.forEach(function(item) {
+                item.sell_price = Number(item.cost_price || 0) * (1 + markup / 100);
+                item.margin_pct = markup > 0 ? (markup / (100 + markup)) * 100 : 0;
+            });
+        }
+        // Save the draft with updated prices
+        await apiFetch('/api/quotes/' + crmQuote.id + '/draft', {
+            method: 'PUT', body: { line_items: crmQuote.line_items }
+        });
+        showToast('Quote draft saved', 'success');
+        _closeMobileSheet();
+        renderQuote();
+        updateQuoteTabBadge();
+    } catch (e) {
+        logCatchError('_mqSaveDraft', e);
+        showToast('Error saving draft: ' + (e.message || 'unknown'), 'error');
+    }
+}
+
+// Submit quote for mobile
+async function _mqSubmitQuote() {
+    var checks = document.querySelectorAll('.mq-offer-check:checked');
+    var offerIds = [];
+    for (var i = 0; i < checks.length; i++) {
+        offerIds.push(parseInt(checks[i].dataset.offerId));
+    }
+    if (!offerIds.length) { showToast('Select at least one offer', 'error'); return; }
+    try {
+        crmQuote = await apiFetch('/api/requisitions/' + currentReqId + '/quote', {
+            method: 'POST', body: { offer_ids: offerIds }
+        });
+        // Apply markup
+        var markup = parseFloat(document.getElementById('mqMarkup')?.value) || 0;
+        if (crmQuote && crmQuote.line_items) {
+            crmQuote.line_items.forEach(function(item) {
+                item.sell_price = Number(item.cost_price || 0) * (1 + markup / 100);
+                item.margin_pct = markup > 0 ? (markup / (100 + markup)) * 100 : 0;
+            });
+        }
+        // Save draft first, then send
+        await apiFetch('/api/quotes/' + crmQuote.id + '/draft', {
+            method: 'PUT', body: { line_items: crmQuote.line_items }
+        });
+        showToast('Quote built \u2014 review and send from the Quote tab', 'success');
+        notifyStatusChange(crmQuote);
+        _closeMobileSheet();
+        renderQuote();
+        updateQuoteTabBadge();
+    } catch (e) {
+        logCatchError('_mqSubmitQuote', e);
+        showToast('Error building quote: ' + (e.message || 'unknown'), 'error');
+    }
+}
+
+// ── Mobile Buy Plan Form ──────────────────────────────────────────────
+// Bottom sheet for reviewing and submitting a buy plan on mobile.
+// Shows selected offers summary with vendor/price/qty per line and total cost.
+
+async function _openMobileBuyPlanForm(reqId) {
+    _closeMobileSheet();
+    if (!reqId) return;
+
+    // Need a quote to build a buy plan
+    if (!crmQuote) {
+        showToast('Build a quote first before creating a buy plan', 'error');
+        return;
+    }
+    if (crmQuote.status !== 'won') {
+        showToast('Quote must be marked as Won to create a buy plan', 'error');
+        return;
+    }
+
+    // Check for existing V3 buy plan
+    var existingPlan = _currentBuyPlanV3;
+    if (!existingPlan) {
+        try {
+            var resp = await apiFetch('/api/buy-plans-v3?quote_id=' + crmQuote.id);
+            var plans = (resp.items || []);
+            if (plans.length > 0) {
+                existingPlan = await apiFetch('/api/buy-plans-v3/' + plans[0].id);
+                _currentBuyPlanV3 = existingPlan;
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
+    // If no existing plan, try to build one
+    if (!existingPlan) {
+        try {
+            existingPlan = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan-v3/build', { method: 'POST' });
+            _currentBuyPlanV3 = existingPlan;
+        } catch (e) {
+            logCatchError('_openMobileBuyPlanForm', e);
+            showToast('Failed to build buy plan: ' + (e.message || ''), 'error');
+            return;
+        }
+    }
+
+    var bp = existingPlan;
+    var lines = bp.lines || [];
+
+    // Build lines summary
+    var linesHtml = '';
+    var totalCost = 0;
+    for (var i = 0; i < lines.length; i++) {
+        var l = lines[i];
+        var lineCost = (l.quantity || 0) * Number(l.unit_cost || 0);
+        totalCost += lineCost;
+        linesHtml += '<div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">'
+            + '<div style="flex:1;min-width:0">'
+            + '<div style="font-weight:600;font-size:13px">' + esc(l.mpn || '') + '</div>'
+            + '<div style="font-size:12px;color:var(--muted)">' + esc(l.vendor_name || '\u2014') + '</div>'
+            + '</div>'
+            + '<div style="text-align:right;flex-shrink:0;margin-left:12px">'
+            + '<div style="font-weight:600;font-size:13px">$' + Number(l.unit_cost || 0).toFixed(4) + '</div>'
+            + '<div style="font-size:12px;color:var(--muted)">Qty ' + (l.quantity || 0).toLocaleString() + '</div>'
+            + '<div style="font-size:11px;color:var(--text2)">= $' + lineCost.toFixed(2) + '</div>'
+            + '</div>'
+            + '</div>';
+    }
+
+    if (!lines.length) {
+        linesHtml = '<p style="color:var(--muted);text-align:center;padding:16px 0">No line items in this buy plan</p>';
+    }
+
+    // Financial summary
+    var revenue = bp.total_revenue || 0;
+    var profit = revenue - totalCost;
+    var marginPct = revenue > 0 ? (profit / revenue * 100) : 0;
+
+    // Build sheet
+    var bg = document.createElement('div');
+    bg.className = 'm-bottom-sheet-bg';
+    bg.addEventListener('click', function(e) { if (e.target === bg) _closeMobileSheet(); });
+
+    var sheet = document.createElement('div');
+    sheet.className = 'm-bottom-sheet';
+    sheet.innerHTML = '<div class="m-swipe-handle" style="text-align:center;padding:8px 0">'
+        + '<div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto"></div>'
+        + '</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 12px">'
+        + '<h3 style="margin:0;font-size:16px;font-weight:700">Buy Plan</h3>'
+        + '<button onclick="_closeMobileSheet()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px 8px;line-height:1">\u00d7</button>'
+        + '</div>'
+        + (bp.customer_name ? '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Customer: <strong>' + esc(bp.customer_name) + '</strong></div>' : '')
+        + (bp.quote_number ? '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">Quote: <strong>' + esc(bp.quote_number) + '</strong></div>' : '')
+        + (bp.ai_summary ? '<div style="background:#f0f9ff;padding:10px 12px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:12px;font-size:12px;line-height:1.5">'
+            + '<strong style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#2563eb">AI Analysis</strong><br>'
+            + esc(bp.ai_summary) + '</div>' : '')
+        + '<div style="max-height:250px;overflow-y:auto;-webkit-overflow-scrolling:touch;margin-bottom:12px">'
+        + linesHtml
+        + '</div>'
+        + '<div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:16px">'
+        + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px"><span>Total Cost</span><strong>$' + totalCost.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</strong></div>'
+        + (revenue > 0 ? '<div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px"><span>Revenue</span><strong>$' + revenue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</strong></div>'
+            + '<div style="display:flex;justify-content:space-between;margin-bottom:4px;font-size:13px"><span>Profit</span><strong style="color:' + (profit >= 0 ? 'var(--green)' : 'var(--red)') + '">$' + profit.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) + '</strong></div>'
+            + '<div style="display:flex;justify-content:space-between;font-size:13px"><span>Margin</span><strong>' + marginPct.toFixed(1) + '%</strong></div>'
+            : '')
+        + '</div>'
+        + (bp.status === 'draft'
+            ? '<div style="margin-bottom:12px">'
+              + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Acctivate SO# <span style="color:var(--red)">*</span></label>'
+              + '<input type="text" id="mbpSoNum" placeholder="Enter SO#" '
+              + 'style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box">'
+              + '</div>'
+              + '<div style="margin-bottom:16px">'
+              + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Notes for Buyers</label>'
+              + '<textarea id="mbpNotes" rows="2" placeholder="Special instructions\u2026" '
+              + 'style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box"></textarea>'
+              + '</div>'
+              + '<button class="m-action-btn m-action-btn-primary" onclick="_mbpSubmit()" style="min-height:44px;font-size:16px">Submit Buy Plan</button>'
+            : '<div style="text-align:center;padding:8px 0;font-size:13px;color:var(--muted)">Status: <strong style="color:' + _bpV3StatusColor(bp.status) + '">' + esc(_bpV3StatusLabel(bp.status)) + '</strong></div>');
+
+    bg.appendChild(sheet);
+    document.body.appendChild(bg);
+}
+
+// Submit buy plan from mobile sheet
+async function _mbpSubmit() {
+    if (!_currentBuyPlanV3 || _currentBuyPlanV3.status !== 'draft') return;
+
+    var soNum = (document.getElementById('mbpSoNum')?.value || '').trim();
+    if (!soNum) {
+        showToast('Acctivate SO# is required', 'error');
+        document.getElementById('mbpSoNum')?.focus();
+        return;
+    }
+
+    var notes = (document.getElementById('mbpNotes')?.value || '').trim() || null;
+    var btn = document.querySelector('.m-bottom-sheet .m-action-btn-primary');
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
+
+    try {
+        var body = { sales_order_number: soNum, salesperson_notes: notes };
+        var res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body: body });
+        var msg = res.auto_approved ? 'Buy plan auto-approved \u2014 buyers notified!' : 'Buy plan submitted for approval';
+        showToast(msg, 'success');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        _closeMobileSheet();
+        renderBuyPlanV3Status();
+    } catch (e) {
+        logCatchError('_mbpSubmit', e);
+        showToast('Failed to submit: ' + (e.message || e), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Submit Buy Plan'; }
+    }
+}
+
+// ── Mobile Log Offer — Bottom Sheet Form ──────────────────────────────
+// Opens a mobile-optimised bottom sheet for logging an offer against a requisition.
+// Called from the mobile drill-down offers tab (app.js) via window._openMobileOfferForm.
+
+let _mobileOfferVendorCardId = null;
+let _mobileOfferVendorDebounce = null;
+
+async function _openMobileOfferForm(reqId) {
+    _closeMobileSheet();
+    if (!reqId) return;
+
+    // Fetch requirements for part picker
+    let reqs = [];
+    try {
+        reqs = await apiFetch('/api/requisitions/' + reqId + '/requirements');
+    } catch (e) {
+        logCatchError('_openMobileOfferForm', e);
+        showToast('Failed to load parts', 'error');
+    }
+
+    _mobileOfferVendorCardId = null;
+
+    // Build part options
+    let partOptions = '<option value="">Select part...</option>';
+    for (const r of (reqs || [])) {
+        const mpn = r.primary_mpn || 'Part #' + r.id;
+        const qty = r.target_qty ? ' (qty ' + Number(r.target_qty).toLocaleString() + ')' : '';
+        partOptions += '<option value="' + r.id + '" data-mpn="' + escAttr(mpn) + '">'
+            + esc(mpn) + qty + '</option>';
+    }
+    // Auto-select if only one part
+    const autoSelect = reqs && reqs.length === 1 ? reqs[0].id : '';
+
+    var bg = document.createElement('div');
+    bg.className = 'm-bottom-sheet-bg';
+    bg.addEventListener('click', function(e) { if (e.target === bg) _closeMobileOfferForm(); });
+
+    var sheet = document.createElement('div');
+    sheet.className = 'm-bottom-sheet';
+    sheet.innerHTML = '<div style="text-align:center;padding:8px 0">'
+        + '<div style="width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto"></div>'
+        + '</div>'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 8px">'
+        + '<h3 style="margin:0;font-size:16px;font-weight:700">Log Offer</h3>'
+        + '<button onclick="_closeMobileOfferForm()" style="background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:4px 8px;line-height:1">&times;</button>'
+        + '</div>'
+        + '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">REQ-' + String(reqId).padStart(3, '0') + '</div>'
+        + '<form id="mOfferForm" onsubmit="event.preventDefault();_submitMobileOffer(' + reqId + ')" autocomplete="off">'
+        // Vendor
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Vendor *</label>'
+        + '<div style="position:relative">'
+        + '<input id="moVendor" type="text" placeholder="Vendor name"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
+        + '<div id="moVendorSuggestions" style="position:absolute;left:0;right:0;top:100%;z-index:310;background:var(--white);border:1px solid var(--border);border-radius:0 0 8px 8px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>'
+        + '</div>'
+        + '</div>'
+        // Part
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Part *</label>'
+        + '<select id="moPartSelect"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
+        + partOptions + '</select>'
+        + '</div>'
+        // Qty + Price row
+        + '<div style="display:flex;gap:12px;margin-bottom:12px">'
+        + '<div style="flex:1">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Qty</label>'
+        + '<input id="moQty" type="number" inputmode="numeric" placeholder="0"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
+        + '</div>'
+        + '<div style="flex:1">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Unit Price</label>'
+        + '<input id="moPrice" type="number" inputmode="decimal" step="0.0001" placeholder="0.00"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
+        + '</div>'
+        + '</div>'
+        // Lead Time
+        + '<div style="margin-bottom:12px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Lead Time</label>'
+        + '<input id="moLead" type="text" placeholder="e.g. 2-3 weeks"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
+        + '</div>'
+        // Notes
+        + '<div style="margin-bottom:16px">'
+        + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Notes</label>'
+        + '<textarea id="moNotes" rows="2" placeholder="Optional notes"'
+        + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit;resize:vertical"></textarea>'
+        + '</div>'
+        // Buttons
+        + '<button id="moSubmitBtn" type="submit" class="m-action-btn m-action-btn-primary" style="min-height:44px;font-size:16px">Save Offer</button>'
+        + '<button type="button" class="m-action-btn m-action-btn-ghost" onclick="_closeMobileOfferForm()" style="min-height:44px;font-size:16px">Cancel</button>'
+        + '</form>';
+
+    bg.appendChild(sheet);
+    document.body.appendChild(bg);
+
+    // Auto-select single part
+    if (autoSelect) {
+        var sel = document.getElementById('moPartSelect');
+        if (sel) sel.value = String(autoSelect);
+    }
+
+    // Init vendor autocomplete
+    _initMoVendorAutocomplete();
+
+    // Focus vendor input after animation
+    setTimeout(function() {
+        var inp = document.getElementById('moVendor');
+        if (inp) inp.focus();
+    }, 300);
+}
+
+function _closeMobileOfferForm() {
+    var bg = document.querySelector('.m-bottom-sheet-bg');
+    if (!bg) return;
+    var sheet = bg.querySelector('.m-bottom-sheet');
+    if (sheet) {
+        sheet.style.transform = 'translateY(100%)';
+        sheet.style.transition = 'transform .2s ease-in';
+        setTimeout(function() { bg.remove(); }, 200);
+    } else {
+        bg.remove();
+    }
+}
+
+function _initMoVendorAutocomplete() {
+    var input = document.getElementById('moVendor');
+    var dropdown = document.getElementById('moVendorSuggestions');
+    if (!input || !dropdown) return;
+
+    input.addEventListener('input', function() {
+        clearTimeout(_mobileOfferVendorDebounce);
+        _mobileOfferVendorCardId = null;
+        var q = input.value.trim();
+        if (q.length < 2) { dropdown.style.display = 'none'; return; }
+        _mobileOfferVendorDebounce = setTimeout(function() {
+            _moVendorSearch(q);
+        }, 250);
+    });
+
+    // Dismiss dropdown on outside tap
+    document.addEventListener('click', function _moDocClick(e) {
+        if (!dropdown.contains(e.target) && e.target !== input) {
+            dropdown.style.display = 'none';
+        }
+        // Clean up listener when sheet is gone
+        if (!document.getElementById('moVendor')) {
+            document.removeEventListener('click', _moDocClick);
+        }
+    });
+}
+
+async function _moVendorSearch(q) {
+    var dropdown = document.getElementById('moVendorSuggestions');
+    var input = document.getElementById('moVendor');
+    if (!dropdown || !input) return;
+    try {
+        var data = await apiFetch('/api/autocomplete/names?q=' + encodeURIComponent(q) + '&limit=8');
+        var vendors = (data || []).filter(function(r) { return r.type === 'vendor' && r.id && r.name; });
+        if (!vendors.length) {
+            dropdown.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:var(--muted)">No vendors found</div>';
+            dropdown.style.display = 'block';
+            return;
+        }
+        dropdown.innerHTML = vendors.map(function(v) {
+            return '<div data-id="' + v.id + '" style="padding:12px;font-size:14px;cursor:pointer;border-bottom:1px solid var(--border);-webkit-tap-highlight-color:transparent">'
+                + esc(v.name) + '</div>';
+        }).join('');
+        dropdown.style.display = 'block';
+        dropdown.querySelectorAll('[data-id]').forEach(function(item) {
+            item.addEventListener('click', function() {
+                input.value = item.textContent;
+                _mobileOfferVendorCardId = parseInt(item.dataset.id) || null;
+                dropdown.style.display = 'none';
+            });
+        });
+    } catch (e) {
+        dropdown.style.display = 'none';
+    }
+}
+
+async function _submitMobileOffer(reqId) {
+    var _v = function(id) { return (document.getElementById(id) || {}).value || ''; };
+    var vendor = _v('moVendor').trim();
+    if (!vendor) { showToast('Vendor name is required', 'error'); return; }
+
+    var partSel = document.getElementById('moPartSelect');
+    var reqPartId = partSel && partSel.value ? parseInt(partSel.value) : null;
+    var mpn = partSel && partSel.selectedOptions[0]
+        ? (partSel.selectedOptions[0].dataset.mpn || partSel.selectedOptions[0].textContent || '')
+        : '';
+    if (!mpn || !reqPartId) { showToast('Select a part', 'error'); return; }
+
+    var btn = document.getElementById('moSubmitBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
+
+    try {
+        var body = {
+            mpn: mpn,
+            vendor_name: vendor,
+            vendor_card_id: _mobileOfferVendorCardId || null,
+            requirement_id: reqPartId,
+            qty_available: parseInt(_v('moQty')) || null,
+            unit_price: parseFloat(_v('moPrice')) || null,
+            lead_time: _v('moLead').trim() || null,
+            notes: _v('moNotes').trim() || null,
+            source: 'manual',
+            status: 'active',
+        };
+
+        await apiFetch('/api/requisitions/' + reqId + '/offers', { method: 'POST', body: body });
+
+        _closeMobileOfferForm();
+        showToast('Offer logged', 'success');
+
+        // Invalidate caches so offers tab refreshes
+        if (window._ddTabCache && window._ddTabCache[reqId]) {
+            delete window._ddTabCache[reqId].offers;
+        }
+
+        // Refresh the mobile drill-down offers tab if visible
+        var panel = document.getElementById('mobileDdPanel');
+        if (panel && typeof window._loadDdSubTab === 'function') {
+            window._loadDdSubTab(reqId, 'offers', panel);
+        }
+    } catch (e) {
+        logCatchError('_submitMobileOffer', e);
+        showToast('Failed to log offer: ' + (e.message || e), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save Offer'; }
+    }
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     _refreshCustPipeline,
@@ -8708,4 +9307,9 @@ Object.assign(window, {
     renderMobileAccountList, _renderMobileContact,
     // Mobile offer feed
     loadOfferFeed, _renderOfferFeed, _setOfferFeedFilter: _setOfferFeedFilterCrm,
+    // Mobile quote & buy plan bottom sheets
+    _openMobileQuoteForm, _openMobileBuyPlanForm, _closeMobileSheet,
+    _mqUpdateTotals, _mqSaveDraft, _mqSubmitQuote, _mbpSubmit,
+    // Mobile log offer bottom sheet
+    _openMobileOfferForm, _submitMobileOffer, _closeMobileOfferForm,
 });
