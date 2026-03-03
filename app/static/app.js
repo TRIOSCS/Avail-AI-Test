@@ -5757,8 +5757,16 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         // Apply filters
         const filtered = _ddApplyFilters(sightings, reqId, label);
 
-        // Sort by score descending (best sources first)
+        // Look up target qty for this requirement group
+        const _reqs = _ddReqCache[reqId] || [];
+        const _req = _reqs.find(r => r.id == rId);
+        const targetQty = _req?.target_qty || 0;
+
+        // Sort: full-fill vendors first, then by score descending
         filtered.sort((a, b) => {
+            const aFill = targetQty > 0 && a.qty_available >= targetQty ? 1 : 0;
+            const bFill = targetQty > 0 && b.qty_available >= targetQty ? 1 : 0;
+            if (aFill !== bFill) return bFill - aFill;
             const sa = a.vendor_card?.vendor_score ?? a.score ?? 0;
             const sb = b.vendor_card?.vendor_score ?? b.score ?? 0;
             return sb - sa;
@@ -5772,8 +5780,6 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
         // Look up target price from requirement cache
-        const _reqs = _ddReqCache[reqId] || [];
-        const _req = _reqs.find(r => r.id == rId);
         const groupTargetPrice = _req?.target_price ?? null;
         const targetPriceLabel = groupTargetPrice != null ? ` \u00b7 target $${Number(groupTargetPrice).toFixed(2)}` : '';
 
