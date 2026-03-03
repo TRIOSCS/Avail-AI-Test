@@ -5852,20 +5852,26 @@ function _updateDdBulkButton(reqId) {
     const sel = _ddSelectedSightings[reqId];
     const count = sel ? sel.size : 0;
     btn.style.display = count > 0 ? '' : 'none';
-    // Count how many selected have emails
+    // Group selected sightings by normalized vendor name
     const data = _ddSightingsCache[reqId] || {};
-    let withEmail = 0;
+    const vendorMap = {}; // normalized name -> { hasEmail: bool }
     for (const [, group] of Object.entries(data)) {
         for (const s of (group.sightings || [])) {
-            if (sel && sel.has(s.id)) {
-                if (s.vendor_email || (s.vendor_card && s.vendor_card.has_emails)) withEmail++;
-            }
+            if (!sel || !sel.has(s.id)) continue;
+            const vn = (s.vendor_name || '').trim().toLowerCase();
+            if (!vn || vn === 'no seller listed') continue;
+            const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
+            if (!vendorMap[vn]) vendorMap[vn] = { hasEmail: false };
+            if (hasEmail) vendorMap[vn].hasEmail = true;
         }
     }
-    if (withEmail < count) {
-        btn.textContent = `Prepare RFQ (${withEmail} of ${count} selected)`;
+    const totalVendors = Object.keys(vendorMap).length;
+    const withEmail = Object.values(vendorMap).filter(v => v.hasEmail).length;
+    const vLabel = totalVendors === 1 ? 'vendor' : 'vendors';
+    if (withEmail < totalVendors) {
+        btn.textContent = `Prepare RFQ (${withEmail} of ${totalVendors} ${vLabel})`;
     } else {
-        btn.textContent = `Prepare RFQ (${count})`;
+        btn.textContent = `Prepare RFQ (${totalVendors} ${vLabel})`;
     }
 }
 
