@@ -8283,6 +8283,17 @@ async function openBatchRfqModal(prebuiltGroups) {
             rfqCancelWrap.classList.remove('u-hidden');
             document.getElementById('rfqCancelLookup').onclick = () => abortCtrl.abort();
         }
+        // Show "Skip remaining" button after 5 seconds (R2-3)
+        const skipTimer = setTimeout(() => {
+            if (rfqCancelWrap && !abortCtrl.signal.aborted) {
+                const skipBtn = document.createElement('button');
+                skipBtn.className = 'btn btn-warning btn-sm';
+                skipBtn.style.marginLeft = '8px';
+                skipBtn.textContent = 'Skip remaining';
+                skipBtn.onclick = () => abortCtrl.abort();
+                rfqCancelWrap.appendChild(skipBtn);
+            }
+        }, 5000);
         try {
             const rfqStatus = document.getElementById('rfqPrepareStatus');
             if (rfqStatus) rfqStatus.textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
@@ -8292,9 +8303,14 @@ async function openBatchRfqModal(prebuiltGroups) {
             await Promise.all(needsLookup.map(async (v) => {
                 if (abortCtrl.signal.aborted) { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                 try {
-                    const data = await apiFetch('/api/vendor-contact', {
+                    const timeoutMs = 15000;
+                    const fetchPromise = apiFetch('/api/vendor-contact', {
                         method: 'POST', body: { vendor_name: v.vendor_name }, signal: abortCtrl.signal
                     });
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error('Lookup timed out')), timeoutMs)
+                    );
+                    const data = await Promise.race([fetchPromise, timeoutPromise]);
                     v.emails = data.emails || [];
                     v.phones = data.phones || [];
                     v.card_id = data.card_id;
@@ -8309,13 +8325,14 @@ async function openBatchRfqModal(prebuiltGroups) {
                     if (e.name === 'AbortError') { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                     console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
                     v.lookup_status = 'no_email';
-                    v.lookup_fail_reason = 'Lookup error: ' + (e.message || 'unknown');
+                    v.lookup_fail_reason = e.message === 'Lookup timed out' ? 'Lookup timed out (15s)' : 'Lookup error: ' + (e.message || 'unknown');
                 }
                 done++;
                 const st = document.getElementById('rfqPrepareStatus'); if (st) st.textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
                 _renderRfqPrepareProgress();
             }));
         } finally {
+            clearTimeout(skipTimer);
             delete modal.dataset.loading;
             if (rfqCancelWrap) rfqCancelWrap.classList.add('u-hidden');
         }
