@@ -5347,6 +5347,7 @@ function renderProactiveScorecard(data) {
 
 let _perfVendorSort = 'composite_score';
 let _perfVendorOrder = 'desc';
+let _perfActiveOnly = true;
 
 function showPerformance() {
     // Redirect to scorecard page (backward compat)
@@ -5476,7 +5477,10 @@ function renderVendorScorecards(data) {
 
     window._perfToggleSort = toggleSort;
 
-    const searchBar = `<div style="margin:0 16px 10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="sbox" oninput="_debouncedLoadVendorScorecards()" style="width:300px"></div>`;
+    const searchBar = `<div style="margin:0 16px 10px;display:flex;align-items:center;gap:12px">
+        <input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="sbox" oninput="_debouncedLoadVendorScorecards()" style="width:300px">
+        <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--muted);cursor:pointer;white-space:nowrap"><input type="checkbox" id="perfActiveOnly" ${_perfActiveOnly ? 'checked' : ''} onchange="_perfActiveOnly=this.checked;loadVendorScorecards()"> Active only</label>
+    </div>`;
 
     let html = searchBar + `<div style="overflow-x:auto;padding:0 16px"><table class="tbl">
         <thead><tr>
@@ -5488,9 +5492,14 @@ function renderVendorScorecards(data) {
             <th onclick="window._perfToggleSort('composite_score')"${thC('composite_score')}>Score ${sa('composite_score')}</th>
         </tr></thead><tbody>`;
 
-    for (const v of items) {
+    let filteredItems = items;
+    if (_perfActiveOnly) {
+        filteredItems = items.filter(v => v.interaction_count > 0);
+    }
+
+    for (const v of filteredItems) {
         if (!v.is_sufficient_data) {
-            html += `<tr class="cold-start"><td>${v.vendor_name}</td><td colspan="5" class="metric-cell na" style="text-align:center;font-style:italic">Insufficient Data (${v.interaction_count} interactions)</td></tr>`;
+            html += `<tr class="cold-start"><td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(0, 28) : ''}<strong>${esc(v.vendor_name)}</strong></td>${metricCell(v.response_rate)}<td colspan="4" class="metric-cell na" style="text-align:center;font-style:italic">Low data (${v.interaction_count} interactions)</td></tr>`;
             continue;
         }
         const reviewDisplay = v.avg_review_rating !== null && v.avg_review_rating !== undefined
