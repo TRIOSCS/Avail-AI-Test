@@ -1765,6 +1765,7 @@ table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
 /* Focus ring for accessibility */
 *:focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:var(--radius-sm)}
 input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visible{outline:none}
+.modal input:focus-visible,.modal select:focus-visible,.modal textarea:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
 
 /* Scrollbar styling */
 .main-scroll::-webkit-scrollbar{width:6px}

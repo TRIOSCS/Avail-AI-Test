@@ -6,6 +6,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#3b6ea8">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <meta name="apple-mobile-web-app-title" content="AVAIL">
     <title>AVAIL — Electronic Component Sourcing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -452,6 +454,7 @@
     <div id="view-vendors" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Vendors</h2>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()" style="margin-left:auto">+ Add Vendor</button>
         </div>
         <div class="crm-toolbar">
             <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
@@ -1165,7 +1168,8 @@
             <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button type="button" class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
+            <button type="button" class="tab on" onclick="switchSettingsTab('profile',this)">My Profile</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
@@ -1176,7 +1180,11 @@
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
-        <div id="settings-users" class="settings-panel">
+        <div id="settings-profile" class="settings-panel">
+            <p class="empty">Loading profile...</p>
+        </div>
+
+        <div id="settings-users" class="settings-panel hidden">
             <div id="adminUsersList"><p class="empty">Loading...</p></div>
             <div class="card s-card" style="margin-top:16px">
                 <h3>Create New User</h3>
@@ -1455,5 +1463,12 @@
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(function(e) {
+    console.warn('SW registration failed:', e);
+  });
+}
+</script>
 </body>
 </html>

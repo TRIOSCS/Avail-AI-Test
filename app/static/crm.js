@@ -1508,6 +1508,12 @@ function openNewCompanyModal() {
     openModal('newCompanyModal', 'ncName');
 }
 
+function openNewVendorModal() {
+    openModal('vendorContactModal');
+    const titleEl = document.getElementById('vendorContactModalTitle');
+    if (titleEl) titleEl.textContent = 'Add New Vendor';
+}
+
 const debouncedCheckDupCompany = debounce(async (val) => {
     const warn = document.getElementById('ncDupWarning');
     if (!warn) return;
@@ -3874,7 +3880,7 @@ async function loadSiteOptions() {
                     _siteListCache.push({
                         id: s.id,
                         companyId: c.id,
-                        label: c.name + (sites.length > 1 ? ' — ' + s.site_name : ''),
+                        label: sites.length > 1 && s.site_name !== c.name ? c.name + ' — ' + s.site_name : c.name,
                         companyName: c.name,
                         siteName: s.site_name,
                     });
@@ -4919,7 +4925,7 @@ async function doNotOfferSelected(siteId) {
 function renderProactiveMatches() {
     const el = document.getElementById('proactiveMatchesPanel');
     if (!_proactiveGroups.length) {
-        el.innerHTML = '<p class="empty">No proactive matches in the last 7 days. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
+        el.innerHTML = '<p class="empty">No matches yet this week. This page shows you when a vendor offers parts that your past customers have requested — so you can reconnect and close a sale.</p>';
         return;
     }
     let html = '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg2)">';
@@ -5318,7 +5324,7 @@ function renderProactiveScorecard(data) {
                 <th style="text-align:right">PO</th>
                 <th style="text-align:right">Converted</th>
                 <th style="text-align:right">Rate</th>
-                <th style="text-align:right">Anticipated</th>
+                <th style="text-align:right" title="Estimated revenue from open quoted deals">Anticipated</th>
                 <th style="text-align:right">Won Revenue</th>
                 <th style="text-align:right">Gross Profit</th>
             </tr></thead>
@@ -5338,6 +5344,7 @@ function renderProactiveScorecard(data) {
                 </tr>`;
             }).join('')}</tbody>
         </table>
+        <p style="font-size:10px;color:var(--muted);margin-top:8px">Conversion Rate = PO ÷ Sent. Green (≥30%) = strong. Amber (≥15%) = average. Target 30%+ for top performer status.</p>
         </div>`;
     }
 
@@ -8405,7 +8412,7 @@ Object.assign(window, {
     confirmSendQuote, createCompany, createUser,
     filterSiteTypeahead,
     loadCustomers, loadEnrichmentQueue, onSqContactChange,
-    debouncedCheckDupCompany, openNewCompanyModal, renderBuyPlansList, saveEditCompany,
+    debouncedCheckDupCompany, openNewCompanyModal, openNewVendorModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
     sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
     startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchEnrichTab,

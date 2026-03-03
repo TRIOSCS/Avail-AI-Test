@@ -93,7 +93,7 @@ function renderSubmitForm(container) {
         el('h2', {}, ['Submit Trouble Ticket']),
         el('button', {
             className: 'btn btn-ghost btn-sm',
-            textContent: 'My Tickets',
+            textContent: '\u2190 Back to Tickets',
             onclick: function() { renderMyTickets(container); },
         }),
     ]);
@@ -207,7 +207,7 @@ async function renderMyTickets(container) {
 }
 
 // ── Admin Dashboard ───────────────────────────────────────────────────
-var _adminFilter = '';
+var _adminFilter = 'submitted';
 var _adminOffset = 0;
 
 async function renderAdminDashboard(container) {

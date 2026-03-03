@@ -830,11 +830,13 @@ async function pollApiHealth() {
         if (badge) {
             if (alerts.length > 0) {
                 badge.textContent = alerts.length;
+                badge.title = alerts.map(a => a.source_name || a.message || 'Unknown').join(', ');
                 badge.classList.remove('u-hidden');
                 badge.style.display = 'inline-block';
             } else {
                 badge.classList.add('u-hidden');
                 badge.style.display = '';
+                badge.title = '';
             }
         }
 
@@ -1122,6 +1124,7 @@ function showVendors() {
 
 function showMaterials() {
     showView('view-materials');
+    navHighlight(document.getElementById('navMaterials'));
     currentReqId = null;
     const imp = document.getElementById('stockImportArea');
     if (imp) imp.classList.add('u-hidden');
