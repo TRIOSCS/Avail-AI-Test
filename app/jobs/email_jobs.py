@@ -11,7 +11,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..scheduler import _traced_job, _utc
+from ..scheduler import _traced_job
+from ..utils.token_manager import _utc
 
 
 def register_email_jobs(scheduler, settings):
@@ -153,7 +154,7 @@ async def _job_deep_email_mining():
     """Deep email mining scan for all connected users."""
     from ..database import SessionLocal
     from ..models import User
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
 
     db = SessionLocal()
     try:
@@ -357,7 +358,7 @@ async def _job_calendar_scan():
     """Daily: scan calendar events for vendor meetings and trade shows."""
     from ..database import SessionLocal
     from ..models import User
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
     from ..services.calendar_intelligence import scan_calendar_events
 
     db = SessionLocal()
@@ -430,7 +431,7 @@ async def _scan_user_inbox(user, db):
     """Scan a single user's inbox for vendor replies and stock lists."""
     from ..config import settings
     from ..email_service import poll_inbox
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
     from .inventory_jobs import _scan_stock_list_attachments
 
     is_backfill = user.last_inbox_scan is None
@@ -490,7 +491,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
     from ..config import settings
     from ..connectors.email_mining import EmailMiner
     from ..models import VendorCard
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
     from ..vendor_utils import normalize_vendor_name
 
     lookback = settings.inbox_backfill_days if is_backfill else 1
@@ -564,7 +565,7 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     from ..config import settings
     from ..connectors.email_mining import EmailMiner
     from ..models import VendorCard
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
 
     lookback = settings.inbox_backfill_days if is_backfill else 7
     fresh_token = await get_valid_token(user, db) or user.access_token

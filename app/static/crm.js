@@ -1118,7 +1118,7 @@ async function _renderCustDrawerPipeline(companyId) {
                     ${status} (${reqs.length})
                 </div>`;
             for (const r of reqs) {
-                html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="goToReq(${r.id},{view:'customers',companyId:${companyId},label:'${esc(c.name || 'Account').replace(/'/g, "\\'")} Pipeline'})">
                     <span style="font-size:12px;font-weight:600;color:var(--blue)">REQ-${String(r.id).padStart(3,'0')}</span>
                     <span style="font-size:12px;color:var(--text);flex:1">${esc(r.name || '')}</span>
                     <span style="font-size:11px;color:var(--muted)">${r.requirement_count || 0} MPNs</span>
@@ -7542,7 +7542,7 @@ function renderProspecting() {
             const isExpanded = _expandedAccounts.has(a.company_id);
             const chevron = `<span style="cursor:pointer;font-size:14px;color:var(--muted);transition:transform .2s;display:inline-block;${isExpanded ? 'transform:rotate(90deg)' : ''}" onclick="event.stopPropagation();toggleAccountExpand(${a.company_id})">&#9654;</span>`;
             const healthDot = _healthBadge(a.health);
-            const sitesLabel = `${a.active_sites}/${a.site_count} active`;
+            const sitesLabel = `<span title="${a.active_sites} active sites out of ${a.site_count} total">${a.active_sites}/${a.site_count} active</span>`;
             const strategic = a.is_strategic ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">STRATEGIC</span>' : '';
 
             html += `<tr style="cursor:pointer" onclick="toggleAccountExpand(${a.company_id})" class="prospect-account-row">

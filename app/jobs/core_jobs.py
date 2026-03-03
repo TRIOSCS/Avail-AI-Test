@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..scheduler import _traced_job, _utc
+from ..scheduler import _traced_job
+from ..utils.token_manager import _utc
 
 
 def register_core_jobs(scheduler, settings):
@@ -63,7 +64,7 @@ async def _job_token_refresh():
     """Refresh tokens for all users with refresh tokens."""
     from ..database import SessionLocal
     from ..models import User
-    from ..scheduler import refresh_user_token
+    from ..utils.token_manager import refresh_user_token
 
     db = SessionLocal()
     try:

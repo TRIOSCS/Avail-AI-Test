@@ -1954,7 +1954,7 @@ function showDashboard() {
             toggle.className = 'cc-persp-toggle';
             toggle.id = 'ccPerspectivePills';
             const eff = _effectivePerspective();
-            toggle.innerHTML = `<button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
+            toggle.innerHTML = `<span style="font-size:10px;color:var(--muted);margin-right:4px" title="Switch between purchasing and sales dashboards">View:</span><button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)" title="Buyer/sourcing focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)" title="Sales/quoting focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
             const h2 = header.querySelector('h2');
             if (h2) h2.after(toggle);
         }
@@ -1964,9 +1964,35 @@ function showDashboard() {
     loadDashboard();
 }
 
-function goToReq(reqId) {
+let _reqBreadcrumb = null;
+
+function goToReq(reqId, breadcrumb) {
+    if (breadcrumb) _reqBreadcrumb = breadcrumb;
+    else _reqBreadcrumb = null;
     sidebarNav('reqs');
     setTimeout(() => { if (typeof toggleDrillDown === 'function') toggleDrillDown(reqId); }, 300);
+}
+
+function _renderBreadcrumb() {
+    const el = document.getElementById('reqBreadcrumb');
+    if (!el) return;
+    if (!_reqBreadcrumb) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.innerHTML = `<span style="font-size:12px;cursor:pointer;color:var(--blue)" onclick="_goBackFromBreadcrumb()">&#x2190; Back to ${esc(_reqBreadcrumb.label)}</span>`;
+}
+
+function _goBackFromBreadcrumb() {
+    if (!_reqBreadcrumb) return;
+    const bc = _reqBreadcrumb;
+    _reqBreadcrumb = null;
+    const el = document.getElementById('reqBreadcrumb');
+    if (el) el.style.display = 'none';
+    if (bc.view === 'customers' && bc.companyId) {
+        sidebarNav('customers');
+        setTimeout(() => { if (typeof openCustDrawer === 'function') openCustDrawer(bc.companyId); }, 300);
+    } else if (bc.view) {
+        sidebarNav(bc.view);
+    }
 }
 
 function _ccUrgencyClass(score) {
@@ -2263,9 +2289,9 @@ async function loadBuyerDashboard(el) {
         // ── Stat Row (matches sales layout) — personal + team averages inline ──
         html += '<div class="cc-stat-row cc-stat-row-buyer">'
             + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs &middot; Team ' + (tk.sourcing_ratio || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer&rarr;Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">BP&rarr;PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of offers that resulted in a sent quote"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer \u2192 Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of sent quotes that the customer accepted (won)"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
+            + '<div class="cc-stat" title="Percentage of buy plans that resulted in a confirmed purchase order"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">Buy Plan \u2192 PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
             + '</div>';
 
         // ── Pipeline Bar ──
@@ -2317,13 +2343,13 @@ async function loadBuyerDashboard(el) {
                 const o = allOffers[i];
                 const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
                 const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
-                html += '<div class="cc-row" onclick="goToReq(' + o.requisition_id + ')">'
+                html += '<div class="cc-row" onclick="sidebarNav(\'reqs\');setTimeout(()=>expandToSubTab(' + o.requisition_id + ',\'offers\'),400)">'
                     + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
                     + '<div class="cc-row-body">'
                     + '<span class="cc-row-name">' + esc(o.vendor_name) + '</span>'
                     + '<span class="cc-row-detail"><span class="mono">' + esc(o.mpn) + '</span> &middot; ' + price + ' &middot; ' + (o.age_label || o.source || '') + '</span>'
                     + '</div>'
-                    + '<span class="cc-row-badge">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
+                    + '<span class="cc-row-badge" title="' + (o._src === 'review' ? 'Needs your review — click to open offers tab' : 'Active offer with recent activity') + '">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
                     + '</div>';
             }
             html += '</div>';
@@ -2565,6 +2591,59 @@ export async function loadRequisitions(query = '', append = false) {
 // v7 table sort state
 let _reqSortCol = null;
 let _reqSortDir = 'asc';
+
+// Column visibility — persisted in localStorage
+const _defaultHiddenCols = {};
+let _hiddenCols = JSON.parse(localStorage.getItem('reqHiddenCols') || '{}');
+
+function _isColHidden(col) { return !!_hiddenCols[col]; }
+function toggleColVisibility(col) {
+    _hiddenCols[col] = !_hiddenCols[col];
+    if (!_hiddenCols[col]) delete _hiddenCols[col];
+    localStorage.setItem('reqHiddenCols', JSON.stringify(_hiddenCols));
+    renderReqList();
+}
+function _toggleColGear() {
+    const wrap = document.getElementById('colGearWrap');
+    if (!wrap) return;
+    if (wrap.innerHTML) { wrap.innerHTML = ''; return; }
+    wrap.innerHTML = _colGearDropdown();
+    // Close on outside click
+    const close = (e) => { if (!wrap.contains(e.target)) { wrap.innerHTML = ''; document.removeEventListener('click', close); } };
+    setTimeout(() => document.addEventListener('click', close), 0);
+}
+
+function _applyColVisCSS() {
+    let style = document.getElementById('colVisStyle');
+    if (!style) { style = document.createElement('style'); style.id = 'colVisStyle'; document.head.appendChild(style); }
+    const v = _currentMainView;
+    // Map column keys to 1-based nth-child positions per view
+    let colMap;
+    if (v === 'sourcing') colMap = {score:3,deadline:4,offers:5,reqs:6,sourced:7,sent:8,resp:9,searched:10,age:11};
+    else if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
+    else colMap = {reqs:3,quote:4,sourced:5,offers:6,sales:7,age:8,deadline:9};
+    const rules = [];
+    for (const [k, nth] of Object.entries(colMap)) {
+        if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
+    }
+    style.textContent = rules.join('\n');
+}
+
+function _colGearDropdown() {
+    const v = _currentMainView;
+    let cols;
+    if (v === 'sourcing') cols = [{k:'score',l:'Sourcing Score'},{k:'deadline',l:'Bid Due'},{k:'offers',l:'Offers'},{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Resp %'},{k:'searched',l:'Searched'},{k:'age',l:'Age'}];
+    else if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'sourced',l:'Sourcing'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'},{k:'deadline',l:'Bid Due'}];
+    let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
+    html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
+    for (const c of cols) {
+        const checked = !_isColHidden(c.k) ? 'checked' : '';
+        html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;font-size:12px;cursor:pointer"><input type="checkbox" ${checked} onchange="toggleColVisibility('${c.k}')">${c.l}</label>`;
+    }
+    html += '</div>';
+    return html;
+}
 
 function _sortArrow(col) {
     if (_reqSortCol !== col) return '\u21c5';
@@ -3066,7 +3145,7 @@ function _renderDdOffers(reqId, data, panel) {
             pendingCount += (g.offers || []).filter(o => o.status === 'pending_review').length;
         }
     }
-    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet — use <b>+ Log Offer</b> above or send an RFQ from the Sourcing tab</span>'; return; }
+    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet — use <b>+ Log Offer</b> above to record a vendor offer, or send RFQs from the <b>Sightings</b> tab to request quotes</span>'; return; }
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
 
@@ -4115,11 +4194,19 @@ async function ddSendQuote(reqId) {
     const prefillEmail = q.contact_email || '';
     const prefillName = q.contact_name || '';
     const senderEmail = window.userEmail || 'your account';
-    // Build contact options from site_contacts
+    // Build contact options from site_contacts, auto-select matching or first
     let contactOpts = '';
+    let autoSelectedEmail = prefillEmail;
     if (q.site_contacts && q.site_contacts.length) {
         for (const c of q.site_contacts) {
-            if (c.email) contactOpts += `<option value="${escAttr(c.email)}" data-name="${escAttr(c.full_name||'')}">${esc(c.full_name || c.email)}${c.title ? ' (' + esc(c.title) + ')' : ''}</option>`;
+            if (!c.email) continue;
+            const selected = (prefillEmail && c.email.toLowerCase() === prefillEmail.toLowerCase()) ? ' selected' : '';
+            contactOpts += `<option value="${escAttr(c.email)}" data-name="${escAttr(c.full_name||'')}"${selected}>${esc(c.full_name || c.email)}${c.title ? ' (' + esc(c.title) + ')' : ''}</option>`;
+        }
+        // If no prefill match, auto-select first contact
+        if (!prefillEmail && q.site_contacts[0]?.email) {
+            autoSelectedEmail = q.site_contacts[0].email;
+            contactOpts = contactOpts.replace('<option value="' + escAttr(autoSelectedEmail) + '"', '<option value="' + escAttr(autoSelectedEmail) + '" selected');
         }
     }
     const html = `<div class="modal-bg open" id="ddSendQuoteBg" onclick="if(event.target===this){this.remove()}">
@@ -4170,6 +4257,11 @@ async function ddSendQuote(reqId) {
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // Auto-populate from selected contact (if auto-selected)
+    const _autoSel = document.getElementById('ddSendContact-' + reqId);
+    if (_autoSel && _autoSel.value && _autoSel.value !== '' && _autoSel.value !== '__add_new__') {
+        ddOnContactSelect(reqId);
+    }
     // Auto-load preview
     ddRefreshPreview(reqId);
 }
@@ -5243,8 +5335,16 @@ function _parseTsvInput(text) {
     const mpnAliases = ['mpn', 'partnumber', 'partno', 'pn', 'mfgpart', 'mfgpartnumber', 'part', 'mfpn'];
     const qtyAliases = ['qty', 'quantity', 'targetqty', 'reqd', 'required', 'need'];
     const priceAliases = ['price', 'targetprice', 'target', 'unitprice', 'unit'];
+    const condAliases = ['condition', 'cond', 'cond.'];
+    const dcAliases = ['datecode', 'dc', 'datecodes', 'date_code', 'date_codes'];
+    const subsAliases = ['subs', 'substitutes', 'alts', 'alternates', 'sub', 'substitute'];
+    const fwAliases = ['firmware', 'fw', 'firmwareversion'];
+    const hwAliases = ['hardware', 'hw', 'hardwarecodes', 'hardware_codes', 'hwrev'];
+    const pkgAliases = ['packaging', 'pkg', 'package'];
+    const notesAliases = ['notes', 'note', 'comments', 'comment', 'remarks'];
 
     let mpnCol = -1, qtyCol = -1, priceCol = -1;
+    let condCol = -1, dcCol = -1, subsCol = -1, fwCol = -1, hwCol = -1, pkgCol = -1, notesCol = -1;
     let dataStart = 0;
 
     // Check if first row is a header
@@ -5254,6 +5354,13 @@ function _parseTsvInput(text) {
             if (mpnCol < 0 && mpnAliases.includes(c)) mpnCol = i;
             if (qtyCol < 0 && qtyAliases.includes(c)) qtyCol = i;
             if (priceCol < 0 && priceAliases.includes(c)) priceCol = i;
+            if (condCol < 0 && condAliases.includes(c)) condCol = i;
+            if (dcCol < 0 && dcAliases.includes(c)) dcCol = i;
+            if (subsCol < 0 && subsAliases.includes(c)) subsCol = i;
+            if (fwCol < 0 && fwAliases.includes(c)) fwCol = i;
+            if (hwCol < 0 && hwAliases.includes(c)) hwCol = i;
+            if (pkgCol < 0 && pkgAliases.includes(c)) pkgCol = i;
+            if (notesCol < 0 && notesAliases.includes(c)) notesCol = i;
         });
         dataStart = 1;
     }
@@ -5277,6 +5384,13 @@ function _parseTsvInput(text) {
             const p = parseFloat(r[priceCol].replace(/[^0-9.]/g, ''));
             if (p > 0) obj.target_price = p;
         }
+        if (condCol >= 0 && r[condCol]) obj.condition = r[condCol].trim();
+        if (dcCol >= 0 && r[dcCol]) obj.date_codes = r[dcCol].trim();
+        if (subsCol >= 0 && r[subsCol]) obj.substitutes = r[subsCol].split(/[,;]/).map(s => s.trim()).filter(Boolean);
+        if (fwCol >= 0 && r[fwCol]) obj.firmware = r[fwCol].trim();
+        if (hwCol >= 0 && r[hwCol]) obj.hardware_codes = r[hwCol].trim();
+        if (pkgCol >= 0 && r[pkgCol]) obj.packaging = r[pkgCol].trim();
+        if (notesCol >= 0 && r[notesCol]) obj.notes = r[notesCol].trim();
         results.push(obj);
     }
     return results;
@@ -5292,9 +5406,29 @@ function _previewPaste() {
         preview.textContent = 'No parts detected';
         btn.disabled = true;
     } else {
-        const sample = parts.slice(0, 3).map(p => p.primary_mpn).join(', ');
-        const more = parts.length > 3 ? ` and ${parts.length - 3} more` : '';
-        preview.innerHTML = `<b>${parts.length}</b> part${parts.length !== 1 ? 's' : ''} detected: ${esc(sample)}${more}`;
+        // Build a mini table showing detected columns
+        const extraCols = parts.some(p => p.condition || p.date_codes || p.substitutes || p.firmware || p.hardware_codes || p.packaging || p.notes);
+        let tbl = `<b>${parts.length}</b> part${parts.length !== 1 ? 's' : ''} detected`;
+        if (extraCols) {
+            const cols = ['MPN','Qty','Price'];
+            if (parts.some(p => p.condition)) cols.push('Cond');
+            if (parts.some(p => p.date_codes)) cols.push('DC');
+            if (parts.some(p => p.packaging)) cols.push('Pkg');
+            if (parts.some(p => p.substitutes)) cols.push('Subs');
+            if (parts.some(p => p.firmware)) cols.push('FW');
+            if (parts.some(p => p.hardware_codes)) cols.push('HW');
+            if (parts.some(p => p.notes)) cols.push('Notes');
+            tbl += ` (columns: ${cols.join(', ')})`;
+        }
+        tbl += ':<br>';
+        const show = parts.slice(0, 5);
+        tbl += '<table style="font-size:11px;margin-top:4px;width:100%;border-collapse:collapse"><tr style="color:var(--muted)"><th style="text-align:left;padding:2px 6px">MPN</th><th style="text-align:right;padding:2px 6px">Qty</th><th style="text-align:right;padding:2px 6px">Price</th></tr>';
+        for (const p of show) {
+            tbl += `<tr><td style="padding:2px 6px">${esc(p.primary_mpn)}</td><td style="text-align:right;padding:2px 6px">${p.target_qty || 1}</td><td style="text-align:right;padding:2px 6px">${p.target_price ? '$' + p.target_price.toFixed(2) : '\u2014'}</td></tr>`;
+        }
+        if (parts.length > 5) tbl += `<tr><td colspan="3" style="padding:2px 6px;color:var(--muted);font-style:italic">\u2026 and ${parts.length - 5} more</td></tr>`;
+        tbl += '</table>';
+        preview.innerHTML = tbl;
         btn.disabled = false;
     }
 }
@@ -5878,6 +6012,16 @@ async function ddResearchAll(reqId) {
 // ── Log Offer Modal ─────────────────────────────────────────────────────
 async function openLogOfferFromList(reqId) {
     const loReqId = document.getElementById('loReqId'); if (loReqId) loReqId.value = reqId;
+    // Show RFQ context banner
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    const ctxEl = document.getElementById('loReqContext');
+    if (ctxEl && reqInfo) {
+        const custName = reqInfo.customer_name || reqInfo.name || 'REQ-' + String(reqId).padStart(3, '0');
+        ctxEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">For</span> <b>${esc(custName)}</b> <span class="mono" style="font-size:11px;color:var(--muted)">(REQ-${String(reqId).padStart(3,'0')})</span>`;
+        ctxEl.style.display = '';
+    } else if (ctxEl) {
+        ctxEl.style.display = 'none';
+    }
     // Load requirements to populate part picker
     const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(e => { showToast('Failed to load requirements','warn'); return []; });
     _ddReqCache[reqId] = reqs;
@@ -6030,6 +6174,7 @@ async function submitLogOffer() {
 }
 
 function renderReqList() {
+    _renderBreadcrumb();
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
@@ -6122,7 +6267,7 @@ function renderReqList() {
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const v = _currentMainView;
-    const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select></th>`;
+    const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select> <span style="position:relative;display:inline-block"><button class="btn-icon" onclick="event.stopPropagation();_toggleColGear()" title="Show/hide columns" style="font-size:14px;cursor:pointer;background:none;border:none;color:var(--muted);padding:0 2px">&#x2699;</button><span id="colGearWrap"></span></span></th>`;
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
@@ -6206,6 +6351,7 @@ function renderReqList() {
     }
     _populateUserFilter();
     _updateToolbarStats();
+    _applyColVisCSS();
     // Restore previously open drill-downs
     if (_openDrillIds.length) {
         const stillPresent = _openDrillIds.filter(id => _reqListData.some(r => r.id === id));
@@ -6456,6 +6602,7 @@ function _renderReqRow(r) {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Source</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
@@ -8159,8 +8306,8 @@ async function openBatchRfqModal(prebuiltGroups) {
 
     const prep2 = document.getElementById('rfqPrepare'); if (prep2) prep2.style.display = 'none';
     const rdy2 = document.getElementById('rfqReady'); if (rdy2) rdy2.style.display = '';
-    renderRfqVendors();
-    renderRfqMessage();
+    try { renderRfqVendors(); } catch(e) { console.error('renderRfqVendors failed:', e); showToast('Error rendering vendor list — try again', 'error'); }
+    try { renderRfqMessage(); } catch(e) { console.error('renderRfqMessage failed:', e); }
 }
 
 function _renderRfqPrepareProgress() {
@@ -8178,6 +8325,8 @@ function _renderRfqPrepareProgress() {
 
 function renderRfqVendors() {
     const el = document.getElementById('rfqVendorList');
+    if (!el) { console.error('renderRfqVendors: rfqVendorList not found'); return; }
+    if (!rfqVendorData || !rfqVendorData.length) { el.innerHTML = '<p style="padding:12px;color:var(--muted)">No vendors to display</p>'; return; }
     el.innerHTML = rfqVendorData.map((v, i) => {
         let emailHtml;
         if (v.lookup_status === 'loading') {
@@ -9855,14 +10004,15 @@ async function _renderVendorDrawerScorecard(vendorId) {
             : null;
         const cancelRate = v.cancellation_rate || 0;
         const rmaRate = v.rma_rate || 0;
-        const deliveryScore = Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100);
+        const hasDeliveryData = v.cancellation_rate != null || v.rma_rate != null || (v.offer_count || 0) >= 5;
+        const deliveryScore = hasDeliveryData ? Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100) : null;
 
         const factors = [
             { label: 'Response Velocity', score: respVelocity, detail: v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data' },
             { label: 'Ghost Rate', score: ghostScore, detail: v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data' },
             { label: 'Pricing Competitiveness', score: pricingScore, detail: v.overall_win_rate != null ? Math.round(v.overall_win_rate * 100) + '% win rate' : 'No data' },
             { label: 'Volume Consistency', score: volumeScore, detail: (v.sighting_count || 0) + ' sightings' },
-            { label: 'Delivery Reliability', score: deliveryScore, detail: 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' },
+            { label: 'Delivery Reliability', score: deliveryScore, detail: hasDeliveryData ? 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' : 'No data' },
         ];
 
         let html = '<div class="drawer-section">';
@@ -11170,7 +11320,10 @@ async function loadNotifications() {
                 <div id="${gid}" class="${collapsed ? 'hidden' : ''}">
             `;
             group.slice(0, 5).forEach(n => {
-                const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
+                // Clean up raw API metadata from notes before display
+                let cleanNotes = n.notes || '';
+                cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\s{2,}/g, ' ').trim();
+                const notesHtml = cleanNotes ? `<div class="notif-item-notes">${esc(cleanNotes)}</div>` : '';
                 const hasLink = n.requisition_id || n.company_id || n.vendor_card_id || n.buy_plan_id;
                 html += `<div class="notif-item" onclick="${_notifClickAction(n)}">
                     <div class="notif-item-body">
@@ -11740,7 +11893,7 @@ Object.assign(window, {
     // Dashboard / Command Center
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
-    showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
+    showDashboard, loadDashboard, loadBuyerDashboard, goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
     // Scorecard
     showScorecard, setScPeriod,
     // Unified state helpers

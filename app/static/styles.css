@@ -2680,3 +2680,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .ahd-inactive-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .ahd-inactive-chip{font-size:11px;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--muted)}
 
+/* Column visibility gear dropdown */
+.col-gear-dd{position:absolute;right:0;top:100%;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:6px 0;z-index:700;min-width:160px}
+.col-gear-dd label:hover{background:var(--bg)}
+

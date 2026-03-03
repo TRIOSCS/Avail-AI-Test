@@ -1,9 +1,20 @@
-"""Admin API — User management, system config, health, data import, Teams."""
+"""Admin data operations -- dedup, merge, CSV import, Teams, and account transfer.
+
+Business rules:
+- Vendor/company dedup uses fuzzy name matching with configurable threshold.
+- CSV import deduplicates by company/vendor name (case-insensitive).
+- Teams integration config is persisted in SystemConfig table.
+- Mass account transfer enforces SITE_CAP_PER_USER on the target user.
+- Merge operations delete the "remove" entity after reassigning all FKs.
+
+Called by: app/routers/admin/__init__.py (included via router)
+Depends on: app/services/vendor_merge_service.py, app/services/company_merge_service.py,
+            app/vendor_utils, app/company_utils, app/models, app/dependencies
+"""
 
 import asyncio
 import csv
 import io
-import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -11,10 +22,9 @@ from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..dependencies import require_admin, require_settings_access
-from ..models import (
-    ApiSource,
+from ...database import get_db
+from ...dependencies import require_admin
+from ...models import (
     Company,
     CustomerSite,
     SiteContact,
@@ -23,418 +33,29 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
-from ..models.config import ApiUsageLog
-from ..rate_limit import limiter
-from ..schemas.crm import CompanyMergeRequest, MassTransferRequest
-from ..services.admin_service import (
-    VALID_ROLES,
-    get_all_config,
-    get_system_health,
-    list_users,
-    set_config_value,
-    update_user,
-)
-from ..services.credential_service import decrypt_value, encrypt_value, mask_value
+from ...rate_limit import limiter
+from ...schemas.crm import CompanyMergeRequest, MassTransferRequest
 
 router = APIRouter(tags=["admin"])
 
 
-# ── Schemas ──────────────────────────────────────────────────────────
+# -- Schemas ---------------------------------------------------------------
 
 
-class CreateUserRequest(BaseModel):
-    name: str
-    email: str
-    role: str = "buyer"
+class VendorMergeRequest(BaseModel):
+    keep_id: int = Field(..., description="ID of the vendor card to keep")
+    remove_id: int = Field(..., description="ID of the vendor card to merge into keep_id and delete")
 
 
-class UserUpdateRequest(BaseModel):
-    name: str | None = None
-    role: str | None = None
-    is_active: bool | None = None
+class TeamsConfigRequest(BaseModel):
+    team_id: str = Field(..., min_length=1)
+    channel_id: str = Field(..., min_length=1)
+    channel_name: Optional[str] = None
+    enabled: bool = True
+    hot_threshold: Optional[float] = None
 
 
-class ConfigUpdateRequest(BaseModel):
-    value: str = Field(..., min_length=1, max_length=500)
-
-
-# ── User Management (admin only) ─────────────────────────────────────
-
-
-@router.get("/api/admin/users")
-@limiter.limit("30/minute")
-def api_list_users(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return list_users(db)
-
-
-@router.post("/api/admin/users")
-@limiter.limit("5/minute")
-def api_create_user(
-    request: Request,
-    body: CreateUserRequest,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    if body.role not in VALID_ROLES:
-        raise HTTPException(400, f"Role must be one of: {', '.join(VALID_ROLES)}")
-    existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
-    if existing:
-        raise HTTPException(409, "User with this email already exists")
-    new_user = User(
-        name=body.name.strip(),
-        email=body.email.lower().strip(),
-        role=body.role,
-    )
-    db.add(new_user)
-    db.commit()
-    return {
-        "id": new_user.id,
-        "name": new_user.name,
-        "email": new_user.email,
-        "role": new_user.role,
-    }
-
-
-@router.put("/api/admin/users/{user_id}")
-@limiter.limit("10/minute")
-def api_update_user(
-    user_id: int,
-    request: Request,
-    body: UserUpdateRequest,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    result = update_user(db, user_id, body.model_dump(exclude_none=False), user)
-    if "error" in result:
-        raise HTTPException(result.get("status", 400), result["error"])
-    return result
-
-
-@router.delete("/api/admin/users/{user_id}")
-@limiter.limit("5/minute")
-def api_delete_user(
-    user_id: int,
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    target = db.get(User, user_id)
-    if not target:
-        raise HTTPException(404, "User not found")
-    if target.id == user.id:
-        raise HTTPException(400, "Cannot delete yourself")
-    db.delete(target)
-    db.commit()
-    return {"status": "deleted"}
-
-
-# ── System Config (admin for writes, settings_access for reads) ──────
-
-
-@router.get("/api/admin/config")
-@limiter.limit("30/minute")
-def api_get_config(
-    request: Request,
-    user: User = Depends(require_settings_access),
-    db: Session = Depends(get_db),
-):
-    return get_all_config(db)
-
-
-@router.put("/api/admin/config/{key}")
-@limiter.limit("10/minute")
-def api_set_config(
-    key: str,
-    request: Request,
-    body: ConfigUpdateRequest,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    result = set_config_value(db, key, body.value, user.email)
-    if "error" in result:
-        raise HTTPException(result.get("status", 400), result["error"])
-    return result
-
-
-# ── System Health (settings_access) ──────────────────────────────────
-
-
-@router.get("/api/admin/health")
-@limiter.limit("30/minute")
-def api_health(
-    request: Request,
-    user: User = Depends(require_settings_access),
-    db: Session = Depends(get_db),
-):
-    return get_system_health(db)
-
-
-# ── Connector Health Dashboard (admin) ────────────────────────────────
-
-
-@router.get("/api/admin/connector-health")
-@limiter.limit("30/minute")
-def api_connector_health(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Return per-connector health metrics with auto-degraded status."""
-    sources = db.query(ApiSource).order_by(ApiSource.name).all()
-    result = []
-    for src in sources:
-        total = src.total_searches or 0
-        total_results = src.total_results or 0
-        errors_24h = src.error_count_24h or 0
-        # Auto-flag degraded: >50% failure rate over last 24h (min 4 searches)
-        status = src.status or "pending"
-        if errors_24h >= 4 and total > 0:
-            recent_success = max(0, total - errors_24h)
-            if errors_24h > recent_success:
-                status = "degraded"
-        result.append(
-            {
-                "id": src.id,
-                "name": src.name,
-                "display_name": src.display_name,
-                "status": status,
-                "is_active": src.is_active,
-                "avg_response_ms": src.avg_response_ms or 0,
-                "total_searches": total,
-                "total_results": total_results,
-                "last_success": src.last_success.isoformat() if src.last_success else None,
-                "last_error": src.last_error,
-                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
-                "error_count_24h": errors_24h,
-            }
-        )
-    return {"connectors": result}
-
-
-@router.get("/api/admin/api-health/dashboard")
-@limiter.limit("30/minute")
-def api_health_dashboard(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Full API health dashboard data — status, usage, recent check history."""
-    from datetime import datetime, timedelta, timezone
-
-    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
-    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
-
-    # Aggregate usage log stats per source (SQLite-compatible)
-    check_stats_raw = (
-        db.query(ApiUsageLog.source_id, ApiUsageLog.success).filter(ApiUsageLog.timestamp >= cutoff_24h).all()
-    )
-    stats_map = {}
-    for row in check_stats_raw:
-        sid = row.source_id
-        if sid not in stats_map:
-            stats_map[sid] = {"total": 0, "failures": 0}
-        stats_map[sid]["total"] += 1
-        if not row.success:
-            stats_map[sid]["failures"] += 1
-
-    result = []
-    for src in sources:
-        quota = src.monthly_quota
-        calls = src.calls_this_month or 0
-        usage_pct = round((calls / quota) * 100, 1) if quota and quota > 0 else None
-        checks = stats_map.get(src.id, {"total": 0, "failures": 0})
-
-        result.append(
-            {
-                "id": src.id,
-                "name": src.name,
-                "display_name": src.display_name,
-                "category": src.category,
-                "source_type": src.source_type,
-                "status": src.status,
-                "is_active": src.is_active,
-                "last_success": src.last_success.isoformat() if src.last_success else None,
-                "last_error": src.last_error,
-                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
-                "error_count_24h": src.error_count_24h or 0,
-                "avg_response_ms": src.avg_response_ms or 0,
-                "total_searches": src.total_searches or 0,
-                "monthly_quota": quota,
-                "calls_this_month": calls,
-                "usage_pct": usage_pct,
-                "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
-                "last_deep_test_at": src.last_deep_test_at.isoformat() if src.last_deep_test_at else None,
-                "recent_checks": checks["total"],
-                "recent_failures": checks["failures"],
-            }
-        )
-
-    return {"sources": result}
-
-
-# ── Credential Management (admin) ─────────────────────────────────────
-
-
-@router.get("/api/admin/sources/{source_id}/credentials")
-@limiter.limit("30/minute")
-def api_get_credentials(
-    source_id: int,
-    request: Request,
-    user: User = Depends(require_settings_access),
-    db: Session = Depends(get_db),
-):
-    """Return masked credential values for a source."""
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "Source not found")
-    result = {}
-    for var_name in src.env_vars or []:
-        encrypted = (src.credentials or {}).get(var_name)
-        if encrypted:
-            try:
-                plain = decrypt_value(encrypted)
-                result[var_name] = {
-                    "status": "set",
-                    "masked": mask_value(plain),
-                    "source": "db",
-                }
-            except (ValueError, TypeError):
-                logger.warning("Credential decryption failed for %s", var_name, exc_info=True)
-                result[var_name] = {"status": "error", "masked": "", "source": "db"}
-        elif os.getenv(var_name):
-            result[var_name] = {
-                "status": "set",
-                "masked": mask_value(os.getenv(var_name)),
-                "source": "env",
-            }
-        else:
-            result[var_name] = {"status": "empty", "masked": "", "source": "none"}
-    return {"source_id": src.id, "source_name": src.name, "credentials": result}
-
-
-@router.put("/api/admin/sources/{source_id}/credentials")
-@limiter.limit("10/minute")
-def api_set_credentials(
-    source_id: int,
-    request: Request,
-    body: dict,
-    user: User = Depends(require_settings_access),
-    db: Session = Depends(get_db),
-):
-    """Set credential values for a source. Body: {VAR_NAME: "plaintext_value", ...}"""
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "Source not found")
-    valid_vars = set(src.env_vars or [])
-    creds = dict(src.credentials or {})
-    updated = []
-    for var_name, value in body.items():
-        if var_name not in valid_vars:
-            continue
-        value = (value or "").strip()
-        if value:
-            creds[var_name] = encrypt_value(value)
-            updated.append(var_name)
-        else:
-            creds.pop(var_name, None)
-            updated.append(var_name)
-    src.credentials = creds
-    db.commit()
-    logger.info(f"Credentials updated for {src.name} by {user.email}: {updated}")
-    return {"status": "ok", "updated": updated}
-
-
-@router.delete("/api/admin/sources/{source_id}/credentials/{var_name}")
-@limiter.limit("5/minute")
-def api_delete_credential(
-    source_id: int,
-    var_name: str,
-    request: Request,
-    user: User = Depends(require_settings_access),
-    db: Session = Depends(get_db),
-):
-    """Remove a single credential from a source."""
-    from ..services.credential_service import credential_is_set
-
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "Source not found")
-    creds = dict(src.credentials or {})
-    removed = creds.pop(var_name, None)
-    src.credentials = creds
-    # Recheck status — if credentials are now incomplete, downgrade to pending
-    env_vars = src.env_vars or []
-    if env_vars and src.status == "live":
-        all_set = all(credential_is_set(db, src.name, v) for v in env_vars)
-        if not all_set:
-            src.status = "pending"
-    db.commit()
-    logger.info(f"Credential {var_name} removed from {src.name} by {user.email}")
-    return {"status": "removed" if removed else "not_found"}
-
-
-# ── Material Card Integrity (admin) ──────────────────────────────────
-
-
-@router.get("/api/admin/integrity")
-@limiter.limit("10/minute")
-def api_integrity_check(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """Run material card integrity checks and return health report."""
-    from ..services.integrity_service import run_integrity_check
-
-    return run_integrity_check(db)
-
-
-@router.get("/api/admin/material-audit")
-@limiter.limit("10/minute")
-def api_material_audit(
-    request: Request,
-    user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    """View recent material card audit log entries."""
-    from ..models import MaterialCardAudit
-
-    card_id = request.query_params.get("card_id")
-    action = request.query_params.get("action")
-    limit = min(int(request.query_params.get("limit", "100")), 500)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
-
-    query = db.query(MaterialCardAudit)
-    if card_id:
-        query = query.filter(MaterialCardAudit.material_card_id == int(card_id))
-    if action:
-        query = query.filter(MaterialCardAudit.action == action)
-    total = query.count()
-    entries = query.order_by(MaterialCardAudit.created_at.desc()).offset(offset).limit(limit).all()
-    return {
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "entries": [
-            {
-                "id": e.id,
-                "material_card_id": e.material_card_id,
-                "action": e.action,
-                "entity_type": e.entity_type,
-                "entity_id": e.entity_id,
-                "old_card_id": e.old_card_id,
-                "new_card_id": e.new_card_id,
-                "normalized_mpn": e.normalized_mpn,
-                "details": e.details,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-                "created_by": e.created_by,
-            }
-            for e in entries
-        ],
-    }
-
-
-# ── Vendor Dedup Suggestions (admin) ──────────────────────────────────
+# -- Vendor Dedup Suggestions (admin) --------------------------------------
 
 
 @router.get("/api/admin/vendor-dedup-suggestions")
@@ -447,18 +68,13 @@ async def api_vendor_dedup_suggestions(
     db: Session = Depends(get_db),
 ):
     """Find potential duplicate vendor cards using fuzzy name matching."""
-    from ..vendor_utils import find_vendor_dedup_candidates
+    from ...vendor_utils import find_vendor_dedup_candidates
 
     loop = asyncio.get_running_loop()
     candidates = await loop.run_in_executor(
         None, find_vendor_dedup_candidates, db, max(70, min(threshold, 100)), min(limit, 200)
     )
     return {"candidates": candidates, "count": len(candidates)}
-
-
-class VendorMergeRequest(BaseModel):
-    keep_id: int = Field(..., description="ID of the vendor card to keep")
-    remove_id: int = Field(..., description="ID of the vendor card to merge into keep_id and delete")
 
 
 @router.post("/api/admin/vendor-merge")
@@ -470,7 +86,7 @@ async def merge_vendor_cards(
     db: Session = Depends(get_db),
 ):
     """Merge two vendor cards: reassign all FKs from remove_id to keep_id, then delete remove_id."""
-    from ..services.vendor_merge_service import merge_vendor_cards as _merge
+    from ...services.vendor_merge_service import merge_vendor_cards as _merge
 
     try:
         result = _merge(payload.keep_id, payload.remove_id, db)
@@ -480,7 +96,7 @@ async def merge_vendor_cards(
     return result
 
 
-# ── Company Dedup (admin only) ────────────────────────────────────────
+# -- Company Dedup (admin only) --------------------------------------------
 
 
 @router.get("/api/admin/company-dedup-suggestions")
@@ -493,7 +109,7 @@ async def api_company_dedup_suggestions(
     db: Session = Depends(get_db),
 ):
     """Find potential duplicate companies using fuzzy name matching."""
-    from ..company_utils import find_company_dedup_candidates
+    from ...company_utils import find_company_dedup_candidates
 
     loop = asyncio.get_running_loop()
     candidates = await loop.run_in_executor(
@@ -512,7 +128,7 @@ def api_company_merge_preview(
     db: Session = Depends(get_db),
 ):
     """Preview impact of merging two companies."""
-    from ..models import ActivityLog, EnrichmentQueue, Requisition, Sighting
+    from ...models import ActivityLog, EnrichmentQueue, Requisition, Sighting
 
     keep = db.get(Company, keep_id)
     remove = db.get(Company, remove_id)
@@ -592,7 +208,7 @@ def api_company_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two companies: move sites, reassign FKs, delete the removed company."""
-    from ..services.company_merge_service import merge_companies as _merge
+    from ...services.company_merge_service import merge_companies as _merge
 
     try:
         result = _merge(payload.keep_id, payload.remove_id, db)
@@ -602,7 +218,7 @@ def api_company_merge(
     return result
 
 
-# ── Data Import (admin only) ─────────────────────────────────────────
+# -- Data Import (admin only) ---------------------------------------------
 
 
 @router.post("/api/admin/import/customers")
@@ -799,15 +415,7 @@ async def import_vendors(
     }
 
 
-# ── Teams Integration (admin only) ──────────────────────────────────
-
-
-class TeamsConfigRequest(BaseModel):
-    team_id: str = Field(..., min_length=1)
-    channel_id: str = Field(..., min_length=1)
-    channel_name: Optional[str] = None
-    enabled: bool = True
-    hot_threshold: Optional[float] = None
+# -- Teams Integration (admin only) ----------------------------------------
 
 
 @router.get("/api/admin/teams/config")
@@ -818,7 +426,7 @@ def api_get_teams_config(
     db: Session = Depends(get_db),
 ):
     """Get current Teams integration configuration."""
-    from ..config import settings
+    from ...config import settings
 
     config = {
         "team_id": settings.teams_team_id,
@@ -899,8 +507,8 @@ async def api_list_teams_channels(
     db: Session = Depends(get_db),
 ):
     """List Teams channels the user has access to via Graph API."""
-    from ..scheduler import get_valid_token
-    from ..utils.graph_client import GraphClient
+    from ...scheduler import get_valid_token
+    from ...utils.graph_client import GraphClient
 
     token = await get_valid_token(user, db)
     if not token:
@@ -951,8 +559,8 @@ async def api_test_teams_post(
     db: Session = Depends(get_db),
 ):
     """Send a test Adaptive Card to the configured Teams channel."""
-    from ..scheduler import get_valid_token
-    from ..services.teams import _get_teams_config, _make_card, post_to_channel
+    from ...scheduler import get_valid_token
+    from ...services.teams import _get_teams_config, _make_card, post_to_channel
 
     channel_id, team_id, enabled = _get_teams_config()
     if not channel_id or not team_id:
@@ -980,7 +588,7 @@ async def api_test_teams_post(
     return {"status": "sent", "message": "Test card posted to Teams channel."}
 
 
-# ── Mass Account Transfer (admin only) ────────────────────────────
+# -- Mass Account Transfer (admin only) ------------------------------------
 
 
 @router.get("/api/admin/transfer/preview")
@@ -1104,6 +712,9 @@ def api_transfer_execute(
         "source": {"id": source.id, "name": source.name},
         "target": {"id": target.id, "name": target.name},
     }
+
+
+# -- Helpers ---------------------------------------------------------------
 
 
 def _upsert_config(db: Session, key: str, value: str, admin_email: str):

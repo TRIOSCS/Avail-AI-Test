@@ -63,10 +63,13 @@ def compute_vendor_score(
     advancement_score = (stage_points_sum / (offer_count * MAX_STAGE_POINTS)) * 100
     advancement_score = min(100.0, max(0.0, advancement_score))
 
-    review_factor = (avg_rating / 5.0) * 100 if avg_rating is not None else 50.0
-    review_factor = min(100.0, max(0.0, review_factor))
-
-    vendor_score = advancement_score * ADVANCEMENT_WEIGHT + review_factor * REVIEW_WEIGHT
+    # When no reviews exist, use advancement_score alone instead of
+    # defaulting review_factor to 50 (which makes all scores converge)
+    if avg_rating is not None:
+        review_factor = min(100.0, max(0.0, (avg_rating / 5.0) * 100))
+        vendor_score = advancement_score * ADVANCEMENT_WEIGHT + review_factor * REVIEW_WEIGHT
+    else:
+        vendor_score = advancement_score
     vendor_score = round(min(100.0, max(0.0, vendor_score)), 1)
 
     return {

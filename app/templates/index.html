@@ -182,6 +182,7 @@
 
     <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
+        <div id="reqBreadcrumb" style="display:none;padding:4px 12px"></div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
@@ -192,6 +193,7 @@
     <div id="logOfferModal" class="modal-bg" onclick="if(event.target===this)closeLogOfferModal()">
         <div class="modal modal-lg">
             <h2>Log Confirmed Offer</h2>
+            <div id="loReqContext" style="display:none;padding:6px 12px;background:var(--bg);border-radius:6px;margin-bottom:8px;font-size:13px"></div>
             <form id="logOfferForm" onsubmit="event.preventDefault();submitLogOffer()">
                 <input type="hidden" id="loReqId">
                 <div class="lo-form">

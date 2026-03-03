@@ -628,7 +628,7 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
 
     # Send email alert
     try:
-        from app.scheduler import get_valid_token
+        from app.utils.token_manager import get_valid_token
         from app.utils.graph_client import GraphClient
 
         token = await get_valid_token(owner, db)
@@ -726,7 +726,7 @@ async def send_manager_digest_email(db: Session):
     html_body = "\n".join(lines)
 
     # Send to all admins in parallel
-    from app.scheduler import get_valid_token
+    from app.utils.token_manager import get_valid_token
     from app.utils.graph_client import GraphClient
 
     async def _send_digest_to_admin(admin_email):

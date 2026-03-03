@@ -3,8 +3,9 @@
 Job implementations live in app/jobs/ domain modules. This module provides:
   - _traced_job decorator (used by all job modules)
   - Global scheduler instance
-  - Token management re-exports
   - configure_scheduler() entry point
+
+Token management lives in app/utils/token_manager.
 """
 
 import uuid
@@ -43,9 +44,9 @@ scheduler = AsyncIOScheduler(
 )
 
 
-# ── Token Management (re-exported from utils.token_manager) ─────────────
+# Backward-compatible re-exports for test files that import token functions
+# from app.scheduler. Production code should import from app.utils.token_manager.
 from .utils.token_manager import (  # noqa: E402, F401
-    _refresh_access_token,
     _utc,
     get_valid_token,
     refresh_user_token,

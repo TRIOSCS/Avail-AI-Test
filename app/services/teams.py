@@ -365,7 +365,7 @@ async def _get_system_token() -> str | None:
     try:
         from app.database import SessionLocal
         from app.models import User
-        from app.scheduler import get_valid_token
+        from app.utils.token_manager import get_valid_token
 
         db = SessionLocal()
         try:

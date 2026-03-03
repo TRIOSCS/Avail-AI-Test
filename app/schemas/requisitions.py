@@ -53,6 +53,12 @@ class RequirementCreate(BaseModel):
     target_qty: int = Field(default=1, ge=1)
     target_price: float | None = None
     substitutes: list[str] = Field(default_factory=list, max_length=20)
+    condition: str | None = None
+    date_codes: str | None = None
+    firmware: str | None = None
+    hardware_codes: str | None = None
+    packaging: str | None = None
+    notes: str | None = None
 
     @field_validator("primary_mpn")
     @classmethod

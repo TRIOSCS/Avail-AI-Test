@@ -91,7 +91,7 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
     """Find and process stock list attachments from vendor emails."""
     from ..config import settings
     from ..connectors.email_mining import EmailMiner
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
 
     lookback = settings.inbox_backfill_days if is_backfill else 1
 
@@ -131,7 +131,7 @@ async def _download_and_import_stock_list(
 ):
     """Download an attachment via Graph API and import as material cards + sightings."""
     from ..models import MaterialCard, MaterialVendorHistory
-    from ..scheduler import get_valid_token
+    from ..utils.token_manager import get_valid_token
     from ..utils.normalization import normalize_mpn, normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
 
