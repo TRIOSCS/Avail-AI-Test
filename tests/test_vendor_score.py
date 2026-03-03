@@ -133,12 +133,11 @@ class TestComputeVendorScore:
         # score = 100*0.8 + 100*0.2 = 100.0
         assert result["vendor_score"] == 100.0
 
-    def test_none_rating_uses_neutral(self):
-        # None rating → review_factor = 50.0
+    def test_none_rating_uses_advancement_only(self):
+        # None rating → vendor_score = advancement_score alone (no review blend)
         result = compute_vendor_score(5, 40.0, None)
-        # advancement = 100, review = 50
-        # score = 100*0.8 + 50*0.2 = 90.0
-        assert result["vendor_score"] == 90.0
+        # advancement = (40 / (5*8)) * 100 = 100.0
+        assert result["vendor_score"] == 100.0
 
     def test_low_rating_lowers_score(self):
         result_low = compute_vendor_score(5, 40.0, 1.0)

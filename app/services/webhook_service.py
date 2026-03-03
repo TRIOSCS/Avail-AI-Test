@@ -45,7 +45,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     Subscribes to /me/messages with changeType=created so we get notified
     on both sent and received emails.
     """
-    from app.utils.token_manager import get_valid_token
+    from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
 
     token = await get_valid_token(user, db)
@@ -108,7 +108,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
 
 async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
     """Renew a Graph subscription before it expires."""
-    from app.utils.token_manager import get_valid_token
+    from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
 
     user = db.get(User, sub.user_id)
@@ -257,7 +257,7 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
     reply matching when inbound messages are detected.
     """
     from app.email_service import poll_inbox
-    from app.utils.token_manager import get_valid_token
+    from app.scheduler import get_valid_token
     from app.services.activity_service import log_email_activity
     from app.utils.graph_client import GraphClient
 

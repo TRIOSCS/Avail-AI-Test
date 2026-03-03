@@ -224,7 +224,7 @@ def test_token_refresh_refreshes_expired(scheduler_db, test_user):
     test_user.access_token = "old_token"
     scheduler_db.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.jobs.core_jobs import _job_token_refresh
 
@@ -239,7 +239,7 @@ def test_token_refresh_skips_valid(scheduler_db, test_user):
     test_user.access_token = "still_valid"
     scheduler_db.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         from app.jobs.core_jobs import _job_token_refresh
 
         asyncio.run(_job_token_refresh())
@@ -547,7 +547,7 @@ def test_token_refresh_refreshes_user_without_access_token(scheduler_db, test_us
     test_user.token_expires_at = None
     scheduler_db.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.jobs.core_jobs import _job_token_refresh
 
@@ -562,7 +562,7 @@ def test_token_refresh_handles_error_per_user(scheduler_db, test_user):
     test_user.access_token = "old"
     scheduler_db.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.side_effect = Exception("Unexpected error")
         from app.jobs.core_jobs import _job_token_refresh
 
@@ -1071,7 +1071,7 @@ def test_deep_email_mining_scans_eligible_user(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
         patch("app.services.deep_enrichment_service.link_contact_to_entities"),
     ):
@@ -1095,7 +1095,7 @@ def test_deep_email_mining_skips_recently_scanned(scheduler_db, test_user):
     mock_miner_instance.deep_scan_inbox = AsyncMock()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
     ):
         from app.jobs.email_jobs import _job_deep_email_mining
@@ -1116,7 +1116,7 @@ def test_deep_email_mining_skips_disconnected_user(scheduler_db, test_user):
     mock_miner_instance.deep_scan_inbox = AsyncMock()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
     ):
         from app.jobs.email_jobs import _job_deep_email_mining
@@ -1137,7 +1137,7 @@ def test_deep_email_mining_skips_when_no_valid_token(scheduler_db, test_user):
     mock_miner_instance.deep_scan_inbox = AsyncMock()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
     ):
         from app.jobs.email_jobs import _job_deep_email_mining
@@ -1169,7 +1169,7 @@ def test_deep_email_mining_links_contacts(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
         patch("app.services.deep_enrichment_service.link_contact_to_entities") as mock_link,
     ):
@@ -1814,7 +1814,7 @@ def test_deep_email_mining_link_contact_exception(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
         patch("app.services.deep_enrichment_service.link_contact_to_entities", side_effect=Exception("link error")),
     ):
@@ -1843,7 +1843,7 @@ def test_deep_email_mining_per_user_timeout(scheduler_db, test_user):
     mock_miner_instance.deep_scan_inbox = AsyncMock(side_effect=asyncio.TimeoutError())
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
     ):
         from app.jobs.email_jobs import _job_deep_email_mining
@@ -1869,7 +1869,7 @@ def test_deep_email_mining_per_user_exception(scheduler_db, test_user):
     mock_miner_instance.deep_scan_inbox = AsyncMock(side_effect=Exception("scan crash"))
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
     ):
         from app.jobs.email_jobs import _job_deep_email_mining
@@ -1979,7 +1979,7 @@ def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
     scheduler_db.commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=["resp1"]),
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
@@ -2007,7 +2007,7 @@ def test_scan_user_inbox_not_backfill(scheduler_db, test_user):
     scheduler_db.commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
@@ -2030,7 +2030,7 @@ def test_scan_user_inbox_no_valid_token(scheduler_db, test_user):
     scheduler_db.commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock) as mock_poll,
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
@@ -2053,7 +2053,7 @@ def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
     scheduler_db.commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock, side_effect=Exception("poll failed")),
         patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
@@ -2079,7 +2079,7 @@ def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
     scheduler_db.commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
         patch(
             "app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock, side_effect=Exception("stock error")
@@ -2110,7 +2110,7 @@ def test_scan_stock_list_attachments_no_emails(scheduler_db, test_user):
     mock_miner.scan_for_stock_lists = AsyncMock(return_value=[])
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -2144,7 +2144,7 @@ def test_scan_stock_list_attachments_with_files(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.jobs.inventory_jobs._download_and_import_stock_list", new_callable=AsyncMock) as mock_dl,
         patch("app.config.settings") as mock_settings,
@@ -2181,7 +2181,7 @@ def test_scan_stock_list_attachments_import_error(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch(
             "app.jobs.inventory_jobs._download_and_import_stock_list",
@@ -2212,7 +2212,7 @@ def test_download_and_import_stock_list_attachment_download_fails(scheduler_db, 
     mock_gc.get_json = AsyncMock(side_effect=Exception("download error"))
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
@@ -2239,7 +2239,7 @@ def test_download_and_import_stock_list_error_in_att_data(scheduler_db, test_use
     mock_gc.get_json = AsyncMock(return_value={"error": {"code": "NotFound"}})
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
@@ -2266,7 +2266,7 @@ def test_download_and_import_stock_list_no_content_bytes(scheduler_db, test_user
     mock_gc.get_json = AsyncMock(return_value={"id": "att1"})  # no contentBytes
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
@@ -2299,7 +2299,7 @@ def test_download_and_import_stock_list_file_validation_fails(scheduler_db, test
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(False, "application/octet-stream")),
     ):
@@ -2333,7 +2333,7 @@ def test_download_and_import_stock_list_no_rows(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]),
@@ -2368,7 +2368,7 @@ def test_download_and_import_stock_list_ai_parser_fallback(scheduler_db, test_us
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch(
@@ -2417,7 +2417,7 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
     ]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2477,7 +2477,7 @@ def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db
     rows = [{"mpn": "QA-TEST-001", "qty": 50, "manufacturer": "Test Corp"}]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2546,7 +2546,7 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
     ]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2595,7 +2595,7 @@ def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, tes
     ]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2652,7 +2652,7 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
     ]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2708,7 +2708,7 @@ def test_download_and_import_stock_list_commit_fails(scheduler_db, test_user):
         return original_commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2751,7 +2751,7 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
     rows = [{"mpn": "NOEMAIL1", "qty": 100}]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2813,7 +2813,7 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
     rows = [{"mpn": "PRICEFB", "qty": 100, "price": 1.25}]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2858,7 +2858,7 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     rows = [{"mpn": "LM317T", "qty": 100}]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2901,7 +2901,7 @@ def test_download_and_import_stock_list_teams_alert_exception(scheduler_db, test
     rows = [{"mpn": "LM317T", "qty": 100}]
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -2936,7 +2936,7 @@ def test_download_and_import_stock_list_null_att_data(scheduler_db, test_user):
     mock_gc.get_json = AsyncMock(return_value=None)
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
@@ -2968,7 +2968,7 @@ def test_mine_vendor_contacts_no_contacts(scheduler_db, test_user):
     mock_miner.scan_inbox = AsyncMock(return_value={"contacts_enriched": []})
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -2999,7 +2999,7 @@ def test_mine_vendor_contacts_creates_new_card(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.normalize_vendor_name", return_value="new vendor co"),
         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_emails,
@@ -3036,7 +3036,7 @@ def test_mine_vendor_contacts_updates_existing_card(scheduler_db, test_user, tes
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"),
         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_emails,
@@ -3068,7 +3068,7 @@ def test_mine_vendor_contacts_skips_empty_vendor_name(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.merge_emails_into_card") as mock_merge,
         patch("app.config.settings") as mock_settings,
@@ -3111,7 +3111,7 @@ def test_mine_vendor_contacts_commit_error(scheduler_db, test_user):
         return original_commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.normalize_vendor_name", return_value="test vendor"),
         patch("app.vendor_utils.merge_emails_into_card", return_value=1),
@@ -3146,7 +3146,7 @@ def test_scan_outbound_rfqs_no_vendors(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3173,7 +3173,7 @@ def test_scan_outbound_rfqs_updates_vendor_card(scheduler_db, test_user, test_ve
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3202,7 +3202,7 @@ def test_scan_outbound_rfqs_unmatched_domain(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3237,7 +3237,7 @@ def test_scan_outbound_rfqs_commit_error(scheduler_db, test_user, test_vendor_ca
         return original_commit()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3266,7 +3266,7 @@ def test_scan_outbound_rfqs_fallback_name_match(scheduler_db, test_user, test_ve
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3592,7 +3592,7 @@ def test_mine_vendor_contacts_flush_conflict(scheduler_db, test_user):
         raise Exception("unique constraint")
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.normalize_vendor_name", return_value="conflict vendor"),
         patch("app.config.settings") as mock_settings,
@@ -3634,7 +3634,7 @@ def test_deep_email_mining_empty_sender_names(scheduler_db, test_user):
     )
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance),
         patch("app.services.deep_enrichment_service.link_contact_to_entities") as mock_link,
     ):
@@ -3825,7 +3825,7 @@ def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_us
     mock_db.rollback = MagicMock()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -3884,7 +3884,7 @@ def test_mine_vendor_contacts_final_commit_error(scheduler_db, test_user):
     mock_user.access_token = "at_mine"
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.vendor_utils.normalize_vendor_name", return_value="commit error vendor"),
         patch("app.vendor_utils.merge_emails_into_card", return_value=1),
@@ -3934,7 +3934,7 @@ def test_scan_outbound_rfqs_final_commit_error(scheduler_db, test_user, test_ven
     mock_user.access_token = "at_out"
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         patch("app.config.settings") as mock_settings,
     ):
@@ -3976,7 +3976,7 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
         return original_flush()
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
@@ -4017,7 +4017,7 @@ def test_token_refresh_redis_lock_acquired(scheduler_db, test_user):
     mock_redis.set.return_value = True  # Lock acquired
 
     with (
-        patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
+        patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
         patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
     ):
         from app.jobs.core_jobs import _job_token_refresh
@@ -4039,7 +4039,7 @@ def test_token_refresh_redis_lock_not_acquired(scheduler_db, test_user):
     mock_redis.set.return_value = False  # Lock NOT acquired
 
     with (
-        patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
+        patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
         patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
     ):
         from app.jobs.core_jobs import _job_token_refresh
@@ -4060,7 +4060,7 @@ def test_token_refresh_redis_delete_exception(scheduler_db, test_user):
     mock_redis.delete.side_effect = Exception("Redis connection lost")
 
     with (
-        patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
+        patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh,
         patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
     ):
         from app.jobs.core_jobs import _job_token_refresh
@@ -4519,7 +4519,7 @@ def test_calendar_scan_timeout(scheduler_db, test_user):
 
     with (
         patch("app.database.SessionLocal", side_effect=_session_factory),
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch(
             "app.services.calendar_intelligence.scan_calendar_events",
             new_callable=AsyncMock,
@@ -4557,7 +4557,7 @@ def test_calendar_scan_generic_error(scheduler_db, test_user):
 
     with (
         patch("app.database.SessionLocal", side_effect=_session_factory),
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch(
             "app.services.calendar_intelligence.scan_calendar_events",
             new_callable=AsyncMock,
@@ -5076,7 +5076,7 @@ def test_calendar_scan_no_token(scheduler_db, test_user):
 
     with (
         patch("app.database.SessionLocal", side_effect=_session_factory),
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None),
     ):
         from app.jobs.email_jobs import _job_calendar_scan
 
@@ -5107,7 +5107,7 @@ def test_calendar_scan_success(scheduler_db, test_user):
 
     with (
         patch("app.database.SessionLocal", side_effect=_session_factory),
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="valid-token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="valid-token"),
         patch(
             "app.services.calendar_intelligence.scan_calendar_events",
             new_callable=AsyncMock,
