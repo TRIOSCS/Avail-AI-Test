@@ -2806,7 +2806,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
 function _renderDdActivity(reqId, data, panel) {
     const vendors = data.vendors || [];
     if (!vendors.length) {
-        panel.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--muted)">No activity yet</span><button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check for Replies</button></div>`;
+        panel.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--muted)">No activity yet</span><button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check for Replies</button><span style="font-size:10px;color:var(--muted);font-style:italic">Scans your inbox for vendor responses</span></div>`;
         return;
     }
     // Summary stats
@@ -2826,7 +2826,7 @@ function _renderDdActivity(reqId, data, panel) {
         <span><b>${totalReplies}</b> replies</span>
         <span><b>${totalCalls}</b> calls</span>
         <span><b>${totalNotes}</b> notes</span>
-        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check for Replies</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();checkForReplies(${reqId},this)" title="Scan your inbox for vendor email replies to RFQs sent for this requisition">&#x21bb; Check Inbox</button>
         <div class="fpills fpills-sm" style="margin-left:auto">
             <button class="fp fp-sm${af==='all'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='all';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">All</button>
             <button class="fp fp-sm${af==='email'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='email';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">✉ Email</button>
@@ -3818,7 +3818,7 @@ function _renderDdQuotes(reqId, data, panel) {
     // data is now an array of quotes (newest first from API)
     const quotes = Array.isArray(data) ? data : (data && data.id ? [data] : []);
     if (!quotes.length) {
-        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quotes yet — select offers in the Offers tab and click <b>Build Quote</b></span>';
+        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quotes yet — select offers in the <b>Offers</b> tab and click <b>Build Quote</b> to create a customer quote</span>';
         return;
     }
 
@@ -4899,7 +4899,9 @@ function _renderDdDetails(reqId, targetPanel) {
             // Left: core need
             html += '<div class="det-part-core">';
             html += `<div class="det-part-mpn mono">${esc(r.primary_mpn || '—')}</div>`;
-            if (r.brand) html += `<div class="det-part-brand">${esc(r.brand)}</div>`;
+            const displayBrand = r.brand || r.manufacturer;
+            if (displayBrand) html += '<div class="det-part-brand">' + esc(displayBrand) + '</div>';
+            if (r.manufacturer && r.manufacturer !== r.brand && r.brand) html += '<div style="font-size:11px;color:var(--muted)">Mfr: ' + esc(r.manufacturer) + '</div>';
             if (subs.length) {
                 html += `<div class="det-part-subs"><span class="det-k">Substitutes</span>`;
                 for (const s of subs) html += `<span class="det-sub mono">${esc(s)}</span>`;
