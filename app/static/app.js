@@ -5577,7 +5577,7 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
         result = result.filter(s => {
             if (f.vendor && !(s.vendor_name || '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
             if (f.source && !(s.source_type || '').toLowerCase().includes(f.source.toLowerCase())) return false;
-            if (f.condition && !(s.condition || '').toLowerCase().includes(f.condition.toLowerCase())) return false;
+            if (f.condition && !((s.condition || '') + ' ' + (s.date_code || '')).toLowerCase().includes(f.condition.toLowerCase())) return false;
             return true;
         });
     }
@@ -5586,8 +5586,8 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
             const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
             if (tf === 'exact') return !isSub;
             if (tf === 'sub') return isSub;
-            if (tf === 'available') return s.qty_available != null && s.qty_available > 0;
-            if (tf === 'na') return s.qty_available == null || s.qty_available <= 0;
+            if (tf === 'available') return !s.is_unavailable && s.qty_available != null && s.qty_available > 0;
+            if (tf === 'na') return s.is_unavailable || s.qty_available == null || s.qty_available <= 0;
             return true;
         });
     }
@@ -5759,6 +5759,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         ${hasFilters ? `<a onclick="event.stopPropagation();_ddClearFilters(${reqId})" style="font-size:10px;color:var(--blue);cursor:pointer">\u2715 Clear</a>` : ''}
+        <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;margin-left:auto;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
     </div>`;
 
     for (const [rId, group] of groups) {
@@ -5884,10 +5885,9 @@ function ddToggleSighting(reqId, sightingId) {
 
 function _updateDdBulkButton(reqId) {
     const btn = document.getElementById('bulkRfqBtn-' + reqId);
-    if (!btn) return;
+    const btn2 = document.getElementById('ddBulkRfqBtn-' + reqId);
     const sel = _ddSelectedSightings[reqId];
     const count = sel ? sel.size : 0;
-    btn.style.display = count > 0 ? '' : 'none';
     // Group selected sightings by normalized vendor name
     const data = _ddSightingsCache[reqId] || {};
     const vendorMap = {}; // normalized name -> { hasEmail: bool }
@@ -5904,10 +5904,13 @@ function _updateDdBulkButton(reqId) {
     const totalVendors = Object.keys(vendorMap).length;
     const withEmail = Object.values(vendorMap).filter(v => v.hasEmail).length;
     const vLabel = totalVendors === 1 ? 'vendor' : 'vendors';
-    if (withEmail < totalVendors) {
-        btn.textContent = `Prepare RFQ (${withEmail} of ${totalVendors} ${vLabel})`;
-    } else {
-        btn.textContent = `Prepare RFQ (${totalVendors} ${vLabel})`;
+    const label = withEmail < totalVendors
+        ? `Prepare RFQ (${withEmail} of ${totalVendors} ${vLabel})`
+        : `Prepare RFQ (${totalVendors} ${vLabel})`;
+    for (const b of [btn, btn2]) {
+        if (!b) continue;
+        b.style.display = count > 0 ? '' : 'none';
+        b.textContent = label;
     }
 }
 
@@ -6400,11 +6403,27 @@ function renderReqList() {
     _populateUserFilter();
     _updateToolbarStats();
     _applyColVisCSS();
-    // Restore previously open drill-downs
+    // Restore previously open drill-downs (CSS only to avoid content reload flash)
     if (_openDrillIds.length) {
         const stillPresent = _openDrillIds.filter(id => _reqListData.some(r => r.id === id));
         if (stillPresent.length) {
-            setTimeout(() => { stillPresent.forEach(id => toggleDrillDown(id)); }, 50);
+            setTimeout(() => {
+                stillPresent.forEach(id => {
+                    const drow = document.getElementById('d-' + id);
+                    const arrow = document.getElementById('a-' + id);
+                    if (drow && !drow.classList.contains('open')) {
+                        drow.classList.add('open');
+                        if (arrow) arrow.classList.add('open');
+                        // Reload sub-tab content into the panel
+                        const defaultTab = _ddActiveTab[id] || _ddDefaultTab(_currentMainView);
+                        _ddActiveTab[id] = defaultTab;
+                        drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === defaultTab));
+                        const panel = drow.querySelector('.dd-panel');
+                        if (panel) _loadDdSubTab(id, defaultTab, panel);
+                    }
+                });
+                _updateDrillToggleLabel();
+            }, 50);
         }
     }
 }

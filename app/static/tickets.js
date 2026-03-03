@@ -393,13 +393,13 @@ async function showTicketDetail(ticketId) {
             body.appendChild(collapsibleSection('Diagnosis', JSON.stringify(t.diagnosis, null, 2)));
         }
 
-        // Generated prompt section (collapsible)
-        if (t.generated_prompt) {
+        // Generated prompt section (collapsible — admin only)
+        if (t.generated_prompt && window.__isAdmin) {
             body.appendChild(collapsibleSection('Generated Prompt', t.generated_prompt));
         }
 
-        // Fix info
-        if (t.fix_branch || t.fix_pr_url) {
+        // Fix info (admin only)
+        if ((t.fix_branch || t.fix_pr_url) && window.__isAdmin) {
             var fixInfo = el('div', { style: 'margin-bottom:16px;' });
             fixInfo.appendChild(el('strong', { textContent: 'Fix Info' }));
             if (t.fix_branch) fixInfo.appendChild(el('div', { style: 'font-size:12px;', textContent: 'Branch: ' + t.fix_branch }));
@@ -421,8 +421,8 @@ async function showTicketDetail(ticketId) {
             ]));
         }
 
-        // Browser / screen info (from report_button submissions)
-        if (t.browser_info || t.screen_size || t.current_view || t.current_page) {
+        // Browser / screen info (from report_button submissions — admin only)
+        if ((t.browser_info || t.screen_size || t.current_view || t.current_page) && window.__isAdmin) {
             var ctxDiv = el('div', { style: 'margin-bottom:16px;font-size:11px;color:var(--muted);border:1px solid var(--border);border-radius:6px;padding:8px 12px;' });
             ctxDiv.appendChild(el('strong', { style: 'font-size:12px;color:var(--fg);display:block;margin-bottom:4px;', textContent: 'Browser Context' }));
             if (t.current_page) ctxDiv.appendChild(el('div', {}, ['URL: ' + t.current_page]));
@@ -432,8 +432,8 @@ async function showTicketDetail(ticketId) {
             body.appendChild(ctxDiv);
         }
 
-        // Console errors
-        if (t.console_errors) {
+        // Console errors (admin only)
+        if (t.console_errors && window.__isAdmin) {
             try {
                 var errs = JSON.parse(t.console_errors);
                 if (errs.length) {
@@ -444,8 +444,8 @@ async function showTicketDetail(ticketId) {
             }
         }
 
-        // AI prompt section with copy/regenerate
-        if (t.ai_prompt) {
+        // AI prompt section with copy/regenerate (admin only)
+        if (t.ai_prompt && window.__isAdmin) {
             var promptDiv = el('div', { style: 'margin-bottom:16px;' });
             var promptHeader = el('div', { style: 'display:flex;align-items:center;gap:8px;margin-bottom:4px;' });
             promptHeader.appendChild(el('strong', { style: 'font-size:12px;', textContent: 'AI Prompt' }));

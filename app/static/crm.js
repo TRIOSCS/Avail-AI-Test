@@ -123,8 +123,8 @@ let _custOwnerFilterId = null;  // null = all, number = specific user
 let _custSelectedIds = new Set();
 
 function setCustFilter(mode, btn) {
-    _custFilterMode = mode;
-    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === mode));
+    _custFilterMode = (_custFilterMode === mode) ? 'all' : mode;
+    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === _custFilterMode));
     renderCustomers();
 }
 
@@ -1800,7 +1800,7 @@ function renderOffers() {
     </div>`;
     const groupsHtml = crmOffers.map(group => {
         const targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(4) : 'no target';
-        const lastQ = group.last_quoted ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
+        const lastQ = group.last_quoted?.sell_price != null ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
         let visibleOffers = group.offers;
         if (_offerStatusFilter !== 'all') {
             visibleOffers = visibleOffers.filter(o => (o.status || 'active') === _offerStatusFilter);
@@ -1830,7 +1830,7 @@ function renderOffers() {
             }
             const fileHtml = nonImages.map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a><button onclick="event.stopPropagation();deleteOfferAttachment(${a.id})" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Remove attachment">&times;</button>`).join(' ');
 
-            const enteredStr = o.entered_by ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
+            const enteredStr = o.entered_by && o.entered_by !== '?' ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
             return `
             <tr class="${rowCls}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
@@ -2072,6 +2072,7 @@ async function updateOffer() {
         notes: _v('eoNotes').trim() || null,
         status: _v('eoStatus'),
     };
+    if (!data.vendor_name) { showToast('Vendor Name is required', 'error'); return; }
     try {
         await apiFetch('/api/offers/' + offerId, { method: 'PUT', body: data });
         closeModal('editOfferModal');
@@ -2166,7 +2167,7 @@ function renderQuote() {
     const statusActions = {
         draft: '<button class="btn btn-ghost" onclick="saveQuoteDraft()">Save Draft</button> <button class="btn btn-ghost" onclick="copyQuoteTable()">📋 Copy</button> <button class="btn btn-primary" onclick="sendQuoteEmail()">Send Quote</button>',
         sent: '<button class="btn btn-success" onclick="markQuoteResult(\'won\')">Mark Won</button> <button class="btn btn-danger" onclick="openLostModal()">Mark Lost</button> <button class="btn btn-ghost" onclick="reviseQuote()">Revise</button>',
-        won: '<p style="color:var(--green);font-weight:600">✓ Won — $' + Number(q.won_revenue||0).toLocaleString() + '</p>',
+        won: '<p style="color:var(--green);font-weight:600">✓ Won — $' + Number(q.won_revenue||0).toLocaleString() + '</p> <button class="btn btn-ghost" onclick="reviseQuote()">Re-quote</button> <button class="btn btn-ghost" onclick="copyQuoteTable()">📋 Copy</button> <button class="btn btn-ghost" onclick="saveQuoteDraft()">Edit</button>',
         lost: '<p style="color:var(--red);font-weight:600">✗ Lost — ' + esc(q.result_reason||'') + '</p> <button class="btn btn-ghost" onclick="reopenQuote(false)">Reopen Quote</button> <button class="btn btn-ghost" onclick="reopenQuote(true)">Reopen &amp; Revise</button>',
         revised: '<p style="color:var(--muted)">Superseded by Rev ' + (q.revision + 1) + '</p>',
     };
@@ -5787,7 +5788,7 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || safeGet('settings_active_tab', 'users'));
+    switchSettingsTab(panel || safeGet('settings_active_tab', 'profile'));
 }
 
 function switchSettingsTab(name, btn) {
@@ -5802,7 +5803,8 @@ function switchSettingsTab(name, btn) {
         if (tabBtn) tabBtn.classList.add('on');
     }
     // Lazy-load data
-    if (name === 'users') loadAdminUsers();
+    if (name === 'profile') loadSettingsProfile();
+    else if (name === 'users') loadAdminUsers();
     else if (name === 'health') loadSettingsHealth();
     else if (name === 'config') loadSettingsConfig();
     else if (name === 'sources') loadSettingsSources();
@@ -5815,6 +5817,53 @@ function switchSettingsTab(name, btn) {
 
 // Keep backward compat for dropdown links
 function showSettings(panel) { openSettingsTab(panel); }
+
+// ── My Profile tab ──────────────────────────────────────────────────
+function loadSettingsProfile() {
+    const container = document.getElementById('settings-profile');
+    if (!container) return;
+    container.textContent = '';
+
+    const card = document.createElement('div');
+    card.className = 'card s-card';
+    card.style.maxWidth = '500px';
+    card.style.padding = '24px';
+
+    const heading = document.createElement('h3');
+    heading.textContent = 'My Profile';
+    heading.style.marginBottom = '16px';
+    card.appendChild(heading);
+
+    const fields = [
+        { label: 'Name', value: window.__userName || window.userName || '—' },
+        { label: 'Email', value: window.__userEmail || window.userEmail || '—' },
+        { label: 'Role', value: (window.userRole || '—').charAt(0).toUpperCase() + (window.userRole || '—').slice(1) },
+    ];
+
+    fields.forEach(f => {
+        const row = document.createElement('div');
+        row.style.cssText = 'margin-bottom:12px;';
+
+        const lbl = document.createElement('label');
+        lbl.style.cssText = 'display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;';
+        lbl.textContent = f.label;
+        row.appendChild(lbl);
+
+        const val = document.createElement('div');
+        val.style.cssText = 'padding:8px 12px;background:var(--bg-alt);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--fg);';
+        val.textContent = f.value;
+        row.appendChild(val);
+
+        card.appendChild(row);
+    });
+
+    const note = document.createElement('p');
+    note.style.cssText = 'font-size:11px;color:var(--muted);margin-top:16px;';
+    note.textContent = 'Profile is managed via Azure AD.';
+    card.appendChild(note);
+
+    container.appendChild(card);
+}
 
 let _sourcesData = [];
 let _sourcesFilter = 'all';
@@ -8384,7 +8433,7 @@ Object.assign(window, {
     toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
-    showProactiveOffers, showSettings,
+    showProactiveOffers, showSettings, loadSettingsProfile,
     // Proactive UI functions called from HTML onclick
     switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
     dismissSingleMatch, toggleProactiveGroup, refreshProactiveMatches,
