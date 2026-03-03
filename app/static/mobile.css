@@ -517,6 +517,56 @@
     padding-top: calc(48px + env(safe-area-inset-top)) !important;
 }
 
+/* ── Redesigned mobile topbar ── */
+.m-topbar-spacer { flex: 1; }
+.m-topbar-btn {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    padding: 0;
+}
+.m-topbar-btn:active { background: var(--surface); }
+.m-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: var(--blue);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+/* ── Expandable search bar ── */
+.m-search-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--white);
+    border-bottom: 1px solid var(--border);
+}
+.m-search-bar.hidden { display: none; }
+.m-search-bar .sbox { flex: 1; min-height: 40px; font-size: 16px; }
+.m-search-cancel {
+    border: none;
+    background: none;
+    color: var(--blue);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 8px;
+    white-space: nowrap;
+    font-family: inherit;
+}
+
 /* ── Score bars for prospect cards ── */
 .m-score-bar {
     height: 6px;

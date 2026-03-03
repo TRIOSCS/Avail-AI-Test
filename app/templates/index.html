@@ -79,16 +79,18 @@
 
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
-    <button type="button" class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
-    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer">
-    <div class="search-wrap mobile-search-wrap">
-        <input type="text" class="sbox mobile-search" id="mobileMainSearch"
-               placeholder="Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
-        <button type="button" class="search-btn" id="mobileSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
-    </div>
-    <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
-        &#x1f514;<span id="mobileNotifBadge" class="notif-badge u-hidden" style="position:absolute;top:-4px;right:-4px">0</span>
+    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="mobileTabNav('reqs',document.querySelector('.m-bottomnav-tab[data-nav=reqs]'))" style="cursor:pointer">
+    <div class="m-topbar-spacer"></div>
+    <button type="button" class="m-topbar-btn m-search-toggle" id="mobileSearchToggle" onclick="_toggleMobileSearch()">
+        <svg viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
+    <button type="button" class="m-topbar-btn" onclick="_showMobileUserMenu()" id="mobileUserBtn">
+        <span class="m-avatar" id="mobileUserAvatar"></span>
+    </button>
+</div>
+<div class="m-search-bar hidden" id="mobileSearchBar">
+    <input type="text" class="sbox" id="mobileMainSearch" placeholder="Search customer, part, requirement…" aria-label="Search" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter'){triggerMainSearch();_toggleMobileSearch()}">
+    <button type="button" class="m-search-cancel" onclick="_toggleMobileSearch()">Cancel</button>
 </div>
 <!-- Mobile action toolbar — view pills + quick actions -->
 <div class="mobile-toolbar" id="mobileToolbar">
@@ -1375,6 +1377,23 @@
 
     </div><!-- end view-settings -->
     </div><!-- end main-scroll -->
+
+    <!-- Mobile Offers Feed -->
+    <div id="view-offers" class="u-hidden m-mobile-only" style="display:none">
+        <div class="m-tabs-scroll" id="offerFeedTabs">
+            <button class="m-tab-pill active" onclick="_setOfferFeedFilter('pending',this)">Pending</button>
+            <button class="m-tab-pill" onclick="_setOfferFeedFilter('all',this)">All</button>
+            <button class="m-tab-pill" onclick="_setOfferFeedFilter('accepted',this)">Accepted</button>
+        </div>
+        <div class="m-summary" id="offerFeedSummary"></div>
+        <div id="offerFeedList"></div>
+    </div>
+
+    <!-- Mobile Alerts Feed -->
+    <div id="view-alerts" class="u-hidden m-mobile-only" style="display:none">
+        <div id="alertsFeedList"></div>
+    </div>
+
 </main><!-- end main -->
 
 <!-- Mobile bottom navigation — 5 tabs, hidden on desktop via m-mobile-only -->
@@ -1382,18 +1401,21 @@
     <button type="button" class="m-bottomnav-tab active" data-nav="reqs" onclick="mobileTabNav('reqs',this)">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         <span>Reqs</span>
+        <span class="m-bottomnav-badge" id="bnBadgeReqs"></span>
     </button>
     <button type="button" class="m-bottomnav-tab" data-nav="customers" onclick="mobileTabNav('customers',this)">
         <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
         <span>Accounts</span>
     </button>
-    <button type="button" class="m-bottomnav-tab" data-nav="vendors" onclick="mobileTabNav('vendors',this)">
-        <svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg>
-        <span>Vendors</span>
+    <button type="button" class="m-bottomnav-tab" data-nav="offers" onclick="mobileTabNav('offers',this)">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Offers</span>
+        <span class="m-bottomnav-badge" id="bnBadgeOffers"></span>
     </button>
-    <button type="button" class="m-bottomnav-tab" data-nav="suggested" onclick="mobileTabNav('suggested',this)">
-        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
-        <span>Prospect</span>
+    <button type="button" class="m-bottomnav-tab" data-nav="alerts" onclick="mobileTabNav('alerts',this)">
+        <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span>Alerts</span>
+        <span class="m-bottomnav-badge" id="bnBadgeAlerts"></span>
     </button>
     <button type="button" class="m-bottomnav-tab" data-nav="more" onclick="toggleMobileMore(this)">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
@@ -1402,13 +1424,12 @@
 </nav>
 <!-- Mobile "More" popover -->
 <div class="m-more-popover m-mobile-only" id="mobileMorePopover">
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('vendors')"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg> Vendors</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('materials')"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Materials</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('buyplans')"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg> Buy Plans</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('proactive')"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> Proactive</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Command Center</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Dashboard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('scorecard')"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg> Scorecard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('contacts')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Contacts</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('prospecting')"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Prospecting</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('settings')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
 </div>
 
