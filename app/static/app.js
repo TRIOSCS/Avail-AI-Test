@@ -1978,7 +1978,13 @@ function _renderBreadcrumb() {
     if (!el) return;
     if (!_reqBreadcrumb) { el.style.display = 'none'; return; }
     el.style.display = '';
-    el.innerHTML = `<span style="font-size:12px;cursor:pointer;color:var(--blue)" onclick="_goBackFromBreadcrumb()">&#x2190; Back to ${esc(_reqBreadcrumb.label)}</span>`;
+    el.textContent = '';
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.style.cssText = 'font-size:12px;padding:4px 10px;display:flex;align-items:center;gap:4px;color:var(--blue)';
+    btn.onclick = _goBackFromBreadcrumb;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Back to ' + esc(_reqBreadcrumb.label);
+    el.appendChild(btn);
 }
 
 function _goBackFromBreadcrumb() {
