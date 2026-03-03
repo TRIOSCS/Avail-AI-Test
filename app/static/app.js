@@ -57,6 +57,22 @@ window.safeRemove = safeRemove;
     else if (mql.addListener) mql.addListener(handler);
 })();
 
+// ── DOM wait utility ─────────────────────────────────────────────────
+// Waits for an element to appear in the DOM (replaces brittle setTimeout chains)
+function waitForElement(selector, timeoutMs) {
+    if (timeoutMs === undefined) timeoutMs = 2000;
+    return new Promise(function(resolve) {
+        var el = document.querySelector(selector);
+        if (el) { resolve(el); return; }
+        var observer = new MutationObserver(function() {
+            var el = document.querySelector(selector);
+            if (el) { observer.disconnect(); resolve(el); }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+        setTimeout(function() { observer.disconnect(); resolve(null); }, timeoutMs);
+    });
+}
+
 // ── Responsive table utility (Phase 7) ────────────────────────────────
 // On mobile: converts rows to .m-card with .m-kv key-value pairs
 // On desktop: returns standard HTML table
@@ -2356,7 +2372,7 @@ async function loadBuyerDashboard(el) {
                 const o = allOffers[i];
                 const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
                 const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
-                html += '<div class="cc-row" onclick="sidebarNav(\'reqs\');setTimeout(()=>expandToSubTab(' + o.requisition_id + ',\'offers\'),400)">'
+                html += '<div class="cc-row" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));expandToSubTab(' + o.requisition_id + ',\'offers\')">'
                     + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
                     + '<div class="cc-row-body">'
                     + '<span class="cc-row-name">' + esc(o.vendor_name) + '</span>'
@@ -2700,10 +2716,15 @@ async function expandToSubTab(reqId, tabName) {
         _openMobileDrillDown(reqId);
         return;
     }
-    const drow = document.getElementById('d-' + reqId);
-    if (!drow) return;
+    let drow = document.getElementById('d-' + reqId);
+    if (!drow) {
+        drow = await waitForElement('#d-' + reqId, 2000);
+        if (!drow) return;
+    }
     if (!drow.classList.contains('open')) {
         await toggleDrillDown(reqId);
+        // Wait for drill-down animation to complete
+        await new Promise(function(r) { setTimeout(r, 350); });
     }
     _switchDdTab(reqId, tabName);
 }
@@ -11360,19 +11381,19 @@ function _notifClickAction(n) {
     const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
     // Offer pending review → navigate to RFQ view then open offers tab
     if (n.type === 'offer_pending_review' && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)},300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'offers')`;
     // Buy plan notifications → open buy plan detail V3
     if (n.type && n.type.startsWith('buyplan_') && n.buy_plan_id)
         return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetailV3(${n.buy_plan_id}),300)`;
     // Quote won/lost → navigate to RFQ view then open quotes tab
     if ((n.type === 'quote_won' || n.type === 'quote_lost') && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'quotes'),400)},300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'quotes')`;
     // Vendor-related → open vendor popup
     if (n.vendor_card_id)
         return close + `openVendorPopup(${n.vendor_card_id})`;
     // Requisition-related → navigate to RFQ view then expand drill-down
     if (n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>toggleDrillDown(${n.requisition_id}),300)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'sourcing')`;
     // Company-related → go to company
     if (n.company_id)
         return close + `goToCompany(${n.company_id})`;
