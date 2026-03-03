@@ -17,14 +17,11 @@ Depends on: dependencies, models, config
 
 import secrets
 from datetime import datetime, timedelta, timezone
-<<<<<<< HEAD
 from urllib.parse import urlencode
-=======
 import base64
 import hashlib
 import hmac
 import os
->>>>>>> 76421ba32ab12e53d30b188d5e434178afbcf23a
 
 import httpx
 from fastapi import APIRouter, Depends, Request, Form
