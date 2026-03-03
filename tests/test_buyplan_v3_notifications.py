@@ -322,7 +322,7 @@ class TestTeamsHelpers:
     async def test_teams_channel(self):
         from app.services.buyplan_v3_notifications import _teams_channel
 
-        with patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock) as mock:
+        with patch("app.services.teams_notifications.post_teams_channel", new_callable=AsyncMock) as mock:
             await _teams_channel("Hello teams")
         mock.assert_awaited_once_with("Hello teams")
 
@@ -331,7 +331,7 @@ class TestTeamsHelpers:
         from app.services.buyplan_v3_notifications import _teams_dm
 
         user = _make_user(db_session)
-        with patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock) as mock:
+        with patch("app.services.teams_notifications.send_teams_dm", new_callable=AsyncMock) as mock:
             await _teams_dm(user, "DM message", db_session)
         mock.assert_awaited_once_with(user, "DM message", db_session)
 
