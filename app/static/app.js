@@ -1219,6 +1219,11 @@ function sortContactList(col) {
     renderContacts((document.getElementById('contactFilter')?.value || '').trim());
 }
 
+function _sanitizeContactField(val) {
+    if (!val) return '';
+    return val.replace(/^[!:;\-.\s]+/, '').trim();
+}
+
 function renderContacts(q) {
     const list = document.getElementById('contactList');
     if (!list) return;
@@ -1293,6 +1298,8 @@ function renderContacts(q) {
         </tr></thead><tbody>`;
 
     for (const c of contacts) {
+        const cleanName = _sanitizeContactField(c.full_name) || 'Unknown';
+        const cleanTitle = _sanitizeContactField(c.title);
         const days = daysSince(c.last_interaction_at || c.first_seen_at);
         const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '—';
         const verifiedBadge = c.is_verified ? ' <span style="color:var(--green);font-size:9px">✓</span>' : '';
@@ -1314,7 +1321,7 @@ function renderContacts(q) {
             <td>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span class="health-dot health-dot-${healthColor}"></span>
-                    <span style="font-weight:600">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
+                    <span style="font-weight:600">${esc(cleanName)}${verifiedBadge}</span>
                 </div>
             </td>
             <td>${isCustomer && c.company_id
@@ -1324,7 +1331,7 @@ function renderContacts(q) {
                     : esc(c.company_name || c.vendor_name || '')}</td>
             <td>${typeBadge}</td>
             <td>${statusDropdown}</td>
-            <td class="muted-cell">${esc(c.title || '—')}</td>
+            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(cleanTitle)}">${esc(cleanTitle.length > 50 ? cleanTitle.slice(0, 50) + '…' : cleanTitle) || '—'}</td>
             <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
             <td>${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.phone)+'</a>' : '<span class="muted-cell">—</span>'}</td>
             <td>${c.interaction_count || 0}</td>
