@@ -2734,6 +2734,8 @@ const _ddActiveTab = {};  // reqId → current sub-tab name
 function _ddSubTabs(mainView) {
     if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'files'];
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'files'];
+    // Mobile: include buy plans and activity tabs for full drill-down
+    if (window.__isMobile) return ['parts', 'offers', 'quotes', 'buyplans', 'activity'];
     return ['parts', 'offers', 'quotes', 'files']; // rfq tab
 }
 
@@ -2742,7 +2744,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', files:'Files'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files'};
     return map[tab] || tab;
 }
 
@@ -2843,6 +2845,22 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
+            case 'buyplans': {
+                // Buy plans are linked via quotes — fetch quotes first, then buy plans per quote
+                const quotes = _ddTabCache[reqId]?.quotes || await apiFetch(`/api/requisitions/${reqId}/quotes`);
+                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                _ddTabCache[reqId].quotes = quotes;
+                const qArr = Array.isArray(quotes) ? quotes : [];
+                const plans = [];
+                for (const q of qArr) {
+                    try {
+                        const bp = await apiFetch(`/api/buy-plans/for-quote/${q.id}`);
+                        if (bp) plans.push(bp);
+                    } catch(_) { /* no buy plan for this quote */ }
+                }
+                data = plans;
+                break;
+            }
             case 'files':
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
@@ -2855,6 +2873,24 @@ async function _loadDdSubTab(reqId, tabName, panel) {
 }
 
 function _renderDdTab(reqId, tabName, data, panel) {
+    // Mobile: use card-based renderers for touch-friendly display
+    if (window.__isMobile) {
+        switch (tabName) {
+            case 'details': _renderDdDetails(reqId, panel); break;
+            case 'parts': _renderMobilePartsList(_ddReqCache[reqId] || [], reqId, panel); break;
+            case 'sightings':
+                if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
+                _renderSourcingDrillDown(reqId, panel);
+                break;
+            case 'activity': _renderMobileActivityList(reqId, data, panel); break;
+            case 'offers': _renderMobileOffersList(data, reqId, panel); break;
+            case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
+            case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
+            case 'files': _renderDdFiles(reqId, data, panel); break;
+            default: panel.innerHTML = '';
+        }
+        return;
+    }
     switch (tabName) {
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts': _renderDrillDownTable(reqId, panel); break;
@@ -4932,6 +4968,312 @@ async function _mobileDdSwitchTab(reqId, tabName, btn) {
         panel.innerHTML = '<span style="font-size:12px;color:var(--muted)">Loading\u2026</span>';
         await _loadDdSubTab(reqId, tabName, panel);
     }
+}
+
+// ── Mobile drill-down card renderers ──────────────────────────────────
+// Card-based views optimized for touch on small screens.
+
+function _renderMobilePartsList(parts, reqId, panel) {
+    const reqs = Array.isArray(parts) ? parts : [];
+    if (!reqs.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No parts on this requisition</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + reqs.length + ' Part' + (reqs.length !== 1 ? 's' : '') + '</div>';
+    for (const r of reqs) {
+        const bestPrice = r.best_offer_price != null
+            ? '$' + parseFloat(r.best_offer_price).toFixed(4)
+            : (r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) + ' target' : '');
+        const sourceCount = r.offer_count || r.sighting_count || 0;
+        const subs = (r.substitutes || []).filter(Boolean);
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px">';
+        html += '<div class="m-card-header">';
+        html += '<span class="mono" style="font-weight:700;font-size:14px">' + esc(r.primary_mpn || '---') + '</span>';
+        html += _reqBadge(r);
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Qty Needed</span>';
+        html += '<span style="font-size:13px;font-weight:600">' + (r.target_qty ? Number(r.target_qty).toLocaleString() : '---') + '</span>';
+        html += '</div>';
+        if (bestPrice) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Best Price</span>';
+            html += '<span style="font-size:13px;font-weight:600;color:var(--teal)">' + esc(bestPrice) + '</span>';
+            html += '</div>';
+        }
+        if (sourceCount > 0) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Sources</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + sourceCount + '</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+        if (r.manufacturer || r.brand) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Mfr: ' + esc(r.manufacturer || r.brand) + '</div>';
+        }
+        if (subs.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">Subs: ' + subs.map(s => '<span class="mono" style="color:var(--blue)">' + esc(s) + '</span>').join(', ') + '</div>';
+        }
+        if (r.condition && r.condition !== 'Any') {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:2px">Condition: ' + esc(r.condition) + '</div>';
+        }
+        if (r.notes) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px;border-top:1px solid var(--border);padding-top:4px">' + esc(r.notes) + '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileOffersList(data, reqId, panel) {
+    const groups = data?.groups || data || [];
+    let totalOffers = 0;
+    if (Array.isArray(groups)) {
+        for (const g of groups) totalOffers += (g.offers || []).length;
+    }
+    if (!totalOffers) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No offers yet</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + totalOffers + ' Offer' + (totalOffers !== 1 ? 's' : '') + '</div>';
+    const grpArr = Array.isArray(groups) ? groups : [];
+    for (const g of grpArr) {
+        const offers = (g.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        if (!offers.length) continue;
+        const reqMpn = g.mpn || g.label || '';
+        html += '<div style="margin-bottom:12px">';
+        html += '<div style="font-size:12px;font-weight:600;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">';
+        html += '<span class="mono">' + esc(reqMpn) + '</span>';
+        html += '<span style="font-size:11px;color:var(--muted)">need ' + (g.target_qty || 0).toLocaleString() + '</span>';
+        html += '</div>';
+        for (const o of offers) {
+            const oid = o.id || o.offer_id;
+            const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '---';
+            const isPending = o.status === 'pending_review';
+            const borderColor = isPending ? 'var(--amber)' : 'var(--border)';
+            let priceColor = 'var(--teal)';
+            if (g.target_price != null && o.unit_price != null) {
+                const pctD = ((o.unit_price - g.target_price) / g.target_price) * 100;
+                priceColor = pctD <= 0 ? 'var(--green)' : pctD <= 15 ? 'var(--amber)' : 'var(--red)';
+            }
+            html += '<div class="m-card" style="cursor:default;margin-bottom:6px;border-left:3px solid ' + borderColor + '">';
+            html += '<div class="m-card-header">';
+            html += '<span style="font-weight:600;font-size:13px">' + esc(o.vendor_name || 'Unknown') + '</span>';
+            if (isPending) html += '<span class="m-chip m-chip-amber" style="font-size:10px">DRAFT</span>';
+            html += '</div>';
+            html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Price</span>';
+            html += '<span style="font-size:14px;font-weight:700;color:' + priceColor + '">' + price + '</span>';
+            html += '</div>';
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Qty</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + (o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '---')) + '</span>';
+            html += '</div>';
+            if (o.lead_time) {
+                html += '<div style="display:flex;flex-direction:column;gap:2px">';
+                html += '<span style="font-size:11px;color:var(--muted)">Lead</span>';
+                html += '<span style="font-size:13px">' + esc(o.lead_time) + '</span>';
+                html += '</div>';
+            }
+            html += '</div>';
+            if (o.condition || o.date_code) {
+                html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+                if (o.condition) html += 'Cond: ' + esc(o.condition);
+                if (o.condition && o.date_code) html += ' | ';
+                if (o.date_code) html += 'DC: ' + esc(o.date_code);
+                html += '</div>';
+            }
+            // Action chips
+            if (isPending) {
+                html += '<div style="display:flex;gap:8px;margin-top:8px">';
+                html += '<button class="m-chip m-chip-green" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddApproveOffer(' + reqId + ',' + oid + ')">Accept</button>';
+                html += '<button class="m-chip m-chip-red" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddRejectOffer(' + reqId + ',' + oid + ')">Reject</button>';
+                html += '</div>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileQuotesList(data, reqId, panel) {
+    const quotes = Array.isArray(data) ? data : (data && data.id ? [data] : []);
+    if (!quotes.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No quotes yet</div>';
+        return;
+    }
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + quotes.length + ' Quote' + (quotes.length !== 1 ? 's' : '') + '</div>';
+    const statusColors = {draft:'var(--muted)',sent:'var(--blue)',revised:'var(--amber)',won:'var(--green)',lost:'var(--red)'};
+    const statusLabels = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+    for (const q of quotes) {
+        const lines = q.line_items || [];
+        const subtotal = q.subtotal || lines.reduce((s, l) => s + ((l.sell_price || l.unit_sell || 0) * (l.qty || 0)), 0);
+        const marginPct = q.total_margin_pct != null ? q.total_margin_pct : 0;
+        const sc = statusColors[q.status] || 'var(--muted)';
+        const sl = statusLabels[q.status] || q.status || 'Draft';
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + sc + '">';
+        html += '<div class="m-card-header">';
+        html += '<span class="mono" style="font-weight:700;font-size:13px">' + esc(q.quote_number || 'Q-' + q.id) + '</span>';
+        html += '<span class="m-chip" style="background:' + sc + '20;color:' + sc + ';font-size:10px">' + sl + '</span>';
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Customer</span>';
+        html += '<span style="font-size:13px;font-weight:600">' + esc(q.customer_name || '---') + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Total</span>';
+        html += '<span style="font-size:14px;font-weight:700;color:var(--teal)">$' + Number(subtotal).toLocaleString(undefined, {minimumFractionDigits: 2}) + '</span>';
+        html += '</div>';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Margin</span>';
+        html += '<span style="font-size:13px;font-weight:600;color:' + (marginPct >= 20 ? 'var(--green)' : marginPct >= 10 ? 'var(--amber)' : 'var(--red)') + '">' + Number(marginPct).toFixed(1) + '%</span>';
+        html += '</div>';
+        html += '</div>';
+        html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+        html += lines.length + ' line' + (lines.length !== 1 ? 's' : '');
+        if (q.revision && q.revision > 1) html += ' | Rev ' + q.revision;
+        if (q.created_at) html += ' | ' + fmtRelative(q.created_at);
+        html += '</div>';
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileBuyPlansList(data, reqId, panel) {
+    const plans = Array.isArray(data) ? data : [];
+    if (!plans.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No buy plans yet</div>';
+        return;
+    }
+    const statusColors = {draft:'var(--muted)',pending:'var(--amber)',approved:'var(--green)',po_entered:'var(--blue)',po_confirmed:'var(--blue)',completed:'var(--green)',rejected:'var(--red)',cancelled:'var(--red)'};
+    const statusLabels = {draft:'Draft',pending:'Pending',approved:'Approved',po_entered:'PO Entered',po_confirmed:'PO Confirmed',completed:'Completed',rejected:'Rejected',cancelled:'Cancelled'};
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + plans.length + ' Buy Plan' + (plans.length !== 1 ? 's' : '') + '</div>';
+    for (const bp of plans) {
+        const sc = statusColors[bp.status] || 'var(--muted)';
+        const sl = statusLabels[bp.status] || bp.status || 'Draft';
+        const lines = bp.lines || bp.line_items || [];
+        const total = bp.total_cost || lines.reduce((s, l) => s + ((l.unit_price || l.buy_price || 0) * (l.qty || 0)), 0);
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + sc + '">';
+        html += '<div class="m-card-header">';
+        html += '<span style="font-weight:600;font-size:13px">' + esc(bp.vendor_name || bp.primary_vendor || 'Vendor') + '</span>';
+        html += '<span class="m-chip" style="background:' + sc + '20;color:' + sc + ';font-size:10px">' + sl + '</span>';
+        html += '</div>';
+        html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
+        html += '<div style="display:flex;flex-direction:column;gap:2px">';
+        html += '<span style="font-size:11px;color:var(--muted)">Total Cost</span>';
+        html += '<span style="font-size:14px;font-weight:700;color:var(--teal)">$' + Number(total).toLocaleString(undefined, {minimumFractionDigits: 2}) + '</span>';
+        html += '</div>';
+        if (lines.length) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">Lines</span>';
+            html += '<span style="font-size:13px;font-weight:600">' + lines.length + '</span>';
+            html += '</div>';
+        }
+        if (bp.po_number) {
+            html += '<div style="display:flex;flex-direction:column;gap:2px">';
+            html += '<span style="font-size:11px;color:var(--muted)">PO #</span>';
+            html += '<span class="mono" style="font-size:13px;font-weight:600">' + esc(bp.po_number) + '</span>';
+            html += '</div>';
+        }
+        html += '</div>';
+        if (bp.created_at || bp.submitted_by_name) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+            if (bp.submitted_by_name) html += 'By ' + esc(bp.submitted_by_name);
+            if (bp.submitted_by_name && bp.created_at) html += ' | ';
+            if (bp.created_at) html += fmtRelative(bp.created_at);
+            html += '</div>';
+        }
+        // Submit button for draft plans
+        if (bp.status === 'draft' || bp.status === 'pending') {
+            html += '<div style="margin-top:8px">';
+            if (bp.status === 'draft') {
+                html += '<button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px;width:100%" onclick="event.stopPropagation();if(typeof openBuyPlanDetailV3===\'function\')openBuyPlanDetailV3(' + bp.id + ')">Open Detail</button>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
+}
+
+function _renderMobileActivityList(reqId, data, panel) {
+    const vendors = (data && data.vendors) ? data.vendors : [];
+    if (!vendors.length) {
+        panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">'
+            + 'No activity yet'
+            + '<div style="margin-top:8px"><button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px" '
+            + 'onclick="event.stopPropagation();checkForReplies(' + reqId + ',this)">Check for Replies</button></div>'
+            + '</div>';
+        return;
+    }
+    // Summary counts
+    let totalContacts = 0, totalReplies = 0;
+    for (const v of vendors) {
+        totalContacts += (v.contacts || []).length;
+        totalReplies += (v.responses || []).length;
+    }
+    let html = '<div style="display:flex;gap:12px;align-items:center;margin-bottom:8px;font-size:12px">';
+    html += '<span><b>' + totalContacts + '</b> RFQs sent</span>';
+    html += '<span><b>' + totalReplies + '</b> replies</span>';
+    html += '<button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:11px;padding:4px 10px;margin-left:auto" onclick="event.stopPropagation();checkForReplies(' + reqId + ',this)">Check Inbox</button>';
+    html += '</div>';
+    // Timeline cards per vendor
+    for (const v of vendors) {
+        const contacts = v.contacts || [];
+        const responses = v.responses || [];
+        const activities = v.activities || [];
+        const hasReply = responses.length > 0;
+        html += '<div class="m-card" style="cursor:default;margin-bottom:8px;border-left:3px solid ' + (hasReply ? 'var(--green)' : 'var(--amber)') + '">';
+        html += '<div class="m-card-header">';
+        html += '<span style="font-weight:600;font-size:13px">' + esc(v.vendor_name || 'Vendor') + '</span>';
+        if (hasReply) {
+            html += '<span class="m-chip m-chip-green" style="font-size:10px">' + responses.length + ' repl' + (responses.length !== 1 ? 'ies' : 'y') + '</span>';
+        } else {
+            html += '<span class="m-chip m-chip-amber" style="font-size:10px">Awaiting</span>';
+        }
+        html += '</div>';
+        // Contact info
+        if (contacts.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
+            html += contacts.map(c => esc(c.contact_name || c.email || '')).filter(Boolean).join(', ');
+            html += '</div>';
+        }
+        // Recent activities
+        const allEvents = [];
+        for (const c of contacts) {
+            allEvents.push({type: 'rfq', date: c.sent_at || c.created_at, label: 'RFQ sent to ' + esc(c.contact_name || c.email || 'contact')});
+        }
+        for (const r of responses) {
+            allEvents.push({type: 'reply', date: r.received_at || r.created_at, label: 'Reply received' + (r.subject ? ': ' + esc(r.subject) : '')});
+        }
+        for (const a of activities) {
+            const ch = a.channel === 'phone' ? 'Call' : a.activity_type === 'note' ? 'Note' : 'Email';
+            allEvents.push({type: 'activity', date: a.created_at, label: ch + (a.summary ? ': ' + esc(a.summary) : '')});
+        }
+        allEvents.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+        if (allEvents.length) {
+            html += '<div style="margin-top:6px;border-top:1px solid var(--border);padding-top:6px">';
+            const show = allEvents.slice(0, 3);
+            for (const ev of show) {
+                const dotColor = ev.type === 'reply' ? 'var(--green)' : ev.type === 'rfq' ? 'var(--blue)' : 'var(--muted)';
+                html += '<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:4px;font-size:11px">';
+                html += '<span style="color:' + dotColor + ';flex-shrink:0;margin-top:2px">&#9679;</span>';
+                html += '<span style="flex:1;color:var(--text)">' + ev.label + '</span>';
+                html += '<span style="color:var(--muted);flex-shrink:0;font-size:10px">' + (ev.date ? fmtRelative(ev.date) : '') + '</span>';
+                html += '</div>';
+            }
+            if (allEvents.length > 3) {
+                html += '<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">+' + (allEvents.length - 3) + ' more events</div>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    panel.innerHTML = html;
 }
 
 function _renderDdDetails(reqId, targetPanel) {
@@ -12124,6 +12466,8 @@ Object.assign(window, {
     // Mobile navigation & drill-down
     mobileTabNav, mobileMoreNav, toggleMobileMore, mobileBack,
     _openMobileDrillDown, _closeMobileDrillDown, _mobileDdSwitchTab,
+    _renderMobilePartsList, _renderMobileOffersList, _renderMobileQuotesList,
+    _renderMobileBuyPlansList, _renderMobileActivityList,
     // Mobile top bar — search toggle & user menu
     _toggleMobileSearch, _showMobileUserMenu,
     // Mobile req list — card redesign
