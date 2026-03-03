@@ -972,9 +972,11 @@ from .routers.apollo_sync import router as apollo_sync_router
 
 app.include_router(apollo_sync_router)
 
-from .routers.explorium import router as explorium_router
-
-app.include_router(explorium_router)
+try:
+    from .routers.explorium import router as explorium_router
+    app.include_router(explorium_router)
+except ModuleNotFoundError:
+    pass  # explorium router not in this branch / optional
 
 from .routers.nc_admin import router as nc_admin_router
 

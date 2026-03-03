@@ -12,9 +12,3 @@ services:
     ports:
       - "8080:80"
       - "8443:443"
- 
-  # Expose Postgres on host for local development (host:5432 -> container:5432)
-  db:
-    ports:
-      - "5432:5432"
-

@@ -16,9 +16,13 @@ Depends on: dependencies, models, config
 """
 
 from datetime import datetime, timedelta, timezone
+import base64
+import hashlib
+import hmac
+import os
 
 import httpx
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -169,8 +173,84 @@ async def logout(request: Request):
     return JSONResponse({"ok": True})
 
 
-# Password login and DEFAULT_USER_EMAIL disabled for server push; re-enable when needed.
-# @router.post("/auth/login") + password_login + default-email shortcut were here.
+def _password_login_enabled() -> bool:
+    """Return True when local/test password login should be allowed.
+
+    Enabled when TESTING=1 or ENABLE_PASSWORD_LOGIN=true in env. Never rely
+    on this for production auth.
+    """
+    if os.getenv("TESTING") == "1":
+        return True
+    return os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
+
+
+def _verify_password(stored: str, password: str) -> bool:
+    """Verify PBKDF2-HMAC-SHA256 password hash stored as 'salt_b64$hash_b64'."""
+    try:
+        salt_b64, hash_b64 = stored.split("$", 1)
+        salt = base64.b64decode(salt_b64)
+        expected = base64.b64decode(hash_b64)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+        return hmac.compare_digest(dk, expected)
+    except Exception as e:  # pragma: no cover - defensive
+        logger.error(f"Password verify failed: {e}")
+        return False
+
+
+@router.post("/auth/login")
+async def password_login(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    """Local/test-only password login using DEFAULT_USER_* users.
+
+    Guarded by TESTING=1 or ENABLE_PASSWORD_LOGIN=true.
+    """
+    if not _password_login_enabled():
+        return JSONResponse({"error": "Password login disabled"}, status_code=403)
+
+    email_norm = email.strip().lower()
+    user = db.query(User).filter_by(email=email_norm).first()
+    if not user or not user.password_hash:
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    if not _verify_password(user.password_hash, password):
+        return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+    request.session["user_id"] = user.id
+    return JSONResponse(
+        {
+            "ok": True,
+            "user_email": user.email,
+            "user_role": user.role or "buyer",
+        }
+    )
+
+
+@router.get("/auth/login-form", response_class=HTMLResponse)
+async def password_login_form():
+    """Simple HTML form for local/test password login."""
+    if not _password_login_enabled():
+        return RedirectResponse("/auth/login")
+    return HTMLResponse(
+        content="""
+<!doctype html>
+<html>
+  <head><title>Local Login</title></head>
+  <body>
+    <h1>Local Password Login</h1>
+    <form method="post" action="/auth/login">
+      <label>Email: <input type="email" name="email" required></label><br>
+      <label>Password: <input type="password" name="password" required></label><br>
+      <button type="submit">Login</button>
+    </form>
+  </body>
+</html>
+        """,
+        media_type="text/html",
+    )
 
 
 @router.get("/auth/status")
