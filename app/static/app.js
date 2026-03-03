@@ -4979,7 +4979,7 @@ function _renderDdDetails(reqId, targetPanel) {
 
 function _reqBadge(r) {
     // Full pipeline: NO RFQ → SEARCHING → RFQ SENT → OFFERS (count) → QUOTED
-    if (r.offer_count > 0) return `<span class="req-badge req-badge-offers" title="${r.offer_count} vendor offer${r.offer_count !== 1 ? 's' : ''} received"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6-2 6 2v5a6 6 0 0 1-6 5 6 6 0 0 1-6-5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>OFFERS (${r.offer_count})</span>`;
+    if (r.offer_count > 0) return `<span class="req-badge req-badge-offers" style="cursor:pointer" title="${r.offer_count} vendor offer${r.offer_count !== 1 ? 's' : ''} received — click to view" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6-2 6 2v5a6 6 0 0 1-6 5 6 6 0 0 1-6-5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>OFFERS (${r.offer_count})</span>`;
     if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching" title="RFQ sent — vendor activity within 48h"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>RFQ SENT</span>';
     if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled" title="RFQ sent but no vendor activity in 48+ hours"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10.5" y2="10"/></svg>STALLED</span>';
     if (r.sighting_count > 0) return `<span class="req-badge req-badge-searching" title="${r.sighting_count} vendor${r.sighting_count !== 1 ? 's' : ''} found — review sightings and send RFQ"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>SOURCING (${r.sighting_count})</span>`;
@@ -5569,6 +5569,37 @@ function _ddFilterSightings(reqId, field, value) {
         if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
     }, 200);
 }
+function _ddShowVendorSuggestions(reqId, query) {
+    const dd = document.getElementById('ddVendorAc-' + reqId);
+    if (!dd) return;
+    if (query.length < 1) { dd.classList.remove('open'); return; }
+    const data = _ddSightingsCache[reqId] || {};
+    const seen = new Set();
+    const vendors = [];
+    for (const [, group] of Object.entries(data)) {
+        for (const s of (group.sightings || [])) {
+            const vn = (s.vendor_name || '').trim();
+            if (!vn) continue;
+            const key = vn.toLowerCase();
+            if (seen.has(key)) continue;
+            if (!key.includes(query.toLowerCase())) continue;
+            seen.add(key);
+            vendors.push(vn);
+            if (vendors.length >= 15) break;
+        }
+        if (vendors.length >= 15) break;
+    }
+    if (!vendors.length) { dd.classList.remove('open'); return; }
+    dd.innerHTML = vendors.map(v => `<div class="ac-item" onmousedown="_ddSelectVendor(${reqId},'${esc(v.replace(/'/g, "\\'"))}')">${esc(v)}</div>`).join('');
+    dd.classList.add('open');
+}
+function _ddSelectVendor(reqId, vendor) {
+    const inp = document.querySelector('[data-sfilter="' + reqId + '-vendor"]');
+    if (inp) inp.value = vendor;
+    _ddFilterSightings(reqId, 'vendor', vendor);
+    const dd = document.getElementById('ddVendorAc-' + reqId);
+    if (dd) dd.classList.remove('open');
+}
 function _ddApplyFilters(sightings, reqId, groupLabel) {
     const f = _ddSightingFilters[reqId];
     const tf = _ddTypeFilter[reqId] || 'all';
@@ -5586,7 +5617,7 @@ function _ddApplyFilters(sightings, reqId, groupLabel) {
             const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
             if (tf === 'exact') return !isSub;
             if (tf === 'sub') return isSub;
-            if (tf === 'available') return !s.is_unavailable && s.qty_available != null && s.qty_available > 0;
+            if (tf === 'available') return !s.is_unavailable;
             if (tf === 'na') return s.is_unavailable || s.qty_available == null || s.qty_available <= 0;
             return true;
         });
@@ -5755,7 +5786,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     // Filter bar
     let html = `<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
         <div class="src-type-pills">${_tfPill('all','All')}${_tfPill('exact','Exact')}${_tfPill('sub','Substitute')}${_tfPill('available','Available')}${_tfPill('na','N/A')}</div>
-        <input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)">
+        <span style="position:relative"><input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value);_ddShowVendorSuggestions(${reqId},this.value)" onblur="setTimeout(()=>{const d=document.getElementById('ddVendorAc-${reqId}');if(d)d.classList.remove('open')},150)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)"><div id="ddVendorAc-${reqId}" class="ac-dropdown"></div></span>
         <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         ${hasFilters ? `<a onclick="event.stopPropagation();_ddClearFilters(${reqId})" style="font-size:10px;color:var(--blue);cursor:pointer">\u2715 Clear</a>` : ''}
@@ -6583,8 +6614,10 @@ function _renderReqRow(r) {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
         const wonVal = r.quote_won_value ? ` <span style="font-size:10px;color:var(--green)">\u00b7 ${fmtDollars(r.quote_won_value)}</span>` : '';
         const pmCnt = r.proactive_match_count || 0;
-        const matchBadge = pmCnt > 0
-            ? `<span style="color:var(--green);font-weight:600">${pmCnt}</span>`
+        const offerCnt = r.offer_count || 0;
+        const matchVal = offerCnt > 0 ? offerCnt : pmCnt;
+        const matchBadge = matchVal > 0
+            ? `<span style="color:var(--green);font-weight:600">${matchVal}</span>`
             : '<span style="color:var(--muted)">\u2014</span>';
         dataCells = `
             <td class="mono">${total}</td>
@@ -7066,8 +7099,6 @@ function setMainView(view, btn) {
         const cont = document.getElementById(id);
         if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     });
-    _activeFilters = {};
-    _myReqsOnly = false;
     _toolbarQuickFilter = '';
     const maBtn = document.getElementById('myAccountsBtn');
     if (maBtn) maBtn.classList.remove('on');
@@ -7390,7 +7421,8 @@ async function createRequisition() {
         const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
         const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         await loadRequisitions();
-        toggleDrillDown(data.id);
+        expandToSubTab(data.id, 'parts');
+        showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
@@ -9972,7 +10004,7 @@ function filterVendorList() {
         </tr></thead><tbody>`;
 
     for (const c of filtered) {
-        const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
+        const score = c.vendor_score != null ? Math.round(c.vendor_score) : null;
         const tier = vendorTier(c);
         const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
         const lastAgo = c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—';
@@ -9984,7 +10016,7 @@ function filterVendorList() {
                 ${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px;font-weight:600">BLOCKED</span>' : ''}
             </td>
             <td><span class="tier-badge tier-badge-${tier}">${tier}</span></td>
-            <td><span style="font-weight:600;font-family:'JetBrains Mono',monospace">${score}</span></td>
+            <td>${score != null ? '<span style="font-weight:600;font-family:\'JetBrains Mono\',monospace">' + score + '</span>' : '<span style="color:var(--muted);font-size:10px">New</span>'}</td>
             <td>${responseRate}</td>
             <td>${c.total_pos || 0}</td>
             <td>${c.sighting_count || 0}</td>
@@ -10088,15 +10120,14 @@ function _renderVendorDrawerOverview(vendorId) {
     if (title) title.textContent = v.display_name;
     const mVTitle = document.getElementById('vendorDrawerMobileTitle');
     if (mVTitle) mVTitle.textContent = v.display_name;
-    const score = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+    const score = v.vendor_score != null ? Math.round(v.vendor_score) : null;
     const tier = vendorTier(v);
 
     let html = `<div class="drawer-section">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
             <div style="display:flex;align-items:center;gap:8px">
                 <span class="tier-badge tier-badge-${tier}">${tier}</span>
-                <span style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace">${score}</span>
-                <span style="font-size:12px;color:var(--muted)">score</span>
+                ${score != null ? '<span style="font-size:14px;font-weight:700;font-family:\'JetBrains Mono\',monospace">' + score + '</span><span style="font-size:12px;color:var(--muted)">score</span>' : '<span style="font-size:12px;color:var(--muted)">New vendor — no score yet</span>'}
             </div>
             <div style="display:flex;gap:6px">
                 <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${v.id})">Full Details</button>
@@ -10126,9 +10157,10 @@ async function _renderVendorDrawerScorecard(vendorId) {
         const respVelocity = v.response_velocity_hours != null
             ? Math.max(0, Math.min(100, Math.round(100 - (v.response_velocity_hours / 72) * 100)))
             : null;
+        const hasOutreach = (v.total_outreach || 0) > 0;
         const ghostScore = v.ghost_rate != null
             ? Math.round((1 - v.ghost_rate) * 100)
-            : null;
+            : (hasOutreach ? 0 : null);
         const pricingScore = v.overall_win_rate != null
             ? Math.round(v.overall_win_rate * 100)
             : null;
@@ -10141,11 +10173,11 @@ async function _renderVendorDrawerScorecard(vendorId) {
         const deliveryScore = hasDeliveryData ? Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100) : null;
 
         const factors = [
-            { label: 'Response Velocity', score: respVelocity, detail: v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data' },
-            { label: 'Ghost Rate', score: ghostScore, detail: v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data' },
+            { label: 'Response Velocity', score: hasOutreach ? respVelocity : 0, detail: hasOutreach ? (v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data') : 'No RFQ history' },
+            { label: 'Ghost Rate', score: hasOutreach ? ghostScore : 0, detail: hasOutreach ? (v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data') : 'No RFQ history' },
             { label: 'Pricing Competitiveness', score: pricingScore, detail: v.overall_win_rate != null ? Math.round(v.overall_win_rate * 100) + '% win rate' : 'No data' },
             { label: 'Volume Consistency', score: volumeScore, detail: (v.sighting_count || 0) + ' sightings' },
-            { label: 'Delivery Reliability', score: deliveryScore, detail: hasDeliveryData ? 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' : 'No data' },
+            { label: 'Delivery Reliability', score: hasOutreach ? deliveryScore : 0, detail: hasOutreach ? (hasDeliveryData ? 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' : 'No data') : 'No RFQ history' },
         ];
 
         let html = '<div class="drawer-section">';
@@ -10163,15 +10195,15 @@ async function _renderVendorDrawerScorecard(vendorId) {
                 <div class="factor-bar">
                     <div class="factor-bar-fill" style="width:${hasData ? score : 0}%;background:${hasData ? barColor : 'var(--muted)'}"></div>
                 </div>
-                ${hasData ? '<div style="text-align:right;font-size:10px;font-weight:700;color:' + barColor + '">' + score + '/100</div>' : '<div style="text-align:right;font-size:10px;color:var(--muted)">No data</div>'}
+                ${hasData ? '<div style="text-align:right;font-size:10px;font-weight:700;color:' + barColor + '">' + score + '/100</div>' : '<div style="text-align:right;font-size:10px;color:var(--muted)">' + (f.detail === 'No RFQ history' ? '0/100' : 'No data') + '</div>'}
             </div>`;
         }
 
         // Overall score
-        const overall = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+        const overall = v.vendor_score != null ? Math.round(v.vendor_score) : null;
         html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between">
             <span style="font-size:13px;font-weight:700">Overall Score</span>
-            <span style="font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${overall >= 70 ? 'var(--green)' : overall >= 40 ? 'var(--amber)' : 'var(--red)'}">${overall}</span>
+            ${overall != null ? '<span style="font-size:20px;font-weight:700;font-family:\'JetBrains Mono\',monospace;color:' + (overall >= 70 ? 'var(--green)' : overall >= 40 ? 'var(--amber)' : 'var(--red)') + '">' + overall + '</span>' : '<span style="font-size:14px;color:var(--muted)">New</span>'}
         </div>`;
         html += '</div>';
         body.innerHTML = html;
