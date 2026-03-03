@@ -8,7 +8,8 @@ of defining their own auth logic.
 Business Rules:
 - get_user returns None if not logged in (non-throwing)
 - require_user raises 401 if not logged in, 403 if deactivated
-- require_buyer raises 403 if user is not buyer/trader/manager/admin
+- require_buyer raises 403 if user is not buyer/sales/trader/manager/admin
+- require_sales raises 403 if user is not sales/trader/manager/admin
 - require_admin raises 403 if user.role != "admin"
 - require_settings_access allows admin only
 - user_reqs_query enforces role-based access: sales sees own only
@@ -83,8 +84,16 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires buyer role for RFQ actions."""
     user = require_user(request, db)
-    if user.role not in ("buyer", "trader", "manager", "admin"):
+    if user.role not in ("buyer", "sales", "trader", "manager", "admin"):
         raise HTTPException(403, "Buyer role required for this action")
+    return user
+
+
+def require_sales(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency: requires sales role for prospecting/CRM actions."""
+    user = require_user(request, db)
+    if user.role not in ("sales", "trader", "manager", "admin"):
+        raise HTTPException(403, "Sales role required for this action")
     return user
 
 
