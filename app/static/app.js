@@ -7462,18 +7462,21 @@ async function requoteFromList(reqId) {
     if (!confirm('Create a new open requisition with the same parts and customer?')) return;
     try {
         const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
-        // Rename from "(copy)" to "(re-quote)"
         const reName = resp.name.replace('(copy)', '(re-quote)');
         if (reName !== resp.name) {
             await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
         }
-        showToast(`Re-quoted as "${reName}"`);
-        // Switch to sourcing view and open the cloned req
+        showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
         const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
         if (srcBtn) setMainView('sourcing', srcBtn);
         await loadRequisitions();
-        expandToSubTab(resp.id, 'sightings');
-    } catch (e) { showToast('Failed to re-quote', 'error'); }
+        const found = _reqListData.find(r => r.id === resp.id);
+        if (found) {
+            expandToSubTab(resp.id, 'sightings');
+        } else {
+            showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
+        }
+    } catch (e) { showToast('Failed to re-quote: ' + (e.message || e), 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
