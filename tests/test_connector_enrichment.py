@@ -504,8 +504,8 @@ def test_connector_configs_have_required_fields():
 def test_connector_configs_priority_order():
     """Connectors are in priority order: authoritative first."""
     names = [cfg["name"] for cfg in _CONNECTOR_CONFIGS]
-    assert names.index("digikey") < names.index("brokerbin")
-    assert names.index("mouser") < names.index("brokerbin")
+    assert names.index("digikey") < names.index("nexar")
+    assert names.index("mouser") < names.index("nexar")
 
 
 # ── Cross-validation tests ───────────────────────────────────────────────
@@ -701,22 +701,22 @@ def test_boost_confidence_multiple_batches(db_session):
         assert mt.confidence == 0.90
 
 
-def test_boost_confidence_fuzzy_match(db_session):
-    """Fuzzy match: 'Vishay Intertechnology' contains 'VISHAY' → boosted to 0.85."""
+def test_boost_confidence_fuzzy_match_noop(db_session):
+    """Fuzzy match removed — produces sub-0.90 confidence, now a no-op."""
     card = _make_card(db_session, "vsm001", manufacturer="Vishay Intertechnology")
     tag = _make_brand_tag(db_session, "VISHAY")
     mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
 
     result = boost_confidence_internal(db_session, batch_size=100)
 
-    assert result["fuzzy_boosted"] >= 1
+    assert result["fuzzy_boosted"] == 0
     db_session.refresh(mt)
-    assert mt.confidence == 0.85
-    assert mt.source == "ai_confirmed_fuzzy"
+    assert mt.confidence == 0.7  # unchanged — fuzzy boost removed
+    assert mt.source == "ai_classified"  # unchanged
 
 
-def test_boost_confidence_commodity_tags(db_session):
-    """Commodity tags at 0.7 → boosted to 0.85."""
+def test_boost_confidence_commodity_tags_noop(db_session):
+    """Commodity boost removed — produces sub-0.90 confidence, now a no-op."""
     card = _make_card(db_session, "cap001")
     tag = Tag(name="Capacitors", tag_type="commodity")
     db_session.add(tag)
@@ -726,10 +726,10 @@ def test_boost_confidence_commodity_tags(db_session):
 
     result = boost_confidence_internal(db_session, batch_size=100)
 
-    assert result["commodity_boosted"] == 1
+    assert result["commodity_boosted"] == 0
     db_session.refresh(mt)
-    assert mt.confidence == 0.85
-    assert mt.source == "ai_commodity_confirmed"
+    assert mt.confidence == 0.7  # unchanged — commodity boost removed
+    assert mt.source == "ai_classified"  # unchanged
 
 
 # ── nexar_bulk_validate tests ───────────────────────────────────────────
@@ -1039,20 +1039,19 @@ def test_backfill_sighting_two_sources(db_session):
     assert tag.name == "Murata"
 
 
-def test_backfill_sighting_single_source(db_session):
-    """Only 1 sighting → confidence 0.85."""
+def test_backfill_sighting_single_source_skipped(db_session):
+    """Only 1 sighting → skipped (below 0.90 confidence floor)."""
     from app.services.tagging_backfill import backfill_manufacturer_from_sightings
 
     card = _make_card(db_session, "xyzpart003")
     _make_sighting(db_session, card, "NXP Semiconductors")
 
     result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
-    assert result["total_tagged"] == 1
+    assert result["total_tagged"] == 0
+    assert result["total_skipped"] == 1
 
     mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
-    assert mt is not None
-    assert mt.confidence == 0.85
-    assert mt.source == "sighting_single"
+    assert mt is None
 
 
 def test_backfill_sighting_skips_junk_manufacturers(db_session):

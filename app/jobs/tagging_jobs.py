@@ -38,10 +38,10 @@ def register_tagging_jobs(scheduler, settings):
         name="Mine sighting manufacturer data for untagged cards",
     )
     scheduler.add_job(
-        _job_nexar_validate,
-        IntervalTrigger(hours=6),
-        id="nexar_validate",
-        name="Validate AI tags via Nexar",
+        _job_nexar_backfill,
+        IntervalTrigger(hours=2),
+        id="nexar_backfill",
+        name="Backfill untagged cards via Nexar (primary high-confidence source)",
     )
 
     if settings.material_enrichment_enabled:
@@ -55,41 +55,40 @@ def register_tagging_jobs(scheduler, settings):
 
 @_traced_job
 async def _job_connector_enrichment():  # pragma: no cover
-    """Enrich low-confidence material cards via API connectors. Runs every 4h.
+    """Enrich untagged material cards via API connectors (0.95 confidence). Runs every 2h.
 
-    Two phases:
-    1. Enrich untagged/low-conf cards with no manufacturer (new data)
-    2. Cross-validate existing AI tags against connectors (upgrade confidence)
+    Phase 1: Enrich untagged cards via DigiKey/Mouser/Element14/OEMSecrets/Nexar
+    Phase 2: Run sighting mining + internal boost cascade
     """
     from ..database import SessionLocal
     from ..models.intelligence import MaterialCard
     from ..models.tags import MaterialTag, Tag
-    from ..services.enrichment import cross_validate_batch, enrich_batch
+    from ..services.enrichment import enrich_batch
 
     db = SessionLocal()
     try:
-        # Phase 1: Enrich cards with low-confidence tags
-        low_conf_cards = (
-            db.query(MaterialCard.normalized_mpn)
-            .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+        # Phase 1: Enrich cards with NO brand tag via connectors
+        tagged_brand_ids = (
+            db.query(MaterialTag.material_card_id)
             .join(Tag, MaterialTag.tag_id == Tag.id)
-            .filter(Tag.tag_type == "brand", MaterialTag.confidence < 0.9)
-            .order_by(MaterialTag.confidence.asc())
+            .filter(Tag.tag_type == "brand")
+            .distinct()
+            .subquery()
+        )
+        untagged_cards = (
+            db.query(MaterialCard.normalized_mpn)
+            .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
+            .order_by(MaterialCard.id)
             .limit(2000)
             .all()
         )
-        mpns = [row.normalized_mpn for row in low_conf_cards]
+        mpns = [row.normalized_mpn for row in untagged_cards]
         if mpns:
-            logger.info(f"Connector enrichment: processing {len(mpns)} low-confidence cards")
+            logger.info(f"Connector enrichment: processing {len(mpns)} untagged cards")
             result = await enrich_batch(mpns, db, concurrency=3)
             logger.info(f"Connector enrichment done: {result}")
 
-        # Phase 2: Cross-validate AI tags against connectors
-        cv_result = await cross_validate_batch(db, limit=500, concurrency=3)
-        if cv_result["total"] > 0:
-            logger.info(f"Cross-validation done: {cv_result}")
-
-        # Phase 3: Run boost cascade to propagate new manufacturer data
+        # Phase 2: Run boost cascade + sighting mining
         from ..services.enrichment import boost_confidence_internal
         from ..services.tagging_backfill import backfill_manufacturer_from_sightings
 
@@ -159,15 +158,15 @@ async def _job_sighting_mining():
 
 
 @_traced_job
-async def _job_nexar_validate():
-    """Validate AI-classified tags via Nexar. Every 6 hours."""
+async def _job_nexar_backfill():
+    """Backfill untagged cards via Nexar — primary high-confidence source. Every 2 hours."""
     from ..database import SessionLocal
-    from ..services.enrichment import nexar_bulk_validate
+    from ..services.enrichment import nexar_backfill_untagged
 
     db = SessionLocal()
     try:
-        result = await nexar_bulk_validate(db, limit=2000)
-        logger.info(f"Nexar validate job: {result}")
+        result = await nexar_backfill_untagged(db, limit=5000)
+        logger.info(f"Nexar backfill job: {result}")
     except Exception:
         db.rollback()
         raise

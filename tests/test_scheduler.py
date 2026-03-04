@@ -199,17 +199,17 @@ def test_reset_connector_errors_registered():
     scheduler.remove_all_jobs()
 
 
-def test_nexar_validate_job_registered():
-    """Nexar validate job is registered."""
+def test_nexar_backfill_job_registered():
+    """Nexar backfill job is registered."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
-    job = scheduler.get_job("nexar_validate")
+    job = scheduler.get_job("nexar_backfill")
     assert job is not None
 
 
 def test_connector_enrichment_2hour_interval():
-    """Connector enrichment runs every 2 hours (was 4)."""
+    """Connector enrichment runs every 2 hours."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
@@ -219,12 +219,12 @@ def test_connector_enrichment_2hour_interval():
     assert trigger.interval.total_seconds() == 7200  # 2 hours
 
 
-def test_nexar_validate_job_6hour_interval():
-    """Nexar validate job runs every 6 hours."""
+def test_nexar_backfill_job_2hour_interval():
+    """Nexar backfill job runs every 2 hours."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
-    job = scheduler.get_job("nexar_validate")
+    job = scheduler.get_job("nexar_backfill")
     assert job is not None
     trigger = job.trigger
-    assert trigger.interval.total_seconds() == 21600  # 6 hours
+    assert trigger.interval.total_seconds() == 7200  # 2 hours

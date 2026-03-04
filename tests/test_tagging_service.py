@@ -46,9 +46,9 @@ def _seed_thresholds(db):
 
 
 def test_prefix_lookup_known_prefix():
-    mfr, conf = lookup_manufacturer_by_prefix("lm317t")
+    mfr, conf = lookup_manufacturer_by_prefix("tps65217")
     assert mfr == "Texas Instruments"
-    assert conf >= 0.7
+    assert conf == 0.9
 
 
 def test_prefix_lookup_long_prefix():
@@ -63,10 +63,13 @@ def test_prefix_lookup_unknown():
     assert conf == 0.0
 
 
-def test_prefix_lookup_short_prefix_lower_confidence():
+def test_prefix_lookup_short_prefix_skipped():
+    """2-char prefixes are now skipped (below min confidence floor)."""
     mfr, conf = lookup_manufacturer_by_prefix("ad5292")
-    assert mfr == "Analog Devices"
-    assert conf == 0.7
+    # AD is a 2-char prefix — now returns None (skip) instead of 0.70
+    # But ADM/ADP/ADG are 3-char, so "adm..." would match. "ad5292" has no 3+ match.
+    assert mfr is None
+    assert conf == 0.0
 
 
 def test_prefix_lookup_stm32():
@@ -93,16 +96,18 @@ def test_prefix_lookup_espressif():
     assert conf == 0.9
 
 
-def test_prefix_lookup_ftdi():
+def test_prefix_lookup_ftdi_2char_skipped():
+    """FT is a 2-char prefix — now skipped (below min confidence floor)."""
     mfr, conf = lookup_manufacturer_by_prefix("ft232r")
-    assert mfr == "FTDI"
-    assert conf == 0.7  # 2-char prefix
+    assert mfr is None
+    assert conf == 0.0
 
 
-def test_prefix_lookup_silicon_labs():
+def test_prefix_lookup_silicon_labs_2char_skipped():
+    """SI is a 2-char prefix — now skipped (below min confidence floor)."""
     mfr, conf = lookup_manufacturer_by_prefix("si5351")
-    assert mfr == "Silicon Labs"
-    assert conf == 0.7  # 2-char prefix
+    assert mfr is None
+    assert conf == 0.0
 
 
 def test_new_prefix_entries():
@@ -121,9 +126,9 @@ def test_new_prefix_entries():
     mfr, conf = lookup_manufacturer_by_prefix("GD25Q128CSIG")
     assert mfr == "GigaDevice"
 
-    # Monolithic Power
+    # Monolithic Power — MP is 2-char prefix, now skipped
     mfr, conf = lookup_manufacturer_by_prefix("MP2315GJ")
-    assert mfr == "Monolithic Power Systems"
+    assert mfr is None  # 2-char prefix below confidence floor
 
     # Realtek
     mfr, conf = lookup_manufacturer_by_prefix("RTL8211F")
@@ -429,12 +434,12 @@ def test_propagate_untagged_material_no_error(db_session, test_material_card):
 
 
 def test_propagate_skips_low_confidence_tags(db_session, test_material_card):
-    """Tags with confidence < 0.7 are not propagated to entities."""
+    """Tags with confidence < 0.90 are not propagated to entities."""
     _seed_thresholds(db_session)
     tag = _make_tag(db_session)
     tag_material_card(
         test_material_card.id,
-        [{"tag_id": tag.id, "source": "ai_classified", "confidence": 0.3}],
+        [{"tag_id": tag.id, "source": "ai_classified", "confidence": 0.85}],
         db_session,
     )
     db_session.commit()

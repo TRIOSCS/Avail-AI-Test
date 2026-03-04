@@ -55,13 +55,7 @@ _CONNECTOR_CONFIGS = [
         "creds": [("oemsecrets", "OEMSECRETS_API_KEY")],
         "confidence": 0.95,
     },
-    {
-        "name": "brokerbin",
-        "module": "app.connectors.sources",
-        "class": "BrokerBinConnector",
-        "creds": [("brokerbin", "BROKERBIN_API_KEY")],
-        "confidence": 0.85,
-    },
+    # BrokerBin removed — 0.85 confidence is below the 0.90 floor
     {
         "name": "nexar",
         "module": "app.connectors.sources",
@@ -254,95 +248,10 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
 
     logger.info(f"Internal confidence boost complete: {total_boosted} tags upgraded to 0.90")
 
-    # Phase 2: Fuzzy match — manufacturer CONTAINS brand or vice versa
-    # e.g. "Vishay Intertechnology" contains "VISHAY", "Hewlett-Packard" vs "HP"
+    # Phase 2 (fuzzy boost to 0.85) and Phase 3 (commodity boost to 0.85) removed —
+    # both produce sub-0.90 confidence, below the minimum floor.
     fuzzy_boosted = 0
-    last_id = 0
-
-    while True:
-        rows = (
-            db.query(MaterialTag.id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-            .filter(
-                Tag.tag_type == "brand",
-                MaterialTag.source == "ai_classified",
-                MaterialTag.confidence < 0.9,
-                MaterialTag.confidence > 0.3,
-                MaterialCard.manufacturer.isnot(None),
-                MaterialCard.manufacturer != "",
-                func.lower(MaterialCard.manufacturer) != func.lower(Tag.name),
-                (
-                    func.lower(MaterialCard.manufacturer).contains(func.lower(Tag.name))
-                    | func.lower(Tag.name).contains(func.lower(MaterialCard.manufacturer))
-                ),
-                MaterialTag.id > last_id,
-            )
-            .order_by(MaterialTag.id)
-            .limit(batch_size)
-            .all()
-        )
-
-        if not rows:
-            break
-
-        mt_ids = [r.id for r in rows]
-        last_id = mt_ids[-1]
-
-        updated = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update(
-                {"confidence": 0.85, "source": "ai_confirmed_fuzzy"},
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        fuzzy_boosted += updated
-        logger.info(f"Fuzzy boost: {fuzzy_boosted} tags upgraded so far")
-
-    if fuzzy_boosted:
-        logger.info(f"Fuzzy confidence boost: {fuzzy_boosted} tags upgraded to 0.85")
-
-    # Phase 3: Boost commodity tags from 0.7 to 0.85 (category classification is reliable)
     commodity_boosted = 0
-    last_id = 0
-
-    while True:
-        rows = (
-            db.query(MaterialTag.id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .filter(
-                Tag.tag_type == "commodity",
-                MaterialTag.source == "ai_classified",
-                MaterialTag.confidence == 0.7,
-                MaterialTag.id > last_id,
-            )
-            .order_by(MaterialTag.id)
-            .limit(batch_size)
-            .all()
-        )
-
-        if not rows:
-            break
-
-        mt_ids = [r.id for r in rows]
-        last_id = mt_ids[-1]
-
-        updated = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update(
-                {"confidence": 0.85, "source": "ai_commodity_confirmed"},
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        commodity_boosted += updated
-        logger.info(f"Commodity boost: {commodity_boosted} tags upgraded so far")
-
-    if commodity_boosted:
-        logger.info(f"Commodity confidence boost: {commodity_boosted} tags upgraded to 0.85")
 
     # Phase 4: Sighting-confirmed — sighting manufacturer confirms existing brand tag
     from app.models.sourcing import Sighting

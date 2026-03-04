@@ -114,6 +114,9 @@ class Settings:
     material_enrichment_enabled: bool = os.getenv("MATERIAL_ENRICHMENT_ENABLED", "true").lower() == "true"
     material_enrichment_batch_size: int = int(os.getenv("MATERIAL_ENRICHMENT_BATCH_SIZE", "300"))
 
+    # Tagging confidence floor — only create/keep tags at or above this confidence
+    min_tag_confidence: float = float(os.getenv("MIN_TAG_CONFIDENCE", "0.90"))
+
     # AI Features (Definitive Spec)
     ai_features_enabled: str = os.getenv("AI_FEATURES_ENABLED", "mike_only")  # "all", "mike_only", "off"
 
