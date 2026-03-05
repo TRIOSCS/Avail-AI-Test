@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.scheduler import scheduler
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 
@@ -70,12 +69,20 @@ def test_reset_connector_errors(scheduler_db):
     from app.models import ApiSource
 
     src1 = ApiSource(
-        name="src_a", display_name="A", category="dist",
-        source_type="api", status="live", error_count_24h=5,
+        name="src_a",
+        display_name="A",
+        category="dist",
+        source_type="api",
+        status="live",
+        error_count_24h=5,
     )
     src2 = ApiSource(
-        name="src_b", display_name="B", category="broker",
-        source_type="api", status="live", error_count_24h=0,
+        name="src_b",
+        display_name="B",
+        category="broker",
+        source_type="api",
+        status="live",
+        error_count_24h=0,
     )
     scheduler_db.add_all([src1, src2])
     scheduler_db.commit()

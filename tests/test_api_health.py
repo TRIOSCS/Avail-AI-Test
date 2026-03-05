@@ -741,9 +741,7 @@ async def test_ping_live_to_error_notifies_admins(db_session):
 
     from app.models.notification import Notification
 
-    notifs = db_session.query(Notification).filter_by(
-        user_id=admin.id, event_type="api_source_down"
-    ).all()
+    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_source_down").all()
     assert len(notifs) == 1
     assert "Notif Test" in notifs[0].title
     assert "403" in notifs[0].body
@@ -783,9 +781,7 @@ async def test_ping_error_to_error_no_duplicate_notification(db_session):
 
     from app.models.notification import Notification
 
-    notifs = db_session.query(Notification).filter_by(
-        user_id=admin.id, event_type="api_source_down"
-    ).all()
+    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_source_down").all()
     assert len(notifs) == 0
 
 
@@ -829,9 +825,7 @@ async def test_quota_warning_at_80_percent(db_session):
 
     from app.models.notification import Notification
 
-    notifs = db_session.query(Notification).filter_by(
-        user_id=admin.id, event_type="api_quota_warning"
-    ).all()
+    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_quota_warning").all()
     assert len(notifs) == 1
     assert "80%" in notifs[0].title
 
@@ -874,9 +868,7 @@ async def test_quota_critical_at_95_percent(db_session):
 
     from app.models.notification import Notification
 
-    notifs = db_session.query(Notification).filter_by(
-        user_id=admin.id, event_type="api_quota_critical"
-    ).all()
+    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_quota_critical").all()
     assert len(notifs) == 1
     assert "critical" in notifs[0].title.lower()
 

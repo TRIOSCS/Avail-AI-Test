@@ -17,9 +17,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import ActivityLog, VendorCard
+from app.models import ActivityLog
 from app.scheduler import scheduler
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -539,10 +538,14 @@ def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
         patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
         patch(
-            "app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock, side_effect=Exception("stock error")
+            "app.jobs.inventory_jobs._scan_stock_list_attachments",
+            new_callable=AsyncMock,
+            side_effect=Exception("stock error"),
         ),
         patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock, side_effect=Exception("mine error")),
-        patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock, side_effect=Exception("outbound error")),
+        patch(
+            "app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock, side_effect=Exception("outbound error")
+        ),
         patch("app.config.settings") as mock_settings,
     ):
         mock_settings.inbox_backfill_days = 180

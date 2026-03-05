@@ -9,10 +9,6 @@ Depends on: routers/vendor_contacts.py, utils/vendor_helpers.py
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
-
-import pytest
-from fastapi.testclient import TestClient
 
 from app.models import Contact, Requisition, VendorCard, VendorContact, VendorResponse
 

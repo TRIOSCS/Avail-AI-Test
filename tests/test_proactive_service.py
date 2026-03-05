@@ -1314,9 +1314,7 @@ class TestQtyCapping:
         assert result["total_cost"] == 100.00
 
     @pytest.mark.asyncio
-    async def test_send_uses_avail_when_less_than_target(
-        self, db_session, test_user, test_company, test_customer_site
-    ):
+    async def test_send_uses_avail_when_less_than_target(self, db_session, test_user, test_company, test_customer_site):
         """When vendor qty_available < customer target_qty, totals use qty_available."""
         source_req = Requisition(
             name="Avail-Req",

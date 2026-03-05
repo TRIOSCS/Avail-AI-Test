@@ -1417,8 +1417,12 @@ class TestStatsIndustriesRegions:
         """Industries/regions only come from suggested-status accounts."""
         _make_prospect(db_session, name="Sugg", domain="sugg.com", industry="Electronics", region="US")
         _make_prospect(
-            db_session, name="Claimed", domain="claimed.com",
-            industry="Automotive", region="EU", status="claimed",
+            db_session,
+            name="Claimed",
+            domain="claimed.com",
+            industry="Automotive",
+            region="EU",
+            status="claimed",
         )
         resp = client.get("/api/prospects/suggested/stats")
         data = resp.json()

@@ -1,7 +1,8 @@
 """Tests for app/utils/encrypted_type.py -- EncryptedText TypeDecorator."""
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from app.utils.encrypted_type import EncryptedText, _get_fernet
 

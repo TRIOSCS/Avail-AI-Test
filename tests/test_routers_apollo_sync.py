@@ -7,8 +7,6 @@ Depends on: app.routers.apollo_sync, conftest fixtures
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 
 class TestApolloDiscover:
     def test_discover_success(self, client):
@@ -47,9 +45,7 @@ class TestApolloEnrich:
     def test_enrich_success(self, client, db_session):
         from app.models import VendorCard
 
-        vc = VendorCard(
-            display_name="Acme", normalized_name="acme_rt", source="manual"
-        )
+        vc = VendorCard(display_name="Acme", normalized_name="acme_rt", source="manual")
         db_session.add(vc)
         db_session.commit()
 

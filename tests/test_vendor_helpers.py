@@ -26,9 +26,6 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import User, VendorCard, VendorReview
 from app.models.tags import EntityTag, Tag
 from app.utils.vendor_helpers import (
@@ -42,7 +39,6 @@ from app.utils.vendor_helpers import (
     scrape_website_contacts,
 )
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
-
 
 # ── clean_emails ─────────────────────────────────────────────────────
 
@@ -406,13 +402,9 @@ class TestBackgroundEnrichVendor:
                 return_value=mock_enrichment,
             ),
             patch("app.enrichment_service.apply_enrichment_to_vendor") as mock_apply,
-            patch(
-                "app.utils.vendor_helpers.get_credential_cached", return_value=None
-            ),
+            patch("app.utils.vendor_helpers.get_credential_cached", return_value=None),
         ):
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(1, "test.com", "Test Vendor")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(1, "test.com", "Test Vendor"))
 
         mock_apply.assert_called_once_with(mock_card, mock_enrichment)
         mock_db.commit.assert_called_once()
@@ -430,13 +422,9 @@ class TestBackgroundEnrichVendor:
                 return_value=None,
             ),
             patch("app.enrichment_service.apply_enrichment_to_vendor") as mock_apply,
-            patch(
-                "app.utils.vendor_helpers.get_credential_cached", return_value=None
-            ),
+            patch("app.utils.vendor_helpers.get_credential_cached", return_value=None),
         ):
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(999, "none.com", "Nobody")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(999, "none.com", "Nobody"))
 
         mock_apply.assert_not_called()
 
@@ -455,13 +443,9 @@ class TestBackgroundEnrichVendor:
                 return_value={"source": "apollo"},
             ),
             patch("app.enrichment_service.apply_enrichment_to_vendor") as mock_apply,
-            patch(
-                "app.utils.vendor_helpers.get_credential_cached", return_value=None
-            ),
+            patch("app.utils.vendor_helpers.get_credential_cached", return_value=None),
         ):
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(999, "gone.com", "Gone Vendor")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(999, "gone.com", "Gone Vendor"))
 
         mock_apply.assert_not_called()
         mock_db.close.assert_called_once()
@@ -478,14 +462,10 @@ class TestBackgroundEnrichVendor:
                 side_effect=RuntimeError("API down"),
             ),
             patch("app.enrichment_service.apply_enrichment_to_vendor"),
-            patch(
-                "app.utils.vendor_helpers.get_credential_cached", return_value=None
-            ),
+            patch("app.utils.vendor_helpers.get_credential_cached", return_value=None),
         ):
             # Should not propagate exception
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(999, "fail.com", "Fail Vendor")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(999, "fail.com", "Fail Vendor"))
 
     def test_material_analysis_runs_with_anthropic_key(self):
         """When ANTHROPIC_API_KEY is available, material analysis runs."""
@@ -511,9 +491,7 @@ class TestBackgroundEnrichVendor:
                 new_callable=AsyncMock,
             ) as mock_analyze,
         ):
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(1, "test.com", "Test")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(1, "test.com", "Test"))
 
         mock_analyze.assert_called_once_with(1)
 
@@ -542,9 +520,7 @@ class TestBackgroundEnrichVendor:
                 side_effect=RuntimeError("AI failed"),
             ),
         ):
-            asyncio.get_event_loop().run_until_complete(
-                _background_enrich_vendor(1, "test.com", "Test")
-            )
+            asyncio.get_event_loop().run_until_complete(_background_enrich_vendor(1, "test.com", "Test"))
 
 
 # ── _load_entity_tags ────────────────────────────────────────────────
@@ -1173,8 +1149,6 @@ class TestMergeContactIntoCard:
             patch("app.vendor_utils.merge_emails_into_card", return_value=1),
             patch("app.vendor_utils.merge_phones_into_card", return_value=1),
         ):
-            changed = merge_contact_into_card(
-                card, ["a@b.com"], ["+1-555-0100"], source="api"
-            )
+            changed = merge_contact_into_card(card, ["a@b.com"], ["+1-555-0100"], source="api")
         assert changed is True
         assert card.source == "api"

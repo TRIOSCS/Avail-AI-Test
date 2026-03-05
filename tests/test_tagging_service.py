@@ -16,7 +16,6 @@ from app.services.tagging import (
     tag_material_card,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
@@ -303,7 +302,7 @@ def test_visibility_gate1_only(db_session):
     db_session.refresh(et1)
     db_session.refresh(et2)
     assert et1.is_visible is False  # 2/100 = 2% < 5%
-    assert et2.is_visible is True   # 98/100 = 98% >= 5%
+    assert et2.is_visible is True  # 98/100 = 98% >= 5%
 
 
 def test_visibility_gate2_only(db_session):

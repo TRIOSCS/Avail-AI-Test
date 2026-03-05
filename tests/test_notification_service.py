@@ -11,9 +11,8 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models.notification import Notification
-from app.models.trouble_ticket import TroubleTicket
 from app.models import User
+from app.models.trouble_ticket import TroubleTicket
 from app.services.notification_service import (
     create_notification,
     get_all,

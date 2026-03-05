@@ -15,27 +15,15 @@ Called by: pytest
 Depends on: conftest fixtures, app modules
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-from sqlalchemy.orm import Session
+from unittest.mock import AsyncMock, patch
 
 from app.models import (
     Company,
-    CustomerSite,
-    MaterialCard,
-    Offer,
-    Requirement,
-    Requisition,
-    User,
-    VendorCard,
 )
 from app.models.self_heal_log import SelfHealLog
-from app.models.trouble_ticket import TroubleTicket
 from app.services.trouble_ticket_service import create_ticket
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  1. COST CONTROLLER
@@ -169,7 +157,9 @@ class TestExecutionService:
         ticket.risk_tier = "low"
         db_session.commit()
 
-        with patch("app.services.execution_service.check_budget", return_value={"allowed": False, "reason": "Over budget"}):
+        with patch(
+            "app.services.execution_service.check_budget", return_value={"allowed": False, "reason": "Over budget"}
+        ):
             with patch("app.services.execution_service.create_notification"):
                 result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
                 assert "error" in result
@@ -323,11 +313,17 @@ class TestExecutionService:
         ticket.generated_prompt = None
         db_session.commit()
 
-        with patch("app.services.execution_service.check_budget", return_value={"allowed": True, "reason": "ok"}), \
-             patch("app.services.execution_service.generate_prompt_for_ticket", return_value="fix prompt"), \
-             patch("app.services.execution_service._run_fix", new_callable=AsyncMock, return_value={"success": True, "cost_usd": 0.1}), \
-             patch("app.services.execution_service.record_cost"), \
-             patch("app.services.execution_service.create_notification"):
+        with (
+            patch("app.services.execution_service.check_budget", return_value={"allowed": True, "reason": "ok"}),
+            patch("app.services.execution_service.generate_prompt_for_ticket", return_value="fix prompt"),
+            patch(
+                "app.services.execution_service._run_fix",
+                new_callable=AsyncMock,
+                return_value={"success": True, "cost_usd": 0.1},
+            ),
+            patch("app.services.execution_service.record_cost"),
+            patch("app.services.execution_service.create_notification"),
+        ):
             result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
             assert result.get("ok") is True
 

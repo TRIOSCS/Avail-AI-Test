@@ -14,7 +14,6 @@ from sqlalchemy.orm import Session
 
 from app.scheduler import scheduler
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 

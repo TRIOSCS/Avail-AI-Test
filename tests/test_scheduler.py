@@ -18,10 +18,9 @@ Individual job function tests have been split into domain-specific files:
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-from app.scheduler import _utc, configure_scheduler, scheduler
-
 import pytest
 
+from app.scheduler import _utc, configure_scheduler, scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 

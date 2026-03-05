@@ -46,9 +46,7 @@ SAMPLE_DISCOVERY_RESULT = {
         "component_topics": ["electronic components", "semiconductors", "BOM sourcing"],
     },
     "hiring": {"type": "procurement", "detail": 15},
-    "events": [
-        {"type": "funding", "date": "2026-01-15", "description": "Series C raised $50M"}
-    ],
+    "events": [{"type": "funding", "date": "2026-01-15", "description": "Series C raised $50M"}],
     "enrichment_raw": {"raw_field": "value"},
 }
 

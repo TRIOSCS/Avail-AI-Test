@@ -13,7 +13,6 @@ from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
 from app.services.tagging_ai import classify_parts_with_ai, run_ai_backfill
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
@@ -142,15 +141,17 @@ def test_triage_internal_parts_heuristics():
     """Heuristic triage catches obvious internal part numbers."""
     from app.services.tagging_ai import triage_internal_parts
 
-    results = triage_internal_parts([
-        "123456789",        # pure numeric
-        "AB",               # too short
-        "INT-CUST-001",     # internal marker
-        "STM32F407VGT6",    # real MPN
-        "TEST-SAMPLE-XYZ",  # internal marker
-        "LM317T",           # real MPN
-        "[BRACKET]",        # unusual chars
-    ])
+    results = triage_internal_parts(
+        [
+            "123456789",  # pure numeric
+            "AB",  # too short
+            "INT-CUST-001",  # internal marker
+            "STM32F407VGT6",  # real MPN
+            "TEST-SAMPLE-XYZ",  # internal marker
+            "LM317T",  # real MPN
+            "[BRACKET]",  # unusual chars
+        ]
+    )
 
     # Map results by mpn
     by_mpn = {r["mpn"]: r for r in results}

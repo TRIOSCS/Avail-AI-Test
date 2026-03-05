@@ -5,8 +5,9 @@ Called by: pytest
 Depends on: app.services.apollo_sync_service, app.connectors.apollo_client
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.services.apollo_sync_service import (
     discover_contacts,
@@ -44,9 +45,7 @@ async def test_discover_contacts_returns_masked_emails():
     ):
         with patch("app.services.apollo_sync_service.settings") as mock_settings:
             mock_settings.apollo_api_key = "test-key"
-            result = await discover_contacts(
-                "acme.com", title_keywords=["procurement"], max_results=10
-            )
+            result = await discover_contacts("acme.com", title_keywords=["procurement"], max_results=10)
 
     assert result["total_found"] == 1
     assert len(result["contacts"]) == 1
@@ -134,9 +133,7 @@ async def test_enrich_selected_contacts(db_session):
             "title": "VP Procurement",
             "email": "jane@acme.com",
             "email_status": "verified",
-            "phone_numbers": [
-                {"type": "direct_dial", "sanitized_number": "+15551234"}
-            ],
+            "phone_numbers": [{"type": "direct_dial", "sanitized_number": "+15551234"}],
             "linkedin_url": "https://linkedin.com/in/janedoe",
         }
     }
@@ -355,9 +352,7 @@ async def test_enrich_no_api_key(db_session):
     """Enrich with no API key should return empty."""
     with patch("app.services.apollo_sync_service.settings") as ms:
         ms.apollo_api_key = ""
-        result = await enrich_selected_contacts(
-            apollo_ids=["abc"], vendor_card_id=1, db=db_session
-        )
+        result = await enrich_selected_contacts(apollo_ids=["abc"], vendor_card_id=1, db=db_session)
     assert result["enriched"] == 0
 
 

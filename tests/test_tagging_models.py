@@ -13,7 +13,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 

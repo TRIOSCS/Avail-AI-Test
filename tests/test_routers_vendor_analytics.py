@@ -11,7 +11,6 @@ Depends on: routers/vendor_analytics.py
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.models import MaterialCard, MaterialVendorHistory, Offer, Requisition, VendorCard

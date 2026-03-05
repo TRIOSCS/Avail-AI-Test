@@ -7,13 +7,11 @@ Called by: pytest
 Depends on: app.services.prompt_generator
 """
 
-import pytest
-
 from app.services.prompt_generator import (
-    generate_fix_prompt,
-    generate_prompt_for_ticket,
     BASE_CONSTRAINTS,
     CATEGORY_RULES,
+    generate_fix_prompt,
+    generate_prompt_for_ticket,
 )
 
 
@@ -24,8 +22,7 @@ class TestGenerateFixPrompt:
             title="Button broken",
             description="Submit button does nothing",
             category="ui",
-            diagnosis={"root_cause": "Missing onclick", "fix_approach": "Add handler",
-                       "test_strategy": "Click test"},
+            diagnosis={"root_cause": "Missing onclick", "fix_approach": "Add handler", "test_strategy": "Click test"},
         )
         assert "# Fix: Button broken" in prompt
         assert "Ticket #1" in prompt
@@ -37,7 +34,10 @@ class TestGenerateFixPrompt:
 
     def test_includes_base_constraints(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="ui",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="ui",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "NEVER modify these files" in prompt
@@ -46,7 +46,10 @@ class TestGenerateFixPrompt:
 
     def test_ui_category_rules(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="ui",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="ui",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "UI Bug Rules" in prompt
@@ -54,7 +57,10 @@ class TestGenerateFixPrompt:
 
     def test_api_category_rules(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="api",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="api",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "API Bug Rules" in prompt
@@ -62,7 +68,10 @@ class TestGenerateFixPrompt:
 
     def test_data_category_rules(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="data",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="data",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "Data Bug Rules" in prompt
@@ -70,7 +79,10 @@ class TestGenerateFixPrompt:
 
     def test_performance_category_rules(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="performance",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="performance",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "Performance Bug Rules" in prompt
@@ -78,14 +90,20 @@ class TestGenerateFixPrompt:
 
     def test_other_category_fallback(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="other",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="other",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "General Bug Rules" in prompt
 
     def test_unknown_category_uses_other(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="unknown_xyz",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="unknown_xyz",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "General Bug Rules" in prompt
@@ -96,7 +114,10 @@ class TestGenerateFixPrompt:
             {"path": "app/main.py", "role": "mentioned", "confidence": 0.7, "stable": True},
         ]
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="api",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="api",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
             relevant_files=files,
         )
@@ -106,11 +127,16 @@ class TestGenerateFixPrompt:
 
     def test_affected_files_from_diagnosis(self):
         diagnosis = {
-            "root_cause": "R", "fix_approach": "F", "test_strategy": "T",
+            "root_cause": "R",
+            "fix_approach": "F",
+            "test_strategy": "T",
             "affected_files": ["app/services/vendor_service.py", "app/routers/vendors.py"],
         }
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="api",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="api",
             diagnosis=diagnosis,
         )
         assert "Affected Files (from diagnosis)" in prompt
@@ -118,7 +144,10 @@ class TestGenerateFixPrompt:
 
     def test_empty_diagnosis_fields(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="ui",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="ui",
             diagnosis={},
         )
         assert "Unknown" in prompt  # default root_cause
@@ -126,7 +155,10 @@ class TestGenerateFixPrompt:
 
     def test_no_relevant_files(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="ui",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="ui",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
             relevant_files=[],
         )
@@ -134,7 +166,10 @@ class TestGenerateFixPrompt:
 
     def test_stable_files_in_constraints(self):
         prompt = generate_fix_prompt(
-            ticket_id=1, title="T", description="D", category="ui",
+            ticket_id=1,
+            title="T",
+            description="D",
+            category="ui",
             diagnosis={"root_cause": "R", "fix_approach": "F", "test_strategy": "T"},
         )
         assert "app/main.py" in prompt  # from STABLE_FILES
@@ -144,13 +179,13 @@ class TestGenerateFixPrompt:
 class TestGeneratePromptForTicket:
     def test_from_ticket_object(self):
         """Test with a mock ticket object."""
+
         class FakeTicket:
             id = 42
             title = "Search broken"
             description = "Search returns no results"
             category = "api"
-            diagnosis = {"root_cause": "Query error", "fix_approach": "Fix SQL",
-                         "test_strategy": "Test search"}
+            diagnosis = {"root_cause": "Query error", "fix_approach": "Fix SQL", "test_strategy": "Test search"}
             file_mapping = ["app/search_service.py"]
 
         prompt = generate_prompt_for_ticket(FakeTicket())

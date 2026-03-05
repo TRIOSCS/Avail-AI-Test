@@ -7,8 +7,9 @@ Called by: pytest
 Depends on: app.services.enrichment, app.services.tagging_ai, app.routers.tagging_admin
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -24,7 +25,6 @@ from app.services.enrichment import (
     nexar_bulk_validate,
 )
 from app.services.tagging_ai import _apply_chunked_batch
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -72,9 +72,7 @@ def _make_material_tag(db: Session, card_id: int, tag_id: int, source: str, conf
 async def test_enrich_digikey_manufacturer(db_session):
     """DigiKey returns manufacturer — should be returned as enrichment result."""
     mock_connector = AsyncMock()
-    mock_connector.search.return_value = [
-        {"manufacturer": "Texas Instruments", "category": "Analog ICs"}
-    ]
+    mock_connector.search.return_value = [{"manufacturer": "Texas Instruments", "category": "Analog ICs"}]
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.services.enrichment.importlib") as mock_import:
@@ -252,6 +250,7 @@ async def test_enrich_batch_skips_no_results(db_session):
 @pytest.mark.asyncio
 async def test_enrich_batch_missing_card(db_session):
     """Batch skips MPNs with no matching MaterialCard."""
+
     async def _mock_enrich(mpn, db):
         return {"manufacturer": "Acme", "source": "digikey", "confidence": 0.95, "category": None}
 
@@ -766,11 +765,11 @@ async def test_nexar_validate_confirms_matching(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [
-            {"part": {"manufacturer": {"name": "Texas Instruments"}}}
-        ]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={
+            "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
+        }
+    )
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -792,11 +791,9 @@ async def test_nexar_validate_changes_manufacturer(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [
-            {"part": {"manufacturer": {"name": "Correct Brand"}}}
-        ]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Correct Brand"}}}]}}}
+    )
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -815,9 +812,7 @@ async def test_nexar_validate_no_result(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": []}}
-    })
+    mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -865,9 +860,12 @@ def _make_sighting_for_boost(db: Session, card: MaterialCard, manufacturer: str)
     db.flush()
 
     sighting = Sighting(
-        requirement_id=requirement.id, material_card_id=card.id,
-        vendor_name="TestVendor", manufacturer=manufacturer,
-        mpn_matched=card.display_mpn, source_type="test",
+        requirement_id=requirement.id,
+        material_card_id=card.id,
+        vendor_name="TestVendor",
+        manufacturer=manufacturer,
+        mpn_matched=card.display_mpn,
+        source_type="test",
     )
     db.add(sighting)
     db.commit()
@@ -941,8 +939,11 @@ def test_admin_ai_backfill_endpoint(client, db_session):
 async def test_scheduler_internal_boost_job(db_session):
     """_job_internal_boost calls boost_confidence_internal."""
     with patch("app.database.SessionLocal", return_value=db_session):
-        with patch("app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}) as mock_boost:
+        with patch(
+            "app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}
+        ) as mock_boost:
             from app.jobs.tagging_jobs import _job_internal_boost
+
             await _job_internal_boost()
             mock_boost.assert_called_once_with(db_session)
 
@@ -953,6 +954,7 @@ async def test_scheduler_prefix_backfill_job(db_session):
     with patch("app.database.SessionLocal", return_value=db_session):
         with patch("app.services.tagging_backfill.run_prefix_backfill", return_value={"total_processed": 0}) as mock_pf:
             from app.jobs.tagging_jobs import _job_prefix_backfill
+
             await _job_prefix_backfill()
             mock_pf.assert_called_once_with(db_session)
 
@@ -966,6 +968,7 @@ async def test_scheduler_sighting_mining_job(db_session):
             return_value={"total_tagged": 0},
         ) as mock_sm:
             from app.jobs.tagging_jobs import _job_sighting_mining
+
             await _job_sighting_mining()
             mock_sm.assert_called_once_with(db_session)
 
@@ -1106,8 +1109,11 @@ def test_repair_visibility_updates_all(db_session):
 
     # Entity tag with enough interactions to be visible, but is_visible=False (the bug)
     et = EntityTag(
-        entity_type="vendor_card", entity_id=999, tag_id=tag.id,
-        interaction_count=5.0, is_visible=False,
+        entity_type="vendor_card",
+        entity_id=999,
+        tag_id=tag.id,
+        interaction_count=5.0,
+        is_visible=False,
     )
     db_session.add(et)
     db_session.commit()
