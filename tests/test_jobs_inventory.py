@@ -8,7 +8,6 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -16,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import BuyPlan
 from app.scheduler import scheduler
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -338,9 +336,13 @@ def test_download_and_import_stock_list_attachment_download_fails(scheduler_db, 
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -361,9 +363,13 @@ def test_download_and_import_stock_list_error_in_att_data(scheduler_db, test_use
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -384,9 +390,13 @@ def test_download_and_import_stock_list_no_content_bytes(scheduler_db, test_user
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -399,9 +409,7 @@ def test_download_and_import_stock_list_file_validation_fails(scheduler_db, test
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"not a csv").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"not a csv").decode()})
 
     with (
         patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
@@ -412,9 +420,13 @@ def test_download_and_import_stock_list_file_validation_fails(scheduler_db, test
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.bin",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.bin",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -427,9 +439,7 @@ def test_download_and_import_stock_list_no_rows(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"header\n").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"header\n").decode()})
 
     with (
         patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
@@ -441,9 +451,13 @@ def test_download_and_import_stock_list_no_rows(scheduler_db, test_user):
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -456,9 +470,7 @@ def test_download_and_import_stock_list_ai_parser_fallback(scheduler_db, test_us
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"mpn,qty\nLM317T,100").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"mpn,qty\nLM317T,100").decode()})
 
     with (
         patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
@@ -477,9 +489,13 @@ def test_download_and_import_stock_list_ai_parser_fallback(scheduler_db, test_us
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
         mock_legacy.assert_called_once()
@@ -495,9 +511,7 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [
         {"mpn": "LM317T", "qty": 100, "price": 0.50, "manufacturer": "TI", "description": "Reg"},
@@ -516,9 +530,13 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -550,9 +568,7 @@ def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "QA-TEST-001", "qty": 50, "manufacturer": "Test Corp"}]
 
@@ -569,9 +585,13 @@ def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="TestVendor", vendor_email="sales@test.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="TestVendor",
+                vendor_email="sales@test.com",
             )
         )
 
@@ -591,22 +611,25 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
     scheduler_db.commit()
 
     card = MaterialCard(
-        normalized_mpn="ne555", display_mpn="NE555",
-        manufacturer="TI", description="Timer",
+        normalized_mpn="ne555",
+        display_mpn="NE555",
+        manufacturer="TI",
+        description="Timer",
     )
     scheduler_db.add(card)
     scheduler_db.flush()
     mvh = MaterialVendorHistory(
-        material_card_id=card.id, vendor_name="arrow",
-        source_type="email_auto_import", last_qty=50, times_seen=1,
+        material_card_id=card.id,
+        vendor_name="arrow",
+        source_type="email_auto_import",
+        last_qty=50,
+        times_seen=1,
     )
     scheduler_db.add(mvh)
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "NE555", "qty": 200, "unit_price": 0.30, "manufacturer": "TI"}]
 
@@ -623,9 +646,13 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -645,9 +672,7 @@ def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, tes
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "EXCESS1", "qty": 500, "manufacturer": "Murata"}]
 
@@ -667,9 +692,13 @@ def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, tes
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="excess.csv",
-                vendor_name="Acme Electronics", vendor_email="purchasing@acme-electronics.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="excess.csv",
+                vendor_name="Acme Electronics",
+                vendor_email="purchasing@acme-electronics.com",
             )
         )
 
@@ -688,9 +717,7 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [
         {"mpn": "AB", "qty": 100},
@@ -711,9 +738,13 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -729,9 +760,7 @@ def test_download_and_import_stock_list_commit_fails(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "FAIL1", "qty": 100}]
 
@@ -757,9 +786,13 @@ def test_download_and_import_stock_list_commit_fails(scheduler_db, test_user):
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
         scheduler_db.commit = original_commit
@@ -775,9 +808,7 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "NOEMAIL1", "qty": 100}]
 
@@ -793,9 +824,13 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Unknown", vendor_email="",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Unknown",
+                vendor_email="",
             )
         )
 
@@ -813,21 +848,23 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
     scheduler_db.commit()
 
     card = MaterialCard(
-        normalized_mpn="pricefb", display_mpn="PRICEFB", manufacturer="Test",
+        normalized_mpn="pricefb",
+        display_mpn="PRICEFB",
+        manufacturer="Test",
     )
     scheduler_db.add(card)
     scheduler_db.flush()
     mvh = MaterialVendorHistory(
-        material_card_id=card.id, vendor_name="arrow",
-        source_type="email_auto_import", times_seen=1,
+        material_card_id=card.id,
+        vendor_name="arrow",
+        source_type="email_auto_import",
+        times_seen=1,
     )
     scheduler_db.add(mvh)
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "PRICEFB", "qty": 100, "price": 1.25}]
 
@@ -844,9 +881,13 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -863,9 +904,7 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "LM317T", "qty": 100}]
 
@@ -882,9 +921,13 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -900,9 +943,7 @@ def test_download_and_import_stock_list_teams_alert_exception(scheduler_db, test
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "LM317T", "qty": 100}]
 
@@ -921,9 +962,13 @@ def test_download_and_import_stock_list_teams_alert_exception(scheduler_db, test
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -944,9 +989,13 @@ def test_download_and_import_stock_list_null_att_data(scheduler_db, test_user):
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
 
@@ -959,9 +1008,7 @@ def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_us
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [{"mpn": "COMMITFAIL1", "qty": 100}]
 
@@ -984,9 +1031,13 @@ def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_us
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, mock_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                mock_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
         mock_db.rollback.assert_called()
@@ -1000,9 +1051,7 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={"contentBytes": base64.b64encode(b"data").decode()}
-    )
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
 
     rows = [
         {"mpn": "CONFLICT1", "qty": 100},
@@ -1032,9 +1081,13 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
 
         asyncio.run(
             _download_and_import_stock_list(
-                test_user, scheduler_db,
-                message_id="msg1", attachment_id="att1", filename="stock.csv",
-                vendor_name="Arrow", vendor_email="sales@arrow.com",
+                test_user,
+                scheduler_db,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="stock.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
             )
         )
         scheduler_db.flush = original_flush

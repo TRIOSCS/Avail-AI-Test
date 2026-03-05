@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.models.notification import Notification
 from app.models.trouble_ticket import TroubleTicket
 from app.services.trouble_ticket_service import update_ticket
 
@@ -21,8 +20,11 @@ from app.services.trouble_ticket_service import update_ticket
 @pytest.fixture()
 def sched_user(db_session: Session) -> User:
     user = User(
-        email="sched@trioscs.com", name="Sched User", role="admin",
-        azure_id="test-sched-001", created_at=datetime.now(timezone.utc),
+        email="sched@trioscs.com",
+        name="Sched User",
+        role="admin",
+        azure_id="test-sched-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -35,8 +37,10 @@ class TestAutoCloseVerification:
         """Tickets awaiting_verification > 48h should be auto-resolved."""
         now = datetime.now(timezone.utc)
         ticket = TroubleTicket(
-            ticket_number="TT-AC-001", submitted_by=sched_user.id,
-            title="Stale verify", description="D",
+            ticket_number="TT-AC-001",
+            submitted_by=sched_user.id,
+            title="Stale verify",
+            description="D",
             status="awaiting_verification",
             diagnosed_at=now - timedelta(hours=50),
         )
@@ -53,8 +57,7 @@ class TestAutoCloseVerification:
             .all()
         )
         assert len(stale) == 1
-        update_ticket(db_session, stale[0].id, status="resolved",
-                      resolution_notes="Auto-resolved: 48h timeout")
+        update_ticket(db_session, stale[0].id, status="resolved", resolution_notes="Auto-resolved: 48h timeout")
         db_session.refresh(ticket)
         assert ticket.status == "resolved"
 
@@ -62,8 +65,10 @@ class TestAutoCloseVerification:
         """Tickets awaiting_verification < 48h should NOT be auto-resolved."""
         now = datetime.now(timezone.utc)
         ticket = TroubleTicket(
-            ticket_number="TT-AC-002", submitted_by=sched_user.id,
-            title="Recent verify", description="D",
+            ticket_number="TT-AC-002",
+            submitted_by=sched_user.id,
+            title="Recent verify",
+            description="D",
             status="awaiting_verification",
             diagnosed_at=now - timedelta(hours=24),
         )
@@ -86,8 +91,10 @@ class TestAutoCloseSubmitted:
         """Submitted tickets > 7d old should be auto-rejected."""
         now = datetime.now(timezone.utc)
         ticket = TroubleTicket(
-            ticket_number="TT-AC-003", submitted_by=sched_user.id,
-            title="Old ticket", description="D",
+            ticket_number="TT-AC-003",
+            submitted_by=sched_user.id,
+            title="Old ticket",
+            description="D",
             status="submitted",
             created_at=now - timedelta(days=8),
         )
@@ -103,8 +110,7 @@ class TestAutoCloseSubmitted:
             .all()
         )
         assert len(stale) == 1
-        update_ticket(db_session, stale[0].id, status="rejected",
-                      resolution_notes="Auto-rejected: 7d timeout")
+        update_ticket(db_session, stale[0].id, status="rejected", resolution_notes="Auto-rejected: 7d timeout")
         db_session.refresh(ticket)
         assert ticket.status == "rejected"
 
@@ -112,8 +118,10 @@ class TestAutoCloseSubmitted:
         """Submitted tickets < 7d should NOT be auto-rejected."""
         now = datetime.now(timezone.utc)
         ticket = TroubleTicket(
-            ticket_number="TT-AC-004", submitted_by=sched_user.id,
-            title="Recent ticket", description="D",
+            ticket_number="TT-AC-004",
+            submitted_by=sched_user.id,
+            title="Recent ticket",
+            description="D",
             status="submitted",
             created_at=now - timedelta(days=3),
         )
@@ -134,8 +142,10 @@ class TestAutoCloseSubmitted:
         """Diagnosed tickets should NOT be auto-rejected regardless of age."""
         now = datetime.now(timezone.utc)
         ticket = TroubleTicket(
-            ticket_number="TT-AC-005", submitted_by=sched_user.id,
-            title="Old diagnosed", description="D",
+            ticket_number="TT-AC-005",
+            submitted_by=sched_user.id,
+            title="Old diagnosed",
+            description="D",
             status="diagnosed",
             created_at=now - timedelta(days=14),
         )

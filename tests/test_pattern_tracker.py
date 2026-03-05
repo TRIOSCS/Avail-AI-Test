@@ -24,8 +24,11 @@ from app.services.pattern_tracker import (
 @pytest.fixture()
 def pt_user(db_session: Session) -> User:
     user = User(
-        email="pattern@trioscs.com", name="Pattern User", role="admin",
-        azure_id="test-pt-001", created_at=datetime.now(timezone.utc),
+        email="pattern@trioscs.com",
+        name="Pattern User",
+        role="admin",
+        azure_id="test-pt-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -60,8 +63,7 @@ class TestWeeklyStats:
     def test_counts_created_and_resolved(self, db_session, pt_user):
         now = datetime.now(timezone.utc)
         _ticket(db_session, pt_user.id, category="api")
-        _ticket(db_session, pt_user.id, category="ui",
-                status="resolved", resolved_at=now)
+        _ticket(db_session, pt_user.id, category="ui", status="resolved", resolved_at=now)
         stats = get_weekly_stats(db_session)
         assert stats["tickets_created"] == 2
         assert stats["tickets_resolved"] == 1
@@ -91,12 +93,8 @@ class TestWeeklyStats:
 
     def test_avg_resolution_time(self, db_session, pt_user):
         now = datetime.now(timezone.utc)
-        _ticket(db_session, pt_user.id,
-                created_at=now - timedelta(hours=6),
-                status="resolved", resolved_at=now)
-        _ticket(db_session, pt_user.id,
-                created_at=now - timedelta(hours=2),
-                status="resolved", resolved_at=now)
+        _ticket(db_session, pt_user.id, created_at=now - timedelta(hours=6), status="resolved", resolved_at=now)
+        _ticket(db_session, pt_user.id, created_at=now - timedelta(hours=2), status="resolved", resolved_at=now)
         stats = get_weekly_stats(db_session)
         assert stats["avg_resolution_hours"] == 4.0  # (6+2)/2
 
@@ -143,8 +141,7 @@ class TestRecurringPatterns:
     def test_excludes_old_tickets(self, db_session, pt_user):
         old = datetime.now(timezone.utc) - timedelta(days=45)
         for _ in range(5):
-            _ticket(db_session, pt_user.id, category="api",
-                    current_page="/old", created_at=old)
+            _ticket(db_session, pt_user.id, category="api", current_page="/old", created_at=old)
         patterns = detect_recurring_patterns(db_session, min_occurrences=3)
         assert patterns == []
 

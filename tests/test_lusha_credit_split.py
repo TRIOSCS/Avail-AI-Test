@@ -26,7 +26,6 @@ from app.services.credit_manager import (
     record_credit_usage,
 )
 
-
 # ── Credit split pool tests ──────────────────────────────────────────
 
 
@@ -206,13 +205,11 @@ def test_lusha_connector_registered():
 
 def test_lusha_enrichment_in_seed_sources():
     """lusha_enrichment is in the SOURCES list in _seed_api_sources."""
-    import hashlib
-    import re
-
-    from app.main import _seed_api_sources
 
     # Read the source of the function to verify lusha_enrichment is present
     import inspect
+
+    from app.main import _seed_api_sources
 
     source = inspect.getsource(_seed_api_sources)
     assert '"lusha_enrichment"' in source, "lusha_enrichment missing from SOURCES list"

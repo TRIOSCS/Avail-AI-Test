@@ -334,10 +334,13 @@ class TestQuoteIntegrityErrorRetry:
 class TestQuoteWonHistorySiteNoCompany:
     """Quote won: verifies won history recording works."""
 
-    def test_quote_won_site_no_company_returns_early(self, client, db_session, test_user, test_requisition, test_material_card):
+    def test_quote_won_site_no_company_returns_early(
+        self, client, db_session, test_user, test_requisition, test_material_card
+    ):
         """Marking quote as won records history correctly (line 567)."""
         co = Company(
-            name="Quote Won Corp", is_active=True,
+            name="Quote Won Corp",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(co)
@@ -450,7 +453,8 @@ class TestOfferWonHistorySiteNoCompany:
     ):
         """Marking offer as won records history correctly (line 785)."""
         co = Company(
-            name="Offer Won Corp", is_active=True,
+            name="Offer Won Corp",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(co)

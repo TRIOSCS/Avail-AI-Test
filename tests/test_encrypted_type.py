@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.utils.encrypted_type import EncryptedText, _get_fernet
 
 
@@ -51,12 +53,13 @@ class TestEncryptedText:
         mock_f.encrypt.assert_called_once_with(b"secret-value")
 
     @patch("app.utils.encrypted_type._get_fernet")
-    def test_process_bind_param_error_returns_raw(self, mock_fernet):
+    def test_process_bind_param_error_raises(self, mock_fernet):
+        """Encryption failure raises ValueError (fail-closed, no plaintext stored)."""
         mock_fernet.side_effect = Exception("key error")
 
         et = EncryptedText()
-        result = et.process_bind_param("fallback-value", MagicMock())
-        assert result == "fallback-value"
+        with pytest.raises(ValueError, match="Encryption failed"):
+            et.process_bind_param("secret-value", MagicMock())
 
     @patch("app.utils.encrypted_type._get_fernet")
     def test_process_result_value_none(self, mock_fernet):

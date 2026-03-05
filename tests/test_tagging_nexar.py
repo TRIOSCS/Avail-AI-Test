@@ -5,14 +5,13 @@ Depends on: app.services.tagging_nexar, app.models
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
 from app.services.tagging_nexar import run_nexar_backfill
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 

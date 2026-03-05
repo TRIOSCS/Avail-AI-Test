@@ -1,7 +1,8 @@
-"""Material tagging background jobs — connector enrichment, boost, prefix, sighting, Nexar.
+"""Material tagging background jobs — Gradient AI (free), prefix, sighting, boost.
 
 Called by: app/jobs/__init__.py via register_tagging_jobs()
-Depends on: app.database, app.models, app.services.enrichment, app.services.tagging_backfill
+Depends on: app.database, app.models, app.services.enrichment, app.services.tagging_backfill,
+            app.services.tagging_ai, app.services.gradient_service
 """
 
 from apscheduler.triggers.cron import CronTrigger
@@ -12,84 +13,95 @@ from ..scheduler import _traced_job
 
 
 def register_tagging_jobs(scheduler, settings):
-    """Register tagging jobs with the scheduler."""
-    scheduler.add_job(
-        _job_connector_enrichment,
-        IntervalTrigger(hours=2),
-        id="connector_enrichment",
-        name="Enrich low-confidence material cards via connectors",
-    )
+    """Register tagging jobs with the scheduler.
+
+    NOTE (2026-03-05): Paid API jobs DISABLED (Nexar/DigiKey/Mouser/Element14/OEMSecrets).
+    Gradient AI is FREE — runs every 30min to classify untagged cards aggressively.
+    Prefix/sighting/boost run frequently to maximize non-API coverage.
+    """
+    # DISABLED — consumes DigiKey/Mouser/Element14/OEMSecrets/Nexar API quota
+    # scheduler.add_job(
+    #     _job_connector_enrichment,
+    #     IntervalTrigger(hours=2),
+    #     id="connector_enrichment",
+    #     name="Enrich low-confidence material cards via connectors",
+    # )
+
+    # Non-API jobs — run more frequently to maximize free coverage
     scheduler.add_job(
         _job_internal_boost,
-        CronTrigger(hour=2, minute=0),
+        IntervalTrigger(hours=4),
         id="internal_confidence_boost",
         name="Cross-check and boost tag confidence",
     )
     scheduler.add_job(
         _job_prefix_backfill,
-        CronTrigger(hour=3, minute=0),
+        IntervalTrigger(hours=2),
         id="prefix_backfill",
         name="Run prefix lookup on untagged cards",
     )
     scheduler.add_job(
         _job_sighting_mining,
-        CronTrigger(hour=4, minute=0),
+        IntervalTrigger(hours=2),
         id="sighting_mining",
         name="Mine sighting manufacturer data for untagged cards",
     )
+
+    # DISABLED — Nexar API quota exhausted (2000 part limit hit)
+    # scheduler.add_job(
+    #     _job_nexar_backfill,
+    #     IntervalTrigger(hours=2),
+    #     id="nexar_backfill",
+    #     name="Backfill untagged cards via Nexar (primary high-confidence source)",
+    # )
+
+    # Gradient AI classification — FREE, runs every 30 min, 500 cards per batch
     scheduler.add_job(
-        _job_nexar_validate,
-        IntervalTrigger(hours=6),
-        id="nexar_validate",
-        name="Validate AI tags via Nexar",
+        _job_gradient_ai_tagging,
+        IntervalTrigger(minutes=30),
+        id="gradient_ai_tagging",
+        name="Classify untagged cards via Gradient AI (free)",
     )
 
     if settings.material_enrichment_enabled:
         scheduler.add_job(
             _job_material_enrichment,
-            IntervalTrigger(hours=6),
+            IntervalTrigger(hours=2),
             id="material_enrichment",
-            name="Material card AI enrichment",
+            name="Material card AI enrichment (Gradient)",
         )
 
 
 @_traced_job
 async def _job_connector_enrichment():  # pragma: no cover
-    """Enrich low-confidence material cards via API connectors. Runs every 4h.
-
-    Two phases:
-    1. Enrich untagged/low-conf cards with no manufacturer (new data)
-    2. Cross-validate existing AI tags against connectors (upgrade confidence)
-    """
+    """Enrich untagged material cards via API connectors (0.95 confidence). DISABLED."""
     from ..database import SessionLocal
     from ..models.intelligence import MaterialCard
     from ..models.tags import MaterialTag, Tag
-    from ..services.enrichment import cross_validate_batch, enrich_batch
+    from ..services.enrichment import enrich_batch
 
     db = SessionLocal()
     try:
-        # Phase 1: Enrich cards with low-confidence tags
-        low_conf_cards = (
-            db.query(MaterialCard.normalized_mpn)
-            .join(MaterialTag, MaterialCard.id == MaterialTag.material_card_id)
+        tagged_brand_ids = (
+            db.query(MaterialTag.material_card_id)
             .join(Tag, MaterialTag.tag_id == Tag.id)
-            .filter(Tag.tag_type == "brand", MaterialTag.confidence < 0.9)
-            .order_by(MaterialTag.confidence.asc())
+            .filter(Tag.tag_type == "brand")
+            .distinct()
+            .subquery()
+        )
+        untagged_cards = (
+            db.query(MaterialCard.normalized_mpn)
+            .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
+            .order_by(MaterialCard.id)
             .limit(2000)
             .all()
         )
-        mpns = [row.normalized_mpn for row in low_conf_cards]
+        mpns = [row.normalized_mpn for row in untagged_cards]
         if mpns:
-            logger.info(f"Connector enrichment: processing {len(mpns)} low-confidence cards")
+            logger.info(f"Connector enrichment: processing {len(mpns)} untagged cards")
             result = await enrich_batch(mpns, db, concurrency=3)
             logger.info(f"Connector enrichment done: {result}")
 
-        # Phase 2: Cross-validate AI tags against connectors
-        cv_result = await cross_validate_batch(db, limit=500, concurrency=3)
-        if cv_result["total"] > 0:
-            logger.info(f"Cross-validation done: {cv_result}")
-
-        # Phase 3: Run boost cascade to propagate new manufacturer data
         from ..services.enrichment import boost_confidence_internal
         from ..services.tagging_backfill import backfill_manufacturer_from_sightings
 
@@ -109,7 +121,7 @@ async def _job_connector_enrichment():  # pragma: no cover
 
 @_traced_job
 async def _job_internal_boost():
-    """Cross-check and boost tag confidence using internal data (no API calls). Daily at 2 AM."""
+    """Cross-check and boost tag confidence using internal data (no API calls). Every 4h."""
     from ..database import SessionLocal
     from ..services.enrichment import boost_confidence_internal
 
@@ -126,7 +138,7 @@ async def _job_internal_boost():
 
 @_traced_job
 async def _job_prefix_backfill():
-    """Run prefix lookup on untagged cards. Daily at 3 AM."""
+    """Run prefix lookup on untagged cards. Every 2h."""
     from ..database import SessionLocal
     from ..services.tagging_backfill import run_prefix_backfill
 
@@ -143,7 +155,7 @@ async def _job_prefix_backfill():
 
 @_traced_job
 async def _job_sighting_mining():
-    """Mine sighting manufacturer data for untagged cards. Daily at 4 AM."""
+    """Mine sighting manufacturer data for untagged cards. Every 2h."""
     from ..database import SessionLocal
     from ..services.tagging_backfill import backfill_manufacturer_from_sightings
 
@@ -159,15 +171,100 @@ async def _job_sighting_mining():
 
 
 @_traced_job
-async def _job_nexar_validate():
-    """Validate AI-classified tags via Nexar. Every 6 hours."""
+async def _job_nexar_backfill():
+    """Backfill untagged cards via Nexar — DISABLED (quota exhausted)."""
     from ..database import SessionLocal
-    from ..services.enrichment import nexar_bulk_validate
+    from ..services.enrichment import nexar_backfill_untagged
 
     db = SessionLocal()
     try:
-        result = await nexar_bulk_validate(db, limit=2000)
-        logger.info(f"Nexar validate job: {result}")
+        result = await nexar_backfill_untagged(db, limit=5000)
+        logger.info(f"Nexar backfill job: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_gradient_ai_tagging():
+    """Classify untagged material cards via Gradient AI (FREE). Every 30 min, 500 cards/batch.
+
+    Waterfall: prefix_backfill + sighting_mining first (instant), then Gradient AI for remainder.
+    Uses Sonnet via Gradient for fast, accurate classification at zero cost.
+    """
+    import asyncio
+
+    from ..database import SessionLocal
+    from ..models.intelligence import MaterialCard
+    from ..models.tags import MaterialTag, Tag
+    from ..services.tagging_ai import classify_parts_with_ai, _apply_ai_results
+
+    db = SessionLocal()
+    try:
+        # Find cards with NO brand tag, excluding internal parts
+        tagged_brand_ids = (
+            db.query(MaterialTag.material_card_id)
+            .join(Tag, MaterialTag.tag_id == Tag.id)
+            .filter(Tag.tag_type == "brand")
+            .distinct()
+            .subquery()
+        )
+        untagged = (
+            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+            .filter(
+                ~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)),
+                MaterialCard.is_internal_part.is_(False),
+            )
+            .order_by(MaterialCard.id)
+            .limit(500)
+            .all()
+        )
+
+        if not untagged:
+            logger.info("Gradient AI tagging: no untagged cards remaining")
+            return
+
+        logger.info(f"Gradient AI tagging: classifying {len(untagged)} cards")
+
+        total_matched = 0
+        total_unknown = 0
+
+        # Process in batches of 50 MPNs, 5 concurrent Gradient calls
+        batch_size = 50
+        concurrency = 5
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _classify_batch(batch):
+            mpns = [row.normalized_mpn for row in batch]
+            async with sem:
+                return await classify_parts_with_ai(mpns)
+
+        all_batches = [untagged[i:i + batch_size] for i in range(0, len(untagged), batch_size)]
+
+        for round_start in range(0, len(all_batches), concurrency):
+            round_batches = all_batches[round_start:round_start + concurrency]
+            results = await asyncio.gather(
+                *[_classify_batch(b) for b in round_batches],
+                return_exceptions=True,
+            )
+
+            for batch, classified in zip(round_batches, results):
+                if isinstance(classified, Exception):
+                    logger.warning(f"Gradient batch failed: {classified}")
+                    continue
+                batch_tuples = [(row.id, row.normalized_mpn) for row in batch]
+                matched, unknown = _apply_ai_results(classified, batch_tuples, db)
+                total_matched += matched
+                total_unknown += unknown
+
+            db.commit()
+
+        logger.info(
+            f"Gradient AI tagging done: {len(untagged)} processed, "
+            f"{total_matched} matched, {total_unknown} unknown"
+        )
     except Exception:
         db.rollback()
         raise
@@ -176,7 +273,7 @@ async def _job_nexar_validate():
 
 
 async def _job_material_enrichment():
-    """Every 6h — AI-enrich material cards missing descriptions/categories."""
+    """Every 2h — AI-enrich material cards missing descriptions/categories via Gradient."""
     from ..config import settings
     from ..database import SessionLocal
 

@@ -194,10 +194,14 @@ class TestPlanContext:
         # Mock plan referencing the quote
         mock_plan = MagicMock(submitted_by_id=user.id, quote_id=999)
 
-        with patch.object(db_session, "get", side_effect=lambda model, pk: {
-            "User": user,
-            "Quote": mock_quote,
-        }.get(model.__name__)):
+        with patch.object(
+            db_session,
+            "get",
+            side_effect=lambda model, pk: {
+                "User": user,
+                "Quote": mock_quote,
+            }.get(model.__name__),
+        ):
             ctx = _plan_context(mock_plan, db_session)
 
         assert ctx["customer_name"] == "Orphan HQ"

@@ -20,6 +20,7 @@ def register_enrichment_jobs(scheduler, settings):
         _job_engagement_scoring, IntervalTrigger(hours=12), id="engagement_scoring", name="Engagement scoring"
     )
 
+    # Apollo, Hunter, Gradient are OK to use at full capacity
     if settings.deep_enrichment_enabled:
         scheduler.add_job(
             _job_deep_enrichment, IntervalTrigger(hours=12), id="deep_enrichment", name="Deep enrichment sweep"

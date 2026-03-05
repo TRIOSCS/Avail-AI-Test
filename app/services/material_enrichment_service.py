@@ -68,8 +68,8 @@ async def enrich_material_cards(card_ids: list[int], db: Session, *, batch_size:
 
 
 async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> None:
-    """Enrich a single batch of cards via one Claude call."""
-    from ..utils.claude_client import claude_structured
+    """Enrich a single batch of cards. Primary: Gradient (free), fallback: Anthropic."""
+    from ..services.gradient_service import gradient_json
 
     parts_list = []
     for card in cards:
@@ -89,16 +89,30 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
     )
 
     try:
-        result = await claude_structured(
+        # Primary: Gradient Claude Sonnet (free, unlimited, accurate for MPN classification)
+        result = await gradient_json(
             prompt,
-            _PART_SCHEMA,
-            system=_SYSTEM_PROMPT,
-            model_tier="fast",
+            system=_SYSTEM_PROMPT + " Return ONLY valid JSON.",
+            model="anthropic-claude-sonnet-4-6",
             max_tokens=4096,
+            temperature=0.1,
             timeout=60,
         )
+
+        # Fallback: direct Anthropic API ($400 budget)
+        if not result or "parts" not in (result if isinstance(result, dict) else {}):
+            from ..utils.claude_client import claude_structured
+
+            result = await claude_structured(
+                prompt,
+                _PART_SCHEMA,
+                system=_SYSTEM_PROMPT,
+                model_tier="fast",
+                max_tokens=4096,
+                timeout=60,
+            )
     except Exception as e:
-        logger.error("Material enrichment Claude call failed: %s", e)
+        logger.error("Material enrichment AI call failed: %s", e)
         stats["errors"] += len(cards)
         return
 
@@ -121,7 +135,7 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
             if desc:
                 card.description = desc
             card.category = cat
-            card.enrichment_source = "claude_haiku"
+            card.enrichment_source = "gradient_ai"
             card.enriched_at = now
             stats["enriched"] += 1
         except Exception as e:

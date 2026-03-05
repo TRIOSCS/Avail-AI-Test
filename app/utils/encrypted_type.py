@@ -41,9 +41,9 @@ class EncryptedText(TypeDecorator):
         try:
             f = _get_fernet()
             return f.encrypt(value.encode()).decode()
-        except Exception:
-            logger.warning("Failed to encrypt value, storing as-is")
-            return value
+        except Exception as e:
+            logger.error(f"Encryption failed — refusing to store plaintext: {e}")
+            raise ValueError("Encryption failed — cannot store sensitive data as plaintext") from e
 
     def process_result_value(self, value, dialect):
         if value is None:

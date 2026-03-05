@@ -10,13 +10,13 @@ from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
 from app.services.tagging_backfill import run_prefix_backfill, seed_from_existing_manufacturers
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
 def _seed_commodity_tags(db):
     """Seed commodity taxonomy tags for tests that need them."""
     from datetime import timezone as tz
+
     for name in ["Power Management ICs", "Capacitors", "Microcontrollers (MCU)", "Miscellaneous"]:
         db.add(Tag(name=name, tag_type="commodity", created_at=datetime.now(tz.utc)))
     db.commit()

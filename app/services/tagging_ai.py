@@ -26,9 +26,9 @@ from app.services.tagging import (
 )
 
 _CLASSIFY_PROMPT = """Classify these electronic component part numbers. For each MPN, provide:
-- manufacturer: The most likely manufacturer (full company name), or null if unknown
+- manufacturer: The manufacturer (full company name), or null if you are not at least 90% confident
 - category: The component category (e.g., Microcontrollers (MCU), Capacitors, Connectors, etc.), or null if unknown
-- confidence: Your confidence in the manufacturer identification (0.0 to 1.0)
+- confidence: Your confidence in the manufacturer identification (0.0 to 1.0). Only return a manufacturer if confidence >= 0.90.
 
 Common MPN patterns to help:
 - STM32*, STM8* → STMicroelectronics; TPS*, LM*, SN* → Texas Instruments
@@ -38,6 +38,7 @@ Common MPN patterns to help:
 
 If this looks like an internal/custom part number (company-specific prefixes, purchase
 order numbers, or non-standard formats), return null for manufacturer.
+If you are less than 90% confident in the manufacturer, return null — do NOT guess.
 
 Return a JSON array with one object per part:
 [{{"mpn": "...", "manufacturer": "..." or null, "category": "..." or null, "confidence": 0.0-1.0}}]
@@ -49,19 +50,33 @@ _SYSTEM = "You are an expert electronic component classifier. Return only valid 
 
 
 async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
-    """Batch MPNs per Claude Haiku call. Parse structured JSON response."""
-    from app.utils.claude_client import claude_json
+    """Batch MPNs via Gradient (free) with Anthropic fallback. Parse structured JSON response."""
+    from app.services.gradient_service import gradient_json
 
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
     prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
-    result = await claude_json(
+    # Primary: Gradient Claude Sonnet (free, unlimited, high accuracy for MPN classification)
+    result = await gradient_json(
         prompt,
         system=_SYSTEM,
-        model_tier="fast",
+        model="anthropic-claude-sonnet-4-6",
         max_tokens=4096,
+        temperature=0.1,
         timeout=60,
     )
+
+    # Fallback: direct Anthropic API ($400 budget)
+    if not result or not isinstance(result, list):
+        from app.utils.claude_client import claude_json
+
+        result = await claude_json(
+            prompt,
+            system=_SYSTEM,
+            model_tier="fast",
+            max_tokens=4096,
+            timeout=60,
+        )
 
     if not result or not isinstance(result, list):
         logger.warning("AI classification returned invalid response")
@@ -93,7 +108,7 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
         category = result.get("category", "Miscellaneous")
 
         is_unknown = manufacturer == "Unknown"
-        confidence = 0.3 if is_unknown else 0.7
+        confidence = 0.3 if is_unknown else 0.92
 
         tags_to_apply = []
 
@@ -664,11 +679,11 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
             unknown += 1
             continue
 
-        # Use model-reported confidence if available and >= 0.7, otherwise default 0.7
+        # Use model-reported confidence if available and >= 0.90, otherwise default 0.92
         if model_confidence is not None and isinstance(model_confidence, (int, float)):
-            confidence = max(0.7, min(1.0, float(model_confidence)))
+            confidence = max(0.90, min(1.0, float(model_confidence)))
         else:
-            confidence = 0.7
+            confidence = 0.92
 
         tags_to_apply = []
         brand_tag = get_or_create_brand_tag(manufacturer, db)
@@ -684,7 +699,7 @@ def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int,
                 tags_to_apply.append({
                     "tag_id": commodity_tag.id,
                     "source": "ai_classified",
-                    "confidence": min(confidence, 0.9),
+                    "confidence": min(confidence, 0.95),
                 })
 
         tag_material_card(card.id, tags_to_apply, db)

@@ -10,20 +10,16 @@ Depends on: app.services.diagnosis_service, conftest fixtures
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import User
 from app.models.notification import Notification
-from app.models.trouble_ticket import TroubleTicket
 from app.models.self_heal_log import SelfHealLog
-from app.services.trouble_ticket_service import create_ticket
+from app.models.trouble_ticket import TroubleTicket
 from app.services.diagnosis_service import (
-    classify_ticket,
     apply_risk_overrides,
-    diagnose_ticket,
+    classify_ticket,
     diagnose_full,
+    diagnose_ticket,
 )
+from app.services.trouble_ticket_service import create_ticket
 
 
 def _run(coro):
@@ -33,8 +29,9 @@ def _run(coro):
 
 def _make_ticket(db, user, **overrides):
     """Create a test ticket."""
-    defaults = dict(title="Button broken", description="Submit button does nothing on RFQ page",
-                    current_page="/api/rfq")
+    defaults = dict(
+        title="Button broken", description="Submit button does nothing on RFQ page", current_page="/api/rfq"
+    )
     defaults.update(overrides)
     return create_ticket(db=db, user_id=user.id, **defaults)
 
@@ -131,9 +128,14 @@ class TestDiagnoseFull:
         # First call = classification, second = diagnosis
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.85, "summary": "UI bug"},
-            {"root_cause": "CSS issue", "affected_files": ["app/static/app.js"],
-             "fix_approach": "Fix CSS", "test_strategy": "Visual check",
-             "estimated_complexity": "simple", "requires_migration": False},
+            {
+                "root_cause": "CSS issue",
+                "affected_files": ["app/static/app.js"],
+                "fix_approach": "Fix CSS",
+                "test_strategy": "Visual check",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         ticket = _make_ticket(db_session, test_user)
         result = _run(diagnose_full(ticket.id, db_session))
@@ -160,9 +162,14 @@ class TestDiagnoseFull:
     def test_migration_forces_high(self, mock_claude, db_session, test_user):
         mock_claude.side_effect = [
             {"category": "data", "risk_tier": "low", "confidence": 0.9, "summary": "Schema issue"},
-            {"root_cause": "Missing column", "affected_files": ["app/models/foo.py"],
-             "fix_approach": "Add migration", "test_strategy": "Test migration",
-             "estimated_complexity": "moderate", "requires_migration": True},
+            {
+                "root_cause": "Missing column",
+                "affected_files": ["app/models/foo.py"],
+                "fix_approach": "Add migration",
+                "test_strategy": "Test migration",
+                "estimated_complexity": "moderate",
+                "requires_migration": True,
+            },
         ]
         ticket = _make_ticket(db_session, test_user)
         result = _run(diagnose_full(ticket.id, db_session))
@@ -172,9 +179,14 @@ class TestDiagnoseFull:
     def test_complex_low_bumps_to_medium(self, mock_claude, db_session, test_user):
         mock_claude.side_effect = [
             {"category": "api", "risk_tier": "low", "confidence": 0.85, "summary": "API issue"},
-            {"root_cause": "Complex refactor needed", "affected_files": ["app/services/foo.py"],
-             "fix_approach": "Major refactor", "test_strategy": "Full regression",
-             "estimated_complexity": "complex", "requires_migration": False},
+            {
+                "root_cause": "Complex refactor needed",
+                "affected_files": ["app/services/foo.py"],
+                "fix_approach": "Major refactor",
+                "test_strategy": "Full regression",
+                "estimated_complexity": "complex",
+                "requires_migration": False,
+            },
         ]
         ticket = _make_ticket(db_session, test_user)
         result = _run(diagnose_full(ticket.id, db_session))
@@ -195,9 +207,14 @@ class TestDiagnoseFull:
     def test_creates_self_heal_log(self, mock_claude, db_session, test_user):
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "Bug"},
-            {"root_cause": "Fix", "affected_files": [], "fix_approach": "Do it",
-             "test_strategy": "Test it", "estimated_complexity": "simple",
-             "requires_migration": False},
+            {
+                "root_cause": "Fix",
+                "affected_files": [],
+                "fix_approach": "Do it",
+                "test_strategy": "Test it",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         ticket = _make_ticket(db_session, test_user)
         _run(diagnose_full(ticket.id, db_session))
@@ -210,15 +227,25 @@ class TestDiagnoseFull:
     def test_emits_notification(self, mock_claude, db_session, test_user):
         mock_claude.side_effect = [
             {"category": "api", "risk_tier": "low", "confidence": 0.9, "summary": "API bug"},
-            {"root_cause": "Query error", "affected_files": [], "fix_approach": "Fix SQL",
-             "test_strategy": "Test it", "estimated_complexity": "simple",
-             "requires_migration": False},
+            {
+                "root_cause": "Query error",
+                "affected_files": [],
+                "fix_approach": "Fix SQL",
+                "test_strategy": "Test it",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         ticket = _make_ticket(db_session, test_user)
         _run(diagnose_full(ticket.id, db_session))
-        notifs = db_session.query(Notification).filter_by(
-            user_id=test_user.id, ticket_id=ticket.id,
-        ).all()
+        notifs = (
+            db_session.query(Notification)
+            .filter_by(
+                user_id=test_user.id,
+                ticket_id=ticket.id,
+            )
+            .all()
+        )
         assert len(notifs) == 1
         assert notifs[0].event_type == "prompt_ready"
         assert "API bug" in notifs[0].title
@@ -226,12 +253,20 @@ class TestDiagnoseFull:
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_high_risk_emits_escalated_notification(self, mock_claude, db_session, test_user):
         mock_claude.return_value = {
-            "category": "data", "risk_tier": "high", "confidence": 0.95, "summary": "DB issue",
+            "category": "data",
+            "risk_tier": "high",
+            "confidence": 0.95,
+            "summary": "DB issue",
         }
         ticket = _make_ticket(db_session, test_user)
         _run(diagnose_full(ticket.id, db_session))
-        notifs = db_session.query(Notification).filter_by(
-            user_id=test_user.id, ticket_id=ticket.id,
-        ).all()
+        notifs = (
+            db_session.query(Notification)
+            .filter_by(
+                user_id=test_user.id,
+                ticket_id=ticket.id,
+            )
+            .all()
+        )
         assert len(notifs) == 1
         assert notifs[0].event_type == "escalated"

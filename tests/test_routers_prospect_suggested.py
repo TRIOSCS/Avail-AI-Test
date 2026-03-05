@@ -1285,3 +1285,153 @@ class TestAddProspectManualErrors:
     def test_add_prospect_duplicate(self, mock_fn, client):
         resp = client.post("/api/prospects/add", json={"domain": "dup.com"})
         assert resp.status_code == 400
+
+
+# ── Discovery Pool Backend Enhancements (Tasks 1-3) ──────────────────
+
+
+class TestRevenueRangeFilter:
+    """Task 1: revenue_range filter on /api/prospects/suggested."""
+
+    def test_filter_revenue_range(self, client, db_session):
+        _make_prospect(db_session, name="Small", domain="small.com", revenue_range="$1M-$10M")
+        _make_prospect(db_session, name="Large", domain="large.com", revenue_range="$100M-$500M")
+        resp = client.get("/api/prospects/suggested?revenue_range=$1M-$10M")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Small"
+
+    def test_filter_revenue_range_partial_match(self, client, db_session):
+        """revenue_range uses ilike, so partial matches work."""
+        _make_prospect(db_session, name="Mid", domain="mid.com", revenue_range="$10M-$50M")
+        _make_prospect(db_session, name="Big", domain="big.com", revenue_range="$500M+")
+        resp = client.get("/api/prospects/suggested?revenue_range=10M")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Mid"
+
+    def test_filter_revenue_range_empty_ignored(self, client, db_session):
+        """Empty revenue_range param is ignored (returns all)."""
+        _make_prospect(db_session, name="Any", domain="any.com", revenue_range="$1M-$10M")
+        resp = client.get("/api/prospects/suggested?revenue_range=")
+        assert resp.json()["total"] == 1
+
+    def test_filter_revenue_range_strips_whitespace(self, client, db_session):
+        _make_prospect(db_session, name="Ws", domain="ws.com", revenue_range="$10M-$50M")
+        resp = client.get("/api/prospects/suggested?revenue_range=%20%2410M%20")
+        data = resp.json()
+        assert data["total"] == 1
+
+
+class TestDiscoverySourceFilter:
+    """Task 1: discovery_source filter on /api/prospects/suggested."""
+
+    def test_filter_discovery_source(self, client, db_session):
+        _make_prospect(db_session, name="Exp", domain="exp.com", discovery_source="explorium")
+        _make_prospect(db_session, name="Man", domain="man.com", discovery_source="manual")
+        resp = client.get("/api/prospects/suggested?discovery_source=explorium")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Exp"
+
+    def test_filter_discovery_source_exact(self, client, db_session):
+        """discovery_source uses exact match, not ilike."""
+        _make_prospect(db_session, name="Exp", domain="exp.com", discovery_source="explorium")
+        resp = client.get("/api/prospects/suggested?discovery_source=explor")
+        assert resp.json()["total"] == 0
+
+    def test_filter_discovery_source_empty_ignored(self, client, db_session):
+        _make_prospect(db_session, name="Any", domain="any.com", discovery_source="apollo")
+        resp = client.get("/api/prospects/suggested?discovery_source=")
+        assert resp.json()["total"] == 1
+
+    def test_filter_discovery_source_strips_whitespace(self, client, db_session):
+        _make_prospect(db_session, name="Ws", domain="ws.com", discovery_source="explorium")
+        resp = client.get("/api/prospects/suggested?discovery_source=%20explorium%20")
+        data = resp.json()
+        assert data["total"] == 1
+
+
+class TestRecentDescSort:
+    """Task 2: recent_desc sort option."""
+
+    def test_sort_recent_desc(self, client, db_session):
+        from datetime import timedelta
+
+        now = datetime.now(timezone.utc)
+        _make_prospect(
+            db_session,
+            name="Old",
+            domain="old.com",
+            created_at=now - timedelta(days=7),
+        )
+        _make_prospect(
+            db_session,
+            name="New",
+            domain="new.com",
+            created_at=now,
+        )
+        resp = client.get("/api/prospects/suggested?sort=recent_desc")
+        items = resp.json()["items"]
+        assert len(items) == 2
+        assert items[0]["name"] == "New"
+        assert items[1]["name"] == "Old"
+
+
+class TestStatsIndustriesRegions:
+    """Task 3: industries and regions in stats endpoint."""
+
+    def test_stats_includes_industries(self, client, db_session):
+        _make_prospect(db_session, name="A", domain="a.com", industry="Electronics")
+        _make_prospect(db_session, name="B", domain="b.com", industry="Aerospace")
+        _make_prospect(db_session, name="C", domain="c.com", industry="Electronics")
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert "industries" in data
+        assert sorted(data["industries"]) == ["Aerospace", "Electronics"]
+
+    def test_stats_includes_regions(self, client, db_session):
+        _make_prospect(db_session, name="A", domain="a.com", region="US")
+        _make_prospect(db_session, name="B", domain="b.com", region="EU")
+        _make_prospect(db_session, name="C", domain="c.com", region="US")
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert "regions" in data
+        assert sorted(data["regions"]) == ["EU", "US"]
+
+    def test_stats_excludes_null_industries(self, client, db_session):
+        _make_prospect(db_session, name="A", domain="a.com", industry="Electronics")
+        _make_prospect(db_session, name="B", domain="b.com", industry=None)
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert data["industries"] == ["Electronics"]
+
+    def test_stats_excludes_null_regions(self, client, db_session):
+        _make_prospect(db_session, name="A", domain="a.com", region="US")
+        _make_prospect(db_session, name="B", domain="b.com", region=None)
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert data["regions"] == ["US"]
+
+    def test_stats_industries_regions_only_suggested(self, client, db_session):
+        """Industries/regions only come from suggested-status accounts."""
+        _make_prospect(db_session, name="Sugg", domain="sugg.com", industry="Electronics", region="US")
+        _make_prospect(
+            db_session,
+            name="Claimed",
+            domain="claimed.com",
+            industry="Automotive",
+            region="EU",
+            status="claimed",
+        )
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert data["industries"] == ["Electronics"]
+        assert data["regions"] == ["US"]
+
+    def test_stats_empty_industries_regions(self, client, db_session):
+        """No suggested prospects => empty lists."""
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert data["industries"] == []
+        assert data["regions"] == []

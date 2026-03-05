@@ -33,11 +33,8 @@ from app.models import (
     MaterialCard,
     Quote,
     Requisition,
-    User,
-    VendorCard,
 )
 from app.services.trouble_ticket_service import create_ticket
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  1. TROUBLE TICKET ROUTER — admin-only endpoints + access control
@@ -239,27 +236,36 @@ class TestSearchServiceBulkRetry:
 
     def test_bulk_sighting_retry_on_commit_failure(self, db_session, test_user):
         """When bulk commit fails, retries row-by-row (lines 600-625)."""
-        from app.models import Requirement, Sighting
+        from app.models import Requirement
         from app.search_service import _save_sightings
 
         req = Requisition(
-            name="REQ-RETRY", customer_name="Test", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-RETRY",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
         item = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item)
         db_session.commit()
 
         results = [
             {
-                "vendor_name": "TestVendor", "mpn_matched": "LM317T",
-                "qty_available": 100, "unit_price": 0.50, "source_type": "test",
-                "mpn": "LM317T", "description": "Part",
+                "vendor_name": "TestVendor",
+                "mpn_matched": "LM317T",
+                "qty_available": 100,
+                "unit_price": 0.50,
+                "source_type": "test",
+                "mpn": "LM317T",
+                "description": "Part",
             }
         ]
         # Normal path - this exercises the commit success path
@@ -299,10 +305,13 @@ class TestSearchServiceBulkRetry:
 
         mock_db.query.side_effect = query_side
 
-        with patch("app.search_service.normalize_mpn_key", return_value="lm317t"), \
-             patch("app.search_service.normalize_mpn", return_value="LM317T"), \
-             patch("app.search_service._audit_card_created"):
+        with (
+            patch("app.search_service.normalize_mpn_key", return_value="lm317t"),
+            patch("app.search_service.normalize_mpn", return_value="LM317T"),
+            patch("app.search_service._audit_card_created"),
+        ):
             from app.search_service import resolve_material_card
+
             card = resolve_material_card("LM317T", mock_db)
             assert card is not None
 
@@ -335,8 +344,11 @@ class TestOfferWonHistory:
         from app.routers.crm.offers import _record_offer_won_history
 
         req = Requisition(
-            name="REQ-OWH", customer_name="Test", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-OWH",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
@@ -347,8 +359,7 @@ class TestOfferWonHistory:
 
         with patch.object(db_session, "get") as mock_get:
             mock_get.side_effect = lambda model, pk: (
-                req if model is Requisition else
-                SimpleNamespace(company_id=None) if model is CustomerSite else None
+                req if model is Requisition else SimpleNamespace(company_id=None) if model is CustomerSite else None
             )
             _record_offer_won_history(db_session, offer)
 
@@ -424,8 +435,11 @@ class TestAvailScoreBranches:
         now = datetime.now(timezone.utc)
 
         req = Requisition(
-            name="REQ-QF", customer_name="Test", status="open",
-            created_by=test_user.id, created_at=now,
+            name="REQ-QF",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=now,
         )
         db_session.add(req)
         db_session.flush()
@@ -439,17 +453,23 @@ class TestAvailScoreBranches:
         db_session.flush()
 
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-SCORE", status="sent",
-            line_items=[], created_by_id=test_user.id,
-            sent_at=None, created_at=now,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-SCORE",
+            status="sent",
+            line_items=[],
+            created_by_id=test_user.id,
+            sent_at=None,
+            created_at=now,
         )
         db_session.add(q)
         db_session.commit()
 
         score, raw = _sales_b3_quote_followup(
-            db_session, test_user.id,
-            now - timedelta(days=30), now + timedelta(days=1),
+            db_session,
+            test_user.id,
+            now - timedelta(days=30),
+            now + timedelta(days=1),
         )
         assert score >= 0
 
@@ -465,11 +485,13 @@ class TestCompanyDedupRank:
     def test_dedup_ranking(self, db_session):
         """find_company_dedup_candidates exercises _rank for auto_keep."""
         c1 = Company(
-            name="Acme Corp", is_active=True,
+            name="Acme Corp",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         c2 = Company(
-            name="Acme Corporation", is_active=True,
+            name="Acme Corporation",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add_all([c1, c2])
@@ -477,14 +499,13 @@ class TestCompanyDedupRank:
 
         from app.company_utils import find_company_dedup_candidates
 
-        # The function uses thefuzz internally; make sure it's available
+        # The function uses thefuzz internally; skip if not installed
         try:
-            from thefuzz import fuzz
             results = find_company_dedup_candidates(db_session, threshold=70)
-            if results:
-                assert "auto_keep_id" in results[0]
         except ImportError:
             pytest.skip("thefuzz not installed")
+        if results:
+            assert "auto_keep_id" in results[0]
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -498,6 +519,7 @@ class TestFileMapperEdgeCases:
     def test_singularize_no_trailing_s(self):
         """_singularize returns name unchanged for non-s endings (line 68)."""
         from app.services.file_mapper import _singularize
+
         assert _singularize("data") == "data"
         assert _singularize("health") == "health"
         assert _singularize("process") == "process"  # "ss" -> no strip
@@ -520,9 +542,9 @@ class TestFileMapperEdgeCases:
 
     def test_scan_routers_oserror(self):
         """When a .py file can't be read, it's skipped (lines 54-55)."""
-        from app.services import file_mapper
-        from app.services.file_mapper import scan_routers
         from pathlib import Path
+
+        from app.services.file_mapper import scan_routers
 
         scan_routers.cache_clear()
         original_read = Path.read_text
@@ -563,20 +585,32 @@ class TestDiagnosisServiceFileContext:
     def test_diagnose_ticket_with_relevant_files(self):
         """diagnose_ticket builds file_context when relevant_files is non-empty."""
         import asyncio
+
         from app.services.diagnosis_service import diagnose_ticket
 
         ticket = SimpleNamespace(
-            id=1, title="Bug", description="Error in /api/vendors",
-            current_page="/api/vendors", sanitized_context=None,
+            id=1,
+            title="Bug",
+            description="Error in /api/vendors",
+            current_page="/api/vendors",
+            sanitized_context=None,
         )
         classification = {
-            "category": "api", "risk_tier": "low",
-            "confidence": 0.9, "summary": "API bug",
+            "category": "api",
+            "risk_tier": "low",
+            "confidence": 0.9,
+            "summary": "API bug",
         }
 
-        with patch("app.services.diagnosis_service.get_relevant_files", return_value=[
-            {"path": "app/routers/vendors.py", "role": "router", "confidence": 0.9, "stable": False},
-        ]), patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock) as mock_claude:
+        with (
+            patch(
+                "app.services.diagnosis_service.get_relevant_files",
+                return_value=[
+                    {"path": "app/routers/vendors.py", "role": "router", "confidence": 0.9, "stable": False},
+                ],
+            ),
+            patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock) as mock_claude,
+        ):
             mock_claude.return_value = {
                 "root_cause": "Logic error",
                 "affected_files": ["app/routers/vendors.py"],
@@ -585,9 +619,7 @@ class TestDiagnosisServiceFileContext:
                 "estimated_complexity": "simple",
                 "requires_migration": False,
             }
-            result = asyncio.get_event_loop().run_until_complete(
-                diagnose_ticket(ticket, classification)
-            )
+            result = asyncio.get_event_loop().run_until_complete(diagnose_ticket(ticket, classification))
             assert result is not None
             assert result["root_cause"] == "Logic error"
             # Verify prompt contained "Relevant files identified"
@@ -606,8 +638,10 @@ class TestProspectingAccountHealth:
     def test_my_accounts_endpoint(self, client, db_session, test_user, test_company):
         """Endpoint /api/prospecting/my-accounts returns data."""
         site = CustomerSite(
-            company_id=test_company.id, site_name="Active Site",
-            owner_id=test_user.id, is_active=True,
+            company_id=test_company.id,
+            site_name="Active Site",
+            owner_id=test_user.id,
+            is_active=True,
         )
         db_session.add(site)
         db_session.commit()
@@ -620,10 +654,18 @@ class TestProspectingAccountHealth:
         # The grey branch requires site_count==0, which can't happen with
         # the inner JOIN in the SQL query. We mock the query result directly.
         mock_row = SimpleNamespace(
-            id=1, name="Empty Co", domain=None, industry=None,
-            hq_city=None, hq_state=None, employee_size=None,
-            is_strategic=False, site_count=0, active_sites=0,
-            inactive_sites=0, last_activity=None,
+            id=1,
+            name="Empty Co",
+            domain=None,
+            industry=None,
+            hq_city=None,
+            hq_state=None,
+            employee_size=None,
+            is_strategic=False,
+            site_count=0,
+            active_sites=0,
+            inactive_sites=0,
+            last_activity=None,
         )
         with patch("app.routers.v13_features.Session.query") as _:
             # Rather than mocking the ORM chain, test the logic path directly
@@ -650,27 +692,35 @@ class TestTagPropagationException:
 
     def test_tag_propagation_exception_swallowed(self, db_session, test_user):
         """Tag propagation error is caught and logged (lines 661-662)."""
-        from app.models import Requirement, Sighting
+        from app.models import Requirement
         from app.search_service import _save_sightings
 
         req = Requisition(
-            name="REQ-TAG", customer_name="Test", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-TAG",
+            customer_name="Test",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
 
         item = Requirement(
-            requisition_id=req.id, primary_mpn="TAGPART",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            primary_mpn="TAGPART",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item)
         db_session.commit()
 
         results = [
             {
-                "vendor_name": "TagVendor", "mpn_matched": "TAGPART",
-                "qty_available": 100, "unit_price": 0.50, "source_type": "test",
+                "vendor_name": "TagVendor",
+                "mpn_matched": "TAGPART",
+                "qty_available": 100,
+                "unit_price": 0.50,
+                "source_type": "test",
                 "mpn": "TAGPART",
             }
         ]
@@ -693,8 +743,10 @@ class TestTaggingRaceCondition:
         from app.services.tagging import classify_material_card as classify_material
 
         mc = MaterialCard(
-            normalized_mpn="tag_race", display_mpn="TAG_RACE",
-            search_count=0, created_at=datetime.now(timezone.utc),
+            normalized_mpn="tag_race",
+            display_mpn="TAG_RACE",
+            search_count=0,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(mc)
         db_session.flush()
@@ -709,6 +761,7 @@ class TestTaggingRaceCondition:
             call_count["n"] += 1
             if call_count["n"] >= 2:
                 from sqlalchemy.exc import IntegrityError
+
                 raise IntegrityError("duplicate", {}, None)
             return original_flush(*args, **kwargs)
 

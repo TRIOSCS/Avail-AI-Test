@@ -26,8 +26,11 @@ def _run(coro):
 @pytest.fixture()
 def rb_user(db_session: Session) -> User:
     user = User(
-        email="rollback@trioscs.com", name="Rollback User", role="admin",
-        azure_id="test-rb-001", created_at=datetime.now(timezone.utc),
+        email="rollback@trioscs.com",
+        name="Rollback User",
+        role="admin",
+        azure_id="test-rb-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -38,9 +41,12 @@ def rb_user(db_session: Session) -> User:
 @pytest.fixture()
 def fixed_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
     ticket = TroubleTicket(
-        ticket_number="TT-RB-001", submitted_by=rb_user.id,
-        title="Fixed bug", description="Was broken, now fixed",
-        status="awaiting_verification", risk_tier="low",
+        ticket_number="TT-RB-001",
+        submitted_by=rb_user.id,
+        title="Fixed bug",
+        description="Was broken, now fixed",
+        status="awaiting_verification",
+        risk_tier="low",
         diagnosis={"root_cause": "Query error"},
         file_mapping=["app/routers/vendors.py"],
     )
@@ -71,9 +77,14 @@ class TestCheckPostFixHealth:
     def test_issues_create_notification(self, mock_health, db_session, fixed_ticket, rb_user):
         mock_health.return_value = ["Database timeout"]
         _run(check_post_fix_health(fixed_ticket.id, db_session))
-        notifs = db_session.query(Notification).filter_by(
-            ticket_id=fixed_ticket.id, event_type="failed",
-        ).all()
+        notifs = (
+            db_session.query(Notification)
+            .filter_by(
+                ticket_id=fixed_ticket.id,
+                event_type="failed",
+            )
+            .all()
+        )
         assert len(notifs) == 1
         assert "regression" in notifs[0].title.lower()
         assert "Database timeout" in notifs[0].body

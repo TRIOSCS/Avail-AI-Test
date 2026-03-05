@@ -27,8 +27,11 @@ from app.services.cost_controller import (
 @pytest.fixture()
 def cost_user(db_session: Session) -> User:
     user = User(
-        email="cost@trioscs.com", name="Cost User", role="admin",
-        azure_id="test-cost-001", created_at=datetime.now(timezone.utc),
+        email="cost@trioscs.com",
+        name="Cost User",
+        role="admin",
+        azure_id="test-cost-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -39,8 +42,10 @@ def cost_user(db_session: Session) -> User:
 @pytest.fixture()
 def cost_ticket(db_session: Session, cost_user: User) -> TroubleTicket:
     ticket = TroubleTicket(
-        ticket_number="TT-20260302-C01", submitted_by=cost_user.id,
-        title="Cost test ticket", description="Testing budget caps",
+        ticket_number="TT-20260302-C01",
+        submitted_by=cost_user.id,
+        title="Cost test ticket",
+        description="Testing budget caps",
     )
     db_session.add(ticket)
     db_session.commit()
@@ -50,8 +55,11 @@ def cost_ticket(db_session: Session, cost_user: User) -> TroubleTicket:
 
 def _add_log(db, ticket_id, cost=None, created_at=None):
     log = SelfHealLog(
-        ticket_id=ticket_id, category="api", risk_tier="low",
-        cost_usd=cost, created_at=created_at or datetime.now(timezone.utc),
+        ticket_id=ticket_id,
+        category="api",
+        risk_tier="low",
+        cost_usd=cost,
+        created_at=created_at or datetime.now(timezone.utc),
     )
     db.add(log)
     db.commit()

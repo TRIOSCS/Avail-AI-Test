@@ -8,8 +8,6 @@ Depends on: app.schemas.apollo
 from app.schemas.apollo import (
     ApolloCreditsResponse,
     ApolloDiscoverRequest,
-    ApolloDiscoverResponse,
-    ApolloEnrichRequest,
     ApolloEnrichResponse,
     ApolloSyncResponse,
     DiscoveredContact,
@@ -40,9 +38,7 @@ def test_sync_response():
 
 
 def test_enrich_response_credits():
-    r = ApolloEnrichResponse(
-        enriched=3, verified=2, credits_used=3, credits_remaining=92
-    )
+    r = ApolloEnrichResponse(enriched=3, verified=2, credits_used=3, credits_remaining=92)
     assert r.credits_remaining == 92
 
 

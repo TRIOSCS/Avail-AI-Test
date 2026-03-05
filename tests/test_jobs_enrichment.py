@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import VendorCard
 from app.scheduler import scheduler
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 

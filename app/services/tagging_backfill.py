@@ -255,7 +255,7 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
             winner, count = mfr_counts.most_common(1)[0]
             distinct_sources = len(mfr_counts)
 
-            # Confidence based on agreement level
+            # Confidence based on agreement level (min 0.90 floor)
             if count >= 3:
                 confidence = 0.95
                 source = "sighting_consensus"
@@ -263,8 +263,9 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
                 confidence = 0.90
                 source = "sighting_consensus"
             else:
-                confidence = 0.85
-                source = "sighting_single"
+                # Single sighting = 0.85, below 0.90 floor — skip
+                total_skipped += 1
+                continue
 
             # Update card manufacturer if not set
             if not card.manufacturer:

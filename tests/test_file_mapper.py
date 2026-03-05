@@ -7,10 +7,10 @@ Depends on: app.services.file_mapper
 """
 
 from app.services.file_mapper import (
-    scan_routers,
+    STABLE_FILES,
     get_relevant_files,
     has_stable_files,
-    STABLE_FILES,
+    scan_routers,
 )
 
 
@@ -63,17 +63,13 @@ class TestGetRelevantFiles:
 
     def test_error_context_extracts_files(self):
         """Should extract file paths mentioned in error context."""
-        files = get_relevant_files(
-            error_context="Traceback: File app/services/health_monitor.py line 42"
-        )
+        files = get_relevant_files(error_context="Traceback: File app/services/health_monitor.py line 42")
         paths = [f["path"] for f in files]
         assert "app/services/health_monitor.py" in paths
 
     def test_stable_flag_set(self):
         """Files in STABLE_FILES should be flagged."""
-        files = get_relevant_files(
-            error_context="Error in app/main.py"
-        )
+        files = get_relevant_files(error_context="Error in app/main.py")
         main_entry = [f for f in files if f["path"] == "app/main.py"]
         assert len(main_entry) == 1
         assert main_entry[0]["stable"] is True

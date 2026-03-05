@@ -306,7 +306,12 @@ def lookup_manufacturer_by_prefix(normalized_mpn: str) -> tuple[str | None, floa
     upper_mpn = normalized_mpn.upper()
     for prefix, manufacturer in _SORTED_PREFIXES:
         if upper_mpn.startswith(prefix.upper()):
-            confidence = 0.9 if len(prefix) >= 3 else 0.7
+            # Only accept 3+ char prefixes (0.90 confidence).
+            # 2-char prefixes are too ambiguous (were 0.70, below min threshold).
+            if len(prefix) < 3:
+                logger.debug(f"Prefix skip (too short): {normalized_mpn!r} prefix={prefix!r}")
+                continue
+            confidence = 0.9
             logger.debug(f"Prefix match: {normalized_mpn!r} → {manufacturer} (prefix={prefix!r}, conf={confidence})")
             return manufacturer, confidence
     return None, 0.0

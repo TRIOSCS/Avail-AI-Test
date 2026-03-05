@@ -16,16 +16,13 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.models.notification import Notification
 from app.models.self_heal_log import SelfHealLog
-from app.models.trouble_ticket import TroubleTicket
-from app.services.cost_controller import check_budget, get_ticket_spend, record_cost
-from app.services.execution_service import execute_fix
+from app.services.cost_controller import check_budget
 from app.services.diagnosis_service import diagnose_full
-from app.services.notification_service import get_unread
+from app.services.execution_service import execute_fix
 from app.services.pattern_tracker import get_health_status, get_weekly_stats
 from app.services.rollback_service import check_post_fix_health
-from app.services.trouble_ticket_service import create_ticket, get_ticket, update_ticket
+from app.services.trouble_ticket_service import create_ticket, update_ticket
 
 
 def _run(coro):
@@ -35,8 +32,11 @@ def _run(coro):
 @pytest.fixture()
 def integ_user(db_session: Session) -> User:
     user = User(
-        email="integ@trioscs.com", name="Integration User", role="admin",
-        azure_id="test-integ-001", created_at=datetime.now(timezone.utc),
+        email="integ@trioscs.com",
+        name="Integration User",
+        role="admin",
+        azure_id="test-integ-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
     db_session.commit()
@@ -52,8 +52,10 @@ class TestLowRiskFullFlow:
     def test_full_lifecycle(self, mock_claude, mock_run, db_session, integ_user):
         # 1. Submit ticket
         ticket = create_ticket(
-            db=db_session, user_id=integ_user.id,
-            title="Button misaligned", description="The submit button is off-center",
+            db=db_session,
+            user_id=integ_user.id,
+            title="Button misaligned",
+            description="The submit button is off-center",
             current_page="/rfq",
         )
         assert ticket.status == "submitted"
@@ -61,9 +63,14 @@ class TestLowRiskFullFlow:
         # 2. Diagnose — mock Claude returns low-risk triage + diagnosis
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "CSS bug"},
-            {"root_cause": "CSS margin", "affected_files": ["app/static/app.css"],
-             "fix_approach": "Fix margin", "test_strategy": "Visual check",
-             "estimated_complexity": "simple", "requires_migration": False},
+            {
+                "root_cause": "CSS margin",
+                "affected_files": ["app/static/app.css"],
+                "fix_approach": "Fix margin",
+                "test_strategy": "Visual check",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         result = _run(diagnose_full(ticket.id, db_session))
         db_session.refresh(ticket)
@@ -73,7 +80,9 @@ class TestLowRiskFullFlow:
 
         # 3. Execute fix — mock _run_fix returns success
         mock_run.return_value = {
-            "success": True, "summary": "Fixed margin", "branch": "fix/1",
+            "success": True,
+            "summary": "Fixed margin",
+            "branch": "fix/1",
             "cost_usd": 0.05,
         }
         exec_result = _run(execute_fix(ticket.id, db_session))
@@ -86,8 +95,7 @@ class TestLowRiskFullFlow:
         assert health["healthy"] is True
 
         # 5. Verify — user confirms fix
-        update_ticket(db_session, ticket.id, status="resolved",
-                      resolution_notes="User verified fix works")
+        update_ticket(db_session, ticket.id, status="resolved", resolution_notes="User verified fix works")
         db_session.refresh(ticket)
         assert ticket.status == "resolved"
 
@@ -108,17 +116,23 @@ class TestHighRiskEscalation:
     def test_high_risk_blocked(self, mock_claude, db_session, integ_user):
         # 1. Submit
         ticket = create_ticket(
-            db=db_session, user_id=integ_user.id,
-            title="Database migration needed", description="Schema change required",
+            db=db_session,
+            user_id=integ_user.id,
+            title="Database migration needed",
+            description="Schema change required",
         )
 
         # 2. Diagnose — returns high risk
         mock_claude.side_effect = [
-            {"category": "database", "risk_tier": "high", "confidence": 0.95,
-             "summary": "Schema migration"},
-            {"root_cause": "Missing column", "affected_files": ["alembic/versions/"],
-             "fix_approach": "Add column", "test_strategy": "Run migration",
-             "estimated_complexity": "complex", "requires_migration": True},
+            {"category": "database", "risk_tier": "high", "confidence": 0.95, "summary": "Schema migration"},
+            {
+                "root_cause": "Missing column",
+                "affected_files": ["alembic/versions/"],
+                "fix_approach": "Add column",
+                "test_strategy": "Run migration",
+                "estimated_complexity": "complex",
+                "requires_migration": True,
+            },
         ]
         _run(diagnose_full(ticket.id, db_session))
         db_session.refresh(ticket)
@@ -145,15 +159,16 @@ class TestBudgetExceeded:
 
     def test_weekly_budget_exceeded(self, db_session, integ_user):
         ticket = create_ticket(
-            db=db_session, user_id=integ_user.id,
-            title="Budget test", description="D",
+            db=db_session,
+            user_id=integ_user.id,
+            title="Budget test",
+            description="D",
         )
 
         # Simulate heavy prior spending exceeding weekly budget ($50 cap)
         # Create SelfHealLog entries with cost_usd directly
         for i in range(30):
-            t = create_ticket(db=db_session, user_id=integ_user.id,
-                              title=f"Old-{i}", description="D")
+            t = create_ticket(db=db_session, user_id=integ_user.id, title=f"Old-{i}", description="D")
             db_session.add(SelfHealLog(ticket_id=t.id, cost_usd=2.0))
         db_session.commit()
 

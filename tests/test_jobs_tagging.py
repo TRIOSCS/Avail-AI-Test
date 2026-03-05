@@ -1,6 +1,6 @@
 """test_jobs_tagging.py — Tests for tagging/material enrichment background jobs
 
-Covers: _job_material_enrichment, _job_nexar_validate, _job_connector_enrichment.
+Covers: _job_material_enrichment, _job_nexar_backfill, _job_connector_enrichment.
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
 to return the test DB session with close() disabled.
@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.scheduler import scheduler
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -60,45 +59,45 @@ def test_material_enrichment_error(scheduler_db):
         asyncio.run(_job_material_enrichment())
 
 
-# ── _job_nexar_validate() ─────────────────────────────────────────────
+# ── _job_nexar_backfill() ─────────────────────────────────────────────
 
 
-def test_nexar_validate_job_runs():
-    """_job_nexar_validate calls nexar_bulk_validate and logs result."""
+def test_nexar_backfill_job_runs():
+    """_job_nexar_backfill calls nexar_backfill_untagged and logs result."""
     mock_db = MagicMock()
 
     with (
         patch("app.database.SessionLocal", return_value=mock_db),
         patch(
-            "app.services.enrichment.nexar_bulk_validate",
+            "app.services.enrichment.nexar_backfill_untagged",
             new_callable=AsyncMock,
-            return_value={"validated": 10, "upgraded": 3},
-        ) as mock_validate,
+            return_value={"total_checked": 10, "tagged": 3, "no_result": 7},
+        ) as mock_backfill,
     ):
-        from app.jobs.tagging_jobs import _job_nexar_validate
+        from app.jobs.tagging_jobs import _job_nexar_backfill
 
-        asyncio.run(_job_nexar_validate())
+        asyncio.run(_job_nexar_backfill())
 
-    mock_validate.assert_called_once_with(mock_db, limit=2000)
+    mock_backfill.assert_called_once_with(mock_db, limit=5000)
     mock_db.close.assert_called_once()
 
 
-def test_nexar_validate_job_handles_error():
-    """_job_nexar_validate rolls back on error and re-raises."""
+def test_nexar_backfill_job_handles_error():
+    """_job_nexar_backfill rolls back on error and re-raises."""
     mock_db = MagicMock()
 
     with (
         patch("app.database.SessionLocal", return_value=mock_db),
         patch(
-            "app.services.enrichment.nexar_bulk_validate",
+            "app.services.enrichment.nexar_backfill_untagged",
             new_callable=AsyncMock,
             side_effect=Exception("Nexar API error"),
         ),
     ):
-        from app.jobs.tagging_jobs import _job_nexar_validate
+        from app.jobs.tagging_jobs import _job_nexar_backfill
 
         with pytest.raises(Exception, match="Nexar API error"):
-            asyncio.run(_job_nexar_validate())
+            asyncio.run(_job_nexar_backfill())
 
     mock_db.rollback.assert_called_once()
     mock_db.close.assert_called_once()

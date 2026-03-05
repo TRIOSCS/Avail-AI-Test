@@ -10,7 +10,7 @@ Depends on: conftest fixtures, app.models.TroubleTicket
 import re
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-import pytest
+
 from sqlalchemy.orm import Session
 
 from app.models import User
@@ -18,16 +18,15 @@ from app.models.trouble_ticket import TroubleTicket
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
 from app.services.trouble_ticket_service import (
-    auto_process_ticket,
-    update_admin_status,
-    create_ticket,
-    get_ticket,
-    list_tickets,
-    get_tickets_by_user,
-    update_ticket,
-    check_file_lock,
     _capture_auto_context,
     _sanitize_context,
+    auto_process_ticket,
+    check_file_lock,
+    create_ticket,
+    get_ticket,
+    get_tickets_by_user,
+    list_tickets,
+    update_ticket,
 )
 
 
@@ -182,11 +181,14 @@ class TestFileLock:
 class TestRouterEndpoints:
     @patch("app.routers.trouble_tickets.svc.auto_process_ticket", new_callable=AsyncMock)
     def test_create_ticket_endpoint(self, mock_auto, client, db_session: Session):
-        resp = client.post("/api/trouble-tickets", json={
-            "title": "Test ticket",
-            "description": "Something broke",
-            "current_page": "/vendors",
-        })
+        resp = client.post(
+            "/api/trouble-tickets",
+            json={
+                "title": "Test ticket",
+                "description": "Something broke",
+                "current_page": "/vendors",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
@@ -234,7 +236,6 @@ class TestVerifyEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "child_ticket_id" in data
-        from app.models.trouble_ticket import TroubleTicket
         child = db_session.get(TroubleTicket, data["child_ticket_id"])
         assert child.parent_ticket_id == ticket.id
         assert child.risk_tier in ("medium", "high")
@@ -279,23 +280,26 @@ class TestDiagnoseEndpoint:
 
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "UI bug"},
-            {"root_cause": "CSS", "affected_files": [], "fix_approach": "Fix",
-             "test_strategy": "Test", "estimated_complexity": "simple",
-             "requires_migration": False},
+            {
+                "root_cause": "CSS",
+                "affected_files": [],
+                "fix_approach": "Fix",
+                "test_strategy": "Test",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Bug", description="Something broke")
-        result = asyncio.get_event_loop().run_until_complete(
-            diagnose_full(ticket.id, db_session))
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
+        result = asyncio.get_event_loop().run_until_complete(diagnose_full(ticket.id, db_session))
         assert result["status"] == "diagnosed"
         assert result["risk_tier"] == "low"
         assert result["classification"]["category"] == "ui"
 
     def test_diagnose_feature_gate(self, client, db_session, test_user):
         """Diagnose endpoint should return 403 when self_heal_enabled is False."""
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Bug", description="Something broke")
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
         from app.config import settings
+
         assert settings.self_heal_enabled is False
 
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
@@ -305,12 +309,16 @@ class TestDiagnoseEndpoint:
 
         mock_claude.side_effect = [
             {"category": "api", "risk_tier": "medium", "confidence": 0.8, "summary": "API bug"},
-            {"root_cause": "Logic error", "affected_files": ["app/services/foo.py"],
-             "fix_approach": "Fix logic", "test_strategy": "Test it",
-             "estimated_complexity": "moderate", "requires_migration": False},
+            {
+                "root_cause": "Logic error",
+                "affected_files": ["app/services/foo.py"],
+                "fix_approach": "Fix logic",
+                "test_strategy": "Test it",
+                "estimated_complexity": "moderate",
+                "requires_migration": False,
+            },
         ]
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Bug", description="API error")
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="API error")
         # First diagnosis
         asyncio.get_event_loop().run_until_complete(diagnose_full(ticket.id, db_session))
         # Verify ticket is diagnosed
@@ -324,9 +332,9 @@ class TestExecuteEndpoint:
 
     def test_execute_feature_gate(self, client, db_session, test_user):
         """Execute endpoint should return 403 when self_heal_enabled is False."""
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Bug", description="Something broke")
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
         from app.config import settings
+
         assert settings.self_heal_enabled is False
 
     @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
@@ -337,16 +345,23 @@ class TestExecuteEndpoint:
 
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "Bug"},
-            {"root_cause": "CSS", "affected_files": [], "fix_approach": "Fix",
-             "test_strategy": "Test", "estimated_complexity": "simple",
-             "requires_migration": False},
+            {
+                "root_cause": "CSS",
+                "affected_files": [],
+                "fix_approach": "Fix",
+                "test_strategy": "Test",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         mock_run.return_value = {
-            "success": True, "summary": "Fixed", "branch": "fix/1", "cost_usd": 0.10,
+            "success": True,
+            "summary": "Fixed",
+            "branch": "fix/1",
+            "cost_usd": 0.10,
         }
 
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="CSS Bug", description="Button misaligned")
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="CSS Bug", description="Button misaligned")
         asyncio.get_event_loop().run_until_complete(diagnose_full(ticket.id, db_session))
         db_session.refresh(ticket)
         assert ticket.status == "diagnosed"
@@ -367,8 +382,11 @@ class TestStatsEndpoint:
         create_ticket(db=db_session, user_id=test_user.id, title="A", description="D")
 
         admin = User(
-            email="stats_admin@trioscs.com", name="Stats Admin", role="admin",
-            azure_id="test-stats-admin", created_at=datetime.now(timezone.utc),
+            email="stats_admin@trioscs.com",
+            name="Stats Admin",
+            role="admin",
+            azure_id="test-stats-admin",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(admin)
         db_session.commit()
@@ -382,6 +400,7 @@ class TestStatsEndpoint:
         app.dependency_overrides[require_admin] = lambda: admin
 
         from starlette.testclient import TestClient
+
         with TestClient(app) as c:
             resp = c.get("/api/trouble-tickets/stats")
         app.dependency_overrides.clear()
@@ -404,6 +423,7 @@ class TestAutoProcessTicket:
     def _mock_session(self, db_session):
         """Return a mock SessionLocal that yields db_session with no-op close."""
         from unittest.mock import MagicMock
+
         wrapper = MagicMock(wraps=db_session)
         wrapper.close = MagicMock()  # no-op close
         wrapper.get = db_session.get
@@ -417,11 +437,10 @@ class TestAutoProcessTicket:
     def test_skips_when_disabled(self, mock_settings, db_session, test_user):
         """Should return immediately when self_heal_enabled is False."""
         import asyncio
+
         mock_settings.self_heal_enabled = False
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="T", description="D")
-        asyncio.get_event_loop().run_until_complete(
-            auto_process_ticket(ticket.id))
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
+        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "submitted"
 
@@ -429,91 +448,101 @@ class TestAutoProcessTicket:
     @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
-    def test_auto_execute_low_risk(self, mock_settings, mock_claude, mock_run,
-                                   mock_session_local, db_session, test_user):
+    def test_auto_execute_low_risk(
+        self, mock_settings, mock_claude, mock_run, mock_session_local, db_session, test_user
+    ):
         """Low-risk ticket should be auto-diagnosed and auto-executed."""
         import asyncio
+
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
         mock_settings.self_heal_auto_execute_low = True
         mock_session_local.return_value = self._mock_session(db_session)
         mock_claude.side_effect = [
             {"category": "ui", "risk_tier": "low", "confidence": 0.9, "summary": "UI bug"},
-            {"root_cause": "CSS", "affected_files": [], "fix_approach": "Fix",
-             "test_strategy": "Test", "estimated_complexity": "simple",
-             "requires_migration": False},
+            {
+                "root_cause": "CSS",
+                "affected_files": [],
+                "fix_approach": "Fix",
+                "test_strategy": "Test",
+                "estimated_complexity": "simple",
+                "requires_migration": False,
+            },
         ]
         mock_run.return_value = {
-            "success": True, "summary": "Fixed", "branch": "fix/1", "cost_usd": 0.05,
+            "success": True,
+            "summary": "Fixed",
+            "branch": "fix/1",
+            "cost_usd": 0.05,
         }
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="CSS Bug", description="Button misaligned")
-        asyncio.get_event_loop().run_until_complete(
-            auto_process_ticket(ticket.id))
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="CSS Bug", description="Button misaligned")
+        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "awaiting_verification"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
-    def test_medium_risk_diagnosed_not_executed(self, mock_settings, mock_claude,
-                                                mock_session_local, db_session, test_user):
+    def test_medium_risk_diagnosed_not_executed(
+        self, mock_settings, mock_claude, mock_session_local, db_session, test_user
+    ):
         """Medium-risk ticket should be auto-diagnosed but NOT auto-executed
         (auto_execute_low only applies to low risk)."""
         import asyncio
+
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
         mock_settings.self_heal_auto_execute_low = True
         mock_session_local.return_value = self._mock_session(db_session)
         mock_claude.side_effect = [
             {"category": "api", "risk_tier": "medium", "confidence": 0.8, "summary": "API error"},
-            {"root_cause": "Logic", "affected_files": ["app/services/foo.py"],
-             "fix_approach": "Fix logic", "test_strategy": "Test",
-             "estimated_complexity": "moderate", "requires_migration": False},
+            {
+                "root_cause": "Logic",
+                "affected_files": ["app/services/foo.py"],
+                "fix_approach": "Fix logic",
+                "test_strategy": "Test",
+                "estimated_complexity": "moderate",
+                "requires_migration": False,
+            },
         ]
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="API Bug", description="Endpoint returns 500")
-        asyncio.get_event_loop().run_until_complete(
-            auto_process_ticket(ticket.id))
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="API Bug", description="Endpoint returns 500")
+        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "diagnosed"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
-    def test_skips_execute_high_risk(self, mock_settings, mock_claude,
-                                     mock_session_local, db_session, test_user):
+    def test_skips_execute_high_risk(self, mock_settings, mock_claude, mock_session_local, db_session, test_user):
         """High-risk ticket should be diagnosed and escalated, NOT auto-executed."""
         import asyncio
+
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
         mock_settings.self_heal_auto_execute_low = True
         mock_session_local.return_value = self._mock_session(db_session)
         mock_claude.side_effect = [
-            {"category": "data", "risk_tier": "high", "confidence": 0.9,
-             "summary": "Data loss risk"},
+            {"category": "data", "risk_tier": "high", "confidence": 0.9, "summary": "Data loss risk"},
         ]
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Data Bug", description="Records disappearing")
-        asyncio.get_event_loop().run_until_complete(
-            auto_process_ticket(ticket.id))
+        ticket = create_ticket(
+            db=db_session, user_id=test_user.id, title="Data Bug", description="Records disappearing"
+        )
+        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "escalated"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
-    def test_handles_diagnosis_failure(self, mock_settings, mock_claude,
-                                       mock_session_local, db_session, test_user):
+    def test_handles_diagnosis_failure(self, mock_settings, mock_claude, mock_session_local, db_session, test_user):
         """If diagnosis fails, ticket should stay as submitted."""
         import asyncio
+
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
         mock_session_local.return_value = self._mock_session(db_session)
         mock_claude.return_value = None  # classification fails
-        ticket = create_ticket(db=db_session, user_id=test_user.id,
-                               title="Bug", description="Something broke")
-        asyncio.get_event_loop().run_until_complete(
-            auto_process_ticket(ticket.id))
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
+        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "submitted"

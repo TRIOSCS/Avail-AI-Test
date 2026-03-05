@@ -13,7 +13,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.models.notification import Notification
 from app.services.notification_service import create_notification
 
 
@@ -36,10 +35,11 @@ def notif_user(db_session: Session) -> User:
 @pytest.fixture()
 def notif_client(db_session: Session, notif_user: User):
     """TestClient authenticated as notif_user."""
+    from fastapi.testclient import TestClient
+
     from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
-    from fastapi.testclient import TestClient
 
     def _override_db():
         yield db_session

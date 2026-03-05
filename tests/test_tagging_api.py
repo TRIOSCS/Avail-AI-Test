@@ -6,8 +6,7 @@ Depends on: app.routers.tags, app.routers.tagging_admin, app.models.tags
 
 from datetime import datetime, timezone
 
-from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
-
+from app.models.tags import EntityTag, MaterialTag, Tag
 
 # ── Helpers ────────────────────────────────────────────────────────────
 

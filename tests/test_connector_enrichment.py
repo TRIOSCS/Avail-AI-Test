@@ -7,8 +7,9 @@ Called by: pytest
 Depends on: app.services.enrichment, app.services.tagging_ai, app.routers.tagging_admin
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -24,7 +25,6 @@ from app.services.enrichment import (
     nexar_bulk_validate,
 )
 from app.services.tagging_ai import _apply_chunked_batch
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -72,9 +72,7 @@ def _make_material_tag(db: Session, card_id: int, tag_id: int, source: str, conf
 async def test_enrich_digikey_manufacturer(db_session):
     """DigiKey returns manufacturer — should be returned as enrichment result."""
     mock_connector = AsyncMock()
-    mock_connector.search.return_value = [
-        {"manufacturer": "Texas Instruments", "category": "Analog ICs"}
-    ]
+    mock_connector.search.return_value = [{"manufacturer": "Texas Instruments", "category": "Analog ICs"}]
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.services.enrichment.importlib") as mock_import:
@@ -252,6 +250,7 @@ async def test_enrich_batch_skips_no_results(db_session):
 @pytest.mark.asyncio
 async def test_enrich_batch_missing_card(db_session):
     """Batch skips MPNs with no matching MaterialCard."""
+
     async def _mock_enrich(mpn, db):
         return {"manufacturer": "Acme", "source": "digikey", "confidence": 0.95, "category": None}
 
@@ -504,8 +503,8 @@ def test_connector_configs_have_required_fields():
 def test_connector_configs_priority_order():
     """Connectors are in priority order: authoritative first."""
     names = [cfg["name"] for cfg in _CONNECTOR_CONFIGS]
-    assert names.index("digikey") < names.index("brokerbin")
-    assert names.index("mouser") < names.index("brokerbin")
+    assert names.index("digikey") < names.index("nexar")
+    assert names.index("mouser") < names.index("nexar")
 
 
 # ── Cross-validation tests ───────────────────────────────────────────────
@@ -701,22 +700,22 @@ def test_boost_confidence_multiple_batches(db_session):
         assert mt.confidence == 0.90
 
 
-def test_boost_confidence_fuzzy_match(db_session):
-    """Fuzzy match: 'Vishay Intertechnology' contains 'VISHAY' → boosted to 0.85."""
+def test_boost_confidence_fuzzy_match_noop(db_session):
+    """Fuzzy match removed — produces sub-0.90 confidence, now a no-op."""
     card = _make_card(db_session, "vsm001", manufacturer="Vishay Intertechnology")
     tag = _make_brand_tag(db_session, "VISHAY")
     mt = _make_material_tag(db_session, card.id, tag.id, "ai_classified", 0.7)
 
     result = boost_confidence_internal(db_session, batch_size=100)
 
-    assert result["fuzzy_boosted"] >= 1
+    assert result["fuzzy_boosted"] == 0
     db_session.refresh(mt)
-    assert mt.confidence == 0.85
-    assert mt.source == "ai_confirmed_fuzzy"
+    assert mt.confidence == 0.7  # unchanged — fuzzy boost removed
+    assert mt.source == "ai_classified"  # unchanged
 
 
-def test_boost_confidence_commodity_tags(db_session):
-    """Commodity tags at 0.7 → boosted to 0.85."""
+def test_boost_confidence_commodity_tags_noop(db_session):
+    """Commodity boost removed — produces sub-0.90 confidence, now a no-op."""
     card = _make_card(db_session, "cap001")
     tag = Tag(name="Capacitors", tag_type="commodity")
     db_session.add(tag)
@@ -726,10 +725,10 @@ def test_boost_confidence_commodity_tags(db_session):
 
     result = boost_confidence_internal(db_session, batch_size=100)
 
-    assert result["commodity_boosted"] == 1
+    assert result["commodity_boosted"] == 0
     db_session.refresh(mt)
-    assert mt.confidence == 0.85
-    assert mt.source == "ai_commodity_confirmed"
+    assert mt.confidence == 0.7  # unchanged — commodity boost removed
+    assert mt.source == "ai_classified"  # unchanged
 
 
 # ── nexar_bulk_validate tests ───────────────────────────────────────────
@@ -766,11 +765,11 @@ async def test_nexar_validate_confirms_matching(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [
-            {"part": {"manufacturer": {"name": "Texas Instruments"}}}
-        ]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={
+            "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
+        }
+    )
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -792,11 +791,9 @@ async def test_nexar_validate_changes_manufacturer(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [
-            {"part": {"manufacturer": {"name": "Correct Brand"}}}
-        ]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Correct Brand"}}}]}}}
+    )
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -815,9 +812,7 @@ async def test_nexar_validate_no_result(db_session):
 
     mock_connector = AsyncMock()
     mock_connector.AGGREGATE_QUERY = "query { ... }"
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": []}}
-    })
+    mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
 
     with patch("app.services.enrichment.get_credential_cached", return_value="test-key"):
         with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
@@ -865,9 +860,12 @@ def _make_sighting_for_boost(db: Session, card: MaterialCard, manufacturer: str)
     db.flush()
 
     sighting = Sighting(
-        requirement_id=requirement.id, material_card_id=card.id,
-        vendor_name="TestVendor", manufacturer=manufacturer,
-        mpn_matched=card.display_mpn, source_type="test",
+        requirement_id=requirement.id,
+        material_card_id=card.id,
+        vendor_name="TestVendor",
+        manufacturer=manufacturer,
+        mpn_matched=card.display_mpn,
+        source_type="test",
     )
     db.add(sighting)
     db.commit()
@@ -941,8 +939,11 @@ def test_admin_ai_backfill_endpoint(client, db_session):
 async def test_scheduler_internal_boost_job(db_session):
     """_job_internal_boost calls boost_confidence_internal."""
     with patch("app.database.SessionLocal", return_value=db_session):
-        with patch("app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}) as mock_boost:
+        with patch(
+            "app.services.enrichment.boost_confidence_internal", return_value={"total_boosted": 0}
+        ) as mock_boost:
             from app.jobs.tagging_jobs import _job_internal_boost
+
             await _job_internal_boost()
             mock_boost.assert_called_once_with(db_session)
 
@@ -953,6 +954,7 @@ async def test_scheduler_prefix_backfill_job(db_session):
     with patch("app.database.SessionLocal", return_value=db_session):
         with patch("app.services.tagging_backfill.run_prefix_backfill", return_value={"total_processed": 0}) as mock_pf:
             from app.jobs.tagging_jobs import _job_prefix_backfill
+
             await _job_prefix_backfill()
             mock_pf.assert_called_once_with(db_session)
 
@@ -966,6 +968,7 @@ async def test_scheduler_sighting_mining_job(db_session):
             return_value={"total_tagged": 0},
         ) as mock_sm:
             from app.jobs.tagging_jobs import _job_sighting_mining
+
             await _job_sighting_mining()
             mock_sm.assert_called_once_with(db_session)
 
@@ -1039,20 +1042,19 @@ def test_backfill_sighting_two_sources(db_session):
     assert tag.name == "Murata"
 
 
-def test_backfill_sighting_single_source(db_session):
-    """Only 1 sighting → confidence 0.85."""
+def test_backfill_sighting_single_source_skipped(db_session):
+    """Only 1 sighting → skipped (below 0.90 confidence floor)."""
     from app.services.tagging_backfill import backfill_manufacturer_from_sightings
 
     card = _make_card(db_session, "xyzpart003")
     _make_sighting(db_session, card, "NXP Semiconductors")
 
     result = backfill_manufacturer_from_sightings(db_session, batch_size=100)
-    assert result["total_tagged"] == 1
+    assert result["total_tagged"] == 0
+    assert result["total_skipped"] == 1
 
     mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id).first()
-    assert mt is not None
-    assert mt.confidence == 0.85
-    assert mt.source == "sighting_single"
+    assert mt is None
 
 
 def test_backfill_sighting_skips_junk_manufacturers(db_session):
@@ -1107,8 +1109,11 @@ def test_repair_visibility_updates_all(db_session):
 
     # Entity tag with enough interactions to be visible, but is_visible=False (the bug)
     et = EntityTag(
-        entity_type="vendor_card", entity_id=999, tag_id=tag.id,
-        interaction_count=5.0, is_visible=False,
+        entity_type="vendor_card",
+        entity_id=999,
+        tag_id=tag.id,
+        interaction_count=5.0,
+        is_visible=False,
     )
     db_session.add(et)
     db_session.commit()

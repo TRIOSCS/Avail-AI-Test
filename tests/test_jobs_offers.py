@@ -9,13 +9,12 @@ to return the test DB session with close() disabled.
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.scheduler import scheduler
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────
 
