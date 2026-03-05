@@ -23,25 +23,6 @@ def run_startup_migrations() -> None:
         logger.info("TESTING mode — skipping startup migrations")
         return
 
-    # Legacy safety net: create_all is NOT the source of truth for schema.
-    # All schema changes MUST go through Alembic migrations.
-    # This only runs as a fallback and logs a warning if it creates anything new.
-    from sqlalchemy import inspect as sa_inspect
-
-    from .models import Base
-
-    inspector = sa_inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    Base.metadata.create_all(bind=engine, checkfirst=True)
-    new_tables = set(sa_inspect(engine).get_table_names()) - existing_tables
-    if new_tables:
-        logger.warning(
-            f"create_all created tables not managed by Alembic: {new_tables} "
-            "— write a migration to track these properly!"
-        )
-    else:
-        logger.info("create_all check passed (no new tables created)")
-
     with engine.connect() as conn:
         _create_fts_triggers(conn)
         _backfill_fts(conn)
