@@ -89,11 +89,11 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
     )
 
     try:
-        # Primary: Gradient (free, unlimited)
+        # Primary: Gradient Claude Sonnet (free, unlimited, accurate for MPN classification)
         result = await gradient_json(
             prompt,
             system=_SYSTEM_PROMPT + " Return ONLY valid JSON.",
-            model_tier="default",
+            model="anthropic-claude-sonnet-4-6",
             max_tokens=4096,
             temperature=0.1,
             timeout=60,

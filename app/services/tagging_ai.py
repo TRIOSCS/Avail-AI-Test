@@ -56,11 +56,11 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # prag
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
     prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
-    # Primary: Gradient (free, unlimited)
+    # Primary: Gradient Claude Sonnet (free, unlimited, high accuracy for MPN classification)
     result = await gradient_json(
         prompt,
         system=_SYSTEM,
-        model_tier="default",
+        model="anthropic-claude-sonnet-4-6",
         max_tokens=4096,
         temperature=0.1,
         timeout=60,
