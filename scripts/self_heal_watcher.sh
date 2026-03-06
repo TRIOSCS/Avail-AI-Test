@@ -17,7 +17,8 @@
 #   - scripts/apply_patches.py (stdlib-only Python script)
 #   - App running at APP_URL with /health and /api/internal/verify-retest/{id}
 
-set -euo pipefail
+set -uo pipefail
+# Note: -e intentionally omitted so one failed fix doesn't abort the entire run
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -26,12 +27,18 @@ PROJ_DIR="/root/availai"
 QUEUE_DIR="${PROJ_DIR}/fix_queue"
 APPLIED_DIR="${PROJ_DIR}/fix_queue/applied"
 FAILED_DIR="${PROJ_DIR}/fix_queue/failed"
-APP_URL="http://localhost:80"
+APP_URL="http://localhost:8000"
 LOG_FILE="/var/log/avail/self_heal_watcher.log"
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+health_ok() {
+    # Check health via Docker exec to bypass Caddy HTTPS redirect
+    docker compose -f "${PROJ_DIR}/docker-compose.yml" exec -T app \
+        curl -sf http://localhost:8000/health >/dev/null 2>&1
+}
+
 log() {
     local ts
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -68,7 +75,9 @@ process_fix() {
     cd "${PROJ_DIR}"
 
     # 2. Create git branch from current HEAD
+    git stash --quiet 2>/dev/null || true
     git checkout main 2>/dev/null || git checkout master 2>/dev/null
+    git branch -d "${branch}" 2>/dev/null || git branch -D "${branch}" 2>/dev/null || true
     git checkout -b "${branch}"
 
     # 3. Apply patches
@@ -109,7 +118,7 @@ EOF
     local waited=0
     local healthy=false
     while [ "${waited}" -lt 60 ]; do
-        if curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
+        if health_ok; then
             healthy=true
             break
         fi
@@ -143,7 +152,7 @@ EOF
         # Wait briefly for rebuild after revert
         local rw=0
         while [ "${rw}" -lt 60 ]; do
-            if curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
+            if health_ok; then
                 break
             fi
             sleep 3
@@ -164,7 +173,7 @@ EOF
 log "Self-heal watcher starting"
 
 # Pre-flight: check app is healthy
-if ! curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
+if ! health_ok; then
     log "WARN App is not healthy at ${APP_URL}/health — skipping this run"
     exit 0
 fi
