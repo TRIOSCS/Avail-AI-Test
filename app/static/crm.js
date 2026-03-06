@@ -896,7 +896,7 @@ function _renderCustDrawerOverview(companyId) {
 
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
     if (title) title.textContent = displayName;
-    if (title && c.is_strategic) title.innerHTML = esc(displayName) + ' <span style="color:var(--amber)">★</span>';
+    if (title && c.is_strategic) { title.textContent = displayName; const star = document.createElement('span'); star.style.color = 'var(--amber)'; star.textContent = ' ★'; title.appendChild(star); }
     const mTitle = document.getElementById('custDrawerMobileTitle');
     if (mTitle) mTitle.textContent = displayName;
 
@@ -943,7 +943,7 @@ function _renderCustDrawerOverview(companyId) {
         <div class="drawer-field"><span class="drawer-field-label">Owner</span><span class="drawer-field-value">${c.account_owner_name ? esc(c.account_owner_name) : '<span style="color:var(--red)">Unassigned</span>'}</span></div>
         <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${esc(c.industry || '—')}</span></div>
         ${c.domain ? '<div class="drawer-field"><span class="drawer-field-label">Domain</span><span class="drawer-field-value"><a href="https://'+escAttr(c.domain)+'" target="_blank">'+esc(c.domain)+'</a></span></div>' : ''}
-        ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a></span></div>' : ''}
+        ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value">' + (c.website.match(/^https?:\/\//i) ? '<a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a>' : esc(c.website)) + '</span></div>' : ''}
         ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(c.phone, {company_id: c.id, origin: 'company_drawer'})+'</span></div>' : ''}
         ${c.employee_size ? '<div class="drawer-field"><span class="drawer-field-label">Size</span><span class="drawer-field-value">'+esc(c.employee_size)+'</span></div>' : ''}
         ${c.hq_city ? '<div class="drawer-field"><span class="drawer-field-label">HQ</span><span class="drawer-field-value">'+esc(c.hq_city)+(c.hq_state ? ', '+esc(c.hq_state) : '')+'</span></div>' : ''}
