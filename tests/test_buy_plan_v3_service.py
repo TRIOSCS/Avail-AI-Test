@@ -104,7 +104,7 @@ class TestParseLeadTimeDays:
 class TestRoutingMaps:
     def setup_method(self):
         # Reset the cached routing maps so each test is clean
-        import app.services.buy_plan_v3_service as mod
+        import app.services.buyplan_scoring as mod
 
         mod._ROUTING_MAPS = None
 
@@ -126,7 +126,7 @@ class TestRoutingMaps:
 
     def test_missing_file_returns_defaults(self):
         with patch("pathlib.Path.exists", return_value=False):
-            import app.services.buy_plan_v3_service as mod
+            import app.services.buyplan_scoring as mod
 
             mod._ROUTING_MAPS = None
             maps = _get_routing_maps()
