@@ -49,4 +49,4 @@ RUN useradd -r -u 1000 -m appuser \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail
 
 ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
