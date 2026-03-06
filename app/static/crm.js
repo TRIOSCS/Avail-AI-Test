@@ -362,7 +362,7 @@ function renderCustomers() {
         <thead><tr>
             <th class="td-check"><input type="checkbox" onchange="toggleAllCustCheckboxes(this)"></th>
             ${thSort('name', 'Account')}
-            ${thSort('type', 'Type')}
+            ${thSort('type', 'TYPE')}
             ${thSort('health', 'Health')}
             ${thSort('owner', 'Owner')}
             ${thSort('sites', 'Sites')}
