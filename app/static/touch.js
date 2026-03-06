@@ -135,7 +135,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 var closeMap = {
                     custDrawer: 'closeCustDrawer',
                     vendorDrawer: 'closeVendorDrawer',
-                    prospectDrawer: 'closeProspectDrawer',
                     suggestedDetailDrawer: 'closeSuggestedDetail'
                 };
                 var fn = window[closeMap[id]];

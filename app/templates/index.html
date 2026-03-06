@@ -50,7 +50,7 @@
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div id="topBreadcrumb" class="top-breadcrumb hidden">
-            <button class="breadcrumb-back" onclick="closeCustDrawer();closeProspectDrawer()" title="Back to list">&larr; <span id="breadcrumbBackLabel">Accounts</span></button>
+            <button class="breadcrumb-back" onclick="closeCustDrawer()" title="Back to list">&larr; <span id="breadcrumbBackLabel">Accounts</span></button>
             <span class="breadcrumb-sep">›</span>
             <span class="breadcrumb-text" id="topBreadcrumbText"></span>
         </div>
@@ -317,55 +317,6 @@
             <button onclick="bulkAssignOwner()">Assign Owner</button>
             <button onclick="bulkExportAccounts()">Export</button>
             <button class="bulk-bar-close" onclick="clearCustSelection()">&times;</button>
-        </div>
-    </div>
-
-    <!-- VIEW: Prospecting (accounts-first hierarchy) -->
-    <div id="view-prospecting" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
-        <div class="crm-header" style="gap:12px;flex-wrap:wrap">
-            <h2>Prospecting</h2>
-            <div id="prospectCapBar" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)"></div>
-        </div>
-        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px">
-            <input class="sbox" id="prospectingFilter" placeholder="Search accounts or sites…" oninput="debouncedLoadProspecting()" style="flex:1;min-width:140px" aria-label="Search prospecting">
-            <div class="chip-row" style="margin:0" id="prospectingPills">
-                <span class="chip on" data-value="my-accounts" onclick="setProspectingTab('my-accounts',this)">My Accounts</span>
-                <span class="chip" data-value="pool" onclick="setProspectingTab('pool',this)">Open Pool</span>
-                <span class="chip" data-value="at-risk" onclick="setProspectingTab('at-risk',this)">At Risk</span>
-            </div>
-            <select id="prospectHealthFilter" onchange="renderProspecting()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="">All Health</option>
-                <option value="green">Active</option>
-                <option value="yellow">At Risk</option>
-                <option value="red">Expiring</option>
-                <option value="grey">No Activity</option>
-            </select>
-        </div>
-        <div class="crm-table-wrap" id="prospectTableWrap" style="flex:1;overflow-y:auto">
-            <table class="crm-table">
-                <thead><tr id="prospectingHead"></tr></thead>
-                <tbody id="prospectingBody"></tbody>
-            </table>
-        </div>
-        <!-- Mini site list for split-pane layout -->
-        <div class="prospect-mini-list" id="prospectMiniList"></div>
-        <!-- Site detail drawer -->
-        <div class="drawer-backdrop" id="prospectDrawerBackdrop" onclick="closeProspectDrawer()"></div>
-        <div class="drawer" id="prospectDrawer">
-            <div class="m-detail-header m-mobile-only">
-                <button class="m-back-btn" onclick="closeProspectDrawer()">&larr;</button>
-                <span class="m-detail-title" id="prospectDrawerMobileTitle">Site</span>
-            </div>
-            <div class="drawer-header m-desktop-only">
-                <h3 id="prospectDrawerTitle">Site</h3>
-                <button class="drawer-close" onclick="closeProspectDrawer()">&times;</button>
-            </div>
-            <div class="drawer-tabs" id="prospectDrawerTabs">
-                <button class="drawer-tab active" onclick="switchProspectDrawerTab('overview',this)">Overview</button>
-                <button class="drawer-tab" onclick="switchProspectDrawerTab('contacts',this)">Contacts</button>
-                <button class="drawer-tab" onclick="switchProspectDrawerTab('activity',this)">Activity</button>
-            </div>
-            <div class="drawer-body" id="prospectDrawerBody"></div>
         </div>
     </div>
 
