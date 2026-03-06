@@ -1,0 +1,13 @@
+Network requests all returned 200 (except manifest.json 404 which is a known PWA config issue, not CRM-related).
+
+## Test Summary: CRM Companies
+
+| Test | Result | Notes |
+|------|--------|-------|
+| **Test 1: Companies list loads** | ✅ PASS | 100 of 1988 accounts displayed with proper columns (Account, Type, Health, Owner, Sites, Open Reqs, 90-day Revenue, Win Rate, Last RFQ) |
+| **Test 2: Company detail drawer** | ✅ PASS | Drawer opens with company name, tabs (Overview, Contacts, Sites, Activity, Pipeline, Apollo), stats (Sites, Contacts, Open Reqs, Type), AI Intelligence section |
+| **Test 3: Drawer tabs load content** | ✅ PASS | All tabs work: Overview (AI summary + account details), Contacts (4 contacts with names/titles/emails/phones), Sites (1 site), Activity (empty state with Add Note), Pipeline (1 archived req) |
+| **Test 4: Load More pagination** | ❌ FAIL | `ReferenceError: loadMoreCustomers is not defined` - button is completely broken. Filed **TT-20260306-004** |
+| **Test 5: Data formatting** | ✅ PASS | All numeric values display correctly, no NaN/undefined/[object Object], dates show relative format ("73mo ago"), empty values show "—" |
+
+**1 issue filed:** TT-20260306-004 - Load More button broken due to missing `loadMoreCustomers` function.

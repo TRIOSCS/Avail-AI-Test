@@ -1,0 +1,1 @@
+I need permission to use the Playwright browser navigation tool to proceed with testing. Could you grant permission for the Playwright MCP tools so I can navigate to the site and run the tests?

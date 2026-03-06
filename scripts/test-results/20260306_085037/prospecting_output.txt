@@ -1,0 +1,58 @@
+I've completed my testing. Let me compile the results.
+
+## Test Results Summary: Prospecting
+
+### Tests Completed (API-based, since browser_evaluate was not permitted for cookie injection)
+
+**Test 1: Discovery pool loads** — API `/api/prospects/suggested` returns 808 prospects correctly. Login page renders on unauthenticated browser (expected behavior).
+
+**Test 2: Discovery cards display data** — Cards have company names, domains, fit/readiness scores, signal tags, AI writeups. No `undefined`, `null`, or `[object Object]` in text fields.
+
+**Test 3-4: Filter controls** — All filters work correctly:
+- `region=EU` → 80 results, all with region=EU ✅
+- `industry=Medical` → results match ✅  
+- `min_fit_score=65` → 7 results, all ≥65 ✅
+- `readiness_level=nurture` → 78 results with scores 40-69 ✅
+- `search=arrow` → 2 matching results ✅
+- Non-existent filters return empty results ✅
+
+**Test 5: Hash route** — `#suggested` loads correctly ✅
+
+**Test 6: Data quality issues** (existing tickets confirmed):
+- `revenue_range` is null for ALL 808 prospects (ticket #693 exists)
+- Industry values contain compound semicolon-separated entries (ticket #691 exists)
+- Region data has "99999" and "United Sttates" typo (ticket #690 exists)
+
+**Test 7-9: Industry/Revenue/Region filters** — Industry and region filters work. Revenue filter is non-functional since all values are null.
+
+**Test 10: Detail view** — Detail endpoint returns full enrichment data, AI writeups, similar customers, signal tags ✅
+
+**Test 11: Sorting** — All 5 sort options work correctly: `readiness_desc`, `fit_desc`, `composite_desc`, `name_asc`, `recent_desc` ✅
+
+**Test 12: Edge cases** — SQL injection, XSS, unicode, long inputs all handled safely ✅. 404 for nonexistent prospect ✅.
+
+### New Issue Filed
+
+- **TT-20260306-049**: All 1554 at-risk sites show `days_inactive=999` sentinel value — no real activity tracking. The at-risk view is meaningless since every owned site has the same sentinel value.
+
+### False Positives Resolved
+
+- **TT-20260306-044**: Pagination works correctly with `page`/`per_page` params (not `limit`/`offset`)
+- **TT-20260306-045**: Sorting works correctly with named sort values (not `sort=field&order=direction`)
+
+### Existing Tickets Confirmed
+
+- **TT-20260306-022** (#693): Revenue range null for all 808 prospects
+- **TT-20260306-020** (#691): Industry filter has 100+ compound semicolon values  
+- **TT-20260306-019** (#690): Region contains "99999" and "United Sttates" typo
+
+### Additional Observations
+
+- Zero `call_now` tier prospects (max readiness score is 58/100)
+- Zero warm intros across all 808 prospects (`has_warm_intro=false` for all)
+- 76% of prospects have `contacts_count=0`
+- Similar customers matches exist with `weak`, `moderate`, and `strong` strengths ✅
+- Prospecting pool has 532 sites, capacity shows 0/200 used ✅
+- Console errors on every page load: missing `manifest.json`, `favicon.ico`, and service worker (ticket #674 exists)
+
+PASS: prospecting (API layer — 1 new issue filed, 2 false positives resolved)

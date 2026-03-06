@@ -1,0 +1,1 @@
+I need permission to use the Playwright browser navigation tool. Could you approve the tool access so I can proceed with testing the CRM Quotes area?

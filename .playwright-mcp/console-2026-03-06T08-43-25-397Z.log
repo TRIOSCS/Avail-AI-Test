@@ -1,0 +1,2 @@
+[      29ms] TypeError: Failed to execute 'fetch' on 'Window': Failed to parse URL from /auth/agent-session
+    at data:text/html,<script>fetch('/auth/agent-session',{method:'POST',headers:{'x-agent-key':'Cmwq2kFDWnEbDO2fy4UF-UVf5QGgDDq-HDE6ZwYnkaU'}}).then(r=>r.json()).then(()=>location.href='https://app.availai.net/')</script>:1:9

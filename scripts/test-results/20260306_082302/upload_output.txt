@@ -1,0 +1,9 @@
+I'm unable to proceed because both Playwright MCP servers are blocked:
+- `mcp__playwright__*` tools require permission approval that isn't being granted
+- `mcp__plugin_playwright_playwright__*` tools fail because the browser is already in use by the other server
+
+Could you either:
+1. **Approve the `mcp__playwright__` tool permissions** when prompted, or
+2. **Kill the existing browser process** so the plugin Playwright server can use it: `pkill -f mcp-chrome` 
+
+Without browser access, I can't perform the upload testing.

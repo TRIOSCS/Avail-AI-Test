@@ -1,0 +1,28 @@
+## Pipeline / Dashboard Test Results
+
+### What Passed
+- **Login page** renders cleanly with proper branding (AVAIL logo, Trio Supply Chain Solutions, Microsoft SSO button)
+- **All 9 dashboard API endpoints** return 200 OK with <100ms response times
+- **Input validation** is solid — invalid params (negative days, XSS strings, bad month formats) all return proper 4xx errors
+- **Date range filtering** works — changing `month` param on unified-leaderboard returns different data
+- **API data types** are correct (floats for currency, ints for counts)
+- **Buyer brief structure** is complete with KPIs, pipeline, revenue/profit, completed deals
+- **Scoring info** is well-documented with category descriptions and weights
+- **Buy Plans V3** endpoint works (returns empty but correct structure)
+
+### Known Issues (existing tickets)
+- manifest.json, favicon.ico, service worker return 404 (TT-20260306-002/003)
+
+### New Issues Filed (5 tickets)
+| Ticket | Issue | Severity |
+|---|---|---|
+| TT-20260306-031 | Buyer leaderboard `avail_rank` not sorted (1,2,6,5,3,4,7) while `mult_rank` is correct | Medium |
+| TT-20260306-032 | 11/12 attention-feed quotes link to same req 21702 with numeric-only titles (90001-90011) — likely test data | Medium |
+| TT-20260306-036 | Proactive scorecard shows $5B anticipated revenue, $850M gross profit — ~100x inflation | High |
+| TT-20260306-037 | All 15 hot offers link to same req 23429 with ~100x inflated unit prices (TL431ACLP at $36 vs $0.30 market) | High |
+| TT-20260306-040 | needs-attention always returns empty array regardless of days param, while team-level attention-feed has 12 critical items | Medium |
+
+### Limitations
+- Could not test authenticated browser UI (session cookie requires server-side secret)
+- Agent user has zero personal data, so personal-scope endpoints return empty (expected)
+- Could not verify frontend rendering of KPI cards, charts, or currency formatting in browser

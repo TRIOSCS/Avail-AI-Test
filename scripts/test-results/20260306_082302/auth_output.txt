@@ -1,0 +1,21 @@
+I'm blocked on Playwright browser permissions. Please approve the Playwright MCP tools so I can complete the visual/interactive browser tests (Tests 1-7, 10). 
+
+Here's what I've completed so far via curl:
+
+**Test 8 (Health endpoint): PASS**
+- Returns `{"status":"ok","version":"3.0.1"}` with HTTP 200 in 54ms
+- All subsystems healthy: db, redis, scheduler, backup
+
+**Test 9 (Auth status endpoint): PASS**
+- Without session: returns `{"connected":false,"users":[]}` — no tokens leaked
+
+**Test 10 partial (Error page - API): PASS**
+- `/api/nonexistent-endpoint` returns proper JSON `{"error":"Not Found","status_code":404}` — no stack trace
+
+**Test 5 partial (Credential leaks): PASS**
+- `/auth/login` redirects (307) directly to Microsoft OAuth — no custom login page with potential leaks
+
+**Test 2 partial (Microsoft OAuth): PASS**
+- Login redirects to `login.microsoftonline.com` ConvergedSignIn page — OAuth flow is correctly configured
+
+I need browser access to complete Tests 1, 2, 3, 4, 6, 7, and the hash-navigation part of Test 10. Please grant Playwright permissions to continue.

@@ -1,0 +1,51 @@
+All endpoints return 200 except the sales notification mark-read for a non-existent ID (404 is expected). All API endpoints are functional.
+
+Here's my complete test summary:
+
+---
+
+## Notification Test Results
+
+### What I Could Test (API-level, comprehensive)
+
+**PASS - API Functionality:**
+- `GET /api/notifications` — returns paginated results correctly (limit/offset work)
+- `GET /api/notifications/unread` — returns unread items with count
+- `POST /api/notifications/{id}/read` — correctly marks individual notifications as read
+- `POST /api/notifications/read-all` — marks all as read, returns count
+- `GET /api/sales/notifications` — returns array (currently empty for agent user)
+- `GET /api/sales/notifications/count` — returns `{count: 0}`
+- `POST /api/sales/notifications/read-all` — works correctly
+- All endpoints return proper HTTP status codes
+
+**PASS - Data Quality:**
+- All notification fields populated (no null/undefined/NaN)
+- Timestamps in valid ISO 8601 format with timezone
+- Sorted newest-first (correct chronological order)
+- No future timestamps
+- Event types are valid: `diagnosed`, `escalated`, `failed`, `prompt_ready`
+- Mark-as-read properly updates `is_read` flag and decrements `unread_count`
+
+**PASS - Frontend Code Review:**
+- Bell icon SVG present in template (line 60-63)
+- `esc()` function used for HTML escaping in notification rendering
+- `fmtDateTime()` properly formats ISO timestamps to human-readable
+- Notification panel has proper CSS: `max-height:400px; overflow-y:auto` for scrolling
+- Outside-click handler properly closes dropdown
+- Badge hides when count is 0 (`display: none`)
+
+### Issues Filed
+
+| Ticket | Issue |
+|--------|-------|
+| TT-20260306-026 | **Bell icon badge always shows 0** — Two disconnected notification systems. The UI bell uses `/api/sales/notifications` (ActivityLog, CRM events = 0 items) while `/api/notifications` (Notification model, ticket events = 33+ items) is never shown in the UI. |
+| TT-20260306-027 | **Notification groups truncated to 5** — Each type group shows max 5 items with a non-clickable "+ N more" label and no link to a full notifications page. |
+
+### What I Could NOT Test (requires browser auth)
+- Tests 1-8: Visual bell icon rendering, badge display, dropdown open/close behavior
+- Test 10: Click-through navigation from notification to related entity
+- Test 11: Badge count live update after reading notifications
+
+The browser could not authenticate because Microsoft OAuth requires interactive login credentials that aren't available to the agent.
+
+PASS: notifications (API layer) — 2 tickets filed for UI/architecture issues

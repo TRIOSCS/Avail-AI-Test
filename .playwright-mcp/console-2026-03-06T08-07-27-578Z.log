@@ -1,0 +1,13 @@
+[      45ms] [ERROR] A bad HTTP response code (404) was received when fetching the script. @ :0
+[      69ms] [WARNING] SW registration failed: TypeError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): A bad HTTP response code (404) was received when fetching the script. @ https://app.availai.net/:36
+[      71ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[      71ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/#vendors:0
+[      72ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/#vendors:0
+[      85ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/favicon.ico:0
+[   37496ms] [ERROR] A bad HTTP response code (404) was received when fetching the script. @ :0
+[   37510ms] [WARNING] SW registration failed: TypeError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): A bad HTTP response code (404) was received when fetching the script. @ https://app.availai.net/:1460
+[   37525ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[   37526ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/:0
+[   37554ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[   37555ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/:0
+[   37559ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/:0

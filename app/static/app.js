@@ -214,6 +214,13 @@ document.addEventListener('click', function(e) {
 
 // Sync mobile <-> desktop search + mirror notification badge
 document.addEventListener('DOMContentLoaded', function() {
+    // Initialize sourcing search if the sourcing view is active
+    if (typeof initSourcingSearch === 'function') {
+        var sourcingView = document.getElementById('view-sourcing');
+        if (sourcingView && !sourcingView.classList.contains('hidden')) {
+            initSourcingSearch();
+        }
+    }
     var ms = document.getElementById('mobileMainSearch');
     var ds = document.getElementById('mainSearch');
     if (ms && ds) {
