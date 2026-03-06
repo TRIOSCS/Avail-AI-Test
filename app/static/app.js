@@ -376,11 +376,11 @@ export async function apiFetch(url, opts = {}) {
     // Request deduplication for GET requests — return in-flight promise if identical
     const dedupeKey = method === 'GET' ? method + ':' + url : null;
     if (dedupeKey && _apiFetchInflight[dedupeKey]) return _apiFetchInflight[dedupeKey];
-    // Double-click protection for mutating requests (500ms cooldown per URL+method)
+    // Double-click protection for mutating requests (1000ms cooldown per URL+method)
     if (method !== 'GET') {
         const cooldownKey = method + ':' + url;
         const last = _apiFetchCooldown[cooldownKey];
-        if (last && Date.now() - last < 500) return Promise.reject(new Error('Duplicate request blocked'));
+        if (last && Date.now() - last < 1000) return Promise.reject(new Error('Duplicate request blocked'));
         _apiFetchCooldown[cooldownKey] = Date.now();
     }
     const doFetch = async () => {
@@ -403,6 +403,7 @@ export async function apiFetch(url, opts = {}) {
                     setTimeout(() => { window.location.href = '/auth/login'; }, 1500);
                     throw lastErr;
                 }
+                if (res.status === 409) throw lastErr;
                 if (res.status >= 500 && attempt < maxRetries) continue;
                 throw lastErr;
             }
