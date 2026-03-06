@@ -68,6 +68,100 @@ async def _job_self_heal_weekly_report():  # pragma: no cover
         db.close()
 
 
+async def retry_stuck_diagnosed(db) -> dict:
+    """Re-process tickets stuck in 'diagnosed' status.
+
+    - Tickets with detailed=None get full re-diagnosis first.
+    - Tickets with good diagnosis get execute_fix retried.
+    - Only low/medium risk tickets are retried.
+    - Skips tickets where iterations_used >= max_iterations.
+    - Processes at most MAX_RETRY_BATCH tickets per run.
+
+    Returns: {retried, rediagnosed, succeeded, failed}
+    """
+    from ..models.trouble_ticket import TroubleTicket
+    from ..services.diagnosis_service import diagnose_full
+    from ..services.execution_service import execute_fix
+
+    if not settings.self_heal_enabled:
+        logger.debug("Self-heal disabled, skipping stuck ticket retry")
+        return {"retried": 0, "rediagnosed": 0, "succeeded": 0, "failed": 0}
+
+    candidates = (
+        db.query(TroubleTicket)
+        .filter(
+            TroubleTicket.status == "diagnosed",
+            TroubleTicket.risk_tier.in_(["low", "medium"]),
+        )
+        .order_by(TroubleTicket.created_at.asc())
+        .limit(MAX_RETRY_BATCH)
+        .all()
+    )
+
+    retried = 0
+    rediagnosed = 0
+    succeeded = 0
+    failed = 0
+
+    for ticket in candidates:
+        iterations = ticket.iterations_used or 0
+        max_iter = (
+            settings.self_heal_max_iterations_low
+            if ticket.risk_tier == "low"
+            else settings.self_heal_max_iterations_medium
+        )
+
+        if iterations >= max_iter:
+            logger.debug(
+                "Ticket {} skipped: iterations {}/{} exhausted",
+                ticket.id, iterations, max_iter,
+            )
+            continue
+
+        diagnosis = ticket.diagnosis or {}
+        detailed = diagnosis.get("detailed") if isinstance(diagnosis, dict) else None
+
+        if not detailed:
+            logger.info("Ticket {} missing detailed diagnosis, re-diagnosing", ticket.id)
+            diag_result = await diagnose_full(ticket.id, db)
+            if "error" in diag_result:
+                logger.warning("Re-diagnosis failed for ticket {}: {}", ticket.id, diag_result["error"])
+                failed += 1
+                continue
+            rediagnosed += 1
+
+        logger.info("Retrying execute_fix for ticket {}", ticket.id)
+        exec_result = await execute_fix(ticket.id, db)
+        retried += 1
+
+        if exec_result.get("ok"):
+            succeeded += 1
+            logger.info("Ticket {} retry succeeded", ticket.id)
+        else:
+            failed += 1
+            logger.warning("Ticket {} retry failed: {}", ticket.id, exec_result.get("error", "unknown"))
+
+    logger.info(
+        "Stuck ticket retry complete: {} retried, {} rediagnosed, {} succeeded, {} failed",
+        retried, rediagnosed, succeeded, failed,
+    )
+    return {"retried": retried, "rediagnosed": rediagnosed, "succeeded": succeeded, "failed": failed}
+
+
+@_traced_job
+async def _job_retry_stuck_diagnosed():  # pragma: no cover
+    """Scheduled wrapper: retry stuck diagnosed tickets."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        await retry_stuck_diagnosed(db)
+    except Exception:
+        logger.exception("Stuck ticket retry job failed")
+    finally:
+        db.close()
+
+
 @_traced_job
 async def _job_consolidate_tickets():  # pragma: no cover
     """Daily sweep: find and link duplicate open tickets."""

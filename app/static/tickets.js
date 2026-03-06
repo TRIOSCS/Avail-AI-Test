@@ -470,7 +470,7 @@ async function showTicketDetail(ticketId) {
             if (t.fix_branch) fixInfo.appendChild(el('div', { style: 'font-size:12px;', textContent: 'Branch: ' + t.fix_branch }));
             if (t.fix_pr_url) {
                 var prLink = el('a', { href: t.fix_pr_url, target: '_blank', textContent: 'View PR' });
-                var prDiv = el('div', { style: 'font-size:12px;' }, ['PR: ', prLink]);
+                var prDiv = el('div', { style: 'font-size:12px;display:inline-block;' }, ['PR: ', prLink]);
                 fixInfo.appendChild(prDiv);
             }
             if (t.iterations_used) fixInfo.appendChild(el('div', { style: 'font-size:12px;', textContent: 'Iterations: ' + t.iterations_used }));
