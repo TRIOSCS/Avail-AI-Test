@@ -91,12 +91,12 @@ function renderResponsiveTable(columns, rows, opts) {
         }).join('');
     }
     // Desktop: standard table
-    var thead = '<thead><tr>' + columns.map(function(c) { return '<th>' + c.label + '</th>'; }).join('') + '</tr></thead>';
+    var thead = '<thead><tr>' + columns.map(function(c) { return '<th' + (c.minWidth ? ' style="min-width:' + c.minWidth + ';white-space:nowrap"' : '') + '>' + c.label + '</th>'; }).join('') + '</tr></thead>';
     var tbody = '<tbody>' + rows.map(function(row) {
         var clickAttr = opts.onclick ? ' onclick="' + opts.onclick.replace('{id}', row.id || '') + '" style="cursor:pointer"' : '';
         return '<tr' + clickAttr + '>' + columns.map(function(col) {
             var val = col.format ? col.format(row[col.key], row) : (row[col.key] != null ? row[col.key] : '—');
-            return '<td>' + val + '</td>';
+            return '<td' + (col.minWidth ? ' style="min-width:' + col.minWidth + ';white-space:nowrap"' : '') + '>' + val + '</td>';
         }).join('') + '</tr>';
     }).join('') + '</tbody>';
     return '<table class="tbl">' + thead + tbody + '</table>';
@@ -538,7 +538,7 @@ function _timeAgo(iso) {
 }
 export function fmtDate(iso) {
     if (!iso) return '';
-    return new Date(iso).toLocaleDateString();
+    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 export function fmtDateTime(iso) {
     if (!iso) return '';
