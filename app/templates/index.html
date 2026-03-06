@@ -338,6 +338,26 @@
                 <option value="5001-10000">5,001–10,000 emp</option>
                 <option value="10001">10,001+ emp</option>
             </select>
+            <select id="suggestedIndustry" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Industries</option>
+            </select>
+            <select id="suggestedRevenue" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Revenue</option>
+                <option value="<$1M">&lt;$1M</option>
+                <option value="$1M-$5M">$1M-$5M</option>
+                <option value="$5M-$10M">$5M-$10M</option>
+                <option value="$10M-$50M">$10M-$50M</option>
+                <option value="$50M+">$50M+</option>
+            </select>
+            <select id="suggestedRegion" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Regions</option>
+            </select>
+            <select id="suggestedSource" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Sources</option>
+                <option value="apollo">Apollo</option>
+                <option value="lusha">Lusha</option>
+                <option value="manual">Manual</option>
+            </select>
             <select id="suggestedFitScore" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
                 <option value="0">All Fit Scores</option>
                 <option value="70">Fit 70+</option>
@@ -355,6 +375,7 @@
                 <option value="fit_desc">Sort: Fit Score</option>
                 <option value="composite_desc">Sort: Composite</option>
                 <option value="name_asc">Sort: Name</option>
+                <option value="recent_desc">Sort: Recently Added</option>
             </select>
             <span id="suggestedPager" style="font-size:11px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px;margin-left:auto"></span>
         </div>
