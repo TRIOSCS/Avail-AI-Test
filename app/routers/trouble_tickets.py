@@ -402,3 +402,54 @@ async def verify_ticket(
             status="escalated", resolution_notes="User reported still broken",
         )
         return {"ok": True, "status": "escalated", "child_ticket_id": child.id}
+
+
+@router.post("/api/trouble-tickets/{ticket_id}/verify-retest")
+async def verify_retest_ticket(
+    ticket_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Trigger automated retest via SiteTester after fix deployment (admin only)."""
+    from app.services.rollback_service import verify_and_retest
+
+    result = await verify_and_retest(ticket_id, db)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/api/internal/verify-retest/{ticket_id}")
+async def internal_verify_retest(
+    ticket_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Internal-only retest endpoint (localhost only, no auth).
+
+    Called by: scripts/self_heal_watcher.sh after applying patches and rebuilding.
+    """
+    client = request.client
+    if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Internal endpoint — localhost only")
+
+    from app.services.rollback_service import verify_and_retest
+
+    # Generate session cookie for SiteTester
+    session_cookie = None
+    try:
+        from itsdangerous import URLSafeTimedSerializer
+        from app.config import settings as cfg
+        signer = URLSafeTimedSerializer(cfg.secret_key)
+        session_cookie = signer.dumps({"user_id": 1})
+    except Exception:
+        logger.warning("Could not generate session cookie for retest")
+
+    result = await verify_and_retest(
+        ticket_id, db,
+        base_url="http://localhost:8000",
+        session_cookie=session_cookie,
+    )
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result

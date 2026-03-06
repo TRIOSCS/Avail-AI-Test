@@ -37,3 +37,4 @@ app/static/public/*_backup.png
 .env.ics-worker
 .env.nc-worker
 .worktrees/
+fix_queue/
