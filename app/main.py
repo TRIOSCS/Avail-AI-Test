@@ -582,7 +582,7 @@ def _seed_api_sources():
                 "description": "Claude API — powers RFQ response parsing, attachment column mapping, AI chat, and intelligent data extraction.",
                 "signup_url": "https://console.anthropic.com",
                 "env_vars": ["ANTHROPIC_API_KEY"],
-                "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-20250514 (configurable via ANTHROPIC_MODEL).",
+                "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-6 (configurable via ANTHROPIC_MODEL).",
             },
             {
                 "name": "teams_notifications",

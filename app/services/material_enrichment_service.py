@@ -93,7 +93,6 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
         result = await gradient_json(
             prompt,
             system=_SYSTEM_PROMPT + " Return ONLY valid JSON.",
-            model="anthropic-claude-sonnet-4-6",
             max_tokens=4096,
             temperature=0.1,
             timeout=60,

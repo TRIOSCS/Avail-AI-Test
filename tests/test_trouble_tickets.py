@@ -346,7 +346,7 @@ class TestExecuteEndpoint:
         db_session.refresh(ticket)
         assert ticket.status == "submitted"
 
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_execute_after_diagnose(self, mock_claude, mock_run, db_session, test_user):
         """Full flow: diagnose → execute → awaiting_verification."""
@@ -365,8 +365,8 @@ class TestExecuteEndpoint:
         ]
         mock_run.return_value = {
             "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b"}],
             "summary": "Fixed",
-            "branch": "fix/1",
             "cost_usd": 0.10,
         }
 
@@ -375,10 +375,11 @@ class TestExecuteEndpoint:
         db_session.refresh(ticket)
         assert ticket.status == "diagnosed"
 
-        result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
+        with patch("app.services.execution_service._write_fix_queue"):
+            result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
         assert result["ok"] is True
         db_session.refresh(ticket)
-        assert ticket.status == "awaiting_verification"
+        assert ticket.status == "fix_queued"
 
 
 class TestStatsEndpoint:
@@ -454,7 +455,7 @@ class TestAutoProcessTicket:
         assert ticket.status == "submitted"
 
     @patch("app.database.SessionLocal")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
     def test_auto_execute_low_risk(
@@ -480,14 +481,15 @@ class TestAutoProcessTicket:
         ]
         mock_run.return_value = {
             "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b"}],
             "summary": "Fixed",
-            "branch": "fix/1",
             "cost_usd": 0.05,
         }
         ticket = create_ticket(db=db_session, user_id=test_user.id, title="CSS Bug", description="Button misaligned")
-        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
+        with patch("app.services.execution_service._write_fix_queue"):
+            asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
-        assert ticket.status == "awaiting_verification"
+        assert ticket.status == "fix_queued"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)

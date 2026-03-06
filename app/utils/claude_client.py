@@ -22,16 +22,17 @@ from typing import Any
 import sentry_sdk
 from loguru import logger
 
+from app.config import settings
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
 
-# Model tiers
+# Model tiers — read from settings, fallback to sensible defaults
 MODELS = {
     "fast": "claude-haiku-4-5-20251001",
-    "smart": "claude-sonnet-4-6",
+    "smart": settings.anthropic_model or "claude-sonnet-4-6",
 }
 
 

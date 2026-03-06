@@ -36,7 +36,7 @@ API_URL = "https://inference.do-ai.run/v1/chat/completions"
 _configured = getattr(settings, "do_gradient_model", None)
 MODELS = {
     "default": _configured or "anthropic-claude-sonnet-4-6",
-    "strong": "anthropic-claude-opus-4.6",
+    "strong": "anthropic-claude-opus-4-6",
 }
 
 # HTTP status codes worth retrying

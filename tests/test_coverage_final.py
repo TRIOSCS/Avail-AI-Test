@@ -202,13 +202,13 @@ class TestExecutionService:
                 assert "iterations" in result["error"].lower()
 
     @patch("app.services.execution_service.create_notification")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     def test_execute_fix_success(self, mock_run, mock_notif, db_session, test_user):
         import asyncio
 
         from app.services.execution_service import execute_fix
 
-        mock_run.return_value = {"success": True, "branch": "fix/test", "cost_usd": 0.1, "summary": "Fixed"}
+        mock_run.return_value = {"success": True, "patches": [{"file": "x.py", "search": "a", "replace": "b"}], "cost_usd": 0.1, "summary": "Fixed"}
 
         ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
         ticket.diagnosis = {"root_cause": "test"}
@@ -218,11 +218,12 @@ class TestExecutionService:
 
         with patch("app.services.execution_service.check_budget", return_value={"allowed": True, "reason": "ok"}):
             with patch("app.services.execution_service.record_cost"):
-                result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
-                assert result.get("ok") is True
+                with patch("app.services.execution_service._write_fix_queue"):
+                    result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
+                    assert result.get("ok") is True
 
     @patch("app.services.execution_service.create_notification")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     def test_execute_fix_failure_retryable(self, mock_run, mock_notif, db_session, test_user):
         import asyncio
 
@@ -244,7 +245,7 @@ class TestExecutionService:
                 assert "attempt" in result["error"].lower()
 
     @patch("app.services.execution_service.create_notification")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     def test_execute_fix_failure_escalated(self, mock_run, mock_notif, db_session, test_user):
         import asyncio
 
@@ -264,15 +265,15 @@ class TestExecutionService:
             assert "error" in result
             assert "escalated" in result["error"].lower()
 
-    def test_run_fix_testing_mode(self):
+    def test_generate_fix_testing_mode(self):
         import asyncio
 
-        from app.services.execution_service import _run_fix
+        from app.services.execution_service import _generate_fix
 
-        ticket = SimpleNamespace(id=1)
-        result = asyncio.get_event_loop().run_until_complete(_run_fix("fix this", ticket))
+        ticket = SimpleNamespace(id=1, diagnosis={"root_cause": "test", "affected_files": ["x.py"]}, category="bug")
+        result = asyncio.get_event_loop().run_until_complete(_generate_fix(ticket))
         assert result["success"] is False
-        assert "test mode" in result["error"].lower()
+        assert "test" in result["error"].lower()
 
     def test_escalate(self, db_session, test_user):
         from app.services.execution_service import _escalate
@@ -300,29 +301,28 @@ class TestExecutionService:
         db_session.refresh(ticket)
         assert ticket.status == "escalated"
 
-    def test_generate_prompt_called(self, db_session, test_user):
-        """Cover prompt generation branch (line 73-75)."""
+    def test_generate_fix_called(self, db_session, test_user):
+        """Cover _generate_fix branch via execute_fix."""
         import asyncio
 
         from app.services.execution_service import execute_fix
 
         ticket = create_ticket(db=db_session, user_id=test_user.id, title="T", description="D")
-        ticket.diagnosis = {"root_cause": "test"}
+        ticket.diagnosis = {"root_cause": "test", "affected_files": ["app/main.py"]}
         ticket.status = "diagnosed"
         ticket.risk_tier = "low"
-        ticket.generated_prompt = None
         db_session.commit()
 
         with (
             patch("app.services.execution_service.check_budget", return_value={"allowed": True, "reason": "ok"}),
-            patch("app.services.execution_service.generate_prompt_for_ticket", return_value="fix prompt"),
             patch(
-                "app.services.execution_service._run_fix",
+                "app.services.execution_service._generate_fix",
                 new_callable=AsyncMock,
-                return_value={"success": True, "cost_usd": 0.1},
+                return_value={"success": True, "patches": [{"file": "x.py", "search": "a", "replace": "b"}], "cost_usd": 0.1, "summary": "Fixed"},
             ),
             patch("app.services.execution_service.record_cost"),
             patch("app.services.execution_service.create_notification"),
+            patch("app.services.execution_service._write_fix_queue"),
         ):
             result = asyncio.get_event_loop().run_until_complete(execute_fix(ticket.id, db_session))
             assert result.get("ok") is True
