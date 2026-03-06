@@ -123,7 +123,7 @@ $AREA_PROMPT"
     # Launch claude in background (unset CLAUDECODE to allow nested sessions)
     echo "  >> Launching agent: $area"
     timeout "$TIMEOUT_SECS" env -u CLAUDECODE claude -p "$(cat "$PROMPT_FILE")" \
-        --allowedTools "mcp__plugin_playwright_playwright__*,Bash" \
+        --dangerously-skip-permissions \
         > "$RUN_DIR/${area}_output.txt" 2>&1 &
     PID=$!
     PIDS+=($PID)
