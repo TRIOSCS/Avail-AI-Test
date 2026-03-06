@@ -214,6 +214,7 @@ document.addEventListener('click', function(e) {
 
 // Sync mobile <-> desktop search + mirror notification badge
 document.addEventListener('DOMContentLoaded', function() {
+    _restoreSidebarState();
     // Initialize sourcing search if the sourcing view is active
     if (typeof initSourcingSearch === 'function') {
         var sourcingView = document.getElementById('view-sourcing');
@@ -7716,7 +7717,8 @@ function _updateSbScrollArrows() {
 })();
 
 function toggleSidebar() {
-    document.body.classList.toggle('sb-open');
+    var open = document.body.classList.toggle('sb-open');
+    try { localStorage.setItem('sb-pinned', open ? '1' : ''); } catch(e) {}
 }
 
 function toggleSidebarGroup(headerEl) {
@@ -7736,23 +7738,46 @@ function toggleSidebarGroup(headerEl) {
         items.style.opacity = '0';
         group.classList.add('collapsed');
     }
+    _saveSidebarGroups();
+}
+
+function _saveSidebarGroups() {
+    try {
+        var state = {};
+        document.querySelectorAll('.sb-nav-group[data-section]').forEach(function(g) {
+            state[g.dataset.section] = g.classList.contains('collapsed');
+        });
+        localStorage.setItem('sb-groups', JSON.stringify(state));
+    } catch(e) {}
+}
+
+function _restoreSidebarState() {
+    try {
+        if (localStorage.getItem('sb-pinned') === '1') {
+            document.body.classList.add('sb-open');
+        }
+        var groups = localStorage.getItem('sb-groups');
+        if (groups) {
+            var state = JSON.parse(groups);
+            Object.keys(state).forEach(function(section) {
+                if (!state[section]) return;
+                var group = document.querySelector('.sb-nav-group[data-section="' + section + '"]');
+                if (!group) return;
+                var items = group.querySelector('.sb-group-items');
+                if (!items) return;
+                group.classList.add('collapsed');
+                items.style.maxHeight = '0';
+                items.style.opacity = '0';
+            });
+        }
+    } catch(e) {}
 }
 
 export function sidebarNav(page, el) {
     // Track activity for auto-dashboard on return
     safeSet('_lastActivityTs', String(Date.now()));
-    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
-    // Highlight Command Center group for dashboard/scorecard views
-    if (page === 'dashboard' || page === 'scorecard' || page === 'performance') {
-        const ccBtn = document.getElementById('navCmdCenter');
-        if (ccBtn) ccBtn.classList.add('active');
-    }
-    var section = el && el.closest('[data-section]');
-    if (section) {
-        var gradient = document.querySelector('.sb-top-gradient');
-        if (gradient) gradient.dataset.section = section.dataset.section;
-    }
     // Close sidebar on mobile
     const sb = document.getElementById('sidebar');
     if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
@@ -7782,14 +7807,8 @@ export function sidebarNav(page, el) {
 }
 
 export function navHighlight(btn) {
-    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    var section = btn && btn.closest('[data-section]');
-    if (section) {
-        var gradient = document.querySelector('.sb-top-gradient');
-        if (gradient) gradient.dataset.section = section.dataset.section;
-    }
-    // Only auto-close sidebar on mobile; keep pinned state on desktop
     if (window.innerWidth < 768) document.body.classList.remove('sb-open');
 }
 
