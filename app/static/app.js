@@ -1030,6 +1030,19 @@ function switchEnrichmentTab(tabId, btn) {
 }
 window.switchEnrichmentTab = switchEnrichmentTab;
 
+function switchEnrichmentTab(tabId, btn) {
+    document.querySelectorAll('.enrichment-tab-content').forEach(function(el) {
+        el.classList.remove('active');
+    });
+    var panel = document.getElementById('enrichment-' + tabId);
+    if (panel) panel.classList.add('active');
+    document.querySelectorAll('.enrichment-tab-btn').forEach(function(b) {
+        b.classList.remove('active');
+    });
+    if (btn) btn.classList.add('active');
+}
+window.switchEnrichmentTab = switchEnrichmentTab;
+
 // ── API Health Polling ──────────────────────────────────────────────────
 window._apiHealthErrors = [];
 async function pollApiHealth() {
