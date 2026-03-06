@@ -798,6 +798,20 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
+    // Enforce minimum date of today on the BID DUE field
+    const _bidDueInput = document.getElementById('nrDeadline');
+    if (_bidDueInput) {
+        const _today = new Date().toISOString().split('T')[0];
+        _bidDueInput.setAttribute('min', _today);
+        _bidDueInput.addEventListener('change', function() {
+            if (_bidDueInput.value && _bidDueInput.value < _today) {
+                _bidDueInput.setCustomValidity('BID DUE date cannot be in the past.');
+                _bidDueInput.reportValidity();
+            } else {
+                _bidDueInput.setCustomValidity('');
+            }
+        });
+    }
     // Route based on URL hash (supports bookmarks + page refresh)
     const initHash = location.hash.replace('#', '');
     var initDrillId = null;
