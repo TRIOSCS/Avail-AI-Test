@@ -265,6 +265,7 @@ document.addEventListener('DOMContentLoaded', function() {
         ms.addEventListener('input', function() { ds.value = ms.value; });
         ds.addEventListener('input', function() { ms.value = ds.value; });
 
+
         // Sync on viewport change (device rotation / resize across breakpoint)
         var mql = window.matchMedia('(max-width:768px)');
         var syncSearch = function() { var active = mql.matches ? ds.value : ms.value; ds.value = active; ms.value = active; };
