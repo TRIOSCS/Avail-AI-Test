@@ -1,5 +1,15 @@
 /* AVAIL v1.2.0 — CRM Extension: Customers, Offers, Quotes */
 
+const GONE_PATTERN = /\s*[\(\-]\s*gone\s*\)?\s*$/i;
+
+function sanitiseContactName(name) {
+  if (GONE_PATTERN.test(name)) {
+    console.warn(`[AVAIL] Contact name contains departure marker: "${name}"`);
+    return name.replace(GONE_PATTERN, '').trim();
+  }
+  return name;
+}
+
 import {
     apiFetch, debounce, esc, escAttr, logCatchError, showToast,
     fmtDate, fmtDateTime, fmtRelative, openModal, closeModal,
@@ -496,7 +506,8 @@ function renderMobileAccountList(companies) {
 // and tap-to-email links. Used in the company drawer contacts tab on mobile.
 
 function _renderMobileContact(ct, companyId) {
-    const initials = (ct.full_name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const initials = (sanitiseContactName(ct.full_name || '?')).split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    ct = { ...ct, full_name: sanitiseContactName(ct.full_name || '') };
     const location = [ct.site_city, ct.site_state].filter(Boolean).join(', ');
 
     // Build action links for phone and email (tap-friendly)
@@ -512,7 +523,7 @@ function _renderMobileContact(ct, companyId) {
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
             <div style="width:40px;height:40px;border-radius:50%;background:var(--blue-bg,#eff6ff);color:var(--blue,#2563eb);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0">${initials}</div>
             <div style="flex:1;min-width:0">
-                <div class="m-card-title" style="margin:0">${esc(ct.full_name)}${ct.is_primary ? ' <span style="background:var(--blue);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;vertical-align:middle">Primary</span>' : ''}</div>
+                <div class="m-card-title" style="margin:0">${esc(sanitiseContactName(ct.full_name))}${ct.is_primary ? ' <span style="background:var(--blue);color:#fff;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;vertical-align:middle">Primary</span>' : ''}</div>
                 ${ct.title ? `<div class="m-card-subtitle" style="margin:0">${esc(ct.title)}</div>` : ''}
                 <div class="m-card-meta" style="margin:0">${esc(ct.site_name || '')}${location ? ' · ' + esc(location) : ''}</div>
             </div>
