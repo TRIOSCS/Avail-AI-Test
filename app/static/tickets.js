@@ -1000,9 +1000,9 @@ function listenToFindTroubleStream(container) {
 // ── Keyboard shortcuts for ticket detail (admin only) ────────────────
 document.addEventListener('keydown', function(e) {
     if (!window.__isAdmin) return;
-    // Skip if user is typing in an input/textarea/select
+    // Skip if user is typing in an input/textarea/select or contenteditable
     var tag = (e.target.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
 
     var container = document.getElementById('settings-tickets');
     if (!container || container.style.display === 'none') return;
