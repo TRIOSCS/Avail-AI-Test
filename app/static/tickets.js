@@ -10,12 +10,13 @@ import {
 
 // ── Common Issues dropdown options ─────────────────────────────────────
 var COMMON_ISSUES = [
-    '',
-    'Search results not loading',
-    'RFQ emails not sending',
-    'Login / session expired unexpectedly',
-    'Page loads slowly or times out',
-    'Data missing or incorrect',
+    { label: '', title: '', hint: '' },
+    { label: 'Search not working', title: 'Search returns no/wrong results for [part]', hint: 'What part number did you search? What did you expect to see?' },
+    { label: 'Page won\'t load', title: 'Page fails to load: [which page]', hint: 'Which page? Do you see an error message or blank screen?' },
+    { label: 'Data looks wrong', title: 'Incorrect data on [what]', hint: 'What data is wrong? What should it be?' },
+    { label: 'Slow performance', title: 'Slow response on [where]', hint: 'Which page is slow? How long does it take to load?' },
+    { label: 'Email/RFQ issue', title: 'Email or RFQ problem: [describe]', hint: 'Which RFQ? What happened? Did you get an error?' },
+    { label: 'Other', title: '', hint: 'Describe what happened and what you expected.' },
 ];
 
 var STATUS_LABELS = {
@@ -105,12 +106,16 @@ function renderSubmitForm(container) {
     // Common issues quick-select
     var commonSelect = el('select', { id: 'ttCommonIssue', style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;' });
     commonSelect.appendChild(el('option', { value: '', textContent: 'Select a common issue (optional)...' }));
-    COMMON_ISSUES.forEach(function(issue) {
-        if (issue) commonSelect.appendChild(el('option', { value: issue, textContent: issue }));
+    COMMON_ISSUES.forEach(function(item) {
+        if (item.label) commonSelect.appendChild(el('option', { value: item.label, textContent: item.label }));
     });
     commonSelect.onchange = function() {
+        var sel = COMMON_ISSUES.find(function(i) { return i.label === commonSelect.value; });
+        if (!sel) return;
         var titleInput = document.getElementById('ttTitle');
-        if (this.value && titleInput) titleInput.value = this.value;
+        var descArea = document.getElementById('ttDesc');
+        if (sel.title && titleInput) titleInput.value = sel.title;
+        if (sel.hint && descArea) descArea.placeholder = sel.hint;
     };
 
     var titleInput = el('input', {
