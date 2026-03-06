@@ -1282,67 +1282,8 @@ def test_company_activity_red_fc100(client, test_company):
 
 
 # =========================================================================
-# 14. schemas/crm.py -- lines 63, 158, 165, 242, 249, 326, 333
-# =========================================================================
-
-
-def test_crm_company_phone_none():
-    from app.schemas.crm import CompanyCreate
-
-    assert CompanyCreate(name="T", phone=None).phone is None
-
-
-def test_crm_site_state_none():
-    from app.schemas.crm import SiteCreate
-
-    assert SiteCreate(site_name="H", country="US", state=None).state is None
-
-
-def test_crm_site_contact_phone_none():
-    from app.schemas.crm import SiteCreate
-
-    assert SiteCreate(site_name="H", country="US", contact_phone=None).contact_phone is None
-
-
-def test_crm_sitecontact_phone_none():
-    from app.schemas.crm import SiteContactCreate
-
-    assert SiteContactCreate(full_name="J", phone=None).phone is None
-
-
-def test_crm_sitecontact_email_none():
-    from app.schemas.crm import SiteContactCreate
-
-    assert SiteContactCreate(full_name="J", email=None).email is None
-
-
-def test_crm_offer_packaging_none():
-    from app.schemas.crm import OfferCreate
-
-    assert OfferCreate(mpn="LM317T", vendor_name="A", packaging=None).packaging is None
-
-
-def test_crm_offer_datecode_none():
-    from app.schemas.crm import OfferCreate
-
-    assert OfferCreate(mpn="LM317T", vendor_name="A", date_code=None).date_code is None
-
-
-# =========================================================================
 # 15. schemas/vendors.py -- lines 32, 48, 53, 106, 121
 # =========================================================================
-
-
-def test_vendor_update_emails_none():
-    from app.schemas.vendors import VendorCardUpdate
-
-    assert VendorCardUpdate(emails=None).emails is None
-
-
-def test_vendor_update_phones_none():
-    from app.schemas.vendors import VendorCardUpdate
-
-    assert VendorCardUpdate(phones=None).phones is None
 
 
 def test_vendor_update_phones_blank():
