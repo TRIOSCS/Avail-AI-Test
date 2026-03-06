@@ -259,6 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
 export let currentReqId = null;
 export function setCurrentReqId(id) { currentReqId = id; }
 let currentReqName = '';
+let formIsDirty = false;
 let searchResults = {};
 let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
 let searchResultsCache = {};  // keyed by reqId
@@ -924,7 +925,13 @@ async function checkM365Status() {
 
 // Refresh M365 status every 5 min
 const _m365Timer = setInterval(checkM365Status, 300000);
-window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
+window.addEventListener('beforeunload', (e) => {
+    clearInterval(_m365Timer);
+    if (formIsDirty) {
+        e.preventDefault();
+        e.returnValue = '';
+    }
+});
 
 // ── Mobile Offer Feed (stub) ────────────────────────────────────────────
 function _setOfferFeedFilter(filter, btn) {
