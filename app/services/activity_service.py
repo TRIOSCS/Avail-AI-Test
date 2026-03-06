@@ -562,6 +562,34 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  RFQ / SOURCING ACTIVITY LOGGING
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def log_rfq_activity(
+    db: Session,
+    rfq_id: int,
+    activity_type: str,
+    description: str,
+    metadata: dict | None = None,
+    user_id: int | None = None,
+) -> ActivityLog:
+    """Log an activity entry on the RFQ activity timeline."""
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type=activity_type,
+        channel="system",
+        requisition_id=rfq_id,
+        notes=description,
+        details=metadata,
+    )
+    db.add(record)
+    db.flush()
+    logger.info(f"RFQ activity logged: {activity_type} -> rfq {rfq_id}")
+    return record
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  UNMATCHED ACTIVITY QUEUE (Phase 2A)
 # ═══════════════════════════════════════════════════════════════════════
 
