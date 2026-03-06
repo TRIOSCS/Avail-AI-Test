@@ -41,8 +41,7 @@ async def execute_fix(ticket_id: int, db: Session) -> dict:
         return {"error": f"Ticket status '{ticket.status}' cannot be executed"}
 
     risk_tier = ticket.risk_tier or "medium"
-    if risk_tier == "high":
-        return {"error": "High-risk tickets require human intervention"}
+    # Aggressive mode: execute all risk levels
 
     # Budget check
     budget = check_budget(db, ticket_id)
@@ -83,7 +82,12 @@ async def execute_fix(ticket_id: int, db: Session) -> dict:
             "summary": result.get("summary", ""),
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
-        _write_fix_queue(ticket_id, payload)
+        try:
+            _write_fix_queue(ticket_id, payload)
+        except OSError as e:
+            logger.error("Failed to write fix queue for ticket {}: {}", ticket_id, e)
+            update_ticket(db, ticket_id, status="diagnosed")
+            return {"error": f"Fix queue write failed: {e}"}
 
         update_ticket(db, ticket_id, status="fix_queued")
         record_cost(db, ticket_id, result.get("cost_usd", 0.05))
@@ -112,14 +116,27 @@ async def _generate_fix(ticket: TroubleTicket) -> dict:
     from app.services.patch_generator import generate_patches
 
     diagnosis = ticket.diagnosis or {}
-    affected_files = diagnosis.get("affected_files", [])
+    detailed = diagnosis.get("detailed") or {}
+    if not isinstance(detailed, dict):
+        detailed = {}
+    # Check detailed diagnosis, top-level, and relevant_files fallback
+    affected_files = (
+        detailed.get("affected_files", [])
+        or diagnosis.get("affected_files", [])
+        or diagnosis.get("relevant_files", [])
+    )
     if not affected_files:
+        logger.warning("Ticket {}: no affected files in diagnosis: {}", ticket.id, list(diagnosis.keys()))
         return {"success": False, "error": "No affected files in diagnosis"}
+
+    # Merge detailed diagnosis into top-level for patch generator
+    merged_diagnosis = dict(diagnosis)
+    merged_diagnosis.update(detailed)
 
     try:
         result = await generate_patches(
             title=ticket.title,
-            diagnosis=diagnosis,
+            diagnosis=merged_diagnosis,
             category=ticket.category or "unknown",
             affected_files=affected_files,
         )

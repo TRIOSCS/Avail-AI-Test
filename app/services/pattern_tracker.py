@@ -106,11 +106,17 @@ def get_weekly_stats(db: Session, weeks_back: int = 1) -> dict:
         .scalar()
     )
 
+    # All-time total
+    total_all_time = (
+        db.query(func.count(TroubleTicket.id)).scalar()
+    ) or 0
+
     return {
         "period_start": start.isoformat(),
         "period_end": now.isoformat(),
         "tickets_created": created,
         "tickets_resolved": resolved,
+        "tickets_total": total_all_time,
         "by_category": by_category,
         "by_risk": by_risk,
         "success_rate": round(success_rate, 1),
@@ -167,17 +173,17 @@ def get_health_status(db: Session) -> dict:
 
     Returns: {status: green|yellow|red, open_count, high_risk_count, message}
     """
-    open_statuses = ("open", "in_progress")
+    resolved_statuses = ("resolved", "rejected")
     open_count = (
         db.query(func.count(TroubleTicket.id))
-        .filter(TroubleTicket.status.in_(open_statuses))
+        .filter(~TroubleTicket.status.in_(resolved_statuses))
         .scalar()
     ) or 0
 
     high_risk_count = (
         db.query(func.count(TroubleTicket.id))
         .filter(
-            TroubleTicket.status.in_(open_statuses),
+            ~TroubleTicket.status.in_(resolved_statuses),
             TroubleTicket.risk_tier == "high",
         )
         .scalar()

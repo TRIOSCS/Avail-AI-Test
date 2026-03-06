@@ -212,11 +212,17 @@ async function renderMyTickets(container) {
 }
 
 // ── Admin Dashboard ───────────────────────────────────────────────────
-var _adminFilter = 'submitted';
+var _adminFilter = '';
 var _adminOffset = 0;
+var _adminRefreshTimer = null;
 
 async function renderAdminDashboard(container) {
     clearNode(container);
+    var findTroubleBtn = el('button', {
+        className: 'btn btn-sm',
+        textContent: 'Find Trouble',
+        onclick: function() { startFindTrouble(container); },
+    });
     var header = el('div', { className: 'vendor-header' }, [
         el('h2', {}, ['Trouble Tickets']),
         el('div', { style: 'display:flex;gap:8px;' }, [
@@ -298,6 +304,13 @@ async function renderAdminDashboard(container) {
         var loadEl = container.querySelector('.empty');
         if (loadEl) loadEl.textContent = 'Failed to load tickets.';
     }
+
+    // Auto-refresh every 10s while tickets tab is visible
+    if (_adminRefreshTimer) clearInterval(_adminRefreshTimer);
+    _adminRefreshTimer = setInterval(function() {
+        if (!container.offsetParent) { clearInterval(_adminRefreshTimer); _adminRefreshTimer = null; return; }
+        renderAdminDashboard(container);
+    }, 10000);
 }
 
 // ── Shared ticket table builder ───────────────────────────────────────
@@ -361,7 +374,7 @@ function buildTicketTable(tickets, isAdmin) {
 
 // ── Ticket Detail View ────────────────────────────────────────────────
 async function showTicketDetail(ticketId) {
-    var container = document.getElementById('view-tickets');
+    var container = document.getElementById('settings-tickets');
     if (!container) return;
     clearNode(container);
     container.appendChild(el('p', { className: 'empty', textContent: 'Loading...' }));
@@ -719,9 +732,9 @@ var _statsCache = null;
 var _statsCacheTs = 0;
 
 async function loadStatsBar(container) {
-    // Cache for 60s to avoid hammering on every filter pill click
+    // Cache for 8s — short enough to see live updates, long enough to avoid hammering
     var now = Date.now();
-    if (_statsCache && now - _statsCacheTs < 60000) {
+    if (_statsCache && now - _statsCacheTs < 8000) {
         renderStatsBar(container, _statsCache);
         return;
     }
@@ -757,7 +770,8 @@ function renderStatsBar(container, data) {
 
     // Stat chips
     var chips = [
-        { label: 'Created', value: stats.tickets_created },
+        { label: 'Total', value: stats.tickets_total || stats.tickets_created },
+        { label: 'Open', value: health.open_count || 0 },
         { label: 'Resolved', value: stats.tickets_resolved },
         { label: 'Success', value: stats.success_rate != null ? stats.success_rate + '%' : '—' },
         { label: 'Avg Time', value: stats.avg_resolution_hours != null ? stats.avg_resolution_hours + 'h' : '—' },
@@ -926,86 +940,61 @@ document.addEventListener('click', function(e) {
 // ── Find Trouble — Automated Site Audit ──────────────────────────────
 
 async function startFindTrouble(container) {
-    if (!confirm('Launch exhaustive site audit?\n\n1. Playwright sweep (clicks every button)\n2. Claude agent prompts (opens tabs)\n\nProceed?')) return;
-
-    showToast('Starting site audit...', 'info');
+    if (!confirm('Launch Find Trouble?\n\nPlaywright will sweep all 17 areas, click every button, and create tickets for any issues found.\n\nProceed?')) return;
 
     try {
-        var job = await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
-        showToast('Playwright sweep started', 'success');
-        pollSweepProgress(job.job_id, container);
-
-        var promptData = await apiFetch('/api/trouble-tickets/find-trouble/prompts');
-        var prompts = promptData.prompts || [];
-
-        prompts.forEach(function(p) {
-            window.open(window.location.origin + '/' + (p.url_hash || '#'), '_blank');
-        });
-
-        showPromptPanel(prompts);
+        await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
+        showToast('Find Trouble started — sweeping all areas...', 'info');
+        listenToFindTroubleStream(container);
     } catch (e) {
-        showToast('Failed to start audit: ' + e.message, 'error');
+        if (e.message && e.message.indexOf('409') !== -1) {
+            showToast('Find Trouble is already running', 'warning');
+        } else {
+            showToast('Failed to start: ' + e.message, 'error');
+        }
     }
 }
 
-function pollSweepProgress(jobId, container) {
-    var interval = setInterval(async function() {
-        try {
-            var status = await apiFetch('/api/trouble-tickets/find-trouble/' + jobId);
-            if (status.status === 'complete') {
-                clearInterval(interval);
-                showToast('Audit complete: ' + status.issues_found + ' issues found, ' + status.issues_created + ' tickets created', 'success');
-                renderAdminDashboard(container);
-            } else if (status.status && status.status.startsWith('error')) {
-                clearInterval(interval);
-                showToast('Audit failed: ' + status.status, 'error');
-            }
-        } catch (e) {
-            clearInterval(interval);
+function listenToFindTroubleStream(container) {
+    var evtSource = new EventSource('/api/trouble-tickets/find-trouble/stream');
+    var statusBar = document.getElementById('ftStatusBar');
+    if (!statusBar) {
+        statusBar = el('div', {
+            id: 'ftStatusBar',
+            style: 'padding:8px 12px;margin-bottom:12px;border-radius:6px;background:var(--bg);border:1px solid var(--border);font-size:12px;color:var(--muted);',
+        });
+        var header = container.querySelector('.vendor-header');
+        if (header && header.nextSibling) {
+            header.parentNode.insertBefore(statusBar, header.nextSibling);
+        } else {
+            container.appendChild(statusBar);
         }
-    }, 5000);
-}
+    }
+    statusBar.textContent = 'Starting sweep...';
 
-function showPromptPanel(prompts) {
-    var existing = document.getElementById('promptPanel');
-    if (existing) existing.remove();
-
-    var overlay = el('div', {
-        id: 'promptPanel',
-        style: 'position:fixed;right:16px;top:60px;width:420px;max-height:80vh;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;padding:16px;',
-    });
-
-    overlay.appendChild(el('button', {
-        style: 'position:absolute;top:8px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);',
-        textContent: 'x',
-        onclick: function() { overlay.remove(); },
-    }));
-    overlay.appendChild(el('h3', { style: 'margin:0 0 12px;font-size:14px;', textContent: 'Claude Agent Prompts' }));
-    overlay.appendChild(el('p', { style: 'font-size:11px;color:var(--muted);margin-bottom:12px;', textContent: 'Copy each prompt into Claude in the corresponding browser tab.' }));
-
-    prompts.forEach(function(p) {
-        var card = el('div', { style: 'border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;' });
-        var hdr = el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;' });
-        hdr.appendChild(el('strong', { style: 'font-size:12px;', textContent: p.area }));
-        var cpBtn = el('button', { className: 'btn btn-sm', textContent: 'Copy', style: 'font-size:10px;padding:2px 8px;' });
-        cpBtn.onclick = function() {
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(p.prompt).then(function() {
-                    cpBtn.textContent = 'Copied!';
-                    setTimeout(function() { cpBtn.textContent = 'Copy'; }, 1500);
-                });
+    evtSource.onmessage = function(event) {
+        try {
+            var data = JSON.parse(event.data);
+            if (data.type === 'stream_end') {
+                evtSource.close();
+                statusBar.textContent = 'Sweep complete.';
+                showToast('Find Trouble finished', 'success');
+                setTimeout(function() { renderAdminDashboard(container); }, 1500);
+                return;
             }
-        };
-        hdr.appendChild(cpBtn);
-        card.appendChild(hdr);
-        card.appendChild(el('p', {
-            style: 'font-size:10px;color:var(--muted);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
-            textContent: (p.prompt || '').split('\n')[0],
-        }));
-        overlay.appendChild(card);
-    });
+            if (data.type === 'error') {
+                statusBar.style.color = 'var(--red)';
+                statusBar.textContent = data.message;
+            } else {
+                statusBar.textContent = data.message || data.type;
+            }
+        } catch (_) {}
+    };
 
-    document.body.appendChild(overlay);
+    evtSource.onerror = function() {
+        evtSource.close();
+        statusBar.textContent = 'Stream disconnected.';
+    };
 }
 
 // ── Keyboard shortcuts for ticket detail (admin only) ────────────────
@@ -1015,7 +1004,7 @@ document.addEventListener('keydown', function(e) {
     var tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
 
-    var container = document.getElementById('view-tickets');
+    var container = document.getElementById('settings-tickets');
     if (!container || container.style.display === 'none') return;
 
     // Only active on ticket detail view (has a Back button)
