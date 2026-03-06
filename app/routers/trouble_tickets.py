@@ -597,3 +597,40 @@ async def verify_ticket(
             resolution_notes="User reported still broken",
         )
         return {"ok": True, "status": "escalated", "child_ticket_id": child.id}
+
+
+@router.post("/api/trouble-tickets/{ticket_id}/verify-retest")
+async def verify_retest(
+    ticket_id: int,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Run SiteTester on the ticket's area and resolve or create regression ticket."""
+    from app.services.rollback_service import verify_and_retest
+
+    session_cookie = request.cookies.get("session", "")
+    base_url = str(request.base_url).rstrip("/")
+    return await verify_and_retest(
+        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
+    )
+
+
+@router.post("/api/internal/verify-retest/{ticket_id}")
+async def internal_verify_retest(
+    ticket_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Internal endpoint for host watcher — localhost only, no auth."""
+    client = request.client
+    if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(403, "Internal endpoint — localhost only")
+
+    from app.services.rollback_service import verify_and_retest
+
+    session_cookie = request.cookies.get("session", "")
+    base_url = str(request.base_url).rstrip("/")
+    return await verify_and_retest(
+        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
+    )

@@ -139,11 +139,7 @@ def list_tickets(
     items = []
     for t in tickets:
         submitter = db.get(User, t.submitted_by) if t.submitted_by else None
-        child_count = (
-            db.query(TroubleTicket)
-            .filter(TroubleTicket.parent_ticket_id == t.id)
-            .count()
-        )
+        child_count = db.query(TroubleTicket).filter(TroubleTicket.parent_ticket_id == t.id).count()
         items.append(
             {
                 "id": t.id,
@@ -373,7 +369,7 @@ async def auto_process_ticket(ticket_id: int) -> None:
                 if "error" in exec_result:
                     logger.warning("Auto-execute failed for ticket {}: {}", ticket_id, exec_result["error"])
                     return
-                logger.info("Ticket {} auto-processed: diagnosed and fix executed (risk={})", ticket_id, risk_tier)
+                logger.info("Ticket {} auto-processed: diagnosed and fix queued (risk={})", ticket_id, risk_tier)
             else:
                 logger.info("Ticket {} auto-diagnosed (risk={}) — awaiting admin", ticket_id, risk_tier)
         else:

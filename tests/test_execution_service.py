@@ -1,13 +1,14 @@
 """Tests for execution service.
 
 Covers: execute_fix pipeline, budget checks, file locks, max iterations,
-escalation, notification emission, subprocess mocking.
+escalation, notification emission, patch generation mocking.
 
 Called by: pytest
 Depends on: app.services.execution_service
 """
 
 import asyncio
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -167,30 +168,35 @@ class TestExecuteFixMaxIterations:
 
 
 class TestExecuteFixSuccess:
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_successful_fix(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
-            "success": True,
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    def test_successful_fix_writes_queue_file(self, mock_gen, db_session, diagnosed_ticket, tmp_path):
+        mock_gen.return_value = {
+            "patches": [
+                {"file": "app/routers/vendors.py", "search": "old", "replace": "new", "explanation": "fix"}
+            ],
             "summary": "Fixed the query",
-            "branch": "fix/ticket-1",
-            "cost_usd": 0.10,
         }
-        result = _run(execute_fix(diagnosed_ticket.id, db_session))
+        with patch("app.services.execution_service.FIX_QUEUE_DIR", str(tmp_path)):
+            result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert result["ok"] is True
-        assert result["status"] == "awaiting_verification"
-        db_session.refresh(diagnosed_ticket)
-        assert diagnosed_ticket.status == "awaiting_verification"
-        assert diagnosed_ticket.iterations_used == 1
+        assert result["status"] == "fix_queued"
+        # Verify JSON file was written
+        queue_file = tmp_path / f"{diagnosed_ticket.id}.json"
+        assert queue_file.exists()
+        payload = json.loads(queue_file.read_text())
+        assert payload["ticket_id"] == diagnosed_ticket.id
+        assert len(payload["patches"]) == 1
 
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_successful_fix_emits_notification(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
-            "success": True,
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    def test_successful_fix_emits_notification(self, mock_gen, db_session, diagnosed_ticket, tmp_path):
+        mock_gen.return_value = {
+            "patches": [
+                {"file": "app/routers/vendors.py", "search": "old", "replace": "new", "explanation": "fix"}
+            ],
             "summary": "Done",
-            "branch": "fix/1",
-            "cost_usd": 0.05,
         }
-        _run(execute_fix(diagnosed_ticket.id, db_session))
+        with patch("app.services.execution_service.FIX_QUEUE_DIR", str(tmp_path)):
+            _run(execute_fix(diagnosed_ticket.id, db_session))
         notifs = (
             db_session.query(Notification)
             .filter_by(
@@ -203,52 +209,31 @@ class TestExecuteFixSuccess:
 
 
 class TestExecuteFixFailure:
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_retryable(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
-            "success": False,
-            "error": "Syntax error",
-            "cost_usd": 0.05,
-        }
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    def test_patch_generation_fails(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = None
         result = _run(execute_fix(diagnosed_ticket.id, db_session))
-        assert "Fix failed" in result["error"]
-        assert "attempt 1/" in result["error"]
+        assert "Patch generation failed" in result["error"]
         db_session.refresh(diagnosed_ticket)
-        assert diagnosed_ticket.status == "diagnosed"  # back to diagnosed for retry
+        assert diagnosed_ticket.status == "diagnosed"
+
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    def test_empty_patches_fails(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = {"patches": [], "summary": "Could not determine fix"}
+        result = _run(execute_fix(diagnosed_ticket.id, db_session))
+        assert "No patches generated" in result["error"]
 
     @patch("app.services.execution_service.settings")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_final_attempt_escalates(self, mock_run, mock_settings, db_session, diagnosed_ticket):
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    def test_failed_fix_final_attempt_escalates(self, mock_gen, mock_settings, db_session, diagnosed_ticket):
         mock_settings.self_heal_max_iterations_low = 2
         mock_settings.self_heal_max_iterations_medium = 10
         mock_settings.self_heal_ticket_budget = 100.0
         mock_settings.self_heal_weekly_budget = 500.0
-        mock_run.return_value = {
-            "success": False,
-            "error": "Still broken",
-            "cost_usd": 0.05,
-        }
+        mock_gen.return_value = None
         diagnosed_ticket.iterations_used = 1
         db_session.commit()
         result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert "escalated" in result["error"]
         db_session.refresh(diagnosed_ticket)
         assert diagnosed_ticket.status == "escalated"
-
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_emits_notification(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
-            "success": False,
-            "error": "Oops",
-            "cost_usd": 0.05,
-        }
-        _run(execute_fix(diagnosed_ticket.id, db_session))
-        notifs = (
-            db_session.query(Notification)
-            .filter_by(
-                ticket_id=diagnosed_ticket.id,
-                event_type="failed",
-            )
-            .all()
-        )
-        assert len(notifs) == 1

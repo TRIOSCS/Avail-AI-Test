@@ -1,68 +1,112 @@
-"""Rollback service — post-fix health monitoring (alert-only, no auto-revert).
+"""Verify-retest service -- post-fix Playwright verification for the self-heal pipeline.
 
-After a fix is deployed, monitors for regressions via a pluggable health
-check. In v1 this is a stub; future versions can query Sentry for new errors.
-Notifies admin if issues are detected. Does NOT auto-revert — unsafe on
-single-server Docker Compose deployment.
+After a fix is applied and the container rebuilt, this service runs SiteTester
+on just the affected area. If issues persist, it creates a regression ticket
+and escalates.
 
-Called by: execution_service.py (after fix applied)
-Depends on: services/notification_service.py, models/trouble_ticket.py
+Called by: routers/trouble_tickets.py (verify-retest endpoint), host watcher script
+Depends on: services/site_tester.py, services/trouble_ticket_service.py,
+            services/notification_service.py
 """
-
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models.trouble_ticket import TroubleTicket
 from app.services.notification_service import create_notification
-from app.services.trouble_ticket_service import update_ticket
+from app.services.site_tester import TEST_AREAS, SiteTester
+from app.services.trouble_ticket_service import create_ticket, update_ticket
 
 
-async def check_post_fix_health(ticket_id: int, db: Session) -> dict:
-    """Check for regressions after a fix was applied.
+async def verify_and_retest(
+    ticket_id: int,
+    db: Session,
+    *,
+    base_url: str,
+    session_cookie: str,
+) -> dict:
+    """Run SiteTester on the ticket's affected area and resolve or escalate.
 
-    Returns: {healthy: bool, issues: list[str]}
+    Returns:
+        {passed: True, issues: []} on success
+        {passed: False, issues: [...], regression_ticket_id: int} on failure
+        {passed: False, error: str} if ticket not found
     """
     ticket = db.get(TroubleTicket, ticket_id)
     if not ticket:
-        return {"healthy": True, "issues": []}
+        return {"passed": False, "error": "Ticket not found"}
 
-    issues = await _check_health(ticket)
+    # Determine which test area to check
+    test_area = ticket.tested_area or ticket.category or "search"
 
-    if issues:
-        logger.warning("Post-fix health issues for ticket {}: {}", ticket_id, issues)
-        _alert_admin(db, ticket, issues)
-        return {"healthy": False, "issues": issues}
+    # Find matching area config from TEST_AREAS
+    area_config = None
+    for area in TEST_AREAS:
+        if area["name"] == test_area:
+            area_config = area
+            break
 
-    logger.info("Post-fix health check passed for ticket {}", ticket_id)
-    return {"healthy": True, "issues": []}
+    if not area_config:
+        logger.warning("No matching test area '{}' found, falling back to 'search'", test_area)
+        test_area = "search"
+        area_config = TEST_AREAS[0]  # search is first
 
+    # Run the site tester
+    tester = SiteTester(base_url, session_cookie)
+    await tester.run_full_sweep()
 
-async def _check_health(ticket: TroubleTicket) -> list[str]:
-    """Pluggable health check — stub in v1.
+    # Filter issues to just the matching test area
+    area_issues = [i for i in tester.issues if i.get("area") == test_area]
 
-    Future: query Sentry API for new errors matching ticket's file_mapping
-    in the last N minutes after fix deployment.
-    """
-    # v1 stub — always healthy
-    # Future implementation:
-    # - Query Sentry for new issues since ticket.resolved_at
-    # - Filter by affected files from ticket.file_mapping
-    # - Return list of new error descriptions
-    return []
+    if not area_issues:
+        # Pass -- resolve the ticket
+        update_ticket(db, ticket_id, status="resolved", resolution_notes="Verified by automated retest")
+        if ticket.submitted_by:
+            create_notification(
+                db,
+                user_id=ticket.submitted_by,
+                event_type="resolved",
+                title=f"Ticket #{ticket_id}: Retest passed",
+                body="Automated retest verified the fix is working.",
+                ticket_id=ticket_id,
+            )
+        logger.info("Verify-retest passed for ticket {}", ticket_id)
+        return {"passed": True, "issues": []}
 
+    # Fail -- create regression child ticket and escalate
+    issue_desc = "\n".join(
+        f"- {i.get('title', 'Unknown')}: {i.get('description', '')}"
+        for i in area_issues
+    )
 
-def _alert_admin(db: Session, ticket: TroubleTicket, issues: list[str]) -> None:
-    """Notify the ticket submitter about post-fix regressions."""
-    body = "Issues detected after fix:\n" + "\n".join(f"- {i}" for i in issues)
+    regression = create_ticket(
+        db,
+        user_id=ticket.submitted_by or 0,
+        title=f"Retest failed: {ticket.title[:150]}",
+        description=f"Automated retest found issues in area '{test_area}':\n{issue_desc}",
+        source="retest",
+        current_view=test_area,
+    )
+    regression.parent_ticket_id = ticket_id
+    regression.tested_area = test_area
+    db.commit()
+
+    update_ticket(
+        db,
+        ticket_id,
+        status="escalated",
+        resolution_notes=f"Retest failed with {len(area_issues)} issue(s) in '{test_area}'",
+    )
+
     if ticket.submitted_by:
         create_notification(
-            db, user_id=ticket.submitted_by,
+            db,
+            user_id=ticket.submitted_by,
             event_type="failed",
-            title=f"Ticket #{ticket.id}: Post-fix regression detected",
-            body=body,
-            ticket_id=ticket.id,
+            title=f"Ticket #{ticket_id}: Retest failed",
+            body=f"Retest found {len(area_issues)} issue(s). Regression ticket #{regression.id} created.",
+            ticket_id=ticket_id,
         )
-    # Mark ticket for re-investigation
-    update_ticket(db, ticket.id, resolution_notes=f"Post-fix regression: {', '.join(issues)}")
+
+    logger.warning("Verify-retest failed for ticket {} — {} issues, regression #{}", ticket_id, len(area_issues), regression.id)
+    return {"passed": False, "issues": area_issues, "regression_ticket_id": regression.id}

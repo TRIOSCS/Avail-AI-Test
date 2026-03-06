@@ -1,28 +1,28 @@
 """Execution service — orchestrates fix execution for the self-heal pipeline.
 
-Flow: approve → budget check → file lock → run fix (subprocess) → handle result.
-The _run_fix() method is pluggable — local subprocess in v1, GitHub Actions later.
+Flow: approve → budget check → file lock → generate patches (Claude API) → queue fix.
+Patches are written to FIX_QUEUE_DIR as JSON for human review before application.
 
 Called by: routers/trouble_tickets.py
 Depends on: services/cost_controller.py, services/trouble_ticket_service.py,
-            services/notification_service.py, services/prompt_generator.py
+            services/notification_service.py, services/patch_generator.py
 """
 
-import asyncio
+import json
 import os
-import subprocess
 from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models.self_heal_log import SelfHealLog
 from app.models.trouble_ticket import TroubleTicket
 from app.services.cost_controller import check_budget, record_cost
 from app.services.notification_service import create_notification
-from app.services.prompt_generator import generate_prompt_for_ticket
+from app.services.patch_generator import generate_patches
 from app.services.trouble_ticket_service import check_file_lock, update_ticket
+
+FIX_QUEUE_DIR = "/app/fix_queue"
 
 
 async def execute_fix(ticket_id: int, db: Session) -> dict:
@@ -37,7 +37,7 @@ async def execute_fix(ticket_id: int, db: Session) -> dict:
     if not ticket.diagnosis:
         return {"error": "Ticket not yet diagnosed"}
 
-    if ticket.status not in ("diagnosed", "prompt_ready"):
+    if ticket.status not in ("diagnosed", "prompt_ready", "fix_queued"):
         return {"error": f"Ticket status '{ticket.status}' cannot be executed"}
 
     risk_tier = ticket.risk_tier or "medium"
@@ -59,93 +59,79 @@ async def execute_fix(ticket_id: int, db: Session) -> dict:
             return {"error": reason}
 
     # Max iterations check
-    max_iter = (
-        settings.self_heal_max_iterations_low if risk_tier == "low"
-        else settings.self_heal_max_iterations_medium
-    )
+    max_iter = settings.self_heal_max_iterations_low if risk_tier == "low" else settings.self_heal_max_iterations_medium
     current_iter = ticket.iterations_used or 0
     if current_iter >= max_iter:
         _escalate(db, ticket, f"Max iterations ({max_iter}) reached")
         return {"error": f"Max iterations ({max_iter}) reached — escalated"}
 
-    # Get or generate prompt
-    prompt = ticket.generated_prompt
-    if not prompt:
-        prompt = generate_prompt_for_ticket(ticket)
-        update_ticket(db, ticket_id, generated_prompt=prompt)
+    # Extract diagnosis text
+    diag = ticket.diagnosis
+    if isinstance(diag, dict):
+        diagnosis = diag.get("detailed") or diag
+    else:
+        diagnosis = diag
 
     # Mark as in-progress
     update_ticket(db, ticket_id, status="in_progress", iterations_used=current_iter + 1)
 
-    # Execute
-    result = await _run_fix(prompt, ticket)
+    # Generate patches via Claude API
+    category = ticket.category or "other"
+    affected_files = file_mapping or []
+    result = await generate_patches(
+        title=ticket.title,
+        diagnosis=diagnosis,
+        category=category,
+        affected_files=affected_files,
+    )
 
-    # Handle result
-    if result["success"]:
-        update_ticket(
-            db, ticket_id,
-            status="awaiting_verification",
-            fix_branch=result.get("branch"),
-        )
-        record_cost(db, ticket_id, result.get("cost_usd", 0.0))
-        _notify(db, ticket, "fixed", "Fix applied", result.get("summary", "Fix completed"))
-        logger.info("Ticket {} fix applied successfully", ticket_id)
-        return {"ok": True, "status": "awaiting_verification", "message": "Fix applied"}
-    else:
-        error_msg = result.get("error", "Unknown error")
+    # Handle: generation failed entirely
+    if result is None:
+        record_cost(db, ticket_id, 0.03)
         if current_iter + 1 >= max_iter:
-            _escalate(db, ticket, f"Fix failed after {current_iter + 1} iterations: {error_msg}")
-            return {"error": f"Fix failed and escalated: {error_msg}"}
+            _escalate(db, ticket, f"Patch generation failed after {current_iter + 1} iterations")
+            return {"error": f"Patch generation failed and escalated"}
         else:
             update_ticket(db, ticket_id, status="diagnosed")
-            record_cost(db, ticket_id, result.get("cost_usd", 0.0))
-            _notify(db, ticket, "failed", "Fix attempt failed", error_msg)
-            return {"error": f"Fix failed (attempt {current_iter + 1}/{max_iter}): {error_msg}"}
+            _notify(db, ticket, "failed", "Fix attempt failed", "Patch generation failed")
+            return {"error": f"Patch generation failed (attempt {current_iter + 1}/{max_iter})"}
+
+    # Handle: empty patches
+    patches = result.get("patches", [])
+    if not patches:
+        _notify(db, ticket, "failed", "Fix attempt failed", "No patches generated")
+        update_ticket(db, ticket_id, status="diagnosed")
+        return {"error": "No patches generated"}
+
+    # Success — write fix to queue
+    test_area = getattr(ticket, "tested_area", None) or category
+    fix_payload = {
+        "ticket_id": ticket_id,
+        "ticket_number": ticket.ticket_number,
+        "risk_tier": risk_tier,
+        "category": category,
+        "test_area": test_area,
+        "patches": patches,
+        "summary": result.get("summary", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_fix_queue(ticket_id, fix_payload)
+
+    fix_branch = f"fix/ticket-{ticket_id}"
+    update_ticket(db, ticket_id, status="fix_queued", fix_branch=fix_branch)
+    record_cost(db, ticket_id, 0.05)
+    _notify(db, ticket, "fixed", "Fix queued", result.get("summary", "Patches generated"))
+    logger.info("Ticket {} fix queued ({} patches)", ticket_id, len(patches))
+    return {"ok": True, "status": "fix_queued", "message": f"Fix queued with {len(patches)} patch(es)"}
 
 
-async def _run_fix(prompt: str, ticket: TroubleTicket) -> dict:
-    """Execute the fix via local subprocess.
-
-    Returns: {success: bool, error?: str, summary?: str, branch?: str, cost_usd?: float}
-    """
-    if os.getenv("TESTING"):
-        return {"success": False, "error": "Execution disabled in test mode"}
-
-    try:  # pragma: no cover
-        result = await asyncio.to_thread(
-            _subprocess_fix, prompt, ticket.id,
-        )
-        return result
-    except Exception as e:  # pragma: no cover
-        logger.error("Execution subprocess failed for ticket {}: {}", ticket.id, e)
-        return {"success": False, "error": str(e), "cost_usd": 0.0}
-
-
-def _subprocess_fix(prompt: str, ticket_id: int) -> dict:  # pragma: no cover
-    """Run claude CLI as subprocess with the fix prompt."""
-    try:
-        result = subprocess.run(
-            ["claude", "-p", prompt],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            cwd="/root/availai",
-        )
-        if result.returncode == 0:
-            return {
-                "success": True,
-                "summary": result.stdout[:500] if result.stdout else "Fix applied",
-                "branch": f"fix/ticket-{ticket_id}",
-                "cost_usd": 0.10,  # estimated per-run cost
-            }
-        else:
-            return {
-                "success": False,
-                "error": result.stderr[:500] if result.stderr else "Process exited with error",
-                "cost_usd": 0.05,
-            }
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": "Execution timed out (5min)", "cost_usd": 0.05}
+def _write_fix_queue(ticket_id: int, payload: dict) -> None:
+    """Write fix JSON to the queue directory."""
+    os.makedirs(FIX_QUEUE_DIR, exist_ok=True)
+    path = os.path.join(FIX_QUEUE_DIR, f"{ticket_id}.json")
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
+    logger.info("Fix queue file written: {}", path)
 
 
 def _escalate(db: Session, ticket: TroubleTicket, reason: str) -> None:
@@ -159,8 +145,11 @@ def _notify(db: Session, ticket: TroubleTicket, event: str, title: str, body: st
     """Send notification to ticket submitter."""
     if ticket.submitted_by:
         create_notification(
-            db, user_id=ticket.submitted_by, event_type=event,
-            title=f"Ticket #{ticket.id}: {title}", body=body,
+            db,
+            user_id=ticket.submitted_by,
+            event_type=event,
+            title=f"Ticket #{ticket.id}: {title}",
+            body=body,
             ticket_id=ticket.id,
         )
 

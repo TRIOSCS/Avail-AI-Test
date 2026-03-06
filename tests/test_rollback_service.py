@@ -1,6 +1,7 @@
-"""Tests for rollback service (post-fix health monitoring).
+"""Tests for verify-retest service (post-fix Playwright area retest).
 
-Covers: health check stub, alert emission, regression handling.
+Covers: pass resolves ticket, fail creates regression, missing ticket,
+        notification emission.
 
 Called by: pytest
 Depends on: app.services.rollback_service
@@ -8,7 +9,7 @@ Depends on: app.services.rollback_service
 
 import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -16,7 +17,7 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.models.notification import Notification
 from app.models.trouble_ticket import TroubleTicket
-from app.services.rollback_service import check_post_fix_health
+from app.services.rollback_service import verify_and_retest
 
 
 def _run(coro):
@@ -39,16 +40,15 @@ def rb_user(db_session: Session) -> User:
 
 
 @pytest.fixture()
-def fixed_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
+def queued_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
     ticket = TroubleTicket(
         ticket_number="TT-RB-001",
         submitted_by=rb_user.id,
-        title="Fixed bug",
-        description="Was broken, now fixed",
-        status="awaiting_verification",
+        title="Tickets view broken",
+        description="The tickets view throws a JS error",
+        status="fix_queued",
+        tested_area="tickets",
         risk_tier="low",
-        diagnosis={"root_cause": "Query error"},
-        file_mapping=["app/routers/vendors.py"],
     )
     db_session.add(ticket)
     db_session.commit()
@@ -56,51 +56,86 @@ def fixed_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
     return ticket
 
 
-class TestCheckPostFixHealth:
-    def test_healthy_by_default(self, db_session, fixed_ticket):
-        result = _run(check_post_fix_health(fixed_ticket.id, db_session))
-        assert result["healthy"] is True
+def _make_mock_tester(issues=None):
+    """Build a mock SiteTester class whose instances have run_full_sweep + issues."""
+    mock_cls = MagicMock()
+    instance = MagicMock()
+    instance.run_full_sweep = AsyncMock(return_value=[])
+    instance.issues = issues or []
+    mock_cls.return_value = instance
+    return mock_cls
+
+
+class TestVerifyAndRetest:
+    @patch("app.services.rollback_service.SiteTester")
+    def test_pass_resolves_ticket(self, mock_st_cls, db_session, queued_ticket):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[],
+        )
+        result = _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is True
         assert result["issues"] == []
+        db_session.refresh(queued_ticket)
+        assert queued_ticket.status == "resolved"
 
-    def test_missing_ticket_returns_healthy(self, db_session):
-        result = _run(check_post_fix_health(99999, db_session))
-        assert result["healthy"] is True
+    @patch("app.services.rollback_service.SiteTester")
+    def test_fail_creates_regression_ticket(self, mock_st_cls, db_session, queued_ticket):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[
+                {"area": "tickets", "title": "JS error", "description": "Uncaught TypeError"},
+            ],
+        )
+        result = _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is False
+        assert "regression_ticket_id" in result
 
-    @patch("app.services.rollback_service._check_health", new_callable=AsyncMock)
-    def test_issues_detected_alerts(self, mock_health, db_session, fixed_ticket):
-        mock_health.return_value = ["New 500 error on /api/vendors", "TypeError in search"]
-        result = _run(check_post_fix_health(fixed_ticket.id, db_session))
-        assert result["healthy"] is False
-        assert len(result["issues"]) == 2
+        # Check child ticket
+        child = db_session.get(TroubleTicket, result["regression_ticket_id"])
+        assert child is not None
+        assert child.parent_ticket_id == queued_ticket.id
+        assert child.tested_area == "tickets"
+        assert "Retest failed" in child.title
 
-    @patch("app.services.rollback_service._check_health", new_callable=AsyncMock)
-    def test_issues_create_notification(self, mock_health, db_session, fixed_ticket, rb_user):
-        mock_health.return_value = ["Database timeout"]
-        _run(check_post_fix_health(fixed_ticket.id, db_session))
+        # Original should be escalated
+        db_session.refresh(queued_ticket)
+        assert queued_ticket.status == "escalated"
+
+    def test_missing_ticket(self, db_session):
+        result = _run(verify_and_retest(
+            99999, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is False
+        assert "not found" in result["error"].lower()
+
+    @patch("app.services.rollback_service.SiteTester")
+    def test_pass_emits_notification(self, mock_st_cls, db_session, queued_ticket, rb_user):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[],
+        )
+        _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
         notifs = (
             db_session.query(Notification)
             .filter_by(
-                ticket_id=fixed_ticket.id,
-                event_type="failed",
+                ticket_id=queued_ticket.id,
+                event_type="resolved",
             )
             .all()
         )
         assert len(notifs) == 1
-        assert "regression" in notifs[0].title.lower()
-        assert "Database timeout" in notifs[0].body
-
-    @patch("app.services.rollback_service._check_health", new_callable=AsyncMock)
-    def test_issues_update_resolution_notes(self, mock_health, db_session, fixed_ticket):
-        mock_health.return_value = ["Memory leak"]
-        _run(check_post_fix_health(fixed_ticket.id, db_session))
-        db_session.refresh(fixed_ticket)
-        assert "Memory leak" in (fixed_ticket.resolution_notes or "")
-
-    @patch("app.services.rollback_service._check_health", new_callable=AsyncMock)
-    def test_does_not_auto_revert(self, mock_health, db_session, fixed_ticket):
-        """Rollback is alert-only — status should NOT change."""
-        mock_health.return_value = ["Error detected"]
-        _run(check_post_fix_health(fixed_ticket.id, db_session))
-        db_session.refresh(fixed_ticket)
-        # Status should remain awaiting_verification (not reverted)
-        assert fixed_ticket.status == "awaiting_verification"
