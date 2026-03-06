@@ -252,10 +252,11 @@ document.addEventListener('click', function(e) {
 
 // Sync mobile <-> desktop search + mirror notification badge
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize sourcing search if the sourcing view is active
+    // Initialize sourcing search if the sourcing view is active (lazy — only on first visit)
     if (typeof initSourcingSearch === 'function') {
         var sourcingView = document.getElementById('view-sourcing');
-        if (sourcingView && !sourcingView.classList.contains('hidden')) {
+        if (sourcingView && !sourcingView.classList.contains('hidden') && !sourcingView.dataset.searchInit) {
+            sourcingView.dataset.searchInit = '1';
             initSourcingSearch();
         }
     }
