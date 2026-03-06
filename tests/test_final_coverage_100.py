@@ -155,11 +155,11 @@ async def test_notify_submitted_email_failure(db_session, test_user):
     gc_mock.post = AsyncMock(side_effect=Exception("SMTP down"))
 
     with (
-        patch("app.services.buyplan_service.settings") as ms,
+        patch("app.services.buyplan_notifications.settings") as ms,
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         ms.admin_emails = [admin.email]
         ms.teams_webhook_url = ""
@@ -211,8 +211,8 @@ async def test_notify_approved_salesperson_notes(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_approved(plan, db_session)
 
@@ -260,8 +260,8 @@ async def test_notify_approved_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_approved(plan, db_session)
 
@@ -281,8 +281,8 @@ async def test_notify_rejected_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_rejected(plan, db_session)
 
@@ -302,9 +302,9 @@ async def test_notify_stock_sale_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
-        patch("app.services.buyplan_service.settings") as ms,
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications.settings") as ms,
     ):
         ms.stock_sale_notify_emails = ["stock@test.com"]
         ms.teams_webhook_url = ""
@@ -327,8 +327,8 @@ async def test_notify_completed_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_completed(plan, db_session, completer_name="Admin")
 
