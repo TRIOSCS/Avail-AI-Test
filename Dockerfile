@@ -13,16 +13,23 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for thefuzz (C extension) and WeasyPrint (PDF rendering)
+# System deps for thefuzz (C extension), WeasyPrint (PDF), and Playwright (browser testing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc python3-dev curl tini \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
+    libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true
+
+# Install Chromium for Playwright/patchright (self-heal site testing)
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN patchright install chromium
 
 # Copy app code and Alembic (for migrations at runtime)
 COPY app/ app/
