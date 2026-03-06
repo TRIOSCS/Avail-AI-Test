@@ -558,11 +558,11 @@
 <div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
     <div class="modal">
         <h2>New Requisition</h2>
-        <div class="field"><label for="nrName">Name <span style="color:var(--red)">*</span></label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required></div>
+        <div class="field"><label for="nrName">Name <span style="color:var(--red)">*</span></label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required><span class="field-error text-danger" id="nrNameError" style="display:none;font-size:0.8rem;color:#dc3545;margin-top:2px"></span></div>
         <div class="field" style="margin-top:10px">
             <label>Customer Account <span style="color:var(--red)">*</span></label>
             <div class="site-typeahead">
-                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="debouncedFilterSites(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites">
+                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="debouncedFilterSites(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites"><span class="field-error text-danger" id="nrSiteError" style="display:none;font-size:0.8rem;color:#dc3545;margin-top:2px"></span>
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
@@ -585,7 +585,7 @@
             </select>
         </div>
         <div class="mactions">
-            <button type="button" class="btn btn-ghost" onclick="closeModal('newReqModal')">Cancel</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('newReqModal');_clearNrValidation()">Cancel</button>
             <button type="button" class="btn btn-primary" onclick="createRequisition()">Create</button>
         </div>
     </div>
