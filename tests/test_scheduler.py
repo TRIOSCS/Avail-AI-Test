@@ -52,6 +52,11 @@ def _mock_settings(**overrides):
         po_verify_interval_min=30,
         buyplan_auto_complete_hour=18,
         buyplan_auto_complete_tz="America/New_York",
+        contact_scoring_enabled=False,
+        eight_by_eight_enabled=False,
+        prospecting_enabled=False,
+        customer_enrichment_enabled=False,
+        material_enrichment_enabled=False,
     )
     defaults.update(overrides)
     mock = MagicMock()
@@ -210,32 +215,12 @@ def test_reset_connector_errors_registered():
     scheduler.remove_all_jobs()
 
 
-def test_nexar_backfill_job_registered():
-    """Nexar backfill job is registered."""
+def test_gradient_ai_tagging_job_registered():
+    """Gradient AI tagging job is registered (replaced nexar_backfill + connector_enrichment)."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
-    job = scheduler.get_job("nexar_backfill")
+    job = scheduler.get_job("gradient_ai_tagging")
     assert job is not None
-
-
-def test_connector_enrichment_2hour_interval():
-    """Connector enrichment runs every 2 hours."""
-    with patch("app.config.settings", _mock_settings()):
-        configure_scheduler()
-
-    job = scheduler.get_job("connector_enrichment")
-    assert job is not None
-    trigger = job.trigger
-    assert trigger.interval.total_seconds() == 7200  # 2 hours
-
-
-def test_nexar_backfill_job_2hour_interval():
-    """Nexar backfill job runs every 2 hours."""
-    with patch("app.config.settings", _mock_settings()):
-        configure_scheduler()
-
-    job = scheduler.get_job("nexar_backfill")
-    assert job is not None
-    trigger = job.trigger
-    assert trigger.interval.total_seconds() == 7200  # 2 hours
+    # Runs every 30 minutes
+    assert job.trigger.interval.total_seconds() == 1800

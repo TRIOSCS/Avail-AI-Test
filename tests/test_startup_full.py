@@ -292,7 +292,7 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
                 patch("app.startup._backfill_proactive_offer_qty") as m_pq,
                 patch("app.startup._exec") as m_exec,
-                patch("app.models.Base") as mock_base_cls,
+                patch("app.startup._seed_vinod_user") as m_vinod,
             ):
                 run_startup_migrations()
                 m_fts.assert_called_once()
@@ -306,7 +306,7 @@ class TestRunStartupMigrationsNonTesting:
                 m_so.assert_called_once()
                 m_sv.assert_called_once()
                 m_pq.assert_called_once()
-                mock_base_cls.metadata.create_all.assert_called_once()
+                m_vinod.assert_called_once()
         finally:
             if original is not None:
                 os.environ["TESTING"] = original

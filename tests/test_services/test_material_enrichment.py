@@ -69,10 +69,12 @@ async def test_enrich_material_cards_success(db):
         ]
     }
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=mock_result,
+    with (
+        patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
     ):
         stats = await enrich_material_cards([card1.id, card2.id], db)
 
@@ -83,7 +85,7 @@ async def test_enrich_material_cards_success(db):
     db.refresh(card2)
     assert card1.description == "Adjustable positive voltage regulator, 1.2V to 37V output"
     assert card1.category == "power_ic"
-    assert card1.enrichment_source == "claude_haiku"
+    assert card1.enrichment_source == "gradient_ai"
     assert card1.enriched_at is not None
     assert card2.description == "ARM Cortex-M4 microcontroller with 1MB Flash"
 
@@ -106,7 +108,7 @@ async def test_enrich_material_cards_invalid_category(db):
     }
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -135,7 +137,7 @@ async def test_enrich_material_cards_null_description(db):
     }
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -155,7 +157,7 @@ async def test_enrich_material_cards_api_failure(db):
     card = _make_card(db, "FAIL-PART")
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         side_effect=Exception("API timeout"),
     ):
@@ -172,10 +174,17 @@ async def test_enrich_material_cards_empty_response(db):
 
     card = _make_card(db, "EMPTY-PART")
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=None,
+    with (
+        patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+        patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         stats = await enrich_material_cards([card.id], db)
 
@@ -204,7 +213,7 @@ async def test_enrich_material_cards_batch_processing(db):
         }
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         side_effect=mock_claude,
     ):
@@ -249,7 +258,7 @@ async def test_enrich_pending_cards_picks_unenriched(db):
     }
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -291,7 +300,7 @@ async def test_enrich_apply_exception_counts_error(db):
     mock_result = {"parts": ["not-a-dict"]}
 
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.services.gradient_service.gradient_json",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):

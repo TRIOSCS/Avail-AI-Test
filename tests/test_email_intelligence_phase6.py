@@ -282,6 +282,10 @@ class TestJobEmailHealthUpdate:
                     deep_email_mining_enabled=False,
                     deep_enrichment_enabled=False,
                     contact_scoring_enabled=False,
+                    eight_by_eight_enabled=False,
+                    prospecting_enabled=False,
+                    customer_enrichment_enabled=False,
+                    material_enrichment_enabled=False,
                 ),
             ),
         ):
@@ -415,6 +419,10 @@ class TestJobCalendarScan:
                     deep_email_mining_enabled=False,
                     deep_enrichment_enabled=False,
                     contact_scoring_enabled=False,
+                    eight_by_eight_enabled=False,
+                    prospecting_enabled=False,
+                    customer_enrichment_enabled=False,
+                    material_enrichment_enabled=False,
                 ),
             ),
         ):

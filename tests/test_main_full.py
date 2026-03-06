@@ -390,21 +390,10 @@ class TestHSTSHeader:
 
     def test_hsts_header_when_https(self, client):
         """When app_url starts with https, HSTS header is set."""
-        from app.config import Settings
-
-        original_app_url = Settings.app_url
-
-        try:
-            Settings.app_url = "https://app.example.com"
-            from app.main import settings
-
-            settings.app_url = "https://app.example.com"
+        with patch("app.config.settings.app_url", "https://app.example.com"):
             resp = client.get("/health")
             assert "Strict-Transport-Security" in resp.headers
             assert "max-age=31536000" in resp.headers["Strict-Transport-Security"]
-        finally:
-            Settings.app_url = original_app_url
-            settings.app_url = original_app_url
 
 
 # ── Middleware exception path (lines 233-241) ─────────────────────────

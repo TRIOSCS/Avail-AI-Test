@@ -118,8 +118,9 @@ class TestTroubleTicketAdminEndpoints:
     def test_diagnose_disabled(self, admin_client, db_session, admin_user):
         """Diagnose returns 403 when self_heal_enabled=False (line 150-151)."""
         ticket = create_ticket(db=db_session, user_id=admin_user.id, title="T", description="D")
-        resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/diagnose")
-        assert resp.status_code == 403
+        with patch("app.config.settings.self_heal_enabled", False):
+            resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/diagnose")
+            assert resp.status_code == 403
 
     def test_diagnose_not_found(self, admin_client, db_session, admin_user):
         """Diagnose on non-existent ticket returns 404 (line 153-154)."""
@@ -158,8 +159,9 @@ class TestTroubleTicketAdminEndpoints:
     def test_execute_disabled(self, admin_client, db_session, admin_user):
         """Execute returns 403 when self_heal_enabled=False."""
         ticket = create_ticket(db=db_session, user_id=admin_user.id, title="T", description="D")
-        resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/execute")
-        assert resp.status_code == 403
+        with patch("app.config.settings.self_heal_enabled", False):
+            resp = admin_client.post(f"/api/trouble-tickets/{ticket.id}/execute")
+            assert resp.status_code == 403
 
     @patch("app.routers.trouble_tickets.execute_fix", new_callable=AsyncMock)
     def test_execute_error(self, mock_exec, admin_client, db_session, admin_user):

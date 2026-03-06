@@ -225,6 +225,9 @@ class TestCrmCompanyAutoEnrich:
                 return_value=("NoCred", "nocred.com"),
             ),
             patch("app.routers.crm.companies.get_credential_cached", return_value=None),
+            patch("app.config.settings.apollo_api_key", ""),
+            patch("app.config.settings.hunter_api_key", ""),
+            patch("app.config.settings.do_gradient_api_key", ""),
         ):
             resp = client.post("/api/companies", json={"name": "NoCred", "domain": "nocred.com"})
         assert resp.status_code == 200
