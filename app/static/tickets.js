@@ -304,6 +304,7 @@ function buildTicketTable(tickets, isAdmin) {
     var headRow = el('tr');
     var cols = ['#', 'Title', 'Status', 'Risk', 'Created'];
     if (isAdmin) cols.splice(2, 0, 'Submitter');
+    if (isAdmin) cols.push('Linked');
     cols.forEach(function(c) {
         headRow.appendChild(el('th', { textContent: c }));
     });
@@ -333,6 +334,16 @@ function buildTicketTable(tickets, isAdmin) {
             riskTd.appendChild(txt('—'));
         }
         row.appendChild(riskTd);
+        // Linked count badge (admin only)
+        if (isAdmin) {
+            var linkedTd = el('td');
+            if (t.child_count > 0) {
+                linkedTd.appendChild(badge(String(t.child_count), '#7c3aed'));
+            } else {
+                linkedTd.appendChild(txt('—'));
+            }
+            row.appendChild(linkedTd);
+        }
         // Created
         row.appendChild(el('td', {
             textContent: t.created_at ? new Date(t.created_at).toLocaleDateString() : '—',
@@ -392,6 +403,39 @@ async function showTicketDetail(ticketId) {
         if (t.diagnosed_at) times.appendChild(el('div', {}, ['Diagnosed: ' + new Date(t.diagnosed_at).toLocaleString()]));
         if (t.resolved_at) times.appendChild(el('div', {}, ['Resolved: ' + new Date(t.resolved_at).toLocaleString()]));
         body.appendChild(times);
+
+        // Linked tickets (child reports)
+        if (t.child_tickets && t.child_tickets.length) {
+            var linkedDiv = el('div', { style: 'margin-bottom:16px;' });
+            linkedDiv.appendChild(el('strong', { style: 'font-size:12px;display:block;margin-bottom:8px;', textContent: 'Linked Reports (' + t.child_tickets.length + ')' }));
+            t.child_tickets.forEach(function(child) {
+                var childRow = el('div', {
+                    style: 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;',
+                    onclick: function() { showTicketDetail(child.id); },
+                });
+                var leftSide = el('div');
+                leftSide.appendChild(el('span', { style: 'font-size:11px;color:var(--muted);margin-right:8px;', textContent: child.ticket_number }));
+                leftSide.appendChild(el('span', { style: 'font-size:12px;', textContent: child.title }));
+                childRow.appendChild(leftSide);
+                if (child.similarity_score) {
+                    childRow.appendChild(el('span', {
+                        style: 'font-size:10px;color:var(--muted);',
+                        textContent: Math.round(child.similarity_score * 100) + '% match',
+                    }));
+                }
+                linkedDiv.appendChild(childRow);
+            });
+            body.appendChild(linkedDiv);
+        }
+
+        // Show parent link if this ticket is a child
+        if (t.parent_ticket_id) {
+            body.appendChild(el('div', {
+                style: 'font-size:11px;color:var(--muted);margin-bottom:12px;cursor:pointer;',
+                textContent: 'Linked to parent ticket #' + t.parent_ticket_id,
+                onclick: function() { showTicketDetail(t.parent_ticket_id); },
+            }));
+        }
 
         // Diagnosis section (collapsible)
         if (t.diagnosis) {
