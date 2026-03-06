@@ -44,6 +44,7 @@ def run_startup_migrations() -> None:
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
+    _seed_vinod_user()
     logger.info("Startup migrations complete")
 
 
@@ -87,8 +88,35 @@ def _create_default_user_if_env_set() -> None:
         db.close()
 
 
+def _seed_vinod_user(db=None) -> None:
+    """Seed Vinod admin user (Azure AD login, no password).
 
-def _exec(conn, stmt: str, params: dict | None = None) -> None:
+    Called by: run_startup_migrations
+    Depends on: User model, SessionLocal
+    """
+    from .models.auth import User
+
+    own_session = db is None
+    if own_session:
+        db = SessionLocal()
+    try:
+        existing = db.query(User).filter_by(email="vinod@trioscs.com").first()
+        if existing:
+            logger.info("Vinod admin user already exists, skipping")
+            return
+        user = User(email="vinod@trioscs.com", name="Vinod", role="admin")
+        db.add(user)
+        db.commit()
+        logger.info("Created Vinod admin user")
+    except Exception:
+        logger.exception("Failed creating Vinod admin user")
+        db.rollback()
+    finally:
+        if own_session:
+            db.close()
+
+
+def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
     """Execute a single DDL statement with rollback on failure."""
     try:
         conn.execute(sqltext(stmt), params or {})

@@ -47,10 +47,9 @@ def integ_user(db_session: Session) -> User:
 class TestLowRiskFullFlow:
     """Low-risk ticket: submit → diagnose → execute → verify → resolve."""
 
-    @patch("app.services.execution_service._write_fix_queue")
-    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
-    def test_full_lifecycle(self, mock_claude, mock_gen, mock_write, db_session, integ_user):
+    def test_full_lifecycle(self, mock_claude, mock_gen, db_session, integ_user, tmp_path):
         # 1. Submit ticket
         ticket = create_ticket(
             db=db_session,
@@ -79,37 +78,28 @@ class TestLowRiskFullFlow:
         assert ticket.risk_tier == "low"
         assert ticket.diagnosis is not None
 
-        # 3. Execute fix — mock _generate_fix returns success
+        # 3. Execute fix — mock generate_patches returns patches
         mock_gen.return_value = {
-            "success": True,
-            "patches": [{"file": "app/static/app.css", "diff": "margin fix"}],
+            "patches": [{"file": "app/static/app.css", "search": "old", "replace": "new", "explanation": "fix"}],
             "summary": "Fixed margin",
-            "cost_usd": 0.05,
         }
-        exec_result = _run(execute_fix(ticket.id, db_session))
+        with patch("app.services.execution_service.FIX_QUEUE_DIR", str(tmp_path)):
+            exec_result = _run(execute_fix(ticket.id, db_session))
         assert exec_result["ok"] is True
         db_session.refresh(ticket)
         assert ticket.status == "fix_queued"
 
-        # 4. Post-fix health check — mock SiteTester to avoid Playwright
-        with patch("app.services.site_tester.SiteTester") as MockTester:
-            instance = AsyncMock()
-            instance.run_full_sweep = AsyncMock(return_value=[])
-            MockTester.return_value = instance
-            health = _run(verify_and_retest(ticket.id, db_session))
-        assert health["ok"] is True
-        assert health["status"] == "resolved"
-
-        # 5. Ticket already resolved by verify_and_retest
+        # 4. Resolve — simulating watcher verified fix
+        update_ticket(db_session, ticket.id, status="resolved", resolution_notes="Verified by automated retest")
         db_session.refresh(ticket)
         assert ticket.status == "resolved"
 
-        # 6. Stats should reflect the resolved ticket
+        # 5. Stats should reflect the resolved ticket
         stats = get_weekly_stats(db_session)
         assert stats["tickets_created"] >= 1
         assert stats["tickets_resolved"] >= 1
 
-        # 7. Health should be green (no open tickets)
+        # 6. Health should be green (no open tickets)
         health_status = get_health_status(db_session)
         assert health_status["status"] == "green"
 

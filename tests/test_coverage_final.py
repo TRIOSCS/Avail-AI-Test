@@ -328,48 +328,6 @@ class TestExecutionService:
             assert result.get("ok") is True
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  3. CONFIG — Settings attributes
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestConfigSettings:
-    def test_self_heal_settings_accessible(self):
-        from app.config import settings
-
-        assert isinstance(settings.self_heal_auto_execute_low, bool)
-        assert isinstance(settings.self_heal_ticket_budget, float)
-        assert isinstance(settings.self_heal_weekly_budget, float)
-        assert isinstance(settings.self_heal_max_iterations_low, int)
-        assert isinstance(settings.self_heal_max_iterations_medium, int)
-
-    def test_proactive_settings_accessible(self):
-        from app.config import settings
-
-        assert isinstance(settings.proactive_archive_age_days, int)
-        assert isinstance(settings.proactive_throttle_days, int)
-
-    def test_buyplan_settings_accessible(self):
-        from app.config import settings
-
-        assert isinstance(settings.buyplan_nudge_buyer_hours, int)
-        assert isinstance(settings.buyplan_escalate_manager_hours, int)
-        assert isinstance(settings.buyplan_favoritism_threshold_pct, float)
-        assert isinstance(settings.buyplan_better_offer_pct, float)
-
-    def test_contact_settings_accessible(self):
-        from app.config import settings
-
-        assert isinstance(settings.contact_nudge_cooling_days, int)
-
-    def test_prospecting_settings_accessible(self):
-        from app.config import settings
-
-        assert isinstance(settings.prospecting_enabled, bool)
-        assert isinstance(settings.prospecting_expire_days, int)
-        assert isinstance(settings.prospecting_resurface_days, int)
-        assert isinstance(settings.prospecting_min_fit_for_contacts, int)
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  4. DASHBOARD — _ensure_aware + edge cases

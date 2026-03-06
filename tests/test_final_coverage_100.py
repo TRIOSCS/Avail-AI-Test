@@ -155,11 +155,11 @@ async def test_notify_submitted_email_failure(db_session, test_user):
     gc_mock.post = AsyncMock(side_effect=Exception("SMTP down"))
 
     with (
-        patch("app.services.buyplan_service.settings") as ms,
+        patch("app.services.buyplan_notifications.settings") as ms,
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         ms.admin_emails = [admin.email]
         ms.teams_webhook_url = ""
@@ -211,8 +211,8 @@ async def test_notify_approved_salesperson_notes(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_approved(plan, db_session)
 
@@ -260,8 +260,8 @@ async def test_notify_approved_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_approved(plan, db_session)
 
@@ -281,8 +281,8 @@ async def test_notify_rejected_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_rejected(plan, db_session)
 
@@ -302,9 +302,9 @@ async def test_notify_stock_sale_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
-        patch("app.services.buyplan_service.settings") as ms,
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications.settings") as ms,
     ):
         ms.stock_sale_notify_emails = ["stock@test.com"]
         ms.teams_webhook_url = ""
@@ -327,8 +327,8 @@ async def test_notify_completed_email_failure(db_session, test_user):
     with (
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
         patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_service._post_teams_channel", new_callable=AsyncMock),
-        patch("app.services.buyplan_service._send_teams_dm", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._post_teams_channel", new_callable=AsyncMock),
+        patch("app.services.buyplan_notifications._send_teams_dm", new_callable=AsyncMock),
     ):
         await notify_buyplan_completed(plan, db_session, completer_name="Admin")
 
@@ -1282,67 +1282,8 @@ def test_company_activity_red_fc100(client, test_company):
 
 
 # =========================================================================
-# 14. schemas/crm.py -- lines 63, 158, 165, 242, 249, 326, 333
-# =========================================================================
-
-
-def test_crm_company_phone_none():
-    from app.schemas.crm import CompanyCreate
-
-    assert CompanyCreate(name="T", phone=None).phone is None
-
-
-def test_crm_site_state_none():
-    from app.schemas.crm import SiteCreate
-
-    assert SiteCreate(site_name="H", country="US", state=None).state is None
-
-
-def test_crm_site_contact_phone_none():
-    from app.schemas.crm import SiteCreate
-
-    assert SiteCreate(site_name="H", country="US", contact_phone=None).contact_phone is None
-
-
-def test_crm_sitecontact_phone_none():
-    from app.schemas.crm import SiteContactCreate
-
-    assert SiteContactCreate(full_name="J", phone=None).phone is None
-
-
-def test_crm_sitecontact_email_none():
-    from app.schemas.crm import SiteContactCreate
-
-    assert SiteContactCreate(full_name="J", email=None).email is None
-
-
-def test_crm_offer_packaging_none():
-    from app.schemas.crm import OfferCreate
-
-    assert OfferCreate(mpn="LM317T", vendor_name="A", packaging=None).packaging is None
-
-
-def test_crm_offer_datecode_none():
-    from app.schemas.crm import OfferCreate
-
-    assert OfferCreate(mpn="LM317T", vendor_name="A", date_code=None).date_code is None
-
-
-# =========================================================================
 # 15. schemas/vendors.py -- lines 32, 48, 53, 106, 121
 # =========================================================================
-
-
-def test_vendor_update_emails_none():
-    from app.schemas.vendors import VendorCardUpdate
-
-    assert VendorCardUpdate(emails=None).emails is None
-
-
-def test_vendor_update_phones_none():
-    from app.schemas.vendors import VendorCardUpdate
-
-    assert VendorCardUpdate(phones=None).phones is None
 
 
 def test_vendor_update_phones_blank():

@@ -1,14 +1,12 @@
 """Trouble ticket router -- unified CRUD endpoints for the self-heal pipeline.
 
-POST /api/trouble-tickets/find-trouble       -- start Find Trouble loop (admin)
-POST /api/trouble-tickets/find-trouble/stop  -- cancel running loop (admin)
-GET  /api/trouble-tickets/find-trouble/stream-- SSE progress stream (admin)
-GET  /api/trouble-tickets/find-trouble/prompts-- agent test prompts (admin)
 POST /api/trouble-tickets            -- create (any authenticated user)
 GET  /api/trouble-tickets            -- list all (admin, status/source filter + pagination)
 GET  /api/trouble-tickets/my-tickets -- current user's tickets
 GET  /api/trouble-tickets/stats      -- weekly stats + health (admin)
 GET  /api/trouble-tickets/export/xlsx-- Excel export (admin)
+GET  /api/trouble-tickets/active-areas -- areas under automated test (admin)
+GET  /api/trouble-tickets/similar    -- check for similar open tickets (admin)
 GET  /api/trouble-tickets/{id}       -- single ticket (admin or submitter)
 PATCH /api/trouble-tickets/{id}      -- update (admin only)
 POST /api/trouble-tickets/{id}/verify -- user confirms fix or reports still broken
@@ -21,7 +19,6 @@ Depends on: services/trouble_ticket_service.py, dependencies.py
 """
 
 import asyncio
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -32,72 +29,55 @@ from app.config import settings
 from app.database import get_db
 from app.dependencies import require_admin, require_user
 from app.models import User
+from app.models.trouble_ticket import TroubleTicket
 from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
-from app.services.find_trouble_service import get_find_trouble_service
 from app.services.pattern_tracker import get_health_status, get_weekly_stats
 
 router = APIRouter(tags=["trouble-tickets"])
 
+# In-memory tracking for Find Trouble sweep jobs
+_sweep_jobs: dict[str, dict] = {}
 
-# ── Find Trouble endpoints (must be before /{ticket_id} routes) ────────
 
 @router.post("/api/trouble-tickets/find-trouble")
 async def start_find_trouble(
     request: Request,
     user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
 ):
-    """Launch the Find Trouble test loop (admin only)."""
-    svc_ft = get_find_trouble_service()
+    """Launch exhaustive site audit -- Playwright sweep + generates agent prompts."""
+    import uuid
+
+    from app.services.site_tester import SiteTester, create_tickets_from_issues
+
+    job_id = str(uuid.uuid4())[:8]
     session_cookie = request.cookies.get("session", "")
     base_url = str(request.base_url).rstrip("/")
 
-    result = svc_ft.try_start(base_url, session_cookie)
-    if result is None:
-        raise HTTPException(409, "Find Trouble is already running")
-    return result
+    tester = SiteTester(base_url=base_url, session_cookie=session_cookie)
+    _sweep_jobs[job_id] = {"status": "running", "tester": tester, "issues_created": 0}
 
+    async def _run():
+        try:
+            issues = await tester.run_full_sweep()
+            from app.database import SessionLocal
 
-@router.post("/api/trouble-tickets/find-trouble/stop")
-async def stop_find_trouble(
-    user: User = Depends(require_admin),
-):
-    """Cancel the running Find Trouble loop."""
-    svc_ft = get_find_trouble_service()
-    if svc_ft.stop():
-        return {"ok": True, "message": "Stop requested"}
-    raise HTTPException(404, "No Find Trouble job running")
+            sweep_db = SessionLocal()
+            try:
+                count = await create_tickets_from_issues(issues, sweep_db)
+                _sweep_jobs[job_id]["issues_created"] = count
+            finally:
+                sweep_db.close()
+            _sweep_jobs[job_id]["status"] = "complete"
+        except Exception as e:
+            logger.exception("Find Trouble sweep failed")
+            _sweep_jobs[job_id]["status"] = f"error: {e}"
 
-
-@router.get("/api/trouble-tickets/find-trouble/stream")
-async def find_trouble_stream(
-    user: User = Depends(require_admin),
-):
-    """SSE stream of Find Trouble progress events."""
-    svc_ft = get_find_trouble_service()
-
-    async def event_generator():
-        cursor = 0
-        while True:
-            events = svc_ft.consume_events(after=cursor)
-            for evt in events:
-                yield f"data: {json.dumps(evt)}\n\n"
-                cursor += 1
-
-            status = svc_ft.get_status()
-            if not status["running"] and cursor >= len(svc_ft._events):
-                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-                break
-
-            await asyncio.sleep(1)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "status": "running"}
 
 
 @router.get("/api/trouble-tickets/find-trouble/prompts")
@@ -108,6 +88,25 @@ async def find_trouble_prompts(
     from app.services.test_prompts import generate_all_prompts
 
     return {"prompts": generate_all_prompts()}
+
+
+@router.get("/api/trouble-tickets/find-trouble/{job_id}")
+async def find_trouble_progress(
+    job_id: str,
+    user: User = Depends(require_admin),
+):
+    """Poll progress of a Find Trouble sweep."""
+    job = _sweep_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    tester = job.get("tester")
+    return {
+        "status": job["status"],
+        "progress": tester.progress if tester else [],
+        "areas_tested": tester.areas_tested if tester else 0,
+        "issues_found": len(tester.issues) if tester else 0,
+        "issues_created": job.get("issues_created", 0),
+    }
 
 
 @router.post("/api/trouble-tickets")
@@ -137,6 +136,11 @@ async def create_ticket(
         console_errors=body.console_errors,
         page_state=body.page_state,
         current_view=body.current_view,
+        tested_area=getattr(body, "tested_area", None),
+        dom_snapshot=getattr(body, "dom_snapshot", None),
+        network_errors=getattr(body, "network_errors", None),
+        performance_timings=getattr(body, "performance_timings", None),
+        reproduction_steps=getattr(body, "reproduction_steps", None),
     )
 
     # For report_button tickets, generate AI prompt
@@ -157,7 +161,8 @@ async def create_ticket(
             )
             if result:
                 svc.update_ticket(
-                    db=db, ticket_id=ticket.id,
+                    db=db,
+                    ticket_id=ticket.id,
                     title=result["title"],
                     ai_prompt=result["prompt"],
                 )
@@ -167,6 +172,22 @@ async def create_ticket(
 
     # Fire-and-forget: auto-diagnose and auto-execute in background
     asyncio.create_task(svc.auto_process_ticket(ticket.id))
+
+    # Thread consolidation — link to similar open ticket if found
+    async def _consolidate_bg(tid: int):
+        from app.database import SessionLocal
+        from app.services.ticket_consolidation import consolidate_ticket
+
+        _db = SessionLocal()
+        try:
+            await consolidate_ticket(tid, _db)
+        except Exception:
+            logger.warning("Background consolidation failed for ticket {}", tid)
+        finally:
+            _db.close()
+
+    asyncio.create_task(_consolidate_bg(ticket.id))
+
     return {"ok": True, "id": ticket.id, "ticket_number": ticket.ticket_number}
 
 
@@ -229,34 +250,50 @@ def export_tickets_xlsx(
     ws = wb.active
     ws.title = "Trouble Tickets"
     headers = [
-        "ID", "Ticket #", "Title", "Description", "Status", "Source",
-        "Risk Tier", "Category", "Reporter", "URL", "View",
-        "Browser", "Screen", "Console Errors", "Admin Notes",
-        "Created", "Diagnosed", "Resolved",
+        "ID",
+        "Ticket #",
+        "Title",
+        "Description",
+        "Status",
+        "Source",
+        "Risk Tier",
+        "Category",
+        "Reporter",
+        "URL",
+        "View",
+        "Browser",
+        "Screen",
+        "Console Errors",
+        "Admin Notes",
+        "Created",
+        "Diagnosed",
+        "Resolved",
     ]
     ws.append(headers)
     for t in tickets:
         submitter = db.get(User, t.submitted_by) if t.submitted_by else None
-        ws.append([
-            t.id,
-            t.ticket_number,
-            t.title,
-            t.description or "",
-            t.status,
-            t.source or "",
-            t.risk_tier or "",
-            t.category or "",
-            submitter.email if submitter else "",
-            t.current_page or "",
-            t.current_view or "",
-            t.browser_info or "",
-            t.screen_size or "",
-            t.console_errors or "",
-            t.admin_notes or "",
-            t.created_at.isoformat() if t.created_at else "",
-            t.diagnosed_at.isoformat() if t.diagnosed_at else "",
-            t.resolved_at.isoformat() if t.resolved_at else "",
-        ])
+        ws.append(
+            [
+                t.id,
+                t.ticket_number,
+                t.title,
+                t.description or "",
+                t.status,
+                t.source or "",
+                t.risk_tier or "",
+                t.category or "",
+                submitter.email if submitter else "",
+                t.current_page or "",
+                t.current_view or "",
+                t.browser_info or "",
+                t.screen_size or "",
+                t.console_errors or "",
+                t.admin_notes or "",
+                t.created_at.isoformat() if t.created_at else "",
+                t.diagnosed_at.isoformat() if t.diagnosed_at else "",
+                t.resolved_at.isoformat() if t.resolved_at else "",
+            ]
+        )
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -279,9 +316,69 @@ async def list_tickets(
 ):
     """List all tickets (admin only). Optional status/source filter and pagination."""
     return svc.list_tickets(
-        db=db, status_filter=status, source_filter=source,
-        limit=limit, offset=offset,
+        db=db,
+        status_filter=status,
+        source_filter=source,
+        limit=limit,
+        offset=offset,
     )
+
+
+@router.get("/api/trouble-tickets/active-areas")
+async def active_areas(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Areas currently under automated test (last hour)."""
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    rows = (
+        db.query(TroubleTicket.tested_area)
+        .filter(
+            TroubleTicket.tested_area.isnot(None),
+            TroubleTicket.source.in_(["playwright", "agent"]),
+            TroubleTicket.created_at >= cutoff,
+        )
+        .distinct()
+        .all()
+    )
+    return {"areas": [r[0] for r in rows]}
+
+
+@router.get("/api/trouble-tickets/similar")
+async def check_similar(
+    title: str = Query(..., min_length=3),
+    description: str = Query(""),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Check for similar open tickets before submitting (agent pre-check)."""
+    from app.services.ticket_consolidation import find_similar_ticket
+
+    # Create a temporary ticket object for comparison (not persisted)
+    temp = TroubleTicket(
+        id=-1,
+        title=title,
+        description=description or title,
+        status="submitted",
+    )
+    match = await find_similar_ticket(temp, db)
+    if match:
+        parent = db.get(TroubleTicket, match["match_id"])
+        return {
+            "matches": [
+                {
+                    "id": parent.id,
+                    "ticket_number": parent.ticket_number,
+                    "title": parent.title,
+                    "confidence": match["confidence"],
+                }
+            ]
+            if parent
+            else [],
+        }
+    return {"matches": []}
 
 
 @router.get("/api/trouble-tickets/{ticket_id}")
@@ -298,6 +395,12 @@ async def get_ticket(
         raise HTTPException(403, "Access denied")
     submitter = db.get(User, ticket.submitted_by) if ticket.submitted_by else None
     resolved_by = db.get(User, ticket.resolved_by_id) if ticket.resolved_by_id else None
+    children = (
+        db.query(TroubleTicket)
+        .filter(TroubleTicket.parent_ticket_id == ticket.id)
+        .order_by(TroubleTicket.created_at.desc())
+        .all()
+    )
     return {
         "id": ticket.id,
         "ticket_number": ticket.ticket_number,
@@ -320,6 +423,19 @@ async def get_ticket(
         "cost_usd": ticket.cost_usd,
         "resolution_notes": ticket.resolution_notes,
         "parent_ticket_id": ticket.parent_ticket_id,
+        "similarity_score": ticket.similarity_score,
+        "child_tickets": [
+            {
+                "id": c.id,
+                "ticket_number": c.ticket_number,
+                "title": c.title,
+                "status": c.status,
+                "similarity_score": c.similarity_score,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in children
+        ],
+        "child_count": len(children),
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
         "diagnosed_at": ticket.diagnosed_at.isoformat() if ticket.diagnosed_at else None,
         "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
@@ -353,9 +469,7 @@ async def update_ticket(
     # If status being changed to resolved, set resolved_by
     if updates.get("status") == "resolved":
         updates["resolved_by_id"] = user.id
-        updates["resolved_at"] = __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        )
+        updates["resolved_at"] = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
     ticket = svc.update_ticket(db=db, ticket_id=ticket_id, **updates)
     if not ticket:
         raise HTTPException(404, "Ticket not found")
@@ -425,7 +539,8 @@ async def regenerate_prompt(
         raise HTTPException(502, "AI prompt generation failed — try again later")
 
     svc.update_ticket(
-        db=db, ticket_id=ticket.id,
+        db=db,
+        ticket_id=ticket.id,
         title=result["title"],
         ai_prompt=result["prompt"],
     )
@@ -453,8 +568,10 @@ async def verify_ticket(
 
     if is_fixed:
         svc.update_ticket(
-            db=db, ticket_id=ticket_id,
-            status="resolved", resolution_notes="User verified fix",
+            db=db,
+            ticket_id=ticket_id,
+            status="resolved",
+            resolution_notes="User verified fix",
         )
         return {"ok": True, "status": "resolved"}
     else:
@@ -468,29 +585,35 @@ async def verify_ticket(
             description=child_desc,
         )
         svc.update_ticket(
-            db=db, ticket_id=child.id,
-            risk_tier=child_risk, parent_ticket_id=ticket.id,
+            db=db,
+            ticket_id=child.id,
+            risk_tier=child_risk,
+            parent_ticket_id=ticket.id,
         )
         svc.update_ticket(
-            db=db, ticket_id=ticket_id,
-            status="escalated", resolution_notes="User reported still broken",
+            db=db,
+            ticket_id=ticket_id,
+            status="escalated",
+            resolution_notes="User reported still broken",
         )
         return {"ok": True, "status": "escalated", "child_ticket_id": child.id}
 
 
 @router.post("/api/trouble-tickets/{ticket_id}/verify-retest")
-async def verify_retest_ticket(
+async def verify_retest(
     ticket_id: int,
+    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Trigger automated retest via SiteTester after fix deployment (admin only)."""
+    """Run SiteTester on the ticket's area and resolve or create regression ticket."""
     from app.services.rollback_service import verify_and_retest
 
-    result = await verify_and_retest(ticket_id, db)
-    if "error" in result:
-        raise HTTPException(400, result["error"])
-    return result
+    session_cookie = request.cookies.get("session", "")
+    base_url = str(request.base_url).rstrip("/")
+    return await verify_and_retest(
+        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
+    )
 
 
 @router.post("/api/internal/verify-retest/{ticket_id}")
@@ -499,31 +622,15 @@ async def internal_verify_retest(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Internal-only retest endpoint (localhost only, no auth).
-
-    Called by: scripts/self_heal_watcher.sh after applying patches and rebuilding.
-    """
+    """Internal endpoint for host watcher — localhost only, no auth."""
     client = request.client
     if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Internal endpoint — localhost only")
 
     from app.services.rollback_service import verify_and_retest
 
-    # Generate session cookie for SiteTester
-    session_cookie = None
-    try:
-        from itsdangerous import URLSafeTimedSerializer
-        from app.config import settings as cfg
-        signer = URLSafeTimedSerializer(cfg.secret_key)
-        session_cookie = signer.dumps({"user_id": 1})
-    except Exception:
-        logger.warning("Could not generate session cookie for retest")
-
-    result = await verify_and_retest(
-        ticket_id, db,
-        base_url="http://localhost:8000",
-        session_cookie=session_cookie,
+    session_cookie = request.cookies.get("session", "")
+    base_url = str(request.base_url).rstrip("/")
+    return await verify_and_retest(
+        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
     )
-    if "error" in result:
-        raise HTTPException(400, result["error"])
-    return result

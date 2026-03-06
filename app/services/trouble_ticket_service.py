@@ -20,9 +20,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import APP_VERSION, settings
-from app.models.trouble_ticket import TroubleTicket
 from app.models import User
-
+from app.models.trouble_ticket import TroubleTicket
 
 MAX_SCREENSHOT_SIZE = 2 * 1024 * 1024  # 2 MB base64
 
@@ -54,6 +53,11 @@ def create_ticket(
     console_errors: str | None = None,
     page_state: str | None = None,
     current_view: str | None = None,
+    tested_area: str | None = None,
+    dom_snapshot: str | None = None,
+    network_errors: list[dict] | None = None,
+    performance_timings: dict | None = None,
+    reproduction_steps: list[str] | None = None,
 ) -> TroubleTicket:
     """Create a trouble ticket with auto-captured context.
 
@@ -89,6 +93,16 @@ def create_ticket(
         page_state=page_state,
         current_view=current_view,
     )
+    if tested_area:
+        ticket.tested_area = tested_area
+    if dom_snapshot:
+        ticket.dom_snapshot = dom_snapshot
+    if network_errors:
+        ticket.network_errors = network_errors
+    if performance_timings:
+        ticket.performance_timings = performance_timings
+    if reproduction_steps:
+        ticket.reproduction_steps = reproduction_steps
     db.add(ticket)
     db.commit()
     db.refresh(ticket)
@@ -121,29 +135,28 @@ def list_tickets(
     if source_filter:
         query = query.filter(TroubleTicket.source == source_filter)
     total = query.count()
-    tickets = (
-        query.order_by(TroubleTicket.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    tickets = query.order_by(TroubleTicket.created_at.desc()).offset(offset).limit(limit).all()
     items = []
     for t in tickets:
         submitter = db.get(User, t.submitted_by) if t.submitted_by else None
-        items.append({
-            "id": t.id,
-            "ticket_number": t.ticket_number,
-            "title": t.title,
-            "status": t.status,
-            "risk_tier": t.risk_tier,
-            "category": t.category,
-            "submitted_by": t.submitted_by,
-            "submitted_by_name": submitter.name if submitter else None,
-            "source": t.source,
-            "has_screenshot": bool(t.screenshot_b64),
-            "has_ai_prompt": bool(t.ai_prompt),
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        })
+        child_count = db.query(TroubleTicket).filter(TroubleTicket.parent_ticket_id == t.id).count()
+        items.append(
+            {
+                "id": t.id,
+                "ticket_number": t.ticket_number,
+                "title": t.title,
+                "status": t.status,
+                "risk_tier": t.risk_tier,
+                "category": t.category,
+                "submitted_by": t.submitted_by,
+                "submitted_by_name": submitter.name if submitter else None,
+                "source": t.source,
+                "has_screenshot": bool(t.screenshot_b64),
+                "has_ai_prompt": bool(t.ai_prompt),
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "child_count": child_count,
+            }
+        )
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
@@ -281,8 +294,10 @@ def _sanitize_context(context: dict, submitter_email: str = "") -> dict:
             sanitized[key] = _sanitize_context(value, submitter_email)
         elif isinstance(value, list):
             sanitized[key] = [
-                _sanitize_context(item, submitter_email) if isinstance(item, dict)
-                else _sanitize_string(item, submitter_email) if isinstance(item, str)
+                _sanitize_context(item, submitter_email)
+                if isinstance(item, dict)
+                else _sanitize_string(item, submitter_email)
+                if isinstance(item, str)
                 else item
                 for item in value
             ]

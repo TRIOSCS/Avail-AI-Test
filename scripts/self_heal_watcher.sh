@@ -3,19 +3,19 @@
 #
 # Monitors fix_queue/ for JSON fix files produced by the in-container
 # execution_service.py, then for each file:
-#   1. Stashes uncommitted work, creates a git branch
+#   1. Creates a git branch
 #   2. Applies patches via scripts/apply_patches.py
 #   3. Commits, merges to main, rebuilds the Docker container
 #   4. Waits for health, then triggers verify-retest
 #   5. On retest failure, reverts the merge and rebuilds
 #
 # What calls it:
-#   Cron or systemd timer on the Docker host (e.g. every 2 minutes).
+#   Cron or systemd timer on the Docker host (e.g. every 5 minutes).
 #
 # What it depends on:
-#   - bash, git, python3, docker compose
+#   - bash, git, curl, python3, docker compose
 #   - scripts/apply_patches.py (stdlib-only Python script)
-#   - App running inside Docker with /health and /api/internal/verify-retest/{id}
+#   - App running at APP_URL with /health and /api/internal/verify-retest/{id}
 
 set -euo pipefail
 
@@ -36,28 +36,6 @@ log() {
     local ts
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     echo "${ts}  $*" | tee -a "${LOG_FILE}"
-}
-
-# Check app health via docker compose exec (port 8000 not exposed to host)
-app_healthy() {
-    docker compose -f "${PROJ_DIR}/docker-compose.yml" exec -T app \
-        python3 -c "import urllib.request; urllib.request.urlopen('${APP_URL}/health')" \
-        >/dev/null 2>&1
-}
-
-# Hit an internal API endpoint via docker compose exec
-app_post() {
-    local path="$1"
-    docker compose -f "${PROJ_DIR}/docker-compose.yml" exec -T app \
-        python3 -c "
-import urllib.request
-req = urllib.request.Request('${APP_URL}${path}', method='POST', data=b'')
-try:
-    resp = urllib.request.urlopen(req, timeout=120)
-    print(resp.status)
-except Exception as e:
-    print('000')
-" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -89,12 +67,7 @@ process_fix() {
 
     cd "${PROJ_DIR}"
 
-    # 2. Stash any uncommitted work, create git branch from current HEAD
-    local stashed=false
-    if [ -n "$(git status --porcelain)" ]; then
-        git stash push -m "watcher: before fix/ticket-${ticket_id}" 2>/dev/null && stashed=true
-        log "Stashed uncommitted changes"
-    fi
+    # 2. Create git branch from current HEAD
     git checkout main 2>/dev/null || git checkout master 2>/dev/null
     git checkout -b "${branch}"
 
@@ -103,9 +76,6 @@ process_fix() {
         log "ERR  Patches failed for ticket #${ticket_id}"
         git checkout main 2>/dev/null || git checkout master 2>/dev/null
         git branch -D "${branch}" 2>/dev/null || true
-        if [ "${stashed}" = "true" ]; then
-            git stash pop 2>/dev/null || log "WARN  Could not restore stash"
-        fi
         mv "${fix_file}" "${FAILED_DIR}/${filename}"
         return
     fi
@@ -127,9 +97,6 @@ EOF
         log "ERR  Merge conflict for ticket #${ticket_id}"
         git merge --abort 2>/dev/null || true
         git branch -D "${branch}" 2>/dev/null || true
-        if [ "${stashed}" = "true" ]; then
-            git stash pop 2>/dev/null || log "WARN  Could not restore stash"
-        fi
         mv "${fix_file}" "${FAILED_DIR}/${filename}"
         return
     fi
@@ -138,36 +105,33 @@ EOF
     log "Rebuilding containers..."
     docker compose up -d --build
 
-    # 7. Wait up to 90s for health check (via docker exec)
+    # 7. Wait up to 60s for health check
     local waited=0
     local healthy=false
-    while [ "${waited}" -lt 90 ]; do
-        if app_healthy; then
+    while [ "${waited}" -lt 60 ]; do
+        if curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
             healthy=true
             break
         fi
-        sleep 5
-        waited=$((waited + 5))
+        sleep 3
+        waited=$((waited + 3))
     done
 
     if [ "${healthy}" != "true" ]; then
-        log "ERR  Health check failed after 90s for ticket #${ticket_id} — reverting"
+        log "ERR  Health check failed after 60s for ticket #${ticket_id} — reverting"
         git revert HEAD --no-edit
         docker compose up -d --build
         git branch -D "${branch}" 2>/dev/null || true
-        if [ "${stashed}" = "true" ]; then
-            git stash pop 2>/dev/null || log "WARN  Could not restore stash"
-        fi
         mv "${fix_file}" "${FAILED_DIR}/${filename}"
         return
     fi
 
     log "Container healthy after ${waited}s"
 
-    # 8. Trigger verify-retest (via docker exec)
+    # 8. Trigger verify-retest
     local retest_status
-    retest_status="$(app_post "/api/internal/verify-retest/${ticket_id}")" || retest_status="000"
-    retest_status="$(echo "${retest_status}" | tr -d '[:space:]')"
+    retest_status="$(curl -sf -o /dev/null -w '%{http_code}' \
+        -X POST "${APP_URL}/api/internal/verify-retest/${ticket_id}")" || retest_status="000"
 
     if [ "${retest_status}" = "200" ]; then
         log "OK   Ticket #${ticket_id} retest passed"
@@ -178,23 +142,18 @@ EOF
         docker compose up -d --build
         # Wait briefly for rebuild after revert
         local rw=0
-        while [ "${rw}" -lt 90 ]; do
-            if app_healthy; then
+        while [ "${rw}" -lt 60 ]; do
+            if curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
                 break
             fi
-            sleep 5
-            rw=$((rw + 5))
+            sleep 3
+            rw=$((rw + 3))
         done
         mv "${fix_file}" "${FAILED_DIR}/${filename}"
     fi
 
     # 9. Clean up branch
     git branch -D "${branch}" 2>/dev/null || true
-
-    # 10. Restore stashed changes
-    if [ "${stashed}" = "true" ]; then
-        git stash pop 2>/dev/null || log "WARN  Could not restore stash"
-    fi
 
     log "Finished processing ticket #${ticket_id}"
 }
@@ -204,9 +163,9 @@ EOF
 # ---------------------------------------------------------------------------
 log "Self-heal watcher starting"
 
-# Pre-flight: check app is healthy (via docker exec since port 8000 not exposed to host)
-if ! app_healthy; then
-    log "WARN App is not healthy — skipping this run"
+# Pre-flight: check app is healthy
+if ! curl -sf "${APP_URL}/health" >/dev/null 2>&1; then
+    log "WARN App is not healthy at ${APP_URL}/health — skipping this run"
     exit 0
 fi
 

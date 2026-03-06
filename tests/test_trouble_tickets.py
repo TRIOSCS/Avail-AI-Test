@@ -295,12 +295,17 @@ class TestDiagnoseEndpoint:
         assert result["risk_tier"] == "low"
         assert result["classification"]["category"] == "ui"
 
-    def test_diagnose_feature_gate(self, client, db_session, test_user):
-        """Diagnose endpoint should return 403 when self_heal_enabled is False."""
-        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
-        from app.config import settings
+    def test_diagnose_feature_gate(self, db_session, test_user):
+        """Auto-process should skip when self_heal_enabled is False."""
+        import asyncio
 
-        assert settings.self_heal_enabled is False
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
+        with patch("app.services.trouble_ticket_service.settings") as mock_settings:
+            mock_settings.self_heal_enabled = False
+            asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
+        db_session.refresh(ticket)
+        # Ticket should remain submitted — auto_process_ticket exits early
+        assert ticket.status == "submitted"
 
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_diagnose_already_diagnosed(self, mock_claude, db_session, test_user):
@@ -330,12 +335,16 @@ class TestDiagnoseEndpoint:
 class TestExecuteEndpoint:
     """Tests for the execute endpoint — service-level since router is thin wrapper."""
 
-    def test_execute_feature_gate(self, client, db_session, test_user):
-        """Execute endpoint should return 403 when self_heal_enabled is False."""
-        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
-        from app.config import settings
+    def test_execute_feature_gate(self, db_session, test_user):
+        """Auto-process should skip execution when self_heal_enabled is False."""
+        import asyncio
 
-        assert settings.self_heal_enabled is False
+        ticket = create_ticket(db=db_session, user_id=test_user.id, title="Bug", description="Something broke")
+        with patch("app.services.trouble_ticket_service.settings") as mock_settings:
+            mock_settings.self_heal_enabled = False
+            asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
+        db_session.refresh(ticket)
+        assert ticket.status == "submitted"
 
     @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)

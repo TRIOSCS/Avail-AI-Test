@@ -13,16 +13,24 @@ from .gradient_service import gradient_json
 
 # Map frontend views to the files an engineer would need to look at
 VIEW_FILE_MAP = {
-    "rfq": "app/static/app.js (RFQ section), app/routers/requisitions.py, app/routers/rfq.py",
-    "sourcing": "app/static/app.js (sourcing section), app/routers/sources.py, app/services/search_service.py",
+    "rfq": "app/static/app.js (RFQ section), app/routers/requisitions.py, app/routers/rfq.py, app/services/email_service.py",
+    "sourcing": "app/static/app.js (sourcing section), app/routers/sources.py, app/services/search_service.py, app/connectors/",
+    "search": "app/static/app.js (search section), app/routers/sources.py, app/services/search_service.py, app/connectors/",
     "archive": "app/static/app.js (archive section), app/routers/requisitions.py",
     "crm": "app/static/crm.js, app/routers/crm.py",
     "companies": "app/static/crm.js (companies section), app/routers/crm.py",
+    "contacts": "app/static/crm.js (contacts section), app/routers/crm.py",
     "quotes": "app/static/crm.js (quotes section), app/routers/crm.py",
     "vendors": "app/static/app.js (vendors section), app/routers/vendors.py",
     "settings": "app/static/crm.js (settings section), app/routers/admin.py",
     "pipeline": "app/static/crm.js (pipeline section), app/routers/crm.py",
     "activity": "app/static/crm.js (activity section), app/services/activity_service.py",
+    "prospecting": "app/static/crm.js (prospecting section), app/routers/prospecting.py, app/services/prospecting_service.py",
+    "tagging": "app/routers/tags.py, app/routers/tagging_admin.py, app/services/tagging.py",
+    "tickets": "app/static/tickets.js, app/routers/trouble_tickets.py, app/services/trouble_ticket_service.py",
+    "apollo": "app/routers/apollo_sync.py, app/services/apollo_sync_service.py",
+    "notifications": "app/static/tickets.js (notifications section), app/services/notification_service.py",
+    "upload": "app/static/app.js (upload section), app/routers/upload.py",
 }
 
 SYSTEM_PROMPT = """\
@@ -32,19 +40,24 @@ concise, actionable prompt that can be pasted into Claude Code CLI to investigat
 
 Architecture context:
 - Stack: FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + Jinja2 + vanilla JS
-- Frontend: two JS files — app/static/app.js (search, RFQ, vendors, upload) and \
-app/static/crm.js (CRM, quotes, activity, settings). Single template: app/templates/index.html
+- Frontend: app/static/app.js (search, RFQ, vendors, upload), app/static/crm.js \
+(CRM, quotes, activity, settings, prospecting), app/static/tickets.js (tickets). \
+Single template: app/templates/index.html
 - Backend: app/routers/ for HTTP endpoints, app/services/ for business logic, app/models/ for ORM
-- Tests: pytest with in-memory SQLite, run with TESTING=1
+- Tests: pytest with in-memory SQLite, run with TESTING=1 PYTHONPATH=/root/availai
+- Always use Loguru for logging, never print()
+- Error responses use: {"error": str, "status_code": int, "request_id": str}
+- Database: use db.get(Model, id) not db.query(Model).get(id)
 
 Return ONLY valid JSON (no markdown fences, no extra text) with exactly two keys:
 - "title": a short (max 80 chars) summary of the issue suitable for a ticket title
-- "prompt": a multi-line Claude Code prompt (200-500 words) that includes:
-  1. What the user reported (in their words, summarized)
-  2. Relevant file paths to investigate based on the view/context
-  3. Console errors if present (quoted)
-  4. Suggested investigation steps
-  5. Any reproduction context (URL, view, browser)
+- "prompt": a multi-line Claude Code prompt (200-500 words) structured as:
+  1. CONTEXT: What the user reported (summarized) + reproduction info
+  2. DIAGNOSIS: Likely root cause based on the error context
+  3. FILES TO READ FIRST: Specific file paths to examine before making changes
+  4. FIX INSTRUCTIONS: Concrete steps to fix the issue
+  5. TEST: How to write a test for the fix and verify it works
+  6. RULES: Make minimal changes. Write tests. Use Loguru. Run full test suite after.
 """
 
 

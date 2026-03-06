@@ -258,10 +258,10 @@ async def test_stock_sale_email_inner_exception(db_session, test_user):
             return_value=gc_mock,
         ),
         patch(
-            "app.services.buyplan_service._post_teams_channel",
+            "app.services.buyplan_notifications._post_teams_channel",
             new_callable=AsyncMock,
         ),
-        patch("app.services.buyplan_service.settings") as ms,
+        patch("app.services.buyplan_notifications.settings") as ms,
     ):
         ms.admin_emails = [test_user.email]
         ms.stock_sale_notify_emails = ["stock@test.com", "warehouse@test.com"]

@@ -113,7 +113,6 @@ function _setTopDrillLabel(label, backLabel) {
 // ── Abort all CRM fetches (called from showView on tab switch) ────────
 function _abortAllCrmFetches() {
     if (_custAbort) { try { _custAbort.abort(); } catch(e){} _custAbort = null; }
-    if (typeof _prospectAbort !== 'undefined' && _prospectAbort) { try { _prospectAbort.abort(); } catch(e){} _prospectAbort = null; }
 }
 
 // ── Customer Filter / Sort / Drawer Helpers ───────────────────────────
@@ -503,7 +502,7 @@ function _renderMobileContact(ct, companyId) {
     // Build action links for phone and email (tap-friendly)
     let actionsHtml = '';
     if (ct.phone) {
-        actionsHtml += `<a href="tel:${escAttr(ct.phone)}" onclick="event.stopPropagation();autoLogCrmCall('${escAttr(ct.phone)}',${companyId || 0})" style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--green-bg,#f0fdf4);border-radius:8px;color:var(--green,#16a34a);text-decoration:none;font-size:13px;font-weight:500">${esc(ct.phone)}</a>`;
+        actionsHtml += phoneLink(ct.phone, {company_id: companyId || null, origin: 'crm_mobile_contact'});
     }
     if (ct.email) {
         actionsHtml += `<a href="mailto:${escAttr(ct.email)}" onclick="event.stopPropagation();autoLogEmail('${escAttr(ct.email)}','${escAttr(ct.full_name || '')}')" style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--blue-bg,#eff6ff);border-radius:8px;color:var(--blue,#2563eb);text-decoration:none;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis">${esc(ct.email)}</a>`;
@@ -904,7 +903,7 @@ function _renderCustDrawerOverview(companyId) {
         <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${esc(c.industry || '—')}</span></div>
         ${c.domain ? '<div class="drawer-field"><span class="drawer-field-label">Domain</span><span class="drawer-field-value"><a href="https://'+escAttr(c.domain)+'" target="_blank">'+esc(c.domain)+'</a></span></div>' : ''}
         ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a></span></div>' : ''}
-        ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value"><a href="tel:'+escAttr(c.phone)+'" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\','+c.id+')">'+esc(c.phone)+'</a></span></div>' : ''}
+        ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(c.phone, {company_id: c.id, origin: 'company_drawer'})+'</span></div>' : ''}
         ${c.employee_size ? '<div class="drawer-field"><span class="drawer-field-label">Size</span><span class="drawer-field-value">'+esc(c.employee_size)+'</span></div>' : ''}
         ${c.hq_city ? '<div class="drawer-field"><span class="drawer-field-label">HQ</span><span class="drawer-field-value">'+esc(c.hq_city)+(c.hq_state ? ', '+esc(c.hq_state) : '')+'</span></div>' : ''}
         ${c.credit_terms ? '<div class="drawer-field"><span class="drawer-field-label">Credit Terms</span><span class="drawer-field-value">'+esc(c.credit_terms)+'</span></div>' : ''}
@@ -1041,7 +1040,7 @@ async function toggleSiteAccordion(siteId) {
                     </div>
                     <div class="site-contact-actions">
                         ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">✉</a>' : ''}
-                        ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="Call" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(c.phone)+'\')">📞</a>' : ''}
+                        ${c.phone ? '<a href="tel:'+escAttr(toE164(c.phone) || c.phone)+'" class="phone-link" onclick="logCallInitiated(this)" data-phone="'+escAttr(c.phone)+'" data-ctx="'+escAttr(JSON.stringify({company_id: _selectedCustId, customer_site_id: s.id, origin: 'site_contacts'}))+'" title="Call">📞</a>' : ''}
                         ${c.email && !c.email_verified ? '<a href="#" onclick="event.preventDefault();event.stopPropagation();verifyContactEmail('+c.id+',\''+escAttr(c.email)+'\')" title="Verify email" style="font-size:10px">Verify</a>' : ''}
                         <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</a>
                     </div>
@@ -1303,14 +1302,14 @@ function _buildContactCardHtml(ct, companyId) {
             </div>
             <div class="contact-card-actions">
                 ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" title="'+escAttr(ct.email)+'" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(ct.email)+'\',\''+escAttr(ct.full_name || '')+'\')">✉</a>' : ''}
-                ${ct.phone ? '<a href="tel:'+escAttr(ct.phone)+'" title="'+escAttr(ct.phone)+'" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(ct.phone)+'\','+companyId+')">📞</a>' : ''}
+                ${ct.phone ? '<a href="tel:'+escAttr(toE164(ct.phone) || ct.phone)+'" class="phone-link" onclick="logCallInitiated(this)" data-phone="'+escAttr(ct.phone)+'" data-ctx="'+escAttr(JSON.stringify({company_id: companyId, customer_site_id: ct.site_id, origin: 'contact_card'}))+'" title="'+escAttr(ct.phone)+'">📞</a>' : ''}
                 <button onclick="openEditSiteContact(${ct.site_id},${ct.id})" title="Edit">✎</button>
                 ${archiveBtn}
             </div>
         </div>
         <div class="contact-card-meta">
             ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" onclick="event.stopPropagation()">' + esc(ct.email) + '</a>' : ''}
-            ${ct.phone ? '<a href="tel:'+escAttr(ct.phone)+'" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(ct.phone)+'\','+companyId+')">' + esc(ct.phone) + '</a>' : ''}
+            ${ct.phone ? phoneLink(ct.phone, {company_id: companyId, customer_site_id: ct.site_id, origin: 'contact_card_meta'}) : ''}
             ${ct.created_at ? '<span class="contact-card-added">' + relTime(ct.created_at) + '</span>' : ''}
         </div>
         <div class="contact-card-notes" style="display:flex;align-items:center;gap:0">
@@ -1467,7 +1466,6 @@ async function _renderCustDrawerContacts(companyId) {
 // Escape key to close drawer
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-        if (document.getElementById('prospectDrawer')?.classList.contains('open')) { closeProspectDrawer(); e.preventDefault(); return; }
         if (document.getElementById('custDrawer')?.classList.contains('open')) { closeCustDrawer(); e.preventDefault(); return; }
         if (document.getElementById('vendorDrawer')?.classList.contains('open') && window.closeVendorDrawer) { window.closeVendorDrawer(); e.preventDefault(); return; }
         if (document.getElementById('contactDrawer')?.classList.contains('open') && window.closeContactDrawer) { window.closeContactDrawer(); e.preventDefault(); return; }
@@ -1508,7 +1506,7 @@ async function toggleSiteDetail(siteId) {
                         ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
                         <div class="si-contact-meta">
                             ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'" onclick="autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">'+esc(c.email)+'</a>' : ''}
-                            ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\')">'+esc(c.phone)+'</a>' : ''}
+                            ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, customer_site_id: s.id, origin: 'site_contact_detail'}) : ''}
                         </div>
                         ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
                         <div style="margin-top:4px;display:flex;align-items:start;gap:4px">
@@ -4130,7 +4128,7 @@ function renderSuggestedContacts() {
                 <div class="sc-title">${esc(c.title || 'No title')}</div>
                 <div class="sc-meta">
                     ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="event.stopPropagation();autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">✉ ' + esc(c.email) + '</a>' : ''}
-                    ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="event.stopPropagation();autoLogCrmCall(\'' + escAttr(c.phone) + '\')">☎ ' + esc(c.phone) + '</a>' : ''}
+                    ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, origin: 'enrichment_contacts'}) : ''}
                     ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" onclick="event.stopPropagation()">LinkedIn ↗</a>' : ''}
                     ${c.location ? '<span>📍 ' + esc(c.location) + '</span>' : ''}
                 </div>
@@ -4421,7 +4419,7 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
                             <div class="ai-contact-meta">
                                 ${c.email ? `<a href="mailto:${escAttr(c.email)}" onclick="autoLogEmail('${escAttr(c.email)}','${escAttr(c.full_name || '')}')">✉ ${esc(c.email)}</a>` : ''}
-                                ${c.phone ? `<a href="tel:${escAttr(c.phone)}" onclick="autoLogCrmCall('${escAttr(c.phone)}')">☎ ${esc(c.phone)}</a>` : ''}
+                                ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, origin: 'ai_contacts'}) : ''}
                                 ${c.linkedin_url ? `<a href="${escAttr(c.linkedin_url)}" target="_blank">LinkedIn ↗</a>` : ''}
                             </div>
                         </div>
@@ -7140,9 +7138,18 @@ async function showSuggested() {
     const readiness = document.getElementById('suggestedReadinessScore');
     if (readiness) readiness.value = '0';
     const sort = document.getElementById('suggestedSort');
-    if (sort) sort.value = 'readiness_desc';
-    _setTopViewLabel('Suggested');
+    if (sort) sort.value = 'fit_desc';
+    const industryEl = document.getElementById('suggestedIndustry');
+    if (industryEl) industryEl.value = '';
+    const revenueEl = document.getElementById('suggestedRevenue');
+    if (revenueEl) revenueEl.value = '';
+    const regionEl = document.getElementById('suggestedRegion');
+    if (regionEl) regionEl.value = '';
+    const sourceEl = document.getElementById('suggestedSource');
+    if (sourceEl) sourceEl.value = '';
+    _setTopViewLabel('Prospecting');
     await loadSuggested();
+    _populateSuggestedFilters();
 }
 
 async function loadSuggested() {
@@ -7155,12 +7162,20 @@ async function loadSuggested() {
     const size = document.getElementById('suggestedSize')?.value || '';
     const fitScore = document.getElementById('suggestedFitScore')?.value || '0';
     const readinessScore = document.getElementById('suggestedReadinessScore')?.value || '0';
-    const sort = document.getElementById('suggestedSort')?.value || 'readiness_desc';
+    const industry = document.getElementById('suggestedIndustry')?.value || '';
+    const revenue = document.getElementById('suggestedRevenue')?.value || '';
+    const region = document.getElementById('suggestedRegion')?.value || '';
+    const source = document.getElementById('suggestedSource')?.value || '';
+    const sort = document.getElementById('suggestedSort')?.value || 'fit_desc';
     const params = new URLSearchParams({ page: _suggestedPage, per_page: 100, sort });
     if (search) params.set('search', search);
     if (size) params.set('employee_size', size);
     if (parseInt(fitScore) > 0) params.set('min_fit_score', fitScore);
     if (parseInt(readinessScore) > 0) params.set('min_readiness_score', readinessScore);
+    if (industry) params.set('industry', industry);
+    if (revenue) params.set('revenue_range', revenue);
+    if (region) params.set('region', region);
+    if (source) params.set('discovery_source', source);
 
     try {
         const [data, stats] = await Promise.all([
@@ -7174,6 +7189,44 @@ async function loadSuggested() {
         showToast('Failed to load suggested accounts', 'error');
         console.error(e);
     }
+}
+
+async function _populateSuggestedFilters() {
+    try {
+        const stats = await apiFetch('/api/prospects/suggested/stats');
+        const industryEl = document.getElementById('suggestedIndustry');
+        if (industryEl && stats.industries) {
+            const curVal = industryEl.value;
+            industryEl.textContent = '';
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All Industries';
+            industryEl.appendChild(allOpt);
+            for (const ind of stats.industries) {
+                const opt = document.createElement('option');
+                opt.value = ind;
+                opt.textContent = ind;
+                industryEl.appendChild(opt);
+            }
+            if (curVal) industryEl.value = curVal;
+        }
+        const regionEl = document.getElementById('suggestedRegion');
+        if (regionEl && stats.regions) {
+            const curVal = regionEl.value;
+            regionEl.textContent = '';
+            const allOpt = document.createElement('option');
+            allOpt.value = '';
+            allOpt.textContent = 'All Regions';
+            regionEl.appendChild(allOpt);
+            for (const reg of stats.regions) {
+                const opt = document.createElement('option');
+                opt.value = reg;
+                opt.textContent = reg;
+                regionEl.appendChild(opt);
+            }
+            if (curVal) regionEl.value = curVal;
+        }
+    } catch(e) { console.warn('Failed to load filter options', e); }
 }
 
 function renderSuggestedStats(stats) {
@@ -7208,6 +7261,9 @@ function renderSuggestedGrid(data) {
         const tierLabels = { call_now: 'Call Now', nurture: 'Nurture', monitor: 'Monitor' };
         const tierBadge = `<span class="suggested-badge ${a.readiness_tier}">${tierLabels[a.readiness_tier] || a.readiness_tier}</span>`;
         const sfBadge = a.company_id ? '<span class="suggested-badge sf">SF</span>' : '';
+        const sourceBadge = a.discovery_source
+            ? '<span class="suggested-badge" style="background:var(--border);color:var(--text);font-size:9px">' + esc(a.discovery_source) + '</span>'
+            : '';
 
         // Domain link
         const domainLink = a.domain
@@ -7219,6 +7275,7 @@ function renderSuggestedGrid(data) {
         if (a.industry) meta.push('<span>' + esc(a.industry) + '</span>');
         if (a.employee_count_range) meta.push('<span>' + esc(a.employee_count_range) + ' emp</span>');
         if (a.hq_location) meta.push('<span>' + esc(a.hq_location) + '</span>');
+        if (a.revenue_range) meta.push('<span>' + esc(a.revenue_range) + '</span>');
 
         // Score bars
         const fitPct = Math.min(a.fit_score, 100);
@@ -7277,7 +7334,7 @@ function renderSuggestedGrid(data) {
                     <div class="suggested-card-name" style="cursor:pointer" onclick="openSuggestedDetail(${a.id})">${esc(a.name)}</div>
                     ${domainLink}
                 </div>
-                <div class="suggested-card-badges">${warmBadge}${tierBadge}${sfBadge}</div>
+                <div class="suggested-card-badges">${warmBadge}${tierBadge}${sfBadge}${sourceBadge}</div>
             </div>
             ${oneLinerHtml}
             ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
@@ -7329,7 +7386,11 @@ async function claimSuggestedAccount(id, name) {
     if (!confirm('Claim "' + name + '"? It will be added to your Accounts list.')) return;
     try {
         const result = await apiFetch('/api/prospects/suggested/' + id + '/claim', { method: 'POST' });
-        showToast('Claimed: ' + (result.company_name || name), 'success');
+        const companyName = esc(result.company_name || name);
+        const crmLink = result.company_id
+            ? ' <a href="#" onclick="event.preventDefault();sidebarNav(\'customers\');setTimeout(function(){openCompanyDrawer(' + result.company_id + ')},300)" style="color:var(--blue);text-decoration:underline">Go to Account</a>'
+            : '';
+        showToast('Claimed: ' + companyName + crmLink, 'success', 5000);
         const card = document.getElementById('sg-card-' + id);
         if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
         try {
@@ -7572,588 +7633,6 @@ async function enrichProspectFree(prospectId) {
 }
 
 
-/// ── Prospecting (Accounts-First Hierarchy) ──────────────────────────────
-
-let _prospectingTab = 'my-accounts';
-let _prospectingData = [];
-let _prospectCapacity = null;
-let _expandedAccounts = new Set();
-
-const debouncedLoadProspecting = debounce(() => loadProspecting(), 250);
-
-function setProspectingTab(tab, btn) {
-    _prospectingTab = tab;
-    _expandedAccounts.clear();
-    document.querySelectorAll('#prospectingPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === tab));
-    // Show/hide health filter (only for my-accounts)
-    const healthFilter = document.getElementById('prospectHealthFilter');
-    if (healthFilter) healthFilter.style.display = tab === 'my-accounts' ? '' : 'none';
-    loadProspecting();
-}
-
-async function showProspecting() {
-    showView('view-prospecting');
-    const viewEl = document.getElementById('view-prospecting');
-    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
-    setCurrentReqId(null);
-    _selectedProspectSiteId = null;
-    _prospectingData = [];
-    _expandedAccounts.clear();
-    _setTopViewLabel('Prospecting');
-    await loadProspecting();
-}
-
-async function _loadCapacityBar() {
-    try {
-        _prospectCapacity = await apiFetch('/api/prospecting/capacity');
-        _renderCapacityBar();
-    } catch (e) { console.error('Capacity load failed:', e); }
-}
-
-function _renderCapacityBar() {
-    const el = document.getElementById('prospectCapBar');
-    if (!el || !_prospectCapacity) return;
-    const c = _prospectCapacity;
-    const pct = Math.min(100, Math.round((c.used / c.cap) * 100));
-    const overCap = c.used > c.cap;
-    const color = overCap ? 'var(--red)' : pct >= 90 ? 'var(--red)' : pct >= 75 ? '#eab308' : 'var(--blue)';
-    let nudge = '';
-    if (overCap) {
-        nudge = `<span style="color:var(--red);font-size:10px;margin-left:8px;font-weight:600">${c.used - c.cap} over limit — release inactive sites</span>`; // nosec: numeric values only, no user input
-    } else if (c.stale_accounts && c.stale_accounts.length > 0 && c.used >= 180) {
-        nudge = `<span style="color:var(--muted);font-size:10px;margin-left:8px">${c.stale_accounts.length} accounts with no activity in 90+ days</span>`;
-    }
-    // nosec: all values are numeric (c.used, c.cap, pct) from internal API - no user input
-    el.innerHTML = `<span style="white-space:nowrap">My Pipeline: <strong>${c.used}</strong>/${c.cap} sites</span>
-        <div style="width:120px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-            <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width .3s"></div>
-        </div>
-        <span style="font-weight:600;color:${color}">${overCap ? 'OVER' : pct + '%'}</span>${nudge}`;
-}
-
-let _prospectAbort = null;
-async function loadProspecting() {
-    if (_prospectAbort) { try { _prospectAbort.abort(); } catch(e){} }
-    _prospectAbort = new AbortController();
-    const body = document.getElementById('prospectingBody');
-    if (body) body.innerHTML = '<tr><td colspan="7" class="empty"><div class="spinner"></div> Loading…</td></tr>';
-
-    // Always load capacity bar
-    _loadCapacityBar();
-
-    try {
-        if (_prospectingTab === 'my-accounts') {
-            _prospectingData = await apiFetch('/api/prospecting/my-accounts', {signal: _prospectAbort.signal}) || [];
-        } else if (_prospectingTab === 'at-risk') {
-            _prospectingData = await apiFetch('/api/prospecting/at-risk', {signal: _prospectAbort.signal}) || [];
-        } else {
-            _prospectingData = await apiFetch('/api/prospecting/pool', {signal: _prospectAbort.signal}) || [];
-        }
-        renderProspecting();
-    } catch (e) {
-        if (e.name === 'AbortError') return;
-        showToast('Failed to load prospecting data', 'error');
-        console.error(e);
-    }
-}
-
-function renderProspecting() {
-    // Mobile: render card list instead of table
-    if (window.__isMobile) { _renderProspectingMobile(); return; }
-
-    const head = document.getElementById('prospectingHead');
-    const body = document.getElementById('prospectingBody');
-    if (!head || !body) return;
-
-    const filter = (document.getElementById('prospectingFilter')?.value || '').toLowerCase();
-    const healthFilter = document.getElementById('prospectHealthFilter')?.value || '';
-    let filtered = _prospectingData;
-
-    if (_prospectingTab === 'my-accounts') {
-        // Filter accounts
-        if (filter) {
-            filtered = filtered.filter(a =>
-                (a.name || '').toLowerCase().includes(filter) ||
-                (a.domain || '').toLowerCase().includes(filter) ||
-                (a.industry || '').toLowerCase().includes(filter) ||
-                (a.location || '').toLowerCase().includes(filter)
-            );
-        }
-        if (healthFilter) {
-            filtered = filtered.filter(a => a.health === healthFilter);
-        }
-
-        head.innerHTML = '<th style="width:30px"></th><th>Account</th><th>Industry</th><th>Location</th><th>Sites</th><th>Health</th><th>Last Activity</th><th></th>';
-        if (!filtered.length) {
-            body.innerHTML = '<tr><td colspan="8" class="empty">No accounts — claim sites from the Open Pool tab</td></tr>';
-            return;
-        }
-        let html = '';
-        for (const a of filtered) {
-            const isExpanded = _expandedAccounts.has(a.company_id);
-            const chevron = `<span style="cursor:pointer;font-size:14px;color:var(--muted);transition:transform .2s;display:inline-block;${isExpanded ? 'transform:rotate(90deg)' : ''}" onclick="event.stopPropagation();toggleAccountExpand(${a.company_id})">&#9654;</span>`;
-            const healthDot = _healthBadge(a.health);
-            const sitesLabel = `<span title="${a.active_sites} active sites out of ${a.site_count} total">${a.active_sites}/${a.site_count} active</span>`;
-            const strategic = a.is_strategic ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">STRATEGIC</span>' : '';
-
-            html += `<tr style="cursor:pointer" onclick="toggleAccountExpand(${a.company_id})" class="prospect-account-row">
-                <td>${chevron}</td>
-                <td><strong>${esc(a.name)}</strong>${strategic}${a.domain ? '<br><small class="u-color-muted">' + esc(a.domain) + '</small>' : ''}</td>
-                <td>${esc(a.industry || '—')}</td>
-                <td>${esc(a.location || '—')}</td>
-                <td>${sitesLabel}</td>
-                <td>${healthDot}</td>
-                <td>${a.last_activity ? fmtRelative(a.last_activity) : '<span class="u-color-muted">Never</span>'}</td>
-                <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseStaleSites(${a.company_id},'${escAttr(a.name)}')" title="Release inactive sites" style="font-size:10px">Release</button></td>
-            </tr>`;
-            // Expanded sites row (placeholder, filled by toggleAccountExpand)
-            html += `<tr id="acct-sites-${a.company_id}" style="display:${isExpanded ? 'table-row' : 'none'}"><td colspan="8" style="padding:0;background:var(--bg-alt,#f9fafb)"><div id="acct-sites-inner-${a.company_id}" style="padding:4px 12px 8px 40px"><div class="spinner" style="margin:8px auto"></div></div></td></tr>`;
-        }
-        body.innerHTML = html;
-        // Load sites for expanded accounts
-        for (const cid of _expandedAccounts) {
-            _loadAccountSites(cid);
-        }
-    } else if (_prospectingTab === 'pool') {
-        if (filter) {
-            filtered = filtered.filter(s =>
-                (s.site_name || '').toLowerCase().includes(filter) ||
-                (s.company_name || '').toLowerCase().includes(filter) ||
-                (s.contact_name || '').toLowerCase().includes(filter) ||
-                (s.city || '').toLowerCase().includes(filter)
-            );
-        }
-        head.innerHTML = '<th>Company</th><th>Site</th><th>Contact</th><th>Location</th><th>Last Activity</th><th></th>';
-        body.innerHTML = filtered.length ? filtered.map(s => `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
-            <td>${esc(s.company_name || '')}</td>
-            <td>${esc(s.site_name || '')}</td>
-            <td>${esc(s.contact_name || '')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
-            <td>${esc([s.city, s.state].filter(Boolean).join(', '))}</td>
-            <td>${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button></td>
-        </tr>`).join('') : '<tr><td colspan="6" class="empty">No unassigned sites — all sites have owners</td></tr>';
-    } else {
-        // at-risk
-        if (filter) {
-            filtered = filtered.filter(s =>
-                (s.site_name || '').toLowerCase().includes(filter) ||
-                (s.company_name || '').toLowerCase().includes(filter) ||
-                (s.owner_name || '').toLowerCase().includes(filter)
-            );
-        }
-        head.innerHTML = '<th>Company</th><th>Site</th><th>Owner</th><th>Days Inactive</th><th>Days Left</th>';
-        body.innerHTML = filtered.length ? filtered.map(s => {
-            const color = s.days_remaining <= 2 ? '#ef4444' : '#eab308';
-            return `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
-                <td>${esc(s.company_name || '')}</td>
-                <td>${esc(s.site_name || '')}</td>
-                <td>${esc(s.owner_name || '')}</td>
-                <td>${s.days_inactive}</td>
-                <td style="color:${color};font-weight:600">${s.days_remaining}</td>
-            </tr>`;
-        }).join('') : '<tr><td colspan="5" class="empty">No sites at risk</td></tr>';
-    }
-}
-
-function _healthBadge(health) {
-    const map = {
-        green: '<span style="color:#22c55e">&#x25cf;</span> Active',
-        yellow: '<span style="color:#eab308">&#x25cf;</span> At Risk',
-        red: '<span style="color:#ef4444">&#x25cf;</span> Expiring',
-        grey: '<span style="color:#9ca3af">&#x25cf;</span> No Activity',
-    };
-    return map[health] || map.grey;
-}
-
-function _renderProspectingMobile() {
-    const wrap = document.getElementById('prospectTableWrap');
-    if (!wrap) return;
-    const filter = (document.getElementById('prospectingFilter')?.value || '').toLowerCase();
-    const healthFilter = document.getElementById('prospectHealthFilter')?.value || '';
-    let filtered = _prospectingData;
-
-    if (_prospectingTab === 'my-accounts') {
-        if (filter) filtered = filtered.filter(a => (a.name||'').toLowerCase().includes(filter) || (a.domain||'').toLowerCase().includes(filter));
-        if (healthFilter) filtered = filtered.filter(a => a.health === healthFilter);
-        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No accounts — claim sites from Open Pool</p>'; return; }
-        let html = '';
-        for (const a of filtered) {
-            const hc = {green:'m-health-green',yellow:'m-health-yellow',red:'m-health-red'}[a.health] || 'm-health-grey';
-            html += `<div class="m-card ${hc}" onclick="openCustDrawer(${a.company_id})">
-                <div class="m-card-header"><span class="m-card-title">${esc(a.name)}</span><span class="m-card-chevron">›</span></div>
-                ${a.domain ? `<div class="m-card-subtitle">${esc(a.domain)}</div>` : ''}
-                <div class="m-card-body">
-                    <span style="font-size:12px">${esc(a.industry || '')}</span>
-                    <span style="font-size:12px"><b>${a.active_sites||0}</b>/${a.site_count||0} sites</span>
-                    <span style="font-size:12px">${a.last_activity ? fmtRelative(a.last_activity) : 'No activity'}</span>
-                </div>
-            </div>`;
-        }
-        wrap.innerHTML = html;
-    } else if (_prospectingTab === 'pool') {
-        if (filter) filtered = filtered.filter(s => (s.site_name||'').toLowerCase().includes(filter) || (s.company_name||'').toLowerCase().includes(filter));
-        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No unassigned sites</p>'; return; }
-        let html = '';
-        for (const s of filtered) {
-            html += `<div class="m-card" onclick="openProspectDrawer(${s.site_id})">
-                <div class="m-card-header"><span class="m-card-title">${esc(s.company_name||'')}</span></div>
-                <div class="m-card-subtitle">${esc(s.site_name||'')}</div>
-                <div class="m-card-body">
-                    <span style="font-size:12px">${esc(s.contact_name||'')}</span>
-                    <span style="font-size:12px">${esc([s.city,s.state].filter(Boolean).join(', '))}</span>
-                </div>
-                <div class="m-card-footer"><span class="m-card-meta">${s.last_activity_at ? fmtRelative(s.last_activity_at) : 'No activity'}</span>
-                    <button class="m-chip m-chip-blue" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button>
-                </div>
-            </div>`;
-        }
-        wrap.innerHTML = html;
-    } else {
-        if (filter) filtered = filtered.filter(s => (s.site_name||'').toLowerCase().includes(filter) || (s.company_name||'').toLowerCase().includes(filter));
-        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No sites at risk</p>'; return; }
-        let html = '';
-        for (const s of filtered) {
-            const color = s.days_remaining <= 2 ? 'm-health-red' : 'm-health-yellow';
-            html += `<div class="m-card ${color}" onclick="openProspectDrawer(${s.site_id})">
-                <div class="m-card-header"><span class="m-card-title">${esc(s.company_name||'')}</span></div>
-                <div class="m-card-subtitle">${esc(s.site_name||'')}</div>
-                <div class="m-card-body">
-                    <span style="font-size:12px">Owner: ${esc(s.owner_name||'')}</span>
-                    <span style="font-size:12px">${s.days_inactive}d inactive</span>
-                    <span class="m-chip ${s.days_remaining<=2?'m-chip-red':'m-chip-amber'}">${s.days_remaining}d left</span>
-                </div>
-            </div>`;
-        }
-        wrap.innerHTML = html;
-    }
-}
-
-async function toggleAccountExpand(companyId) {
-    const row = document.getElementById('acct-sites-' + companyId);
-    if (!row) return;
-    if (_expandedAccounts.has(companyId)) {
-        _expandedAccounts.delete(companyId);
-        row.style.display = 'none';
-        // Update chevron
-        const chevron = row.previousElementSibling?.querySelector('span');
-        if (chevron) chevron.style.transform = '';
-    } else {
-        _expandedAccounts.add(companyId);
-        row.style.display = 'table-row';
-        const chevron = row.previousElementSibling?.querySelector('span');
-        if (chevron) chevron.style.transform = 'rotate(90deg)';
-        await _loadAccountSites(companyId);
-    }
-}
-
-async function _loadAccountSites(companyId) {
-    const inner = document.getElementById('acct-sites-inner-' + companyId);
-    if (!inner) return;
-    inner.innerHTML = '<div class="spinner" style="margin:8px auto"></div>';
-    try {
-        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
-        if (!data.sites || !data.sites.length) {
-            inner.innerHTML = '<div style="padding:8px;color:var(--muted);font-size:12px">No sites found</div>';
-            return;
-        }
-        let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
-        html += '<thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="padding:4px 8px;text-align:left">Site</th><th style="padding:4px 8px;text-align:left">Type</th><th style="padding:4px 8px;text-align:left">Contact</th><th style="padding:4px 8px;text-align:left">Location</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Last Activity</th><th style="padding:4px 8px"></th></tr></thead><tbody>';
-        for (const s of data.sites) {
-            const dot = _healthBadge(s.status);
-            html += `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
-                <td style="padding:6px 8px">${esc(s.site_name)}</td>
-                <td style="padding:6px 8px">${esc(s.site_type || '—')}</td>
-                <td style="padding:6px 8px">${esc(s.contact_name || '—')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
-                <td style="padding:6px 8px">${esc([s.city, s.state].filter(Boolean).join(', ') || '—')}</td>
-                <td style="padding:6px 8px">${dot}</td>
-                <td style="padding:6px 8px">${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
-                <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseSite(${s.site_id},'${escAttr(s.site_name)}')" style="font-size:10px" title="Release site">Release</button></td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        inner.innerHTML = html;
-    } catch (e) {
-        inner.innerHTML = '<div style="padding:8px;color:var(--red);font-size:12px">Failed to load sites</div>';
-    }
-}
-
-async function releaseSite(siteId, siteName) {
-    if (!confirm('Release "' + siteName + '" back to the open pool?')) return;
-    try {
-        await apiFetch('/api/prospecting/release/' + siteId, { method: 'POST' });
-        showToast('Released: ' + siteName, 'info');
-        await loadProspecting();
-    } catch (e) {
-        showToast(e.message || 'Failed to release site', 'error');
-    }
-}
-
-async function releaseStaleSites(companyId, companyName) {
-    if (!confirm('Release all inactive sites for "' + companyName + '"? Only sites with no activity in 90+ days will be released.')) return;
-    try {
-        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
-        const stale = (data.sites || []).filter(s => s.status === 'red' || s.status === 'grey');
-        if (!stale.length) { showToast('No stale sites to release', 'info'); return; }
-        for (const s of stale) {
-            await apiFetch('/api/prospecting/release/' + s.site_id, { method: 'POST' });
-        }
-        showToast('Released ' + stale.length + ' stale sites from ' + companyName, 'success');
-        await loadProspecting();
-    } catch (e) {
-        showToast(e.message || 'Failed to release sites', 'error');
-    }
-}
-
-async function claimSite(siteId) {
-    // Check capacity before confirming
-    if (_prospectCapacity && _prospectCapacity.at_cap) {
-        showToast('You have reached the ' + _prospectCapacity.cap + '-site cap. Release inactive sites before claiming new ones.', 'error');
-        return;
-    }
-    if (!confirm('Claim this site? You will be responsible for maintaining contact.')) return;
-    try {
-        const result = await apiFetch('/api/prospecting/claim/' + siteId, { method: 'POST' });
-        showToast('Site claimed: ' + (result.site_name || ''), 'success');
-        await loadProspecting();
-    } catch (e) {
-        const msg = e.message || 'Failed to claim site';
-        if (msg.includes('cap is')) {
-            showToast(msg, 'error');
-            _loadCapacityBar();
-        } else {
-            showToast(msg, 'error');
-        }
-    }
-}
-
-/// ── Prospecting Drawer (split-pane detail) ─────────────────────────────
-
-let _selectedProspectSiteId = null;
-let _prospectMiniListIds = [];
-
-function _renderProspectMiniList(activeSiteId) {
-    const miniList = document.getElementById('prospectMiniList');
-    if (!miniList) return;
-    let filtered = [..._prospectingData];
-
-    // Apply mini-list search filter
-    const searchInput = miniList.querySelector('.prospect-mini-search');
-    const searchQ = (searchInput?.value || '').toLowerCase().trim();
-    if (searchQ) {
-        filtered = filtered.filter(s =>
-            (s.site_name || '').toLowerCase().includes(searchQ) ||
-            (s.company_name || '').toLowerCase().includes(searchQ) ||
-            (s.contact_name || '').toLowerCase().includes(searchQ)
-        );
-    }
-    _prospectMiniListIds = filtered.map(s => s.site_id);
-
-    let headerHtml = '';
-    if (!miniList.querySelector('.prospect-mini-list-header')) {
-        headerHtml = `<div class="prospect-mini-list-header">
-            <input class="prospect-mini-search" placeholder="Filter sites..." oninput="_renderProspectMiniListFromSearch()"
-                onkeydown="_prospectMiniListKeyNav(event)">
-            <div class="prospect-mini-count">${filtered.length} site${filtered.length !== 1 ? 's' : ''}</div>
-        </div>`;
-    }
-
-    let itemsHtml = '';
-    for (const s of filtered) {
-        const isActive = s.site_id === activeSiteId;
-        itemsHtml += `<div class="prospect-mini-list-item${isActive ? ' active' : ''}" data-sid="${s.site_id}" onclick="openProspectDrawer(${s.site_id})">
-            <div class="prospect-mini-list-info">
-                <div class="prospect-mini-list-name">${esc(s.site_name || '')}</div>
-                <div class="prospect-mini-list-meta">
-                    <span class="prospect-mini-list-sub">${esc(s.company_name || '')}</span>
-                </div>
-            </div>
-        </div>`;
-    }
-
-    if (headerHtml) {
-        miniList.innerHTML = headerHtml + '<div class="prospect-mini-list-scroll">' + itemsHtml + '</div>';
-    } else {
-        const scrollEl = miniList.querySelector('.prospect-mini-list-scroll');
-        if (scrollEl) scrollEl.innerHTML = itemsHtml;
-        const countEl = miniList.querySelector('.prospect-mini-count');
-        if (countEl) countEl.textContent = `${filtered.length} site${filtered.length !== 1 ? 's' : ''}`;
-    }
-
-    const activeEl = miniList.querySelector('.prospect-mini-list-item.active');
-    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
-}
-
-function _renderProspectMiniListFromSearch() { _renderProspectMiniList(_selectedProspectSiteId); }
-
-function _prospectMiniListKeyNav(event) {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
-    event.preventDefault();
-    if (!_prospectMiniListIds.length || !_selectedProspectSiteId) return;
-    const idx = _prospectMiniListIds.indexOf(_selectedProspectSiteId);
-    let next;
-    if (event.key === 'ArrowDown') next = idx < _prospectMiniListIds.length - 1 ? idx + 1 : 0;
-    else next = idx > 0 ? idx - 1 : _prospectMiniListIds.length - 1;
-    openProspectDrawer(_prospectMiniListIds[next]);
-}
-
-async function openProspectDrawer(siteId) {
-    _selectedProspectSiteId = siteId;
-    const backdrop = document.getElementById('prospectDrawerBackdrop');
-    const drawer = document.getElementById('prospectDrawer');
-    const viewEl = document.getElementById('view-prospecting');
-    const miniList = document.getElementById('prospectMiniList');
-    const tableWrap = document.getElementById('prospectTableWrap');
-    const isDesktop = window.innerWidth > 768;
-
-    if (isDesktop && miniList) {
-        _renderProspectMiniList(siteId);
-        miniList.classList.add('open');
-        if (viewEl) viewEl.classList.add('prospect-split-active');
-        if (tableWrap) tableWrap.style.display = 'none';
-        if (backdrop) backdrop.classList.remove('open');
-    } else {
-        if (backdrop) backdrop.classList.add('open');
-    }
-    if (drawer) drawer.classList.add('open');
-
-    // Show drill-down breadcrumb
-    const site = _prospectingData.find(s => s.site_id === siteId);
-    _setTopDrillLabel(site ? (site.site_name || site.company_name || 'Site') : 'Site');
-
-    switchProspectDrawerTab('overview');
-    document.querySelectorAll('#prospectDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
-}
-
-function closeProspectDrawer() {
-    _selectedProspectSiteId = null;
-    const backdrop = document.getElementById('prospectDrawerBackdrop');
-    const drawer = document.getElementById('prospectDrawer');
-    const viewEl = document.getElementById('view-prospecting');
-    const miniList = document.getElementById('prospectMiniList');
-    const tableWrap = document.getElementById('prospectTableWrap');
-    if (backdrop) backdrop.classList.remove('open');
-    if (drawer) drawer.classList.remove('open');
-    if (miniList) miniList.classList.remove('open');
-    if (viewEl) viewEl.classList.remove('prospect-split-active');
-    if (tableWrap) tableWrap.style.display = '';
-    // Restore view label
-    _setTopViewLabel('Prospecting');
-}
-
-function switchProspectDrawerTab(tab, btn) {
-    document.querySelectorAll('#prospectDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    if (!_selectedProspectSiteId) return;
-    if (tab === 'overview') _renderProspectDrawerOverview(_selectedProspectSiteId);
-    else if (tab === 'contacts') _renderProspectDrawerContacts(_selectedProspectSiteId);
-    else if (tab === 'activity') _renderProspectDrawerActivity(_selectedProspectSiteId);
-}
-
-async function _renderProspectDrawerOverview(siteId) {
-    const body = document.getElementById('prospectDrawerBody');
-    const title = document.getElementById('prospectDrawerTitle');
-    if (!body) return;
-
-    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading site…</div>';
-    try {
-        const s = await apiFetch('/api/sites/' + siteId);
-        if (title) title.textContent = s.site_name || 'Site';
-        const mPTitle = document.getElementById('prospectDrawerMobileTitle');
-        if (mPTitle) mPTitle.textContent = s.site_name || 'Site';
-
-        const contacts = s.contacts || [];
-        const contactCount = contacts.length;
-        const siteData = _prospectingData.find(x => x.site_id === siteId) || {};
-
-        let html = `<div class="drawer-section" style="border-bottom:1px solid var(--border)">
-            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;margin-bottom:8px">
-                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${contactCount}</div><div style="font-size:10px;color:var(--muted)">Contacts</div></div>
-                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${esc(siteData.status || 'N/A')}</div><div style="font-size:10px;color:var(--muted)">Status</div></div>
-                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${s.owner_name ? esc(s.owner_name) : '<span style="color:var(--red)">None</span>'}</div><div style="font-size:10px;color:var(--muted)">Owner</div></div>
-            </div>
-        </div>`;
-
-        html += `<div class="drawer-section">
-            <div class="drawer-section-title">Site Details</div>
-            <div class="drawer-field"><span class="drawer-field-label">Company</span><span class="drawer-field-value">${esc(s.company_name || siteData.company_name || '—')}</span></div>
-            ${s.site_type ? '<div class="drawer-field"><span class="drawer-field-label">Type</span><span class="drawer-field-value">' + esc(s.site_type) + '</span></div>' : ''}
-            ${s.city ? '<div class="drawer-field"><span class="drawer-field-label">Location</span><span class="drawer-field-value">' + esc([s.city, s.state].filter(Boolean).join(', ')) + '</span></div>' : ''}
-            ${s.contact_name ? '<div class="drawer-field"><span class="drawer-field-label">Primary Contact</span><span class="drawer-field-value">' + esc(s.contact_name) + (s.contact_email ? ' <a href="mailto:' + escAttr(s.contact_email) + '">' + esc(s.contact_email) + '</a>' : '') + '</span></div>' : ''}
-            ${s.payment_terms ? '<div class="drawer-field"><span class="drawer-field-label">Payment Terms</span><span class="drawer-field-value">' + esc(s.payment_terms) + '</span></div>' : ''}
-            ${s.notes ? '<div class="drawer-field"><span class="drawer-field-label">Notes</span><span class="drawer-field-value">' + esc(s.notes) + '</span></div>' : ''}
-        </div>`;
-
-        // Claim button if no owner
-        if (!s.owner_id) {
-            html += `<div class="drawer-section" style="text-align:center">
-                <button class="btn btn-primary" onclick="claimSite(${siteId}).then(()=>openProspectDrawer(${siteId}))">Claim This Site</button>
-            </div>`;
-        }
-
-        body.innerHTML = html;
-    } catch (e) {
-        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load site</p></div>';
-    }
-}
-
-async function _renderProspectDrawerContacts(siteId) {
-    const body = document.getElementById('prospectDrawerBody');
-    if (!body) return;
-
-    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading contacts…</div>';
-    try {
-        const contacts = await apiFetch('/api/sites/' + siteId + '/contacts');
-        if (!contacts.length) {
-            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No contacts at this site</p></div>';
-            return;
-        }
-        let html = '<div class="drawer-section"><div class="drawer-section-title">' + contacts.length + ' Contacts</div>';
-        for (const ct of contacts) {
-            html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-                <div style="font-weight:600;font-size:12px">${esc(ct.full_name || '—')} ${ct.is_primary ? '<span style="color:var(--blue);font-size:9px">PRIMARY</span>' : ''}</div>
-                ${ct.title ? '<div style="font-size:11px;color:var(--muted)">' + esc(ct.title) + '</div>' : ''}
-                <div style="font-size:11px;margin-top:2px">
-                    ${ct.email ? '<a href="mailto:' + escAttr(ct.email) + '">' + esc(ct.email) + '</a>' : ''}
-                    ${ct.phone ? ' &middot; <a href="tel:' + escAttr(ct.phone) + '">' + esc(ct.phone) + '</a>' : ''}
-                </div>
-            </div>`;
-        }
-        html += '</div>';
-        body.innerHTML = html;
-    } catch (e) {
-        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load contacts</p></div>';
-    }
-}
-
-async function _renderProspectDrawerActivity(siteId) {
-    const body = document.getElementById('prospectDrawerBody');
-    if (!body) return;
-
-    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading activity…</div>';
-    try {
-        const activities = await apiFetch('/api/activities?site_id=' + siteId);
-        if (!activities.length) {
-            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No activity recorded — claim this site and start outreach</p></div>';
-            return;
-        }
-        let html = '<div class="drawer-section"><div class="drawer-section-title">Activity Feed</div>';
-        for (const a of activities) {
-            html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
-                <div style="display:flex;align-items:center;gap:6px">
-                    <span style="font-size:11px;font-weight:600">${esc(a.activity_type || 'note')}</span>
-                    <span style="font-size:10px;color:var(--muted)">${a.created_at ? fmtRelative(a.created_at) : ''}</span>
-                </div>
-                ${a.note ? '<div style="font-size:12px;margin-top:2px">' + esc(a.note) + '</div>' : ''}
-                ${a.user_name ? '<div style="font-size:10px;color:var(--muted)">by ' + esc(a.user_name) + '</div>' : ''}
-            </div>`;
-        }
-        html += '</div>';
-        body.innerHTML = html;
-    } catch (e) {
-        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load activity</p></div>';
-    }
-}
-
 function _refreshCustPipeline() {
     if (_selectedCustId) _renderCustDrawerPipeline(_selectedCustId);
 }
@@ -8204,7 +7683,7 @@ function renderApiHealthDashboard(container, sources) {
 
     // All data values are escaped via esc() and numeric values are coerced to numbers.
     // This follows the established innerHTML pattern used throughout crm.js (e.g. renderCompanyCards,
-    // _renderSourceCards, renderProspecting) where esc() sanitizes all external strings.
+    // _renderSourceCards) where esc() sanitizes all external strings.
     let html = '<div class="ahd-summary">';
     html += '<div class="ahd-stat live"><div class="ahd-stat-value">' + live + '</div><div class="ahd-stat-label">Live</div></div>';
     html += '<div class="ahd-stat degraded"><div class="ahd-stat-value">' + degraded + '</div><div class="ahd-stat-label">Degraded</div></div>';
@@ -9278,12 +8757,6 @@ Object.assign(window, {
     showSuggested, loadSuggested, debouncedLoadSuggested, setSuggestedReadiness,
     claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage, toggleScoringGuide,
     openSuggestedDetail, closeSuggestedDetail, enrichProspectFree,
-    // Prospecting pool + drawer (accounts-first)
-    showProspecting, loadProspecting, claimSite, setProspectingTab,
-    debouncedLoadProspecting, renderProspecting,
-    toggleAccountExpand, releaseSite, releaseStaleSites,
-    openProspectDrawer, closeProspectDrawer, switchProspectDrawerTab,
-    _renderProspectMiniListFromSearch, _prospectMiniListKeyNav,
     // Account transfer
     loadTransferPanel, loadTransferPreview, toggleTransferSite,
     toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,

@@ -290,7 +290,7 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
 def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
     """Update last_activity_at on the matched company or vendor.
 
-    For companies: also updates site last_activity_at and triggers open pool claim.
+    For companies: also updates site last_activity_at.
     """
     now = datetime.now(timezone.utc)
     if match["type"] == "company":
@@ -301,11 +301,14 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
             db.query(CustomerSite).filter(CustomerSite.id == site_id).update(
                 {"last_activity_at": now}, synchronize_session=False
             )
-        # Auto-claim open pool account if unowned
-        if user_id:
-            from app.services.ownership_service import check_and_claim_open_account
-
-            check_and_claim_open_account(match["id"], user_id, db)
+        # Auto-claim disabled by design — ownership is always manual.
+        # Salesperson must explicitly claim accounts via the UI.
+        # Calling a company (via 8x8 or email) resets the inactivity clock
+        # but does NOT transfer ownership. See ownership_service.py for
+        # manual claim endpoint.
+        # if user_id:
+        #     from app.services.ownership_service import check_and_claim_open_account
+        #     check_and_claim_open_account(match["id"], user_id, db)
     elif match["type"] == "vendor":
         db.query(VendorCard).filter(VendorCard.id == match["id"]).update(
             {"last_activity_at": now}, synchronize_session=False
@@ -501,6 +504,33 @@ def log_vendor_note(
 
     logger.info(f"Activity logged: note -> vendor {vendor_card_id} by user {user_id}")
     return record
+
+
+def get_last_call(vendor_card_id: int, db: Session) -> dict | None:
+    """Get the most recent phone call activity for a vendor card.
+
+    Returns {"user_id": int, "user_name": str, "called_at": datetime} or None.
+    """
+    from app.models import User
+
+    record = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.vendor_card_id == vendor_card_id,
+            ActivityLog.channel == "phone",
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .first()
+    )
+    if not record:
+        return None
+
+    user = db.get(User, record.user_id)
+    return {
+        "user_id": record.user_id,
+        "user_name": user.name if user else "Unknown",
+        "called_at": record.created_at.isoformat() if record.created_at else None,
+    }
 
 
 def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | None:

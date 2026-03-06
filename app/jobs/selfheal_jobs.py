@@ -1,12 +1,11 @@
-"""Self-heal pipeline background jobs — weekly report, auto-close stale tickets.
+"""Self-heal pipeline background jobs — weekly report, daily ticket consolidation.
 
 Called by: app/jobs/__init__.py via register_selfheal_jobs()
-Depends on: app.database, app.models.trouble_ticket, app.services.pattern_tracker,
-            app.services.trouble_ticket_service, app.services.notification_service
+Depends on: app.database, app.services.pattern_tracker,
+            app.services.ticket_consolidation
 """
 
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
@@ -21,10 +20,10 @@ def register_selfheal_jobs(scheduler, settings):
         name="Self-heal weekly report",
     )
     scheduler.add_job(
-        _job_self_heal_auto_close,
-        IntervalTrigger(hours=6),
-        id="self_heal_auto_close",
-        name="Auto-close stale tickets",
+        _job_consolidate_tickets,
+        CronTrigger(hour=5),
+        id="consolidate_tickets",
+        name="Daily ticket consolidation sweep",
     )
 
 
@@ -40,14 +39,18 @@ async def _job_self_heal_weekly_report():  # pragma: no cover
         patterns = detect_recurring_patterns(db, min_occurrences=3)
         logger.info(
             "Self-heal weekly report: {} created, {} resolved, {:.0f}% success, ${:.2f} cost",
-            stats["tickets_created"], stats["tickets_resolved"],
-            stats["success_rate"], stats["total_cost"],
+            stats["tickets_created"],
+            stats["tickets_resolved"],
+            stats["success_rate"],
+            stats["total_cost"],
         )
         if patterns:
             for p in patterns:
                 logger.warning(
                     "Recurring pattern: {} on {} ({} occurrences)",
-                    p["category"], p["page"], p["count"],
+                    p["category"],
+                    p["page"],
+                    p["count"],
                 )
     except Exception:
         logger.exception("Self-heal weekly report failed")
@@ -56,42 +59,17 @@ async def _job_self_heal_weekly_report():  # pragma: no cover
 
 
 @_traced_job
-async def _job_self_heal_auto_close():  # pragma: no cover
-    """Auto-close stale tickets: 7d open with no progress → resolved."""
-    from datetime import datetime, timedelta, timezone
-
+async def _job_consolidate_tickets():  # pragma: no cover
+    """Daily sweep: find and link duplicate open tickets."""
     from ..database import SessionLocal
-    from ..models.trouble_ticket import TroubleTicket
-    from ..services.notification_service import create_notification
-    from ..services.trouble_ticket_service import update_ticket
+    from ..services.ticket_consolidation import batch_consolidate
 
     db = SessionLocal()
     try:
-        now = datetime.now(timezone.utc)
-
-        # 7d open with no progress → auto-resolved
-        stale = (
-            db.query(TroubleTicket)
-            .filter(
-                TroubleTicket.status == "open",
-                TroubleTicket.created_at < now - timedelta(days=7),
-            )
-            .all()
-        )
-        for ticket in stale:
-            update_ticket(db, ticket.id, status="resolved",
-                          resolution_notes="Auto-resolved: no activity after 7 days")
-            if ticket.submitted_by:
-                create_notification(
-                    db, user_id=ticket.submitted_by, event_type="fixed",
-                    title=f"Ticket #{ticket.id} auto-resolved",
-                    body="No activity after 7 days — ticket closed.",
-                    ticket_id=ticket.id,
-                )
-
-        if stale:
-            logger.info("Auto-closed {} stale tickets", len(stale))
+        linked = await batch_consolidate(db)
+        if linked:
+            logger.info("Daily consolidation: linked {} duplicate tickets", linked)
     except Exception:
-        logger.exception("Self-heal auto-close failed")
+        logger.exception("Daily ticket consolidation failed")
     finally:
         db.close()

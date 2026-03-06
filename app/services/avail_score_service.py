@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -443,7 +443,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     from app.services.scoring_helpers import month_range
 
     start_dt, end_dt = month_range(month)
-    outbound_types = ("email_sent", "call_outbound")
+    call_and_email_types = ("email_sent", "call_outbound", "call_inbound")
 
     # ── B1: Account Coverage ──
     # % of owned accounts with outbound activity this month
@@ -459,7 +459,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
             for r in db.query(ActivityLog.company_id)
             .filter(
                 ActivityLog.user_id == user_id,
-                ActivityLog.activity_type.in_(outbound_types),
+                ActivityLog.activity_type.in_(call_and_email_types),
                 ActivityLog.company_id.in_(owned_company_ids),
                 ActivityLog.created_at >= start_dt,
                 ActivityLog.created_at < end_dt,
@@ -477,7 +477,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(sqlfunc.distinct(sqlfunc.date(ActivityLog.created_at))))
         .filter(
             ActivityLog.user_id == user_id,
-            ActivityLog.activity_type.in_(outbound_types),
+            ActivityLog.activity_type.in_(call_and_email_types),
             ActivityLog.created_at >= start_dt,
             ActivityLog.created_at < end_dt,
         )
@@ -504,6 +504,8 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     b4_raw = f"{proactive_sent} sent"
 
     # ── B5: New Business Dev ──
+    # Counts new accounts created, new contacts added, AND prospect outreach
+    # (calls/emails to companies the user doesn't own — open pool / unowned)
     new_accounts = (
         db.query(sqlfunc.count(Company.id))
         .filter(
@@ -523,9 +525,20 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         )
         .scalar()
     ) or 0
-    new_biz = new_accounts + new_contacts
-    b5_score = _tier(new_biz, [(5, 10), (4, 8), (3, 6), (2, 4), (1, 2)])
-    b5_raw = f"{new_accounts} accts + {new_contacts} contacts"
+    # Distinct prospect companies contacted (not owned by this user)
+    prospect_q = db.query(sqlfunc.count(sqlfunc.distinct(ActivityLog.company_id))).filter(
+        ActivityLog.user_id == user_id,
+        ActivityLog.activity_type.in_(call_and_email_types),
+        ActivityLog.company_id.isnot(None),
+        ActivityLog.created_at >= start_dt,
+        ActivityLog.created_at < end_dt,
+    )
+    if owned_company_ids:
+        prospect_q = prospect_q.filter(~ActivityLog.company_id.in_(owned_company_ids))
+    prospect_companies = prospect_q.scalar() or 0
+    new_biz = new_accounts + new_contacts + prospect_companies
+    b5_score = _tier(new_biz, [(8, 10), (6, 8), (4, 6), (2, 4), (1, 2)])
+    b5_raw = f"{new_accounts} accts + {new_contacts} contacts + {prospect_companies} prospects"
 
     behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score
 
@@ -621,7 +634,7 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         db.query(sqlfunc.count(ActivityLog.id))
         .filter(
             ActivityLog.user_id == user_id,
-            ActivityLog.activity_type.in_(outbound_types),
+            ActivityLog.activity_type.in_(call_and_email_types),
             ActivityLog.created_at >= start_dt,
             ActivityLog.created_at < end_dt,
         )

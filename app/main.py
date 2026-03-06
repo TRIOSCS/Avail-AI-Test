@@ -910,10 +910,10 @@ from .routers.auth import router as auth_router
 
 app.include_router(auth_router)
 
-from .routers.vendors_crud import router as vendors_crud_router
-from .routers.vendor_contacts import router as vendor_contacts_router
 from .routers.materials import router as materials_router
 from .routers.vendor_analytics import router as vendor_analytics_router
+from .routers.vendor_contacts import router as vendor_contacts_router
+from .routers.vendors_crud import router as vendors_crud_router
 
 app.include_router(vendors_crud_router)
 app.include_router(vendor_contacts_router)
@@ -977,6 +977,7 @@ app.include_router(apollo_sync_router)
 
 try:
     from .routers.explorium import router as explorium_router
+
     app.include_router(explorium_router)
 except ModuleNotFoundError:
     pass  # explorium router not in this branch / optional
@@ -1004,3 +1005,7 @@ app.include_router(tagging_admin_router)
 from .routers.tags import router as tags_router
 
 app.include_router(tags_router)
+
+from .routers.activity import router as activity_router
+
+app.include_router(activity_router)

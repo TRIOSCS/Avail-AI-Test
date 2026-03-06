@@ -47,9 +47,9 @@ from app.services.buyplan_service import (
 # so we patch at the source module, not in buyplan_service namespace.
 _PATCH_TOKEN = "app.scheduler.get_valid_token"
 _PATCH_GC = "app.utils.graph_client.GraphClient"
-_PATCH_TEAMS_CH = "app.services.buyplan_service._post_teams_channel"
-_PATCH_TEAMS_DM = "app.services.buyplan_service._send_teams_dm"
-_PATCH_SETTINGS = "app.services.buyplan_service.settings"
+_PATCH_TEAMS_CH = "app.services.buyplan_notifications._post_teams_channel"
+_PATCH_TEAMS_DM = "app.services.buyplan_notifications._send_teams_dm"
+_PATCH_SETTINGS = "app.services.buyplan_notifications.settings"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -1698,7 +1698,7 @@ class TestRunBuyplanBg:
         mock_coro = AsyncMock()
         mock_coro.__name__ = "test_coro"
 
-        with patch("app.services.buyplan_service.asyncio") as mock_asyncio:
+        with patch("app.services.buyplan_notifications.asyncio") as mock_asyncio:
             run_buyplan_bg(mock_coro, plan.id)
             mock_asyncio.create_task.assert_called_once()
 

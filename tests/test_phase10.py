@@ -320,7 +320,7 @@ class TestCommodityRouting:
             "country_region_map": {},
         }
 
-        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=routing_maps):
+        with patch("app.services.buyplan_scoring._get_routing_maps", return_value=routing_maps):
             from app.services.buy_plan_v3_service import assign_buyer
 
             assigned, reason = assign_buyer(offer, vc, db_session)
@@ -356,7 +356,7 @@ class TestCommodityRouting:
             "country_region_map": {},
         }
 
-        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=routing_maps):
+        with patch("app.services.buyplan_scoring._get_routing_maps", return_value=routing_maps):
             from app.services.buy_plan_v3_service import assign_buyer
 
             assigned, reason = assign_buyer(offer, vc, db_session)

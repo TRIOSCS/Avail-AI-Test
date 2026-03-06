@@ -15,16 +15,16 @@ Called by: main.py (router mount)
 Depends on: dependencies, models, config
 """
 
-import secrets
-from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
 import base64
 import hashlib
 import hmac
 import os
+import secrets
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Depends, Request, Form
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -73,14 +73,16 @@ async def index(request: Request, db: Session = Depends(get_db)):
 async def login(request: Request):
     state = secrets.token_urlsafe(32)
     request.session["oauth_state"] = state
-    params = urlencode({
-        "client_id": settings.azure_client_id,
-        "response_type": "code",
-        "redirect_uri": f"{settings.app_url}/auth/callback",
-        "scope": SCOPES,
-        "response_mode": "query",
-        "state": state,
-    })
+    params = urlencode(
+        {
+            "client_id": settings.azure_client_id,
+            "response_type": "code",
+            "redirect_uri": f"{settings.app_url}/auth/callback",
+            "scope": SCOPES,
+            "response_mode": "query",
+            "state": state,
+        }
+    )
     return RedirectResponse(f"{AZURE_AUTH}/authorize?{params}")
 
 
@@ -240,6 +242,29 @@ async def password_login(
             "user_role": user.role or "buyer",
         }
     )
+
+
+@router.post("/auth/agent-session")
+async def agent_session(request: Request, db: Session = Depends(get_db)):
+    """Create a browser session for headless agent auth.
+
+    Validates x-agent-key header against settings.agent_api_key,
+    looks up the agent@availai.local service user, and sets
+    session cookie. Used by Playwright test agents.
+
+    Called by: test-site.sh dispatcher (machine-to-machine)
+    Depends on: config.settings.agent_api_key, User model
+    """
+    agent_key = request.headers.get("x-agent-key")
+    if not agent_key or not settings.agent_api_key or agent_key != settings.agent_api_key:
+        return JSONResponse({"error": "Invalid or missing agent key"}, status_code=401)
+
+    agent_user = db.query(User).filter_by(email="agent@availai.local").first()
+    if not agent_user:
+        return JSONResponse({"error": "Agent user not found"}, status_code=401)
+
+    request.session["user_id"] = agent_user.id
+    return JSONResponse({"ok": True, "user": "agent@availai.local"})
 
 
 @router.get("/auth/login-form", response_class=HTMLResponse)

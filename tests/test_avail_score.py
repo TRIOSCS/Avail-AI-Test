@@ -426,9 +426,10 @@ class TestSalesAvailScore:
         db_session.commit()
 
         result = compute_sales_avail_score(db_session, sales.id, MONTH)
-        # 3 accounts + 3 contacts = 6 total → tier for 5+
-        assert result["b5_score"] == 10
+        # 3 accounts + 3 contacts + 0 prospects = 6 total → tier for 6+
+        assert result["b5_score"] == 8
         assert "3 accts" in result["b5_raw"]
+        assert "0 prospects" in result["b5_raw"]
 
     def test_win_rate(self, db_session):
         """Won/lost quotes score O1."""

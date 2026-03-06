@@ -1631,7 +1631,7 @@ class TestIsStockSale:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
 
@@ -1658,7 +1658,7 @@ class TestIsStockSale:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
 
@@ -1904,7 +1904,7 @@ class TestCoverageGaps2:
 
         # Patch routing maps to include manufacturer -> commodity mapping
         maps = {"brand_commodity_map": {"texas instruments": "semiconductor"}, "country_region_map": {}}
-        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+        with patch("app.services.buyplan_scoring._get_routing_maps", return_value=maps):
             assigned, reason = assign_buyer(offer, vendor, db_session)
 
         assert assigned is not None
@@ -1951,7 +1951,7 @@ class TestCoverageGaps2:
         db_session.flush()
 
         maps = {"brand_commodity_map": {}, "country_region_map": {"us": "americas"}}
-        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+        with patch("app.services.buyplan_scoring._get_routing_maps", return_value=maps):
             assigned, reason = assign_buyer(offer, vendor, db_session)
 
         assert assigned is not None
@@ -2128,7 +2128,7 @@ class TestCoverageGaps2:
 
         flags = []
         maps = {"brand_commodity_map": {}, "country_region_map": {"china": "apac"}}
-        with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=maps):
+        with patch("app.services.buyplan_scoring._get_routing_maps", return_value=maps):
             _check_geo_mismatch(line, offer, "americas", flags, db_session)
 
         assert len(flags) == 1
@@ -2190,7 +2190,7 @@ class TestCoverageGaps2:
         db_session.commit()
         db_session.refresh(plan)
 
-        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             result = _is_stock_sale(plan, db_session)
         assert result is False
@@ -2235,7 +2235,7 @@ class TestCoverageGaps2:
             return real_get(model, pk, **kw)
 
         db_session.refresh(plan)
-        with patch("app.services.buy_plan_v3_service.settings") as mock_s:
+        with patch("app.services.buyplan_workflow.settings") as mock_s:
             mock_s.stock_sale_vendor_names = {"internal stock"}
             with patch.object(db_session, "get", side_effect=fake_get):
                 result = _is_stock_sale(plan, db_session)
@@ -2265,21 +2265,21 @@ class TestCoverageGaps2:
 
     def test_get_routing_maps_no_file(self, tmp_path):
         """Line 52: _get_routing_maps returns default when file missing."""
-        import app.services.buy_plan_v3_service as svc
+        import app.services.buyplan_scoring as scoring_mod
 
-        old = svc._ROUTING_MAPS
-        svc._ROUTING_MAPS = None  # reset cache
+        old = scoring_mod._ROUTING_MAPS
+        scoring_mod._ROUTING_MAPS = None  # reset cache
         try:
             # Point Path(__file__).parent.parent to a tmp dir that has no config/routing_maps.json
             fake_file = tmp_path / "services" / "fake.py"
             fake_file.parent.mkdir(parents=True, exist_ok=True)
             fake_file.touch()
-            with patch("app.services.buy_plan_v3_service.Path") as MockPath:
+            with patch("app.services.buyplan_scoring.Path") as MockPath:
                 MockPath.return_value = fake_file
                 # __file__ -> fake_file, .parent -> services/, .parent -> tmp_path
                 # / "config" / "routing_maps.json" -> tmp_path/config/routing_maps.json (doesn't exist)
-                result = svc._get_routing_maps()
+                result = scoring_mod._get_routing_maps()
             assert "brand_commodity_map" in result
             assert "country_region_map" in result
         finally:
-            svc._ROUTING_MAPS = old
+            scoring_mod._ROUTING_MAPS = old

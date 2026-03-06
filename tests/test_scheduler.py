@@ -44,6 +44,7 @@ def _mock_settings(**overrides):
         inbox_scan_interval_min=30,
         contacts_sync_enabled=False,
         activity_tracking_enabled=False,
+        ownership_sweep_enabled=False,
         proactive_matching_enabled=False,
         proactive_scan_interval_hours=4,
         deep_email_mining_enabled=False,
@@ -127,13 +128,24 @@ def test_configure_scheduler_conditional_flags_on():
 
 
 def test_configure_scheduler_activity_tracking_jobs():
-    """Activity tracking flag controls webhook_subs and ownership_sweep."""
+    """Activity tracking flag controls webhook_subs; ownership_sweep needs its own flag."""
     with patch("app.config.settings", _mock_settings(activity_tracking_enabled=True)):
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
     assert "webhook_subs" in job_ids
+    # ownership_sweep requires OWNERSHIP_SWEEP_ENABLED=true separately
+    assert "ownership_sweep" not in job_ids
+
+
+def test_configure_scheduler_ownership_sweep_enabled():
+    """Ownership sweep only runs when both flags are true."""
+    with patch("app.config.settings", _mock_settings(activity_tracking_enabled=True, ownership_sweep_enabled=True)):
+        configure_scheduler()
+
+    job_ids = {j.id for j in scheduler.get_jobs()}
     assert "ownership_sweep" in job_ids
+    assert "site_ownership_sweep" in job_ids
 
 
 def test_configure_scheduler_always_includes_buyplan_jobs():

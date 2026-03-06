@@ -230,48 +230,26 @@ class SiteTester:
 async def create_tickets_from_issues(issues: list[dict[str, Any]], db: Any) -> int:
     """Create a TroubleTicket for each issue found by the site tester.
 
-    Deduplicates: skips issues where an open ticket already exists
-    in the same area with the same title prefix (first 80 chars).
-
     Returns the number of tickets created.
     """
-    from app.models.trouble_ticket import TroubleTicket
     from app.services.trouble_ticket_service import create_ticket
-
-    open_statuses = ("submitted", "diagnosed", "escalated", "in_progress", "open", "fix_queued")
-    existing = (
-        db.query(TroubleTicket)
-        .filter(TroubleTicket.status.in_(open_statuses))
-        .filter(TroubleTicket.source == "playwright")
-        .all()
-    )
-    seen = {(t.current_view or "", (t.title or "")[:80]) for t in existing}
 
     count = 0
     for issue in issues:
-        area = issue.get("area", "")
-        title = issue.get("title", "")[:200]
-        dedup_key = (area, title[:80])
-
-        if dedup_key in seen:
-            logger.debug("site_tester: skipping duplicate '{}' in '{}'", title[:60], area)
-            continue
-
         try:
             create_ticket(
                 db=db,
                 user_id=1,  # system user
-                title=title,
+                title=issue["title"][:200],
                 description=issue["description"],
                 current_page=issue.get("url"),
                 source="playwright",
                 console_errors="\n".join(issue.get("console_errors", [])) or None,
-                current_view=area,
+                current_view=issue.get("area"),
             )
-            seen.add(dedup_key)
             count += 1
         except Exception as exc:
-            logger.warning("site_tester: failed to create ticket for '{}': {}", title, exc)
+            logger.warning("site_tester: failed to create ticket for '{}': {}", issue["title"], exc)
 
     if count:
         db.commit()

@@ -10,12 +10,13 @@ import {
 
 // ── Common Issues dropdown options ─────────────────────────────────────
 var COMMON_ISSUES = [
-    '',
-    'Search results not loading',
-    'RFQ emails not sending',
-    'Login / session expired unexpectedly',
-    'Page loads slowly or times out',
-    'Data missing or incorrect',
+    { label: '', title: '', hint: '' },
+    { label: 'Search not working', title: 'Search returns no/wrong results for [part]', hint: 'What part number did you search? What did you expect to see?' },
+    { label: 'Page won\'t load', title: 'Page fails to load: [which page]', hint: 'Which page? Do you see an error message or blank screen?' },
+    { label: 'Data looks wrong', title: 'Incorrect data on [what]', hint: 'What data is wrong? What should it be?' },
+    { label: 'Slow performance', title: 'Slow response on [where]', hint: 'Which page is slow? How long does it take to load?' },
+    { label: 'Email/RFQ issue', title: 'Email or RFQ problem: [describe]', hint: 'Which RFQ? What happened? Did you get an error?' },
+    { label: 'Other', title: '', hint: 'Describe what happened and what you expected.' },
 ];
 
 var STATUS_LABELS = {
@@ -105,12 +106,16 @@ function renderSubmitForm(container) {
     // Common issues quick-select
     var commonSelect = el('select', { id: 'ttCommonIssue', style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;' });
     commonSelect.appendChild(el('option', { value: '', textContent: 'Select a common issue (optional)...' }));
-    COMMON_ISSUES.forEach(function(issue) {
-        if (issue) commonSelect.appendChild(el('option', { value: issue, textContent: issue }));
+    COMMON_ISSUES.forEach(function(item) {
+        if (item.label) commonSelect.appendChild(el('option', { value: item.label, textContent: item.label }));
     });
     commonSelect.onchange = function() {
+        var sel = COMMON_ISSUES.find(function(i) { return i.label === commonSelect.value; });
+        if (!sel) return;
         var titleInput = document.getElementById('ttTitle');
-        if (this.value && titleInput) titleInput.value = this.value;
+        var descArea = document.getElementById('ttDesc');
+        if (sel.title && titleInput) titleInput.value = sel.title;
+        if (sel.hint && descArea) descArea.placeholder = sel.hint;
     };
 
     var titleInput = el('input', {
@@ -212,26 +217,19 @@ var _adminOffset = 0;
 
 async function renderAdminDashboard(container) {
     clearNode(container);
-
-    var findTroubleBtn = el('button', {
-        id: 'findTroubleBtn',
-        className: 'btn btn-sm',
-        style: 'background:#dc2626;color:#fff;',
-        textContent: _ftRunning ? 'Running... (Stop)' : 'Find Trouble',
-        onclick: function() { startFindTrouble(container); },
-    });
-    if (_ftRunning) findTroubleBtn.style.animation = 'ftPulse 2s ease-in-out infinite';
-
     var header = el('div', { className: 'vendor-header' }, [
         el('h2', {}, ['Trouble Tickets']),
-        el('div', { style: 'display:flex;gap:8px;' }, [
-            el('button', {
-                className: 'btn btn-primary btn-sm',
-                textContent: '+ New Ticket',
-                onclick: function() { renderSubmitForm(container); },
-            }),
-            findTroubleBtn,
-        ]),
+        el('button', {
+            className: 'btn btn-primary btn-sm',
+            textContent: '+ New Ticket',
+            onclick: function() { renderSubmitForm(container); },
+        }),
+        el('button', {
+            className: 'btn btn-sm',
+            textContent: 'Find Trouble',
+            style: 'background:#dc2626;color:#fff;margin-left:8px;',
+            onclick: function() { startFindTrouble(container); },
+        }),
     ]);
     container.appendChild(header);
 
@@ -312,6 +310,7 @@ function buildTicketTable(tickets, isAdmin) {
     var headRow = el('tr');
     var cols = ['#', 'Title', 'Status', 'Risk', 'Created'];
     if (isAdmin) cols.splice(2, 0, 'Submitter');
+    if (isAdmin) cols.push('Linked');
     cols.forEach(function(c) {
         headRow.appendChild(el('th', { textContent: c }));
     });
@@ -341,6 +340,16 @@ function buildTicketTable(tickets, isAdmin) {
             riskTd.appendChild(txt('—'));
         }
         row.appendChild(riskTd);
+        // Linked count badge (admin only)
+        if (isAdmin) {
+            var linkedTd = el('td');
+            if (t.child_count > 0) {
+                linkedTd.appendChild(badge(String(t.child_count), '#7c3aed'));
+            } else {
+                linkedTd.appendChild(txt('—'));
+            }
+            row.appendChild(linkedTd);
+        }
         // Created
         row.appendChild(el('td', {
             textContent: t.created_at ? new Date(t.created_at).toLocaleDateString() : '—',
@@ -400,6 +409,39 @@ async function showTicketDetail(ticketId) {
         if (t.diagnosed_at) times.appendChild(el('div', {}, ['Diagnosed: ' + new Date(t.diagnosed_at).toLocaleString()]));
         if (t.resolved_at) times.appendChild(el('div', {}, ['Resolved: ' + new Date(t.resolved_at).toLocaleString()]));
         body.appendChild(times);
+
+        // Linked tickets (child reports)
+        if (t.child_tickets && t.child_tickets.length) {
+            var linkedDiv = el('div', { style: 'margin-bottom:16px;' });
+            linkedDiv.appendChild(el('strong', { style: 'font-size:12px;display:block;margin-bottom:8px;', textContent: 'Linked Reports (' + t.child_tickets.length + ')' }));
+            t.child_tickets.forEach(function(child) {
+                var childRow = el('div', {
+                    style: 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;',
+                    onclick: function() { showTicketDetail(child.id); },
+                });
+                var leftSide = el('div');
+                leftSide.appendChild(el('span', { style: 'font-size:11px;color:var(--muted);margin-right:8px;', textContent: child.ticket_number }));
+                leftSide.appendChild(el('span', { style: 'font-size:12px;', textContent: child.title }));
+                childRow.appendChild(leftSide);
+                if (child.similarity_score) {
+                    childRow.appendChild(el('span', {
+                        style: 'font-size:10px;color:var(--muted);',
+                        textContent: Math.round(child.similarity_score * 100) + '% match',
+                    }));
+                }
+                linkedDiv.appendChild(childRow);
+            });
+            body.appendChild(linkedDiv);
+        }
+
+        // Show parent link if this ticket is a child
+        if (t.parent_ticket_id) {
+            body.appendChild(el('div', {
+                style: 'font-size:11px;color:var(--muted);margin-bottom:12px;cursor:pointer;',
+                textContent: 'Linked to parent ticket #' + t.parent_ticket_id,
+                onclick: function() { showTicketDetail(t.parent_ticket_id); },
+            }));
+        }
 
         // Diagnosis section (collapsible)
         if (t.diagnosis) {
@@ -875,205 +917,6 @@ if (document.readyState === 'loading') {
     startSysNotifPolling();
 }
 
-// ── Find Trouble — Automated Site Testing Loop ──────────────────────
-var _ftEventSource = null;
-var _ftRunning = false;
-
-async function startFindTrouble(container) {
-    if (_ftRunning) {
-        if (confirm('Find Trouble is running. Stop it?')) {
-            stopFindTrouble();
-        }
-        return;
-    }
-
-    if (!confirm(
-        'Launch Find Trouble?\n\n' +
-        '1. Playwright sweep (clicks every button in all 17 areas)\n' +
-        '2. Claude agent deep tests (intelligent workflow testing)\n' +
-        '3. Auto-heal low/medium risk tickets\n' +
-        '4. Repeat until clean\n\n' +
-        'This may take 30-60 minutes. Proceed?'
-    )) return;
-
-    try {
-        await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
-        _ftRunning = true;
-        showToast('Find Trouble started', 'success');
-        updateFindTroubleBtn();
-        showFindTroubleProgress(container);
-        connectFindTroubleSSE(container);
-    } catch (e) {
-        showToast('Failed to start: ' + (e.message || e), 'error');
-    }
-}
-
-async function stopFindTrouble() {
-    try {
-        await apiFetch('/api/trouble-tickets/find-trouble/stop', { method: 'POST' });
-        showToast('Stop requested — finishing current phase', 'info');
-    } catch (e) {
-        showToast('Failed to stop: ' + (e.message || e), 'error');
-    }
-}
-
-function updateFindTroubleBtn() {
-    var btn = document.getElementById('findTroubleBtn');
-    if (!btn) return;
-    if (_ftRunning) {
-        btn.textContent = 'Running... (Stop)';
-        btn.style.background = '#991b1b';
-        btn.style.animation = 'ftPulse 2s ease-in-out infinite';
-    } else {
-        btn.textContent = 'Find Trouble';
-        btn.style.background = '#dc2626';
-        btn.style.animation = 'none';
-    }
-}
-
-function showFindTroubleProgress(container) {
-    var existing = document.getElementById('ftProgress');
-    if (existing) existing.remove();
-
-    var panel = el('div', {
-        id: 'ftProgress',
-        style: 'margin-bottom:16px;border:2px solid #dc2626;border-radius:8px;padding:12px;background:var(--bg-alt);',
-    });
-
-    // Header
-    panel.appendChild(el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;' }, [
-        el('strong', { id: 'ftHeader', style: 'font-size:13px;color:#dc2626;', textContent: 'Find Trouble — Running' }),
-        el('span', { id: 'ftPhase', style: 'font-size:11px;color:var(--muted);', textContent: 'Starting...' }),
-    ]));
-
-    // Round indicator
-    panel.appendChild(el('div', { id: 'ftRound', style: 'font-size:11px;color:var(--muted);margin-bottom:8px;', textContent: 'Round 0/10' }));
-
-    // Area grid
-    var grid = el('div', {
-        id: 'ftAreaGrid',
-        style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:4px;margin-bottom:8px;',
-    });
-    var areas = ['search','requisitions','rfq','crm_companies','crm_contacts','crm_quotes','prospecting','vendors','tagging','tickets','admin_api_health','admin_settings','notifications','auth','upload','pipeline','activity'];
-    areas.forEach(function(area) {
-        grid.appendChild(el('div', {
-            id: 'ftArea_' + area,
-            style: 'font-size:10px;padding:3px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);text-align:center;',
-            textContent: area.replace(/_/g, ' '),
-        }));
-    });
-    panel.appendChild(grid);
-
-    // Stats row
-    panel.appendChild(el('div', { style: 'display:flex;gap:16px;font-size:11px;color:var(--muted);margin-bottom:8px;' }, [
-        el('span', { id: 'ftCreated', textContent: 'Tickets: 0' }),
-        el('span', { id: 'ftHealed', textContent: 'Healed: 0' }),
-        el('span', { id: 'ftClean', textContent: 'Clean rounds: 0' }),
-    ]));
-
-    // Event log
-    panel.appendChild(el('div', {
-        id: 'ftLog',
-        style: 'max-height:150px;overflow-y:auto;font-size:10px;font-family:monospace;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px;',
-    }));
-
-    // Insert after stats bar or at top
-    var statsBar = document.getElementById('ttStatsBar');
-    if (statsBar && statsBar.nextSibling) {
-        container.insertBefore(panel, statsBar.nextSibling);
-    } else {
-        container.insertBefore(panel, container.children[2] || null);
-    }
-}
-
-function connectFindTroubleSSE(container) {
-    if (_ftEventSource) _ftEventSource.close();
-
-    _ftEventSource = new EventSource('/api/trouble-tickets/find-trouble/stream');
-
-    _ftEventSource.onmessage = function(e) {
-        var evt;
-        try { evt = JSON.parse(e.data); } catch (err) { return; }
-
-        if (evt.type === 'stream_end' || evt.type === 'done') {
-            _ftRunning = false;
-            updateFindTroubleBtn();
-            if (_ftEventSource) { _ftEventSource.close(); _ftEventSource = null; }
-            var hdr = document.getElementById('ftHeader');
-            if (hdr) { hdr.textContent = 'Find Trouble — Complete'; hdr.style.color = '#16a34a'; }
-            setTimeout(function() { renderAdminDashboard(container); }, 2000);
-            return;
-        }
-
-        // Update phase
-        if (evt.type === 'phase' || evt.type === 'round_start') {
-            var phaseEl = document.getElementById('ftPhase');
-            if (phaseEl) phaseEl.textContent = evt.message;
-        }
-
-        // Update round
-        if (evt.type === 'round_start') {
-            var roundEl = document.getElementById('ftRound');
-            if (roundEl) roundEl.textContent = evt.message;
-        }
-
-        // Update area status colors
-        if (evt.area) {
-            var areaEl = document.getElementById('ftArea_' + evt.area);
-            if (areaEl) {
-                if (evt.type === 'agent_pass' || evt.type === 'sweep_pass') {
-                    areaEl.style.background = '#dcfce7'; areaEl.style.borderColor = '#16a34a'; areaEl.style.color = '#16a34a';
-                } else if (evt.type === 'agent_fail' || evt.type === 'sweep_fail') {
-                    areaEl.style.background = '#fef2f2'; areaEl.style.borderColor = '#dc2626'; areaEl.style.color = '#dc2626';
-                } else if (evt.type === 'agent_timeout') {
-                    areaEl.style.background = '#fffbeb'; areaEl.style.borderColor = '#d97706'; areaEl.style.color = '#d97706';
-                }
-            }
-        }
-
-        // Update stats
-        if (evt.type === 'tickets_created') {
-            var tc = document.getElementById('ftCreated');
-            if (tc) tc.textContent = 'Tickets: ' + (evt.message.match(/\d+/) || ['?'])[0];
-        }
-        if (evt.type === 'healed') {
-            var th = document.getElementById('ftHealed');
-            if (th) {
-                var cur = parseInt(th.textContent.replace('Healed: ', '')) || 0;
-                th.textContent = 'Healed: ' + (cur + 1);
-            }
-        }
-        if (evt.type === 'clean') {
-            var cc = document.getElementById('ftClean');
-            if (cc) cc.textContent = evt.message;
-        }
-
-        // Append to event log
-        var log = document.getElementById('ftLog');
-        if (log) {
-            var line = el('div', {
-                style: 'color:' + (evt.type === 'error' ? '#dc2626' : evt.type.indexOf('pass') >= 0 ? '#16a34a' : 'var(--muted)'),
-                textContent: (evt.timestamp || '').slice(11, 19) + ' ' + evt.message,
-            });
-            log.appendChild(line);
-            log.scrollTop = log.scrollHeight;
-        }
-    };
-
-    _ftEventSource.onerror = function() {
-        setTimeout(function() {
-            if (_ftRunning) connectFindTroubleSSE(container);
-        }, 3000);
-    };
-}
-
-// Pulse animation for Find Trouble button
-(function() {
-    var style = document.createElement('style');
-    style.textContent = '@keyframes ftPulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }';
-    document.head.appendChild(style);
-})();
-
 // ── Close notification panel on outside click ────────────────────────
 document.addEventListener('click', function(e) {
     var panel = document.getElementById('sysNotifPanel');
@@ -1082,6 +925,91 @@ document.addEventListener('click', function(e) {
     if (panel.contains(e.target) || (bell && bell.contains(e.target))) return;
     panel.style.display = 'none';
 });
+
+// ── Find Trouble — Automated Site Audit ──────────────────────────────
+
+async function startFindTrouble(container) {
+    if (!confirm('Launch exhaustive site audit?\n\n1. Playwright sweep (clicks every button)\n2. Claude agent prompts (opens tabs)\n\nProceed?')) return;
+
+    showToast('Starting site audit...', 'info');
+
+    try {
+        var job = await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
+        showToast('Playwright sweep started', 'success');
+        pollSweepProgress(job.job_id, container);
+
+        var promptData = await apiFetch('/api/trouble-tickets/find-trouble/prompts');
+        var prompts = promptData.prompts || [];
+
+        prompts.forEach(function(p) {
+            window.open(window.location.origin + '/' + (p.url_hash || '#'), '_blank');
+        });
+
+        showPromptPanel(prompts);
+    } catch (e) {
+        showToast('Failed to start audit: ' + e.message, 'error');
+    }
+}
+
+function pollSweepProgress(jobId, container) {
+    var interval = setInterval(async function() {
+        try {
+            var status = await apiFetch('/api/trouble-tickets/find-trouble/' + jobId);
+            if (status.status === 'complete') {
+                clearInterval(interval);
+                showToast('Audit complete: ' + status.issues_found + ' issues found, ' + status.issues_created + ' tickets created', 'success');
+                renderAdminDashboard(container);
+            } else if (status.status && status.status.startsWith('error')) {
+                clearInterval(interval);
+                showToast('Audit failed: ' + status.status, 'error');
+            }
+        } catch (e) {
+            clearInterval(interval);
+        }
+    }, 5000);
+}
+
+function showPromptPanel(prompts) {
+    var existing = document.getElementById('promptPanel');
+    if (existing) existing.remove();
+
+    var overlay = el('div', {
+        id: 'promptPanel',
+        style: 'position:fixed;right:16px;top:60px;width:420px;max-height:80vh;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;padding:16px;',
+    });
+
+    overlay.appendChild(el('button', {
+        style: 'position:absolute;top:8px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);',
+        textContent: 'x',
+        onclick: function() { overlay.remove(); },
+    }));
+    overlay.appendChild(el('h3', { style: 'margin:0 0 12px;font-size:14px;', textContent: 'Claude Agent Prompts' }));
+    overlay.appendChild(el('p', { style: 'font-size:11px;color:var(--muted);margin-bottom:12px;', textContent: 'Copy each prompt into Claude in the corresponding browser tab.' }));
+
+    prompts.forEach(function(p) {
+        var card = el('div', { style: 'border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;' });
+        var hdr = el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;' });
+        hdr.appendChild(el('strong', { style: 'font-size:12px;', textContent: p.area }));
+        var cpBtn = el('button', { className: 'btn btn-sm', textContent: 'Copy', style: 'font-size:10px;padding:2px 8px;' });
+        cpBtn.onclick = function() {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(p.prompt).then(function() {
+                    cpBtn.textContent = 'Copied!';
+                    setTimeout(function() { cpBtn.textContent = 'Copy'; }, 1500);
+                });
+            }
+        };
+        hdr.appendChild(cpBtn);
+        card.appendChild(hdr);
+        card.appendChild(el('p', {
+            style: 'font-size:10px;color:var(--muted);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
+            textContent: (p.prompt || '').split('\n')[0],
+        }));
+        overlay.appendChild(card);
+    });
+
+    document.body.appendChild(overlay);
+}
 
 // ── Keyboard shortcuts for ticket detail (admin only) ────────────────
 document.addEventListener('keydown', function(e) {

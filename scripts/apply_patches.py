@@ -13,6 +13,19 @@ What calls it:
 What it depends on:
     Python 3 stdlib only (json, sys, os, pathlib). No pip packages required.
 
+Fix JSON format:
+    {
+        "ticket_id": 42,
+        "patches": [
+            {
+                "file": "app/services/some_service.py",
+                "search": "exact string to find",
+                "replace": "replacement string"
+            },
+            ...
+        ]
+    }
+
 Exit codes:
     0 — all patches applied successfully
     1 — one or more patches failed (file not found, search string missing, etc.)
@@ -50,6 +63,7 @@ def apply_patch(patch: dict, index: int) -> bool:
 
     if search not in content:
         print(f"  [{index}] WARN Search string not found in {rel_path}")
+        # Treat missing search string as a failure — patch is stale or wrong
         return False
 
     new_content = content.replace(search, replace, 1)
@@ -62,46 +76,6 @@ def apply_patch(patch: dict, index: int) -> bool:
 
     print(f"  [{index}] OK   Patched {rel_path}")
     return True
-
-
-def validate_all_patches(patches: list[dict]) -> bool:
-    """Pre-flight: verify all search strings exist before applying any patch.
-
-    Returns True only if ALL patches would succeed.
-    """
-    if not patches:
-        return True
-
-    all_ok = True
-    for i, patch in enumerate(patches):
-        rel_path = patch.get("file", "")
-        search = patch.get("search", "")
-
-        if not rel_path or not search:
-            print(f"  [{i}] PRE-FLIGHT FAIL  Missing 'file' or 'search'")
-            all_ok = False
-            continue
-
-        target = PROJ_DIR / rel_path
-        if not target.is_file():
-            print(f"  [{i}] PRE-FLIGHT FAIL  File not found: {rel_path}")
-            all_ok = False
-            continue
-
-        try:
-            content = target.read_text(encoding="utf-8")
-        except Exception as exc:
-            print(f"  [{i}] PRE-FLIGHT FAIL  Cannot read {rel_path}: {exc}")
-            all_ok = False
-            continue
-
-        if search not in content:
-            preview = search[:80].replace("\n", "\\n")
-            print(f"  [{i}] PRE-FLIGHT FAIL  Search string not found in {rel_path}")
-            print(f"         Expected: '{preview}...'")
-            all_ok = False
-
-    return all_ok
 
 
 def main() -> int:
@@ -127,12 +101,6 @@ def main() -> int:
 
     ticket_id = data.get("ticket_id", "?")
     print(f"Applying {len(patches)} patch(es) for ticket #{ticket_id}")
-
-    # Pre-flight: validate ALL patches before applying ANY
-    print("Pre-flight validation...")
-    if not validate_all_patches(patches):
-        print("PRE-FLIGHT FAILED — aborting all patches (no files modified)")
-        return 1
 
     all_ok = True
     for i, patch in enumerate(patches):

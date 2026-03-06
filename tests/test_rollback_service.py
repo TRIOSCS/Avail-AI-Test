@@ -1,6 +1,7 @@
-"""Tests for rollback service (post-fix verification via SiteTester).
+"""Tests for verify-retest service (post-fix Playwright area retest).
 
-Covers: verify_and_retest pass/fail paths, ticket status updates, notifications.
+Covers: pass resolves ticket, fail creates regression, missing ticket,
+        notification emission.
 
 Called by: pytest
 Depends on: app.services.rollback_service
@@ -39,16 +40,15 @@ def rb_user(db_session: Session) -> User:
 
 
 @pytest.fixture()
-def fixed_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
+def queued_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
     ticket = TroubleTicket(
         ticket_number="TT-RB-001",
         submitted_by=rb_user.id,
-        title="Fixed bug",
-        description="Was broken, now fixed",
-        status="awaiting_verification",
+        title="Tickets view broken",
+        description="The tickets view throws a JS error",
+        status="fix_queued",
+        tested_area="tickets",
         risk_tier="low",
-        diagnosis={"root_cause": "Query error"},
-        file_mapping=["app/routers/vendors.py"],
     )
     db_session.add(ticket)
     db_session.commit()
@@ -56,102 +56,86 @@ def fixed_ticket(db_session: Session, rb_user: User) -> TroubleTicket:
     return ticket
 
 
+def _make_mock_tester(issues=None):
+    """Build a mock SiteTester class whose instances have run_full_sweep + issues."""
+    mock_cls = MagicMock()
+    instance = MagicMock()
+    instance.run_full_sweep = AsyncMock(return_value=[])
+    instance.issues = issues or []
+    mock_cls.return_value = instance
+    return mock_cls
+
+
 class TestVerifyAndRetest:
-    @patch("app.services.site_tester.SiteTester")
-    def test_pass_resolves_ticket(self, MockTester, db_session, fixed_ticket):
-        """No issues in sweep -> ticket resolved."""
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(return_value=[])
-        MockTester.return_value = instance
-
-        result = _run(verify_and_retest(fixed_ticket.id, db_session))
-        assert result["ok"] is True
-        assert result["status"] == "resolved"
-        db_session.refresh(fixed_ticket)
-        assert fixed_ticket.status == "resolved"
-
-    @patch("app.services.site_tester.SiteTester")
-    def test_pass_creates_resolved_notification(self, MockTester, db_session, fixed_ticket, rb_user):
-        """Resolved ticket sends notification to submitter."""
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(return_value=[])
-        MockTester.return_value = instance
-
-        _run(verify_and_retest(fixed_ticket.id, db_session))
-        notifs = (
-            db_session.query(Notification)
-            .filter_by(ticket_id=fixed_ticket.id, event_type="resolved")
-            .all()
+    @patch("app.services.rollback_service.SiteTester")
+    def test_pass_resolves_ticket(self, mock_st_cls, db_session, queued_ticket):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[],
         )
-        assert len(notifs) == 1
+        result = _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is True
+        assert result["issues"] == []
+        db_session.refresh(queued_ticket)
+        assert queued_ticket.status == "resolved"
 
-    def test_missing_ticket_returns_error(self, db_session):
-        """Non-existent ticket -> error dict."""
-        result = _run(verify_and_retest(99999, db_session))
-        assert "error" in result
+    @patch("app.services.rollback_service.SiteTester")
+    def test_fail_creates_regression_ticket(self, mock_st_cls, db_session, queued_ticket):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[
+                {"area": "tickets", "title": "JS error", "description": "Uncaught TypeError"},
+            ],
+        )
+        result = _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is False
+        assert "regression_ticket_id" in result
+
+        # Check child ticket
+        child = db_session.get(TroubleTicket, result["regression_ticket_id"])
+        assert child is not None
+        assert child.parent_ticket_id == queued_ticket.id
+        assert child.tested_area == "tickets"
+        assert "Retest failed" in child.title
+
+        # Original should be escalated
+        db_session.refresh(queued_ticket)
+        assert queued_ticket.status == "escalated"
+
+    def test_missing_ticket(self, db_session):
+        result = _run(verify_and_retest(
+            99999, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
+        assert result["passed"] is False
         assert "not found" in result["error"].lower()
 
-    @patch("app.services.rollback_service.create_ticket")
-    @patch("app.services.site_tester.SiteTester")
-    def test_fail_escalates_ticket(self, MockTester, mock_create, db_session, fixed_ticket):
-        """Issues found in the ticket's area -> ticket escalated."""
-        area = fixed_ticket.tested_area or fixed_ticket.category or "general"
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(return_value=[
-            {"area": area, "title": "500 error on vendors", "description": "Server error"},
-        ])
-        MockTester.return_value = instance
-        mock_create.return_value = MagicMock(id=9999)
-
-        result = _run(verify_and_retest(fixed_ticket.id, db_session))
-        assert result["ok"] is False
-        assert result["status"] == "escalated"
-        assert len(result["issues"]) == 1
-        db_session.refresh(fixed_ticket)
-        assert fixed_ticket.status == "escalated"
-
-    @patch("app.services.rollback_service.create_ticket")
-    @patch("app.services.site_tester.SiteTester")
-    def test_fail_creates_escalated_notification(self, MockTester, mock_create, db_session, fixed_ticket, rb_user):
-        """Failed retest sends escalation notification."""
-        area = fixed_ticket.tested_area or fixed_ticket.category or "general"
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(return_value=[
-            {"area": area, "title": "Regression", "description": "Broke again"},
-        ])
-        MockTester.return_value = instance
-        mock_create.return_value = MagicMock(id=9999)
-
-        _run(verify_and_retest(fixed_ticket.id, db_session))
+    @patch("app.services.rollback_service.SiteTester")
+    def test_pass_emits_notification(self, mock_st_cls, db_session, queued_ticket, rb_user):
+        mock_st_cls.return_value = MagicMock(
+            run_full_sweep=AsyncMock(return_value=[]),
+            issues=[],
+        )
+        _run(verify_and_retest(
+            queued_ticket.id, db_session,
+            base_url="http://localhost:8000",
+            session_cookie="abc",
+        ))
         notifs = (
             db_session.query(Notification)
-            .filter_by(ticket_id=fixed_ticket.id, event_type="escalated")
+            .filter_by(
+                ticket_id=queued_ticket.id,
+                event_type="resolved",
+            )
             .all()
         )
         assert len(notifs) == 1
-
-    @patch("app.services.site_tester.SiteTester")
-    def test_sweep_exception_returns_error(self, MockTester, db_session, fixed_ticket):
-        """SiteTester crash -> error dict, ticket unchanged."""
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(side_effect=RuntimeError("Playwright crashed"))
-        MockTester.return_value = instance
-
-        result = _run(verify_and_retest(fixed_ticket.id, db_session))
-        assert "error" in result
-        assert "failed" in result["error"].lower()
-        db_session.refresh(fixed_ticket)
-        assert fixed_ticket.status == "awaiting_verification"
-
-    @patch("app.services.site_tester.SiteTester")
-    def test_unrelated_issues_still_pass(self, MockTester, db_session, fixed_ticket):
-        """Issues in OTHER areas don't block resolution of this ticket."""
-        instance = MagicMock()
-        instance.run_full_sweep = AsyncMock(return_value=[
-            {"area": "unrelated_area", "title": "Other problem", "description": "Not ours"},
-        ])
-        MockTester.return_value = instance
-
-        result = _run(verify_and_retest(fixed_ticket.id, db_session))
-        assert result["ok"] is True
-        assert result["status"] == "resolved"

@@ -20,7 +20,7 @@ def register_email_jobs(scheduler, settings):
     if settings.contacts_sync_enabled:
         scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24), id="contacts_sync", name="Contacts sync")
 
-    if settings.activity_tracking_enabled:
+    if settings.activity_tracking_enabled and settings.ownership_sweep_enabled:
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12), id="ownership_sweep", name="Ownership sweep")
         scheduler.add_job(
             _job_site_ownership_sweep,
@@ -28,6 +28,8 @@ def register_email_jobs(scheduler, settings):
             id="site_ownership_sweep",
             name="Site ownership sweep",
         )
+    elif settings.activity_tracking_enabled:
+        logger.info("Ownership sweep disabled (OWNERSHIP_SWEEP_ENABLED=false) — activity tracking still active")
 
     if settings.deep_email_mining_enabled:
         scheduler.add_job(
@@ -358,8 +360,8 @@ async def _job_calendar_scan():
     """Daily: scan calendar events for vendor meetings and trade shows."""
     from ..database import SessionLocal
     from ..models import User
-    from ..utils.token_manager import get_valid_token
     from ..services.calendar_intelligence import scan_calendar_events
+    from ..utils.token_manager import get_valid_token
 
     db = SessionLocal()
     try:

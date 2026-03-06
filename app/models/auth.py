@@ -38,8 +38,8 @@ class User(Base):
     working_hours_end = Column(String(10))  # e.g. "17:00"
 
     # 8x8 Work Analytics
-    eight_by_eight_extension = Column(String(20))
-    eight_by_eight_enabled = Column(Boolean, default=False)
+    eight_by_eight_extension = Column(String(20), nullable=True)
+    eight_by_eight_enabled = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

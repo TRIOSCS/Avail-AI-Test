@@ -10,6 +10,7 @@ from loguru import logger
 def register_all_jobs(scheduler, settings):
     """Register all background jobs from domain modules."""
     from .core_jobs import register_core_jobs
+    from .eight_by_eight_jobs import register_eight_by_eight_jobs
     from .email_jobs import register_email_jobs
     from .enrichment_jobs import register_enrichment_jobs
     from .health_jobs import register_health_jobs
@@ -30,6 +31,7 @@ def register_all_jobs(scheduler, settings):
     register_maintenance_jobs(scheduler, settings)
     register_health_jobs(scheduler, settings)
     register_selfheal_jobs(scheduler, settings)
+    register_eight_by_eight_jobs(scheduler, settings)
 
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
