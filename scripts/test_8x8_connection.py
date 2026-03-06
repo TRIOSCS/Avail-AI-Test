@@ -85,14 +85,25 @@ def main():
     print("[5] Summary:")
     directions = {}
     missed_count = 0
+    extensions = {}
     for cdr in cdrs:
         d = cdr.get("direction", "Unknown")
         directions[d] = directions.get(d, 0) + 1
         if cdr.get("missed") == "Missed":
             missed_count += 1
+        # Track extensions and names
+        norm = normalize_cdr(cdr)
+        ext = norm["extension"]
+        name = norm["caller_name"] if d == "Outgoing" else norm["callee_name"]
+        if ext and ext not in extensions:
+            extensions[ext] = name or "(unknown)"
     for d, count in sorted(directions.items()):
         print(f"    {d}: {count}")
     print(f"    Missed: {missed_count}")
+    print()
+    print("[6] Extensions found:")
+    for ext, name in sorted(extensions.items()):
+        print(f"    ext {ext} — {name}")
     print()
     print("Done. No data written to database.")
 
