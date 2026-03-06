@@ -21,7 +21,7 @@ from app.services.cost_controller import check_budget
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
 from app.services.pattern_tracker import get_health_status, get_weekly_stats
-from app.services.rollback_service import check_post_fix_health
+from app.services.rollback_service import verify_and_retest
 from app.services.trouble_ticket_service import create_ticket, update_ticket
 
 
@@ -47,9 +47,10 @@ def integ_user(db_session: Session) -> User:
 class TestLowRiskFullFlow:
     """Low-risk ticket: submit → diagnose → execute → verify → resolve."""
 
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
-    def test_full_lifecycle(self, mock_claude, mock_run, db_session, integ_user):
+    def test_full_lifecycle(self, mock_claude, mock_gen, mock_write, db_session, integ_user):
         # 1. Submit ticket
         ticket = create_ticket(
             db=db_session,
@@ -78,24 +79,28 @@ class TestLowRiskFullFlow:
         assert ticket.risk_tier == "low"
         assert ticket.diagnosis is not None
 
-        # 3. Execute fix — mock _run_fix returns success
-        mock_run.return_value = {
+        # 3. Execute fix — mock _generate_fix returns success
+        mock_gen.return_value = {
             "success": True,
+            "patches": [{"file": "app/static/app.css", "diff": "margin fix"}],
             "summary": "Fixed margin",
-            "branch": "fix/1",
             "cost_usd": 0.05,
         }
         exec_result = _run(execute_fix(ticket.id, db_session))
         assert exec_result["ok"] is True
         db_session.refresh(ticket)
-        assert ticket.status == "awaiting_verification"
+        assert ticket.status == "fix_queued"
 
-        # 4. Post-fix health check
-        health = _run(check_post_fix_health(ticket.id, db_session))
-        assert health["healthy"] is True
+        # 4. Post-fix health check — mock SiteTester to avoid Playwright
+        with patch("app.services.site_tester.SiteTester") as MockTester:
+            instance = AsyncMock()
+            instance.run_full_sweep = AsyncMock(return_value=[])
+            MockTester.return_value = instance
+            health = _run(verify_and_retest(ticket.id, db_session))
+        assert health["ok"] is True
+        assert health["status"] == "resolved"
 
-        # 5. Verify — user confirms fix
-        update_ticket(db_session, ticket.id, status="resolved", resolution_notes="User verified fix works")
+        # 5. Ticket already resolved by verify_and_retest
         db_session.refresh(ticket)
         assert ticket.status == "resolved"
 
