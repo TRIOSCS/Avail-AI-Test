@@ -79,6 +79,14 @@ class TroubleTicket(Base):
     source = Column(String(20))  # 'report_button' | 'ticket_form'
     legacy_error_report_id = Column(Integer)  # traceability to old error_reports
 
+    # Agent testing context (migration 053)
+    similarity_score = Column(Float)
+    tested_area = Column(String(50))
+    dom_snapshot = Column(Text)
+    network_errors = Column(JSON)
+    performance_timings = Column(JSON)
+    reproduction_steps = Column(JSON)
+
     submitter = relationship("User", foreign_keys=[submitted_by])
     resolved_by = relationship("User", foreign_keys=[resolved_by_id])
     parent_ticket = relationship("TroubleTicket", remote_side=[id], foreign_keys=[parent_ticket_id])
