@@ -55,7 +55,8 @@ async def start_find_trouble(
     """Launch the Find Trouble test loop (admin only)."""
     svc_ft = get_find_trouble_service()
     session_cookie = request.cookies.get("session", "")
-    base_url = str(request.base_url).rstrip("/")
+    # Always use localhost — Playwright runs inside the same container
+    base_url = "http://localhost:8000"
 
     result = svc_ft.try_start(base_url, session_cookie)
     if result is None:

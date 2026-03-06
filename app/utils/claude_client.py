@@ -159,7 +159,8 @@ async def claude_structured(
             return None
 
     except Exception as e:
-        logger.warning(f"Claude structured call failed: {e}")
+        logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
+        logger.debug("Claude structured call traceback:", exc_info=True)
         return None
 
 

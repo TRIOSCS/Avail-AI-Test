@@ -1,14 +1,18 @@
-"""Self-heal pipeline background jobs — weekly report, daily ticket consolidation.
+"""Self-heal pipeline background jobs — weekly report, ticket consolidation, retry stuck tickets.
 
 Called by: app/jobs/__init__.py via register_selfheal_jobs()
 Depends on: app.database, app.services.pattern_tracker,
-            app.services.ticket_consolidation
+            app.services.ticket_consolidation, app.services.execution_service,
+            app.services.diagnosis_service
 """
 
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
+from ..config import settings
 from ..scheduler import _traced_job
+
+MAX_RETRY_BATCH = 10
 
 
 def register_selfheal_jobs(scheduler, settings):
@@ -24,6 +28,12 @@ def register_selfheal_jobs(scheduler, settings):
         CronTrigger(hour=5),
         id="consolidate_tickets",
         name="Daily ticket consolidation sweep",
+    )
+    scheduler.add_job(
+        _job_retry_stuck_diagnosed,
+        CronTrigger(hour="*/4"),
+        id="retry_stuck_diagnosed",
+        name="Retry stuck diagnosed tickets",
     )
 
 

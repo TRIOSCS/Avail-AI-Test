@@ -202,6 +202,7 @@ Provide a detailed technical diagnosis with specific file paths and fix approach
         system=DIAGNOSIS_SYSTEM,
         model_tier="smart",
         max_tokens=2048,
+        timeout=90,
     )
 
     if not result:
@@ -235,20 +236,18 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
     classification = apply_risk_overrides(classification, relevant_files)
     risk_tier = classification["risk_tier"]
 
-    # Stage 2: Detailed diagnosis (skip for high risk — needs human review)
-    diagnosis = None
-    if risk_tier != "high":
-        diagnosis = await diagnose_ticket(ticket, classification)
-        # Check if diagnosis indicates migration needed -> force high
-        if diagnosis and diagnosis.get("requires_migration"):
-            risk_tier = "high"
-            classification["risk_tier"] = "high"
-            logger.info("Risk forced to high: migration required for ticket {}", ticket_id)
-        # Check complexity override: complex + low -> medium
-        if diagnosis and risk_tier == "low" and diagnosis.get("estimated_complexity") == "complex":
-            risk_tier = "medium"
-            classification["risk_tier"] = "medium"
-            logger.info("Risk bumped to medium: complex issue for ticket {}", ticket_id)
+    # Stage 2: Detailed diagnosis (all risk levels in aggressive mode)
+    diagnosis = await diagnose_ticket(ticket, classification)
+    # Check if diagnosis indicates migration needed -> force high
+    if diagnosis and diagnosis.get("requires_migration"):
+        risk_tier = "high"
+        classification["risk_tier"] = "high"
+        logger.info("Risk forced to high: migration required for ticket {}", ticket_id)
+    # Check complexity override: complex + low -> medium
+    if diagnosis and risk_tier == "low" and diagnosis.get("estimated_complexity") == "complex":
+        risk_tier = "medium"
+        classification["risk_tier"] = "medium"
+        logger.info("Risk bumped to medium: complex issue for ticket {}", ticket_id)
 
     # Build combined diagnosis result
     full_diagnosis = {
@@ -257,9 +256,9 @@ async def diagnose_full(ticket_id: int, db: Session) -> dict:
         "relevant_files": [f["path"] for f in relevant_files],
     }
 
-    # Generate fix prompt
+    # Generate fix prompt (all risk levels in aggressive mode)
     generated_prompt = None
-    if diagnosis and risk_tier != "high":
+    if diagnosis:
         generated_prompt = generate_fix_prompt(
             ticket_id=ticket_id,
             title=ticket.title,

@@ -26,7 +26,7 @@ PROJ_DIR="/root/availai"
 QUEUE_DIR="${PROJ_DIR}/fix_queue"
 APPLIED_DIR="${PROJ_DIR}/fix_queue/applied"
 FAILED_DIR="${PROJ_DIR}/fix_queue/failed"
-APP_URL="http://localhost:8000"
+APP_URL="http://localhost:80"
 LOG_FILE="/var/log/avail/self_heal_watcher.log"
 
 # ---------------------------------------------------------------------------

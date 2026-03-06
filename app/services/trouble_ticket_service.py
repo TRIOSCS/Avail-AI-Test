@@ -355,16 +355,9 @@ async def auto_process_ticket(ticket_id: int) -> None:
                 return
 
             risk_tier = result.get("risk_tier", "high")
-            if risk_tier == "high":
-                logger.info("Ticket {} is high-risk — escalating for admin review", ticket_id)
-                ticket = db.get(TroubleTicket, ticket_id)
-                if ticket:
-                    ticket.status = "escalated"
-                    db.commit()
-                return
 
-            # Auto-execute for low and medium risk
-            if settings.self_heal_auto_execute_low and risk_tier in ("low", "medium"):
+            # Auto-execute for all risk levels (aggressive mode)
+            if settings.self_heal_auto_execute_low and risk_tier in ("low", "medium", "high"):
                 exec_result = await execute_fix(ticket_id, db)
                 if "error" in exec_result:
                     logger.warning("Auto-execute failed for ticket {}: {}", ticket_id, exec_result["error"])

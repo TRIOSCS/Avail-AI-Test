@@ -18,10 +18,10 @@ from typing import Any
 
 from loguru import logger
 
-MAX_ROUNDS = 10
-CLEAN_ROUNDS_TO_STOP = 2
-FIX_QUEUE_POLL_INTERVAL = 15  # seconds
-FIX_QUEUE_MAX_WAIT = 300  # 5 minutes
+MAX_ROUNDS = 50
+CLEAN_ROUNDS_TO_STOP = 3
+FIX_QUEUE_POLL_INTERVAL = 5  # seconds
+FIX_QUEUE_MAX_WAIT = 120  # 2 minutes
 
 AREAS = [
     "search", "requisitions", "rfq", "crm_companies", "crm_contacts",
@@ -299,36 +299,51 @@ class FindTroubleService:
             db.close()
 
     async def _auto_process_new_tickets(self, job: dict) -> int:
-        """Auto-diagnose and execute fixes for new playwright tickets."""
+        """Auto-diagnose and execute fixes for new tickets (parallel batches)."""
         from app.database import SessionLocal
         from app.models.trouble_ticket import TroubleTicket
         from app.services.trouble_ticket_service import auto_process_ticket
 
         db = SessionLocal()
         try:
+            # Process ALL submitted tickets, not just playwright
             recent = (
                 db.query(TroubleTicket)
-                .filter(TroubleTicket.source == "playwright")
                 .filter(TroubleTicket.status == "submitted")
                 .order_by(TroubleTicket.id.desc())
-                .limit(50)
+                .limit(100)
                 .all()
             )
 
             healed = 0
-            for ticket in recent:
+            # Process in parallel batches of 8
+            batch_size = 8
+            for i in range(0, len(recent), batch_size):
                 if job["cancel"]:
                     break
-                try:
-                    await auto_process_ticket(ticket.id)
-                    healed += 1
-                    self._emit("healed", f"Auto-processed ticket #{ticket.id}: {ticket.title[:60]}")
-                except Exception as e:
-                    logger.warning("find_trouble: auto-process failed for #{}: {}", ticket.id, e)
+                batch = recent[i:i + batch_size]
+                tasks = []
+                for ticket in batch:
+                    tasks.append(self._process_one(ticket.id, ticket.title, job))
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in results:
+                    if isinstance(r, int):
+                        healed += r
 
             return healed
         finally:
             db.close()
+
+    async def _process_one(self, ticket_id: int, title: str, job: dict) -> int:
+        """Process a single ticket (diagnose + execute). Returns 1 on success, 0 on failure."""
+        from app.services.trouble_ticket_service import auto_process_ticket
+        try:
+            await auto_process_ticket(ticket_id)
+            self._emit("healed", f"Auto-processed ticket #{ticket_id}: {title[:60]}")
+            return 1
+        except Exception as e:
+            logger.warning("find_trouble: auto-process failed for #{}: {}", ticket_id, e)
+            return 0
 
     async def _wait_for_fixes(self, job: dict) -> None:
         """Wait for fix_queue/ to be empty (watcher applies fixes)."""
