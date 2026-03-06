@@ -307,3 +307,23 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
             "users": users_status,
         }
     )
+
+
+@router.post("/auth/agent-session")
+async def agent_session(request: Request, db: Session = Depends(get_db)):
+    """Create a session for headless agent testing.
+
+    Validates x-agent-key header, sets session cookie for the agent user.
+    Called by: scripts/test-site.sh before launching Playwright agents.
+    """
+    agent_key = request.headers.get("x-agent-key")
+    if not agent_key or not settings.agent_api_key or agent_key != settings.agent_api_key:
+        return JSONResponse({"error": "Invalid agent key"}, status_code=401)
+
+    agent_user = db.query(User).filter_by(email="agent@availai.local").first()
+    if not agent_user:
+        logger.error("agent-session: agent@availai.local user not found")
+        return JSONResponse({"error": "Agent user not configured"}, status_code=500)
+
+    request.session["user_id"] = agent_user.id
+    return JSONResponse({"ok": True, "user_id": agent_user.id, "email": agent_user.email})
