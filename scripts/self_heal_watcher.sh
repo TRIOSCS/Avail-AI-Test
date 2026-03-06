@@ -39,6 +39,11 @@ health_ok() {
         curl -sf http://localhost:8000/health >/dev/null 2>&1
 }
 
+app_curl() {
+    # Run curl inside the app container to reach FastAPI directly
+    docker compose -f "${PROJ_DIR}/docker-compose.yml" exec -T app curl "$@"
+}
+
 log() {
     local ts
     ts="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -139,8 +144,8 @@ EOF
 
     # 8. Trigger verify-retest
     local retest_status
-    retest_status="$(curl -sf -o /dev/null -w '%{http_code}' \
-        -X POST "${APP_URL}/api/internal/verify-retest/${ticket_id}")" || retest_status="000"
+    retest_status="$(app_curl -sf -o /dev/null -w '%{http_code}' \
+        -X POST "http://localhost:8000/api/internal/verify-retest/${ticket_id}")" || retest_status="000"
 
     if [ "${retest_status}" = "200" ]; then
         log "OK   Ticket #${ticket_id} retest passed"
