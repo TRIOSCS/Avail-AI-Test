@@ -511,17 +511,14 @@ class TestAgentSession:
         resp = auth_client.post("/auth/agent-session")
         assert resp.status_code == 401
 
-    def test_agent_session_no_agent_user(self, auth_client, db_session, monkeypatch):
-        """POST /auth/agent-session when agent user doesn't exist returns 500."""
+    def test_agent_session_empty_api_key_config(self, auth_client, monkeypatch):
+        """POST /auth/agent-session returns 401 when AGENT_API_KEY not configured."""
         from app.config import settings
 
-        monkeypatch.setattr(settings, "agent_api_key", "test-agent-key-123")
-
-        db_session.query(User).filter_by(email="agent@availai.local").delete()
-        db_session.commit()
+        monkeypatch.setattr(settings, "agent_api_key", "")
 
         resp = auth_client.post(
             "/auth/agent-session",
-            headers={"x-agent-key": "test-agent-key-123"},
+            headers={"x-agent-key": "any-key"},
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 401
