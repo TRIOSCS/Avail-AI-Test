@@ -1,6 +1,18 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
+
+const TEST_PATTERNS = [/QA\s+VALIDATION\s+TEST/i, /DELETE\s+ME/i, /\(clone\).*\(clone\)/i];
+function validateRfqName(name) {
+    for (const p of TEST_PATTERNS) {
+        if (p.test(name)) {
+            return 'This name matches a test-data pattern and cannot be saved in production.';
+        }
+    }
+    return null;
+}
+window.validateRfqName = validateRfqName;
+
 (function() {
     var el = document.getElementById('app-config');
     if (el) {
