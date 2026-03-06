@@ -120,9 +120,9 @@ $AREA_PROMPT"
     PROMPT_FILE="$RUN_DIR/${area}_prompt.md"
     echo "$FULL_PROMPT" > "$PROMPT_FILE"
 
-    # Launch claude in background
+    # Launch claude in background (unset CLAUDECODE to allow nested sessions)
     echo "  >> Launching agent: $area"
-    timeout "$TIMEOUT_SECS" claude -p "$(cat "$PROMPT_FILE")" \
+    timeout "$TIMEOUT_SECS" env -u CLAUDECODE claude -p "$(cat "$PROMPT_FILE")" \
         --allowedTools "mcp__plugin_playwright_playwright__*,Bash" \
         > "$RUN_DIR/${area}_output.txt" 2>&1 &
     PID=$!
@@ -157,19 +157,19 @@ for pid in "${PIDS[@]}"; do
 
     if [ $EXIT_CODE -eq 124 ]; then
         STATUS="TIMEOUT"
-        ((ERROR++))
-    elif grep -q "PASS: $area" "$OUTPUT" 2>/dev/null; then
+        ERROR=$((ERROR+1))
+    elif grep -qi "PASS:.*$area\|PASS.*$area" "$OUTPUT" 2>/dev/null; then
         STATUS="PASS"
-        ((PASS++))
-    elif grep -q "trouble-ticket" "$OUTPUT" 2>/dev/null || grep -q "filed ticket" "$OUTPUT" 2>/dev/null; then
+        PASS=$((PASS+1))
+    elif grep -qi "ticket\|issue.*filed\|FAIL" "$OUTPUT" 2>/dev/null; then
         STATUS="FAIL"
-        ((FAIL++))
+        FAIL=$((FAIL+1))
     elif [ $EXIT_CODE -ne 0 ]; then
         STATUS="ERROR"
-        ((ERROR++))
+        ERROR=$((ERROR+1))
     else
         STATUS="PASS"
-        ((PASS++))
+        PASS=$((PASS+1))
     fi
 
     RESULTS+=("$area:$STATUS")
@@ -195,7 +195,8 @@ echo "{\"run_id\": \"$RUN_ID\", \"timestamp\": \"$(date -Iseconds)\", \"areas_te
 
 # ── Diff from last run ──────────────────────────────────────────────
 PREV_RUN=$(tail -2 "$HISTORY_FILE" 2>/dev/null | head -1)
-if [ -n "$PREV_RUN" ] && [ "$(echo "$PREV_RUN" | jq -r '.run_id')" != "$RUN_ID" ]; then
+PREV_RUN_ID=$(echo "$PREV_RUN" | jq -r '.run_id' 2>/dev/null || echo "")
+if [ -n "$PREV_RUN" ] && [ -n "$PREV_RUN_ID" ] && [ "$PREV_RUN_ID" != "$RUN_ID" ]; then
     echo ""
     echo "  Changes from last run:"
     for r in "${RESULTS[@]}"; do
