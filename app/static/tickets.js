@@ -212,13 +212,26 @@ var _adminOffset = 0;
 
 async function renderAdminDashboard(container) {
     clearNode(container);
+
+    var findTroubleBtn = el('button', {
+        id: 'findTroubleBtn',
+        className: 'btn btn-sm',
+        style: 'background:#dc2626;color:#fff;',
+        textContent: _ftRunning ? 'Running... (Stop)' : 'Find Trouble',
+        onclick: function() { startFindTrouble(container); },
+    });
+    if (_ftRunning) findTroubleBtn.style.animation = 'ftPulse 2s ease-in-out infinite';
+
     var header = el('div', { className: 'vendor-header' }, [
         el('h2', {}, ['Trouble Tickets']),
-        el('button', {
-            className: 'btn btn-primary btn-sm',
-            textContent: '+ New Ticket',
-            onclick: function() { renderSubmitForm(container); },
-        }),
+        el('div', { style: 'display:flex;gap:8px;' }, [
+            el('button', {
+                className: 'btn btn-primary btn-sm',
+                textContent: '+ New Ticket',
+                onclick: function() { renderSubmitForm(container); },
+            }),
+            findTroubleBtn,
+        ]),
     ]);
     container.appendChild(header);
 
@@ -861,6 +874,205 @@ if (document.readyState === 'loading') {
 } else {
     startSysNotifPolling();
 }
+
+// ── Find Trouble — Automated Site Testing Loop ──────────────────────
+var _ftEventSource = null;
+var _ftRunning = false;
+
+async function startFindTrouble(container) {
+    if (_ftRunning) {
+        if (confirm('Find Trouble is running. Stop it?')) {
+            stopFindTrouble();
+        }
+        return;
+    }
+
+    if (!confirm(
+        'Launch Find Trouble?\n\n' +
+        '1. Playwright sweep (clicks every button in all 17 areas)\n' +
+        '2. Claude agent deep tests (intelligent workflow testing)\n' +
+        '3. Auto-heal low/medium risk tickets\n' +
+        '4. Repeat until clean\n\n' +
+        'This may take 30-60 minutes. Proceed?'
+    )) return;
+
+    try {
+        await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
+        _ftRunning = true;
+        showToast('Find Trouble started', 'success');
+        updateFindTroubleBtn();
+        showFindTroubleProgress(container);
+        connectFindTroubleSSE(container);
+    } catch (e) {
+        showToast('Failed to start: ' + (e.message || e), 'error');
+    }
+}
+
+async function stopFindTrouble() {
+    try {
+        await apiFetch('/api/trouble-tickets/find-trouble/stop', { method: 'POST' });
+        showToast('Stop requested — finishing current phase', 'info');
+    } catch (e) {
+        showToast('Failed to stop: ' + (e.message || e), 'error');
+    }
+}
+
+function updateFindTroubleBtn() {
+    var btn = document.getElementById('findTroubleBtn');
+    if (!btn) return;
+    if (_ftRunning) {
+        btn.textContent = 'Running... (Stop)';
+        btn.style.background = '#991b1b';
+        btn.style.animation = 'ftPulse 2s ease-in-out infinite';
+    } else {
+        btn.textContent = 'Find Trouble';
+        btn.style.background = '#dc2626';
+        btn.style.animation = 'none';
+    }
+}
+
+function showFindTroubleProgress(container) {
+    var existing = document.getElementById('ftProgress');
+    if (existing) existing.remove();
+
+    var panel = el('div', {
+        id: 'ftProgress',
+        style: 'margin-bottom:16px;border:2px solid #dc2626;border-radius:8px;padding:12px;background:var(--bg-alt);',
+    });
+
+    // Header
+    panel.appendChild(el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;' }, [
+        el('strong', { id: 'ftHeader', style: 'font-size:13px;color:#dc2626;', textContent: 'Find Trouble — Running' }),
+        el('span', { id: 'ftPhase', style: 'font-size:11px;color:var(--muted);', textContent: 'Starting...' }),
+    ]));
+
+    // Round indicator
+    panel.appendChild(el('div', { id: 'ftRound', style: 'font-size:11px;color:var(--muted);margin-bottom:8px;', textContent: 'Round 0/10' }));
+
+    // Area grid
+    var grid = el('div', {
+        id: 'ftAreaGrid',
+        style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:4px;margin-bottom:8px;',
+    });
+    var areas = ['search','requisitions','rfq','crm_companies','crm_contacts','crm_quotes','prospecting','vendors','tagging','tickets','admin_api_health','admin_settings','notifications','auth','upload','pipeline','activity'];
+    areas.forEach(function(area) {
+        grid.appendChild(el('div', {
+            id: 'ftArea_' + area,
+            style: 'font-size:10px;padding:3px 6px;border-radius:4px;background:var(--bg);border:1px solid var(--border);text-align:center;',
+            textContent: area.replace(/_/g, ' '),
+        }));
+    });
+    panel.appendChild(grid);
+
+    // Stats row
+    panel.appendChild(el('div', { style: 'display:flex;gap:16px;font-size:11px;color:var(--muted);margin-bottom:8px;' }, [
+        el('span', { id: 'ftCreated', textContent: 'Tickets: 0' }),
+        el('span', { id: 'ftHealed', textContent: 'Healed: 0' }),
+        el('span', { id: 'ftClean', textContent: 'Clean rounds: 0' }),
+    ]));
+
+    // Event log
+    panel.appendChild(el('div', {
+        id: 'ftLog',
+        style: 'max-height:150px;overflow-y:auto;font-size:10px;font-family:monospace;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:6px;',
+    }));
+
+    // Insert after stats bar or at top
+    var statsBar = document.getElementById('ttStatsBar');
+    if (statsBar && statsBar.nextSibling) {
+        container.insertBefore(panel, statsBar.nextSibling);
+    } else {
+        container.insertBefore(panel, container.children[2] || null);
+    }
+}
+
+function connectFindTroubleSSE(container) {
+    if (_ftEventSource) _ftEventSource.close();
+
+    _ftEventSource = new EventSource('/api/trouble-tickets/find-trouble/stream');
+
+    _ftEventSource.onmessage = function(e) {
+        var evt;
+        try { evt = JSON.parse(e.data); } catch (err) { return; }
+
+        if (evt.type === 'stream_end' || evt.type === 'done') {
+            _ftRunning = false;
+            updateFindTroubleBtn();
+            if (_ftEventSource) { _ftEventSource.close(); _ftEventSource = null; }
+            var hdr = document.getElementById('ftHeader');
+            if (hdr) { hdr.textContent = 'Find Trouble — Complete'; hdr.style.color = '#16a34a'; }
+            setTimeout(function() { renderAdminDashboard(container); }, 2000);
+            return;
+        }
+
+        // Update phase
+        if (evt.type === 'phase' || evt.type === 'round_start') {
+            var phaseEl = document.getElementById('ftPhase');
+            if (phaseEl) phaseEl.textContent = evt.message;
+        }
+
+        // Update round
+        if (evt.type === 'round_start') {
+            var roundEl = document.getElementById('ftRound');
+            if (roundEl) roundEl.textContent = evt.message;
+        }
+
+        // Update area status colors
+        if (evt.area) {
+            var areaEl = document.getElementById('ftArea_' + evt.area);
+            if (areaEl) {
+                if (evt.type === 'agent_pass' || evt.type === 'sweep_pass') {
+                    areaEl.style.background = '#dcfce7'; areaEl.style.borderColor = '#16a34a'; areaEl.style.color = '#16a34a';
+                } else if (evt.type === 'agent_fail' || evt.type === 'sweep_fail') {
+                    areaEl.style.background = '#fef2f2'; areaEl.style.borderColor = '#dc2626'; areaEl.style.color = '#dc2626';
+                } else if (evt.type === 'agent_timeout') {
+                    areaEl.style.background = '#fffbeb'; areaEl.style.borderColor = '#d97706'; areaEl.style.color = '#d97706';
+                }
+            }
+        }
+
+        // Update stats
+        if (evt.type === 'tickets_created') {
+            var tc = document.getElementById('ftCreated');
+            if (tc) tc.textContent = 'Tickets: ' + (evt.message.match(/\d+/) || ['?'])[0];
+        }
+        if (evt.type === 'healed') {
+            var th = document.getElementById('ftHealed');
+            if (th) {
+                var cur = parseInt(th.textContent.replace('Healed: ', '')) || 0;
+                th.textContent = 'Healed: ' + (cur + 1);
+            }
+        }
+        if (evt.type === 'clean') {
+            var cc = document.getElementById('ftClean');
+            if (cc) cc.textContent = evt.message;
+        }
+
+        // Append to event log
+        var log = document.getElementById('ftLog');
+        if (log) {
+            var line = el('div', {
+                style: 'color:' + (evt.type === 'error' ? '#dc2626' : evt.type.indexOf('pass') >= 0 ? '#16a34a' : 'var(--muted)'),
+                textContent: (evt.timestamp || '').slice(11, 19) + ' ' + evt.message,
+            });
+            log.appendChild(line);
+            log.scrollTop = log.scrollHeight;
+        }
+    };
+
+    _ftEventSource.onerror = function() {
+        setTimeout(function() {
+            if (_ftRunning) connectFindTroubleSSE(container);
+        }, 3000);
+    };
+}
+
+// Pulse animation for Find Trouble button
+(function() {
+    var style = document.createElement('style');
+    style.textContent = '@keyframes ftPulse { 0%,100% { opacity:1; } 50% { opacity:0.7; } }';
+    document.head.appendChild(style);
+})();
 
 // ── Close notification panel on outside click ────────────────────────
 document.addEventListener('click', function(e) {
