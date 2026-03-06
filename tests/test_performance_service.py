@@ -457,7 +457,7 @@ class TestComputeAllVendorScorecards:
             return original(db, vid, window_days, quoted_offer_ids=quoted_offer_ids, po_offer_ids=po_offer_ids)
 
         monkeypatch.setattr(
-            "app.services.performance_service.compute_vendor_scorecard",
+            "app.services.vendor_scorecard.compute_vendor_scorecard",
             patched_scorecard,
         )
 
