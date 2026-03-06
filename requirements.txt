@@ -32,3 +32,5 @@ starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.12.3
 patchright==1.52.5
+# Typed settings from env vars (fail-fast validation at startup)
+pydantic-settings==2.13.0
