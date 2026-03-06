@@ -167,27 +167,29 @@ class TestExecuteFixMaxIterations:
 
 
 class TestExecuteFixSuccess:
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_successful_fix(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_successful_fix(self, mock_gen, mock_write, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
             "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b", "explanation": "c"}],
             "summary": "Fixed the query",
-            "branch": "fix/ticket-1",
             "cost_usd": 0.10,
         }
         result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert result["ok"] is True
-        assert result["status"] == "awaiting_verification"
+        assert result["status"] == "fix_queued"
         db_session.refresh(diagnosed_ticket)
-        assert diagnosed_ticket.status == "awaiting_verification"
+        assert diagnosed_ticket.status == "fix_queued"
         assert diagnosed_ticket.iterations_used == 1
 
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_successful_fix_emits_notification(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_successful_fix_emits_notification(self, mock_gen, mock_write, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
             "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b", "explanation": "c"}],
             "summary": "Done",
-            "branch": "fix/1",
             "cost_usd": 0.05,
         }
         _run(execute_fix(diagnosed_ticket.id, db_session))
@@ -203,9 +205,9 @@ class TestExecuteFixSuccess:
 
 
 class TestExecuteFixFailure:
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_retryable(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_failed_fix_retryable(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
             "success": False,
             "error": "Syntax error",
             "cost_usd": 0.05,
@@ -217,13 +219,13 @@ class TestExecuteFixFailure:
         assert diagnosed_ticket.status == "diagnosed"  # back to diagnosed for retry
 
     @patch("app.services.execution_service.settings")
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_final_attempt_escalates(self, mock_run, mock_settings, db_session, diagnosed_ticket):
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_failed_fix_final_attempt_escalates(self, mock_gen, mock_settings, db_session, diagnosed_ticket):
         mock_settings.self_heal_max_iterations_low = 2
         mock_settings.self_heal_max_iterations_medium = 10
         mock_settings.self_heal_ticket_budget = 100.0
         mock_settings.self_heal_weekly_budget = 500.0
-        mock_run.return_value = {
+        mock_gen.return_value = {
             "success": False,
             "error": "Still broken",
             "cost_usd": 0.05,
@@ -235,9 +237,9 @@ class TestExecuteFixFailure:
         db_session.refresh(diagnosed_ticket)
         assert diagnosed_ticket.status == "escalated"
 
-    @patch("app.services.execution_service._run_fix", new_callable=AsyncMock)
-    def test_failed_fix_emits_notification(self, mock_run, db_session, diagnosed_ticket):
-        mock_run.return_value = {
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_failed_fix_emits_notification(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
             "success": False,
             "error": "Oops",
             "cost_usd": 0.05,
