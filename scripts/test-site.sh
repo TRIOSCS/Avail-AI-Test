@@ -21,7 +21,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 PROMPTS_DIR="$SCRIPT_DIR/agent-prompts"
 RESULTS_DIR="$SCRIPT_DIR/test-results"
 HISTORY_FILE="$SCRIPT_DIR/test-history.jsonl"
-MAX_PARALLEL=15
+MAX_PARALLEL=8
 TIMEOUT_SECS=600  # 10 min per agent
 
 BASE_URL="${BASE_URL:-https://app.availai.net}"
