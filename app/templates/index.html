@@ -110,8 +110,10 @@
     <button type="button" class="sb-scroll-arrow sb-scroll-up" id="sbScrollUp" onclick="document.querySelector('.sidebar-nav').scrollBy({top:-80,behavior:'smooth'})" aria-label="Scroll up"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
     <nav class="sidebar-nav">
         <!-- Command Center -->
-        <div class="sb-nav-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
-            <div class="sb-group-header" onclick="toggleSidebarGroup(this)" data-tip="Command Center" role="button" tabindex="0">
+        <div class="sb-top-gradient sb-top-gradient-cc" data-section="cc"></div>
+        <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="toggleSidebarGroup(this)" data-tip="Command Center" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg></span>
                 <span class="sb-group-label">Command Center</span>
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
@@ -122,7 +124,9 @@
             </div>
         </div>
         <!-- Opportunity -->
+        <div class="sb-top-gradient" data-section="sourcing"></div>
         <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
+            <div class="sb-section-dot"></div>
             <div class="sb-group-header" onclick="toggleSidebarGroup(this)" data-tip="Opportunity" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
                 <span class="sb-group-label">Opportunity</span>
@@ -136,7 +140,9 @@
             </div>
         </div>
         <!-- Relationships -->
+        <div class="sb-top-gradient sb-top-gradient-rel" data-section="relationships"></div>
         <div class="sb-nav-group" data-section="relationships" style="--section-color:var(--relationships-color);--section-dot:var(--relationships-dot);--section-border:var(--relationships-border)">
+            <div class="sb-section-dot"></div>
             <div class="sb-group-header" onclick="toggleSidebarGroup(this)" data-tip="Relationships" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                 <span class="sb-group-label">Relationships</span>
@@ -149,17 +155,12 @@
                 <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
             </div>
         </div>
+        <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
         {% if is_admin %}
-        <!-- Settings -->
-        <div class="sb-nav-group" data-section="settings" style="--section-color:var(--settings-color);--section-dot:var(--settings-dot);--section-border:var(--settings-border)">
-            <div class="sb-group-header" onclick="toggleSidebarGroup(this)" data-tip="Settings" role="button" tabindex="0">
-                <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>
-                <span class="sb-group-label">Settings</span>
-                <span id="apiHealthBadge" class="sb-badge sb-badge-warn u-hidden"></span>
-                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-            <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> General</button>
+        <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--settings-color);--section-dot:var(--settings-dot);--section-border:var(--settings-border)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-items" style="padding-top:4px">
+                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings<span id="apiHealthBadge" class="sb-badge u-hidden" style="background:var(--red);color:#fff"></span></button>
             </div>
         </div>
         {% endif %}
