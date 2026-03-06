@@ -219,17 +219,14 @@ async function renderAdminDashboard(container) {
     clearNode(container);
     var header = el('div', { className: 'vendor-header' }, [
         el('h2', {}, ['Trouble Tickets']),
-        el('button', {
-            className: 'btn btn-primary btn-sm',
-            textContent: '+ New Ticket',
-            onclick: function() { renderSubmitForm(container); },
-        }),
-        el('button', {
-            className: 'btn btn-sm',
-            textContent: 'Find Trouble',
-            style: 'background:#dc2626;color:#fff;margin-left:8px;',
-            onclick: function() { startFindTrouble(container); },
-        }),
+        el('div', { style: 'display:flex;gap:8px;' }, [
+            el('button', {
+                className: 'btn btn-primary btn-sm',
+                textContent: '+ New Ticket',
+                onclick: function() { renderSubmitForm(container); },
+            }),
+            findTroubleBtn,
+        ]),
     ]);
     container.appendChild(header);
 

@@ -3,11 +3,14 @@
 Covers: patch generation, API failure handling, file context inclusion, schema validation.
 """
 
-from unittest.mock import AsyncMock, patch, mock_open
+from unittest.mock import AsyncMock, patch, MagicMock
+from pathlib import Path
 import pytest
 
-from app.services.patch_generator import generate_patches, PATCH_SCHEMA
+from app.services.patch_generator import generate_patches, validate_patches, PATCH_SCHEMA
 
+
+MOCK_FILE_CONTENT = "def handler():\n    return {'error': detail}\n"
 
 MOCK_PATCHES_RESPONSE = {
     "patches": [
@@ -22,6 +25,20 @@ MOCK_PATCHES_RESPONSE = {
 }
 
 
+def _mock_source_dir(file_map: dict):
+    """Return a patch context for SOURCE_DIR that fakes file reads via Path."""
+    mock_dir = MagicMock(spec=Path)
+
+    def _truediv(self, rel_path):
+        p = MagicMock(spec=Path)
+        p.is_file.return_value = rel_path in file_map
+        p.read_text.return_value = file_map.get(rel_path, "")
+        return p
+
+    type(mock_dir).__truediv__ = _truediv
+    return patch("app.services.patch_generator.SOURCE_DIR", mock_dir)
+
+
 @pytest.mark.asyncio
 async def test_generates_patch_list():
     """Mock claude_structured to return valid patches, verify structure."""
@@ -29,7 +46,8 @@ async def test_generates_patch_list():
         "app.services.patch_generator.claude_structured",
         new_callable=AsyncMock,
         return_value=MOCK_PATCHES_RESPONSE,
-    ), patch("builtins.open", mock_open(read_data="def handler():\n    return {'error': detail}\n")):
+    ), _mock_source_dir({"app/routers/crm.py": MOCK_FILE_CONTENT}), \
+         patch("app.services.patch_generator.validate_patches", return_value=(True, [])):
         result = await generate_patches(
             title="Missing status_code in error response",
             diagnosis={"root_cause": "Error response lacks status_code", "fix_approach": "Add status_code field"},
@@ -55,7 +73,7 @@ async def test_returns_none_on_api_failure():
         "app.services.patch_generator.claude_structured",
         new_callable=AsyncMock,
         return_value=None,
-    ), patch("builtins.open", mock_open(read_data="some code")):
+    ), _mock_source_dir({"app/main.py": "some code"}):
         result = await generate_patches(
             title="Some bug",
             diagnosis={"root_cause": "Unknown"},
@@ -78,7 +96,8 @@ async def test_reads_file_contents_for_context():
     with patch(
         "app.services.patch_generator.claude_structured",
         side_effect=capture_claude,
-    ), patch("builtins.open", mock_open(read_data="def main():\n    pass\n")):
+    ), _mock_source_dir({"app/main.py": "def main():\n    pass\n"}), \
+         patch("app.services.patch_generator.validate_patches", return_value=(True, [])):
         await generate_patches(
             title="Bug in main",
             diagnosis={"root_cause": "Logic error"},

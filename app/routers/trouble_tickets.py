@@ -1,5 +1,9 @@
 """Trouble ticket router -- unified CRUD endpoints for the self-heal pipeline.
 
+POST /api/trouble-tickets/find-trouble       -- start Find Trouble loop (admin)
+POST /api/trouble-tickets/find-trouble/stop  -- cancel running loop (admin)
+GET  /api/trouble-tickets/find-trouble/stream-- SSE progress stream (admin)
+GET  /api/trouble-tickets/find-trouble/prompts-- agent test prompts (admin)
 POST /api/trouble-tickets            -- create (any authenticated user)
 GET  /api/trouble-tickets            -- list all (admin, status/source filter + pagination)
 GET  /api/trouble-tickets/my-tickets -- current user's tickets
@@ -19,6 +23,7 @@ Depends on: services/trouble_ticket_service.py, dependencies.py
 """
 
 import asyncio
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -34,50 +39,68 @@ from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
+from app.services.find_trouble_service import get_find_trouble_service
 from app.services.pattern_tracker import get_health_status, get_weekly_stats
 
 router = APIRouter(tags=["trouble-tickets"])
 
-# In-memory tracking for Find Trouble sweep jobs
-_sweep_jobs: dict[str, dict] = {}
 
+# ── Find Trouble endpoints (must be before /{ticket_id} routes) ────────
 
 @router.post("/api/trouble-tickets/find-trouble")
 async def start_find_trouble(
     request: Request,
     user: User = Depends(require_admin),
-    db: Session = Depends(get_db),
 ):
-    """Launch exhaustive site audit -- Playwright sweep + generates agent prompts."""
-    import uuid
-
-    from app.services.site_tester import SiteTester, create_tickets_from_issues
-
-    job_id = str(uuid.uuid4())[:8]
+    """Launch the Find Trouble test loop (admin only)."""
+    svc_ft = get_find_trouble_service()
     session_cookie = request.cookies.get("session", "")
     base_url = str(request.base_url).rstrip("/")
 
-    tester = SiteTester(base_url=base_url, session_cookie=session_cookie)
-    _sweep_jobs[job_id] = {"status": "running", "tester": tester, "issues_created": 0}
+    result = svc_ft.try_start(base_url, session_cookie)
+    if result is None:
+        raise HTTPException(409, "Find Trouble is already running")
+    return result
 
-    async def _run():
-        try:
-            issues = await tester.run_full_sweep()
-            from app.database import SessionLocal
 
-            sweep_db = SessionLocal()
-            try:
-                count = await create_tickets_from_issues(issues, sweep_db)
-                _sweep_jobs[job_id]["issues_created"] = count
-            finally:
-                sweep_db.close()
-            _sweep_jobs[job_id]["status"] = "complete"
-        except Exception as e:
-            logger.exception("Find Trouble sweep failed")
-            _sweep_jobs[job_id]["status"] = f"error: {e}"
+@router.post("/api/trouble-tickets/find-trouble/stop")
+async def stop_find_trouble(
+    user: User = Depends(require_admin),
+):
+    """Cancel the running Find Trouble loop."""
+    svc_ft = get_find_trouble_service()
+    if svc_ft.stop():
+        return {"ok": True, "message": "Stop requested"}
+    raise HTTPException(404, "No Find Trouble job running")
 
-    asyncio.create_task(_run())
-    return {"job_id": job_id, "status": "running"}
+
+@router.get("/api/trouble-tickets/find-trouble/stream")
+async def find_trouble_stream(
+    user: User = Depends(require_admin),
+):
+    """SSE stream of Find Trouble progress events."""
+    svc_ft = get_find_trouble_service()
+
+    async def event_generator():
+        cursor = 0
+        while True:
+            events = svc_ft.consume_events(after=cursor)
+            for evt in events:
+                yield f"data: {json.dumps(evt)}\n\n"
+                cursor += 1
+
+            status = svc_ft.get_status()
+            if not status["running"] and cursor >= len(svc_ft._events):
+                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
+                break
+
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/api/trouble-tickets/find-trouble/prompts")
@@ -88,25 +111,6 @@ async def find_trouble_prompts(
     from app.services.test_prompts import generate_all_prompts
 
     return {"prompts": generate_all_prompts()}
-
-
-@router.get("/api/trouble-tickets/find-trouble/{job_id}")
-async def find_trouble_progress(
-    job_id: str,
-    user: User = Depends(require_admin),
-):
-    """Poll progress of a Find Trouble sweep."""
-    job = _sweep_jobs.get(job_id)
-    if not job:
-        raise HTTPException(404, "Job not found")
-    tester = job.get("tester")
-    return {
-        "status": job["status"],
-        "progress": tester.progress if tester else [],
-        "areas_tested": tester.areas_tested if tester else 0,
-        "issues_found": len(tester.issues) if tester else 0,
-        "issues_created": job.get("issues_created", 0),
-    }
 
 
 @router.post("/api/trouble-tickets")
@@ -600,20 +604,18 @@ async def verify_ticket(
 
 
 @router.post("/api/trouble-tickets/{ticket_id}/verify-retest")
-async def verify_retest(
+async def verify_retest_ticket(
     ticket_id: int,
-    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Run SiteTester on the ticket's area and resolve or create regression ticket."""
+    """Trigger automated retest via SiteTester after fix deployment (admin only)."""
     from app.services.rollback_service import verify_and_retest
 
-    session_cookie = request.cookies.get("session", "")
-    base_url = str(request.base_url).rstrip("/")
-    return await verify_and_retest(
-        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
-    )
+    result = await verify_and_retest(ticket_id, db)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
 
 
 @router.post("/api/internal/verify-retest/{ticket_id}")
@@ -622,15 +624,31 @@ async def internal_verify_retest(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Internal endpoint for host watcher — localhost only, no auth."""
+    """Internal-only retest endpoint (localhost only, no auth).
+
+    Called by: scripts/self_heal_watcher.sh after applying patches and rebuilding.
+    """
     client = request.client
     if not client or client.host not in ("127.0.0.1", "::1", "localhost"):
         raise HTTPException(403, "Internal endpoint — localhost only")
 
     from app.services.rollback_service import verify_and_retest
 
-    session_cookie = request.cookies.get("session", "")
-    base_url = str(request.base_url).rstrip("/")
-    return await verify_and_retest(
-        ticket_id, db, base_url=base_url, session_cookie=session_cookie,
+    # Generate session cookie for SiteTester
+    session_cookie = None
+    try:
+        from itsdangerous import URLSafeTimedSerializer
+        from app.config import settings as cfg
+        signer = URLSafeTimedSerializer(cfg.secret_key)
+        session_cookie = signer.dumps({"user_id": 1})
+    except Exception:
+        logger.warning("Could not generate session cookie for retest")
+
+    result = await verify_and_retest(
+        ticket_id, db,
+        base_url="http://localhost:8000",
+        session_cookie=session_cookie,
     )
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result

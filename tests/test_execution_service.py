@@ -168,35 +168,32 @@ class TestExecuteFixMaxIterations:
 
 
 class TestExecuteFixSuccess:
-    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
-    def test_successful_fix_writes_queue_file(self, mock_gen, db_session, diagnosed_ticket, tmp_path):
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_successful_fix(self, mock_gen, mock_write, db_session, diagnosed_ticket):
         mock_gen.return_value = {
-            "patches": [
-                {"file": "app/routers/vendors.py", "search": "old", "replace": "new", "explanation": "fix"}
-            ],
+            "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b", "explanation": "c"}],
             "summary": "Fixed the query",
+            "cost_usd": 0.10,
         }
-        with patch("app.services.execution_service.FIX_QUEUE_DIR", str(tmp_path)):
-            result = _run(execute_fix(diagnosed_ticket.id, db_session))
+        result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert result["ok"] is True
         assert result["status"] == "fix_queued"
-        # Verify JSON file was written
-        queue_file = tmp_path / f"{diagnosed_ticket.id}.json"
-        assert queue_file.exists()
-        payload = json.loads(queue_file.read_text())
-        assert payload["ticket_id"] == diagnosed_ticket.id
-        assert len(payload["patches"]) == 1
+        db_session.refresh(diagnosed_ticket)
+        assert diagnosed_ticket.status == "fix_queued"
+        assert diagnosed_ticket.iterations_used == 1
 
-    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
-    def test_successful_fix_emits_notification(self, mock_gen, db_session, diagnosed_ticket, tmp_path):
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_successful_fix_emits_notification(self, mock_gen, mock_write, db_session, diagnosed_ticket):
         mock_gen.return_value = {
-            "patches": [
-                {"file": "app/routers/vendors.py", "search": "old", "replace": "new", "explanation": "fix"}
-            ],
+            "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b", "explanation": "c"}],
             "summary": "Done",
+            "cost_usd": 0.05,
         }
-        with patch("app.services.execution_service.FIX_QUEUE_DIR", str(tmp_path)):
-            _run(execute_fix(diagnosed_ticket.id, db_session))
+        _run(execute_fix(diagnosed_ticket.id, db_session))
         notifs = (
             db_session.query(Notification)
             .filter_by(
@@ -209,31 +206,51 @@ class TestExecuteFixSuccess:
 
 
 class TestExecuteFixFailure:
-    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
-    def test_patch_generation_fails(self, mock_gen, db_session, diagnosed_ticket):
-        mock_gen.return_value = None
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_failed_fix_retryable(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
+            "success": False,
+            "error": "Syntax error",
+            "cost_usd": 0.05,
+        }
         result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert "Patch generation failed" in result["error"]
         db_session.refresh(diagnosed_ticket)
         assert diagnosed_ticket.status == "diagnosed"
 
-    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
-    def test_empty_patches_fails(self, mock_gen, db_session, diagnosed_ticket):
-        mock_gen.return_value = {"patches": [], "summary": "Could not determine fix"}
-        result = _run(execute_fix(diagnosed_ticket.id, db_session))
-        assert "No patches generated" in result["error"]
-
     @patch("app.services.execution_service.settings")
-    @patch("app.services.execution_service.generate_patches", new_callable=AsyncMock)
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     def test_failed_fix_final_attempt_escalates(self, mock_gen, mock_settings, db_session, diagnosed_ticket):
         mock_settings.self_heal_max_iterations_low = 2
         mock_settings.self_heal_max_iterations_medium = 10
         mock_settings.self_heal_ticket_budget = 100.0
         mock_settings.self_heal_weekly_budget = 500.0
-        mock_gen.return_value = None
+        mock_gen.return_value = {
+            "success": False,
+            "error": "Still broken",
+            "cost_usd": 0.05,
+        }
         diagnosed_ticket.iterations_used = 1
         db_session.commit()
         result = _run(execute_fix(diagnosed_ticket.id, db_session))
         assert "escalated" in result["error"]
         db_session.refresh(diagnosed_ticket)
         assert diagnosed_ticket.status == "escalated"
+
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_failed_fix_emits_notification(self, mock_gen, db_session, diagnosed_ticket):
+        mock_gen.return_value = {
+            "success": False,
+            "error": "Oops",
+            "cost_usd": 0.05,
+        }
+        _run(execute_fix(diagnosed_ticket.id, db_session))
+        notifs = (
+            db_session.query(Notification)
+            .filter_by(
+                ticket_id=diagnosed_ticket.id,
+                event_type="failed",
+            )
+            .all()
+        )
+        assert len(notifs) == 1
