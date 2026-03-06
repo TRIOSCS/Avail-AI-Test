@@ -324,7 +324,7 @@ export async function apiFetch(url, opts = {}) {
                 // Session expired — redirect to login
                 if (res.status === 401) {
                     showToast('Session expired — redirecting to login…', 'error');
-                    setTimeout(() => { window.location.href = '/login'; }, 1500);
+                    setTimeout(() => { window.location.href = '/auth/login'; }, 1500);
                     throw lastErr;
                 }
                 if (res.status >= 500 && attempt < maxRetries) continue;
