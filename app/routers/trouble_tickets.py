@@ -441,6 +441,7 @@ async def get_ticket(
         ],
         "child_count": len(children),
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+        "updated_at": ticket.updated_at.isoformat() if ticket.updated_at else None,
         "diagnosed_at": ticket.diagnosed_at.isoformat() if ticket.diagnosed_at else None,
         "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
         # Unified fields

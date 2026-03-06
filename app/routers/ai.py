@@ -310,29 +310,62 @@ async def promote_prospect_contact(
         raise HTTPException(404, "Prospect contact not found")
 
     if pc.vendor_card_id:
-        vc = VendorContact(
-            vendor_card_id=pc.vendor_card_id,
-            full_name=pc.full_name,
-            title=pc.title,
-            email=pc.email,
-            phone=pc.phone,
-            linkedin_url=pc.linkedin_url,
-            source="prospect_promote",
-        )
-        db.add(vc)
-        db.flush()
+        # Dedup: check if contact with same email already exists on this vendor
+        existing = None
+        if pc.email:
+            existing = db.query(VendorContact).filter_by(
+                vendor_card_id=pc.vendor_card_id, email=pc.email
+            ).first()
+        if existing:
+            # Update existing contact with any new data
+            if pc.full_name and not existing.full_name:
+                existing.full_name = pc.full_name
+            if pc.title and not existing.title:
+                existing.title = pc.title
+            if pc.phone and not existing.phone:
+                existing.phone = pc.phone
+            if pc.linkedin_url and not existing.linkedin_url:
+                existing.linkedin_url = pc.linkedin_url
+            vc = existing
+        else:
+            vc = VendorContact(
+                vendor_card_id=pc.vendor_card_id,
+                full_name=pc.full_name,
+                title=pc.title,
+                email=pc.email,
+                phone=pc.phone,
+                linkedin_url=pc.linkedin_url,
+                source="prospect_promote",
+            )
+            db.add(vc)
+            db.flush()
         pc.promoted_to_type = "vendor_contact"
         pc.promoted_to_id = vc.id
     elif pc.customer_site_id:
-        sc = SiteContact(
-            customer_site_id=pc.customer_site_id,
-            full_name=pc.full_name,
-            title=pc.title,
-            email=pc.email,
-            phone=pc.phone,
-        )
-        db.add(sc)
-        db.flush()
+        # Dedup: check if contact with same email already exists on this site
+        existing = None
+        if pc.email:
+            existing = db.query(SiteContact).filter_by(
+                customer_site_id=pc.customer_site_id, email=pc.email
+            ).first()
+        if existing:
+            if pc.full_name and not existing.full_name:
+                existing.full_name = pc.full_name
+            if pc.title and not existing.title:
+                existing.title = pc.title
+            if pc.phone and not existing.phone:
+                existing.phone = pc.phone
+            sc = existing
+        else:
+            sc = SiteContact(
+                customer_site_id=pc.customer_site_id,
+                full_name=pc.full_name,
+                title=pc.title,
+                email=pc.email,
+                phone=pc.phone,
+            )
+            db.add(sc)
+            db.flush()
         pc.promoted_to_type = "site_contact"
         pc.promoted_to_id = sc.id
     else:
