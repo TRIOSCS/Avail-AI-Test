@@ -997,7 +997,7 @@ async function _renderCustDrawerSites(companyId) {
 
     const sites = c.sites || [];
     if (!sites.length) {
-        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p></div>`;
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="javascript:void(0)" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p></div>`;
         return;
     }
 
