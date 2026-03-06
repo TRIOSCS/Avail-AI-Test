@@ -290,7 +290,7 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
 def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
     """Update last_activity_at on the matched company or vendor.
 
-    For companies: also updates site last_activity_at and triggers open pool claim.
+    For companies: also updates site last_activity_at.
     """
     now = datetime.now(timezone.utc)
     if match["type"] == "company":
@@ -301,11 +301,14 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
             db.query(CustomerSite).filter(CustomerSite.id == site_id).update(
                 {"last_activity_at": now}, synchronize_session=False
             )
-        # Auto-claim open pool account if unowned
-        if user_id:
-            from app.services.ownership_service import check_and_claim_open_account
-
-            check_and_claim_open_account(match["id"], user_id, db)
+        # Auto-claim disabled by design — ownership is always manual.
+        # Salesperson must explicitly claim accounts via the UI.
+        # Calling a company (via 8x8 or email) resets the inactivity clock
+        # but does NOT transfer ownership. See ownership_service.py for
+        # manual claim endpoint.
+        # if user_id:
+        #     from app.services.ownership_service import check_and_claim_open_account
+        #     check_and_claim_open_account(match["id"], user_id, db)
     elif match["type"] == "vendor":
         db.query(VendorCard).filter(VendorCard.id == match["id"]).update(
             {"last_activity_at": now}, synchronize_session=False
