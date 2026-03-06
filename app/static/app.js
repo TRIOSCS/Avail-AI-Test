@@ -314,6 +314,17 @@ function _rebuildSightingIndex() {
 }
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
+
+// Canonical 2-decimal currency formatter
+function formatCurrency(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    return '$' + parseFloat(value).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+}
+window.formatCurrency = formatCurrency;
+
 const _apiFetchInflight = {}; // URL+method → Promise (dedup guard)
 const _apiFetchCooldown = {}; // URL+method → timestamp (POST/PUT/DELETE double-click guard)
 export async function apiFetch(url, opts = {}) {
