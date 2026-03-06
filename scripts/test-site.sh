@@ -190,7 +190,7 @@ echo "  Output:  $RUN_DIR/"
 echo "═══════════════════════════════════════════════════════"
 
 # ── Append to history ───────────────────────────────────────────────
-RESULTS_JSON=$(printf '%s\n' "${RESULTS[@]}" | jq -R -s 'split("\n") | map(select(. != "")) | map(split(":") | {area: .[0], status: .[1]})')
+RESULTS_JSON=$(printf '%s\n' "${RESULTS[@]}" | jq -R -c -s 'split("\n") | map(select(. != "")) | map(split(":") | {area: .[0], status: .[1]})')
 echo "{\"run_id\": \"$RUN_ID\", \"timestamp\": \"$(date -Iseconds)\", \"areas_tested\": ${#AREAS[@]}, \"pass\": $PASS, \"fail\": $FAIL, \"error\": $ERROR, \"results\": $RESULTS_JSON}" >> "$HISTORY_FILE"
 
 # ── Diff from last run ──────────────────────────────────────────────
