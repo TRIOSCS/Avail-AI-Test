@@ -1,21 +1,23 @@
-"""Patch generator — uses Claude API to generate search/replace patches for bug fixes.
+"""Patch generator — uses Claude API to generate search/replace patches.
 
-Takes a diagnosed trouble ticket and produces structured patches (file, search,
-replace, explanation) that can be reviewed and applied by the execution service.
+Given a ticket's diagnosis and affected files, reads the source files and
+asks Claude to produce exact search/replace patches.
 
-Called by: services/execution_service.py (during self-heal execution)
-Depends on: utils/claude_client.py (claude_structured), services/prompt_generator.py (constraints/rules)
+Called by: services/execution_service.py
+Depends on: utils/claude_client.py (claude_structured), app source files
 """
 
 import os
-from typing import Any
+from pathlib import Path
 
 from loguru import logger
 
-from app.services.prompt_generator import BASE_CONSTRAINTS, CATEGORY_RULES
 from app.utils.claude_client import claude_structured
 
-PATCH_SCHEMA: dict[str, Any] = {
+# Base directory for reading source files inside Docker
+SOURCE_DIR = Path(os.environ.get("APP_SOURCE_DIR", "/app"))
+
+PATCH_SCHEMA = {
     "type": "object",
     "properties": {
         "patches": {
@@ -23,40 +25,62 @@ PATCH_SCHEMA: dict[str, Any] = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "file": {"type": "string", "description": "Relative file path to modify"},
-                    "search": {"type": "string", "description": "Exact text to find in the file"},
-                    "replace": {"type": "string", "description": "Replacement text"},
-                    "explanation": {"type": "string", "description": "Why this change fixes the bug"},
+                    "file": {"type": "string", "description": "Relative path from project root"},
+                    "search": {"type": "string", "description": "Exact string to find (copy-paste from source)"},
+                    "replace": {"type": "string", "description": "Replacement string"},
+                    "explanation": {"type": "string", "description": "Why this change fixes the issue"},
                 },
                 "required": ["file", "search", "replace", "explanation"],
             },
         },
-        "summary": {"type": "string", "description": "One-line summary of the overall fix"},
+        "summary": {"type": "string", "description": "One-line summary of the fix"},
     },
     "required": ["patches", "summary"],
 }
 
-_MAX_FILES = 5
-_MAX_FILE_CHARS = 15000
+SYSTEM_PROMPT = """You are a precise code fixer. Given a bug diagnosis and the current source files,
+produce exact search/replace patches. Rules:
+- The 'search' string must be an EXACT copy-paste from the current file content
+- Keep patches minimal — change only what's needed to fix the issue
+- Never add comments like "// fixed" or "# patched"
+- If you can't find the right code to change, return an empty patches array
+- Each patch targets ONE contiguous block of code"""
 
 
-def _read_file(path: str) -> str | None:
-    """Read a source file, trying Docker path first then cwd."""
-    candidates = [
-        os.path.join("/app", path),
-        os.path.join(os.getcwd(), path),
-    ]
-    for candidate in candidates:
-        try:
-            with open(candidate) as f:
-                content = f.read()
-            if len(content) > _MAX_FILE_CHARS:
-                content = content[:_MAX_FILE_CHARS] + "\n... (truncated)"
-            return content
-        except (OSError, IOError):
+def validate_patches(patches: list[dict], source_dir: Path | None = None) -> tuple[bool, list[str]]:
+    """Validate that all patch search strings exist in their target files.
+
+    Returns (ok, errors) where ok=True means all patches are valid.
+    """
+    base = source_dir or SOURCE_DIR
+    errors = []
+
+    for i, patch in enumerate(patches):
+        rel_path = patch.get("file", "")
+        search = patch.get("search", "")
+
+        if not rel_path:
+            errors.append(f"Patch [{i}]: missing 'file' field")
             continue
-    logger.warning("patch_generator: could not read file {}", path)
-    return None
+
+        target = base / rel_path
+        if not target.is_file():
+            errors.append(f"Patch [{i}]: file not found: {rel_path}")
+            continue
+
+        try:
+            content = target.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"Patch [{i}]: cannot read {rel_path}: {exc}")
+            continue
+
+        if search and search not in content:
+            preview = search[:80].replace("\n", "\\n")
+            errors.append(
+                f"Patch [{i}]: search string not found in {rel_path}: '{preview}...'"
+            )
+
+    return (len(errors) == 0, errors)
 
 
 async def generate_patches(
@@ -65,71 +89,70 @@ async def generate_patches(
     category: str,
     affected_files: list[str],
 ) -> dict | None:
-    """Generate search/replace patches for a diagnosed bug.
+    """Generate search/replace patches for a diagnosed ticket.
 
-    Args:
-        title: Ticket title describing the bug
-        diagnosis: Dict with root_cause, fix_approach, etc.
-        category: Bug category (ui, api, data, performance, other)
-        affected_files: List of relative file paths to examine
-
-    Returns:
-        Dict with 'patches' array and 'summary', or None on failure.
+    Returns dict with 'patches' and 'summary', or None on failure.
     """
-    # Limit files and read contents
-    files_to_read = affected_files[:_MAX_FILES]
-    file_contents: dict[str, str] = {}
-    for path in files_to_read:
-        content = _read_file(path)
-        if content:
-            file_contents[path] = content
+    # Read source files
+    file_contents = {}
+    for rel_path in affected_files[:5]:  # Cap at 5 files
+        full_path = SOURCE_DIR / rel_path
+        if full_path.is_file():
+            try:
+                content = full_path.read_text(encoding="utf-8")
+                if len(content) > 50_000:
+                    content = content[:50_000] + "\n... (truncated)"
+                file_contents[rel_path] = content
+            except Exception:
+                logger.warning("patch_generator: cannot read {}", rel_path)
 
-    # Build file context section
-    file_section = ""
+    if not file_contents:
+        logger.warning("patch_generator: no readable files for {}", title)
+        return None
+
+    # Build prompt
+    files_section = ""
     for path, content in file_contents.items():
-        file_section += f"\n### {path}\n```\n{content}\n```\n"
+        files_section += f"\n### {path}\n```\n{content}\n```\n"
 
-    # Get category-specific rules
-    category_rules = CATEGORY_RULES.get(category, CATEGORY_RULES["other"])
-
-    root_cause = diagnosis.get("root_cause", "Unknown")
-    fix_approach = diagnosis.get("fix_approach", "Not specified")
-
-    prompt = f"""# Bug Fix Request: {title}
+    user_prompt = f"""## Bug Report
+**Title:** {title}
+**Category:** {category}
 
 ## Diagnosis
-**Root Cause:** {root_cause}
-**Fix Approach:** {fix_approach}
+**Root cause:** {diagnosis.get('root_cause', 'Unknown')}
+**Fix approach:** {diagnosis.get('fix_approach', 'Unknown')}
 
-## Source Files
-{file_section}
+## Current Source Files
+{files_section}
 
-{BASE_CONSTRAINTS}
-{category_rules}
-
-## Task
-Generate minimal search/replace patches to fix this bug. Each patch must contain
-the EXACT text to search for (copy-paste from the source above) and the replacement.
-Keep changes minimal — fix the bug, nothing more.
-"""
+Generate the minimal search/replace patches to fix this issue."""
 
     logger.info("patch_generator: generating patches for '{}' ({} files)", title, len(file_contents))
 
-    result = await claude_structured(
-        prompt=prompt,
-        schema=PATCH_SCHEMA,
-        system="You are a senior Python/FastAPI developer. Generate precise search/replace patches to fix bugs. Only output valid patches with exact string matches from the source code provided.",
-        model_tier="smart",
-        max_tokens=4096,
-    )
-
-    if result is None:
-        logger.warning("patch_generator: Claude API returned None for '{}'", title)
+    try:
+        result = await claude_structured(
+            user_prompt,
+            PATCH_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="smart",
+        )
+    except Exception as e:
+        logger.error("patch_generator: Claude API call failed: {}", e)
         return None
 
-    logger.info(
-        "patch_generator: generated {} patches for '{}'",
-        len(result.get("patches", [])),
-        title,
-    )
+    if not result or not isinstance(result, dict):
+        logger.warning("patch_generator: empty or invalid response")
+        return None
+
+    patches = result.get("patches", [])
+    if patches:
+        ok, errors = validate_patches(patches)
+        if not ok:
+            for err in errors:
+                logger.warning("patch_generator: validation failed: {}", err)
+            logger.warning("patch_generator: rejecting {} invalid patches for '{}'", len(patches), title)
+            return None
+
+    logger.info("patch_generator: generated {} patches for '{}'", len(patches), title)
     return result

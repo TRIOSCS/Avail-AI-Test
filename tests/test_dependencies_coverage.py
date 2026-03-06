@@ -172,13 +172,11 @@ class TestRequireSettingsAccess:
 
 
 class TestRequireBuyer:
-    def test_sales_raises_403(self, db_session, sales_user):
-        """Sales role is not allowed for buyer actions."""
+    def test_sales_allowed(self, db_session, sales_user):
+        """Sales role is allowed for buyer actions (expanded access)."""
         request = _mock_request({"user_id": sales_user.id})
-        with pytest.raises(HTTPException) as exc_info:
-            require_buyer(request, db_session)
-        assert exc_info.value.status_code == 403
-        assert "Buyer" in str(exc_info.value.detail)
+        user = require_buyer(request, db_session)
+        assert user.role == "sales"
 
     def test_buyer_allowed(self, db_session, test_user):
         """Buyer role is allowed."""

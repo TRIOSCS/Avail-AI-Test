@@ -12,8 +12,8 @@ Design rules:
   - Retries with exponential backoff on transient errors (429, 500, 502, 503, 504)
 
 Available model tiers:
-  - DEFAULT: anthropic-claude-sonnet-4-6 (structured extraction, parsing, drafting)
-  - STRONG: anthropic-claude-opus-4-6 (complex reasoning, analysis)
+  - DEFAULT: anthropic-claude-4.6-sonnet (structured extraction, parsing, drafting)
+  - STRONG: anthropic-claude-opus-4.6 (complex reasoning, analysis)
 
 Called by: ai_email_parser, ai_part_normalizer, ai_email_drafter, ai_quote_analyzer,
            ai_pricing_analyzer, ai_sourcing_assistant

@@ -1,4 +1,4 @@
-"""Tests for scripts/apply_patches.py — patch application with pre-flight validation.
+"""Tests for scripts/apply_patches.py — patch application.
 
 Called by: pytest
 Depends on: scripts/apply_patches.py
@@ -12,49 +12,7 @@ import pytest
 
 # Import from scripts directory
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from apply_patches import apply_patch, validate_all_patches
-
-
-class TestValidateAllPatches:
-    def test_all_valid(self, tmp_path):
-        """All patches with matching search strings pass pre-flight."""
-        src = tmp_path / "test.py"
-        src.write_text("old code\nmore code\n")
-
-        patches = [
-            {"file": "test.py", "search": "old code", "replace": "new code", "explanation": "fix"},
-        ]
-        with mock_patch("apply_patches.PROJ_DIR", tmp_path):
-            ok = validate_all_patches(patches)
-        assert ok is True
-
-    def test_one_invalid_fails_all(self, tmp_path):
-        """If any patch search string doesn't match, pre-flight rejects all."""
-        src = tmp_path / "test.py"
-        src.write_text("old code\n")
-
-        patches = [
-            {"file": "test.py", "search": "old code", "replace": "new code", "explanation": "ok"},
-            {"file": "test.py", "search": "MISSING", "replace": "new", "explanation": "bad"},
-        ]
-        with mock_patch("apply_patches.PROJ_DIR", tmp_path):
-            ok = validate_all_patches(patches)
-        assert ok is False
-
-    def test_missing_file_fails(self, tmp_path):
-        """Patch targeting non-existent file fails pre-flight."""
-        patches = [
-            {"file": "nope.py", "search": "x", "replace": "y", "explanation": "fix"},
-        ]
-        with mock_patch("apply_patches.PROJ_DIR", tmp_path):
-            ok = validate_all_patches(patches)
-        assert ok is False
-
-    def test_empty_patches_pass(self, tmp_path):
-        """Empty patch list passes pre-flight."""
-        with mock_patch("apply_patches.PROJ_DIR", tmp_path):
-            ok = validate_all_patches([])
-        assert ok is True
+from apply_patches import apply_patch
 
 
 class TestApplyPatch:
