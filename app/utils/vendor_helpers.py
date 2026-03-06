@@ -70,17 +70,44 @@ _JUNK_DOMAINS = {
 # ── Helper Functions ─────────────────────────────────────────────────────
 
 
-def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
-    """Find existing VendorCard by normalized name or fuzzy match, or create new.
+def _extract_domain_from_name(name: str) -> str | None:
+    """Try to extract a likely domain from a vendor name (e.g. 'Digi-Key' -> 'digikey')."""
+    cleaned = re.sub(r"[^a-z0-9]", "", name.lower())
+    return cleaned if len(cleaned) >= 3 else None
+
+
+def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None) -> VendorCard:
+    """Find existing VendorCard by normalized name, domain, or fuzzy match, or create new.
 
     1. Exact normalized match (fastest path)
-    2. Fuzzy match with threshold >= 90 -- auto-merge to avoid duplicates
-    3. No match -- create new card
+    2. Domain match — if a domain is provided, merge into existing card with same domain
+    3. Fuzzy match with threshold >= 82 -- auto-merge to avoid duplicates
+    4. No match -- create new card
     """
     norm = normalize_vendor_name(vendor_name)
     card = db.query(VendorCard).filter_by(normalized_name=norm).first()
     if card:
         return card
+
+    # Domain-based dedup: if the same domain already exists, merge into that card
+    if domain:
+        from sqlalchemy import func as sqlfunc
+
+        domain_lower = domain.strip().lower()
+        card = db.query(VendorCard).filter(sqlfunc.lower(VendorCard.domain) == domain_lower).first()
+        if card:
+            alts = list(card.alternate_names or [])
+            if vendor_name not in alts and vendor_name != card.display_name:
+                alts.append(vendor_name)
+                card.alternate_names = alts
+                db.commit()
+            logger.info(
+                "Domain-matched vendor '%s' to '%s' (domain=%s)",
+                vendor_name,
+                card.display_name,
+                domain_lower,
+            )
+            return card
 
     # Fuzzy match: use pg_trgm on PostgreSQL, fall back to thefuzz
     if not os.environ.get("TESTING"):  # pragma: no cover
@@ -121,7 +148,7 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
             if score > best_score:
                 best_score = score
                 best_card_id = row.id
-        if best_score >= 90 and best_card_id:
+        if best_score >= 82 and best_card_id:
             card = db.get(VendorCard, best_card_id)
             if card:
                 alts = list(card.alternate_names or [])

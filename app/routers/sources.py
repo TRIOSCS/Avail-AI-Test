@@ -758,13 +758,22 @@ async def vendor_engagement_detail(
 
     result = compute_single_vendor_score(db, vendor_id)
 
+    # Use stored values as the source of truth for consistency with the
+    # list/detail endpoints.  The live-recomputed values are returned as
+    # "live_*" fields so callers can compare, but the top-level fields
+    # must match what /api/vendors and /api/vendors/{id} return.
+    stored_score = card.vendor_score
+    stored_is_new = card.is_new_vendor if card.is_new_vendor is not None else True
+
     return {
         "vendor_id": card.id,
         "vendor_name": card.display_name,
-        "vendor_score": result["vendor_score"],
-        "advancement_score": result["advancement_score"],
-        "is_new_vendor": result["is_new_vendor"],
-        "engagement_score": result["vendor_score"],
+        "vendor_score": stored_score,
+        "advancement_score": card.advancement_score,
+        "is_new_vendor": stored_is_new,
+        "engagement_score": stored_score,
+        "live_vendor_score": result["vendor_score"],
+        "live_is_new_vendor": result["is_new_vendor"],
         "raw_counts": {
             "total_outreach": card.total_outreach or 0,
             "total_responses": card.total_responses or 0,

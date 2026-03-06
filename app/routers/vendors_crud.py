@@ -81,16 +81,50 @@ async def check_vendor_duplicate(
 async def list_vendors(
     q: str = Query("", description="Vendor name search filter"),
     tag: str = Query("", description="Filter by brand or commodity tag"),
+    tier: str = Query("", description="Filter by tier: proven, developing, caution, new"),
+    sort: str = Query("", description="Sort column: name, score, sighting_count, response_rate, total_pos"),
+    order: str = Query("asc", description="Sort direction: asc or desc"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List vendor cards with search, pagination, and engagement scores."""
+    """List vendor cards with search, pagination, tier filter, sort, and engagement scores."""
 
-    @cached_endpoint(prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "limit", "offset"])
-    def _fetch(q, tag, limit, offset, db):
-        query = db.query(VendorCard).order_by(VendorCard.display_name)
+    @cached_endpoint(prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "tier", "sort", "order", "limit", "offset"])
+    def _fetch(q, tag, tier, sort, order, limit, offset, db):
+        query = db.query(VendorCard)
+
+        # ── Tier filter ──
+        if tier:
+            tier = tier.strip().lower()
+            if tier == "proven":
+                query = query.filter(
+                    VendorCard.vendor_score.isnot(None),
+                    VendorCard.vendor_score >= 66,
+                    VendorCard.is_new_vendor.is_(False),
+                )
+            elif tier == "developing":
+                query = query.filter(
+                    VendorCard.vendor_score.isnot(None),
+                    VendorCard.vendor_score >= 33,
+                    VendorCard.vendor_score < 66,
+                    VendorCard.is_new_vendor.is_(False),
+                )
+            elif tier == "caution":
+                query = query.filter(
+                    VendorCard.vendor_score.isnot(None),
+                    VendorCard.vendor_score < 33,
+                    VendorCard.is_new_vendor.is_(False),
+                )
+            elif tier == "new":
+                query = query.filter(
+                    sqlfunc.coalesce(VendorCard.is_new_vendor, True).is_(True)
+                    | VendorCard.vendor_score.is_(None)
+                )
+
+        # ── Default order ──
+        query = query.order_by(VendorCard.display_name)
         if tag.strip():
             from sqlalchemy import String as SAString
 
@@ -129,6 +163,23 @@ async def list_vendors(
             else:
                 safe_q = escape_like(q)
                 query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+        # ── Apply explicit sort (overrides default order_by) ──
+        if sort:
+            sort = sort.strip().lower()
+            sort_map = {
+                "name": VendorCard.display_name,
+                "score": VendorCard.vendor_score,
+                "sighting_count": VendorCard.sighting_count,
+                "response_rate": VendorCard.total_responses,  # proxy: sort by raw responses
+                "total_pos": VendorCard.total_pos,
+            }
+            sort_col = sort_map.get(sort)
+            if sort_col is not None:
+                if order.strip().lower() == "desc":
+                    query = query.order_by(None).order_by(sort_col.desc().nullslast())
+                else:
+                    query = query.order_by(None).order_by(sort_col.asc().nullsfirst())
+
         total = query.count()
         cards = query.limit(limit).offset(offset).all()
         if not cards:
@@ -179,7 +230,7 @@ async def list_vendors(
         return {"vendors": results, "total": total, "limit": limit, "offset": offset}
 
     q = q.strip().lower()
-    return _fetch(q=q, tag=tag, limit=limit, offset=offset, db=db)
+    return _fetch(q=q, tag=tag, tier=tier, sort=sort, order=order, limit=limit, offset=offset, db=db)
 
 
 @router.get("/api/autocomplete/names")
