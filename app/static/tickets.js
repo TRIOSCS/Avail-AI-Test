@@ -224,6 +224,12 @@ async function renderAdminDashboard(container) {
             textContent: '+ New Ticket',
             onclick: function() { renderSubmitForm(container); },
         }),
+        el('button', {
+            className: 'btn btn-sm',
+            textContent: 'Find Trouble',
+            style: 'background:#dc2626;color:#fff;margin-left:8px;',
+            onclick: function() { startFindTrouble(container); },
+        }),
     ]);
     container.appendChild(header);
 
@@ -919,6 +925,91 @@ document.addEventListener('click', function(e) {
     if (panel.contains(e.target) || (bell && bell.contains(e.target))) return;
     panel.style.display = 'none';
 });
+
+// ── Find Trouble — Automated Site Audit ──────────────────────────────
+
+async function startFindTrouble(container) {
+    if (!confirm('Launch exhaustive site audit?\n\n1. Playwright sweep (clicks every button)\n2. Claude agent prompts (opens tabs)\n\nProceed?')) return;
+
+    showToast('Starting site audit...', 'info');
+
+    try {
+        var job = await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
+        showToast('Playwright sweep started', 'success');
+        pollSweepProgress(job.job_id, container);
+
+        var promptData = await apiFetch('/api/trouble-tickets/find-trouble/prompts');
+        var prompts = promptData.prompts || [];
+
+        prompts.forEach(function(p) {
+            window.open(window.location.origin + '/' + (p.url_hash || '#'), '_blank');
+        });
+
+        showPromptPanel(prompts);
+    } catch (e) {
+        showToast('Failed to start audit: ' + e.message, 'error');
+    }
+}
+
+function pollSweepProgress(jobId, container) {
+    var interval = setInterval(async function() {
+        try {
+            var status = await apiFetch('/api/trouble-tickets/find-trouble/' + jobId);
+            if (status.status === 'complete') {
+                clearInterval(interval);
+                showToast('Audit complete: ' + status.issues_found + ' issues found, ' + status.issues_created + ' tickets created', 'success');
+                renderAdminDashboard(container);
+            } else if (status.status && status.status.startsWith('error')) {
+                clearInterval(interval);
+                showToast('Audit failed: ' + status.status, 'error');
+            }
+        } catch (e) {
+            clearInterval(interval);
+        }
+    }, 5000);
+}
+
+function showPromptPanel(prompts) {
+    var existing = document.getElementById('promptPanel');
+    if (existing) existing.remove();
+
+    var overlay = el('div', {
+        id: 'promptPanel',
+        style: 'position:fixed;right:16px;top:60px;width:420px;max-height:80vh;overflow-y:auto;background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.15);z-index:9999;padding:16px;',
+    });
+
+    overlay.appendChild(el('button', {
+        style: 'position:absolute;top:8px;right:12px;background:none;border:none;font-size:18px;cursor:pointer;color:var(--muted);',
+        textContent: 'x',
+        onclick: function() { overlay.remove(); },
+    }));
+    overlay.appendChild(el('h3', { style: 'margin:0 0 12px;font-size:14px;', textContent: 'Claude Agent Prompts' }));
+    overlay.appendChild(el('p', { style: 'font-size:11px;color:var(--muted);margin-bottom:12px;', textContent: 'Copy each prompt into Claude in the corresponding browser tab.' }));
+
+    prompts.forEach(function(p) {
+        var card = el('div', { style: 'border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:8px;' });
+        var hdr = el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;' });
+        hdr.appendChild(el('strong', { style: 'font-size:12px;', textContent: p.area }));
+        var cpBtn = el('button', { className: 'btn btn-sm', textContent: 'Copy', style: 'font-size:10px;padding:2px 8px;' });
+        cpBtn.onclick = function() {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(p.prompt).then(function() {
+                    cpBtn.textContent = 'Copied!';
+                    setTimeout(function() { cpBtn.textContent = 'Copy'; }, 1500);
+                });
+            }
+        };
+        hdr.appendChild(cpBtn);
+        card.appendChild(hdr);
+        card.appendChild(el('p', {
+            style: 'font-size:10px;color:var(--muted);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
+            textContent: (p.prompt || '').split('\n')[0],
+        }));
+        overlay.appendChild(card);
+    });
+
+    document.body.appendChild(overlay);
+}
 
 // ── Keyboard shortcuts for ticket detail (admin only) ────────────────
 document.addEventListener('keydown', function(e) {

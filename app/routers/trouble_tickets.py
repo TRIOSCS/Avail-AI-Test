@@ -38,6 +38,76 @@ from app.services.pattern_tracker import get_health_status, get_weekly_stats
 
 router = APIRouter(tags=["trouble-tickets"])
 
+# In-memory tracking for Find Trouble sweep jobs
+_sweep_jobs: dict[str, dict] = {}
+
+
+@router.post("/api/trouble-tickets/find-trouble")
+async def start_find_trouble(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Launch exhaustive site audit -- Playwright sweep + generates agent prompts."""
+    import uuid
+
+    from app.services.site_tester import SiteTester, create_tickets_from_issues
+
+    job_id = str(uuid.uuid4())[:8]
+    session_cookie = request.cookies.get("session", "")
+    base_url = str(request.base_url).rstrip("/")
+
+    tester = SiteTester(base_url=base_url, session_cookie=session_cookie)
+    _sweep_jobs[job_id] = {"status": "running", "tester": tester, "issues_created": 0}
+
+    async def _run():
+        try:
+            issues = await tester.run_full_sweep()
+            from app.database import SessionLocal
+
+            sweep_db = SessionLocal()
+            try:
+                count = await create_tickets_from_issues(issues, sweep_db)
+                _sweep_jobs[job_id]["issues_created"] = count
+            finally:
+                sweep_db.close()
+            _sweep_jobs[job_id]["status"] = "complete"
+        except Exception as e:
+            logger.exception("Find Trouble sweep failed")
+            _sweep_jobs[job_id]["status"] = f"error: {e}"
+
+    asyncio.create_task(_run())
+    return {"job_id": job_id, "status": "running"}
+
+
+@router.get("/api/trouble-tickets/find-trouble/prompts")
+async def find_trouble_prompts(
+    user: User = Depends(require_admin),
+):
+    """Get Claude agent test prompts for all areas."""
+    from app.services.test_prompts import generate_all_prompts
+
+    return {"prompts": generate_all_prompts()}
+
+
+@router.get("/api/trouble-tickets/find-trouble/{job_id}")
+async def find_trouble_progress(
+    job_id: str,
+    user: User = Depends(require_admin),
+):
+    """Poll progress of a Find Trouble sweep."""
+    job = _sweep_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    tester = job.get("tester")
+    return {
+        "status": job["status"],
+        "progress": tester.progress if tester else [],
+        "areas_tested": tester.areas_tested if tester else 0,
+        "issues_found": len(tester.issues) if tester else 0,
+        "issues_created": job.get("issues_created", 0),
+    }
+
 
 @router.post("/api/trouble-tickets")
 async def create_ticket(
