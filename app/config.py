@@ -210,6 +210,15 @@ class Settings:
         d.strip().lower() for d in os.getenv("OWN_DOMAINS", "trioscs.com").split(",") if d.strip()
     )
 
+    # 8x8 Work Analytics
+    eight_by_eight_api_key: str = os.getenv("EIGHT_BY_EIGHT_API_KEY", "")
+    eight_by_eight_username: str = os.getenv("EIGHT_BY_EIGHT_USERNAME", "")
+    eight_by_eight_password: str = os.getenv("EIGHT_BY_EIGHT_PASSWORD", "")
+    eight_by_eight_pbx_id: str = os.getenv("EIGHT_BY_EIGHT_PBX_ID", "")
+    eight_by_eight_timezone: str = os.getenv("EIGHT_BY_EIGHT_TIMEZONE", "America/Los_Angeles")
+    eight_by_eight_enabled: bool = os.getenv("EIGHT_BY_EIGHT_ENABLED", "false").lower() == "true"
+    eight_by_eight_poll_interval_minutes: int = int(os.getenv("EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES", "30"))
+
     # Prospecting module (Phase 8)
     prospecting_enabled: bool = os.getenv("PROSPECTING_ENABLED", "true").lower() == "true"
     prospecting_min_fit_for_contacts: int = int(os.getenv("PROSPECTING_MIN_FIT_FOR_CONTACTS", "60"))

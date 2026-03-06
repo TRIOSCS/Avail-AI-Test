@@ -37,6 +37,10 @@ class User(Base):
     working_hours_start = Column(String(10))  # e.g. "08:00"
     working_hours_end = Column(String(10))  # e.g. "17:00"
 
+    # 8x8 Work Analytics
+    eight_by_eight_extension = Column(String(20), nullable=True)
+    eight_by_eight_enabled = Column(Boolean, default=False, nullable=False)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
