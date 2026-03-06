@@ -379,6 +379,83 @@ export function stateError(msg, hint) {
     return `<div class="state-error">${esc(msg)}${hint ? `<div class="state-error-hint">${hint}</div>` : ''}</div>`;
 }
 
+// ── Phone Formatting & Click-to-Call ─────────────────────────────────
+
+/**
+ * Normalize phone to E.164. Returns null if unparseable.
+ * Mirrors Python: app/utils/phone_utils.py:format_phone_e164
+ */
+function toE164(raw) {
+    if (!raw) return null;
+    var cleaned = raw.trim().replace(/\s*(ext|x|#)\s*\.?\s*\d*$/i, '');
+    if (/[a-zA-Z]/.test(cleaned)) return null;
+    var hasPlus = cleaned.charAt(0) === '+';
+    var digits = cleaned.replace(/\D/g, '');
+    if (!digits || digits.length < 7) return null;
+    if (digits.length === 10) return '+1' + digits;
+    if (digits.length === 11 && digits.charAt(0) === '1') return '+' + digits;
+    if (hasPlus && digits.length >= 7) return '+' + digits;
+    if (digits.length >= 12) return '+' + digits;
+    return null;
+}
+window.toE164 = toE164;
+
+/**
+ * Format phone for display. US: (415) 555-1234, else raw.
+ * Mirrors Python: app/utils/phone_utils.py:format_phone_display
+ */
+function formatPhoneDisplay(raw) {
+    if (!raw) return '';
+    var e = toE164(raw);
+    if (!e) return raw.trim();
+    var d = e.replace(/^\+/, '');
+    if (d.length === 11 && d.charAt(0) === '1') {
+        var local = d.substring(1);
+        return '(' + local.substring(0,3) + ') ' + local.substring(3,6) + '-' + local.substring(6);
+    }
+    return e;
+}
+window.formatPhoneDisplay = formatPhoneDisplay;
+
+/**
+ * Build a click-to-call <a> tag with background activity logging.
+ * Returns plain text for unparseable numbers.
+ * @param {string} raw - raw phone string
+ * @param {object} context - {vendor_card_id, company_id, customer_site_id, requirement_id}
+ * @returns {string} HTML string
+ */
+function phoneLink(raw, context) {
+    var e = toE164(raw);
+    if (!e) return esc(raw || '');
+    var display = formatPhoneDisplay(raw);
+    var ctx = JSON.stringify(context || {}).replace(/"/g, '&quot;');
+    return '<a href="tel:' + escAttr(e) + '" class="phone-link" onclick="logCallInitiated(this)" data-ctx="' + ctx + '" data-phone="' + escAttr(raw) + '">' + esc(display) + '</a>';
+}
+window.phoneLink = phoneLink;
+
+/**
+ * Fire-and-forget POST to /api/activity/call-initiated.
+ * Does NOT preventDefault — the tel: link fires normally.
+ */
+function logCallInitiated(el) {
+    var raw = el.getAttribute('data-phone') || '';
+    var ctx = {};
+    try { ctx = JSON.parse(el.getAttribute('data-ctx') || '{}'); } catch(e) {}
+    var body = { phone_number: raw };
+    if (ctx.vendor_card_id) body.vendor_card_id = ctx.vendor_card_id;
+    if (ctx.company_id) body.company_id = ctx.company_id;
+    if (ctx.customer_site_id) body.customer_site_id = ctx.customer_site_id;
+    if (ctx.requirement_id) body.requirement_id = ctx.requirement_id;
+    if (ctx.origin) body.origin = ctx.origin;
+    fetch('/api/activity/call-initiated', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+        keepalive: true
+    }).catch(function() {});
+}
+window.logCallInitiated = logCallInitiated;
+
 var _modalStack = [];
 export function openModal(id, focusId) {
     var el = document.getElementById(id);
@@ -728,13 +805,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 var settingsTab = (initBaseHash === 'tickets' || initBaseHash === 'apihealth') ? initBaseHash : undefined;
                 window.showSettings(settingsTab);
             },
-            'view-prospecting': () => window.showProspecting(),
             'view-suggested': () => window.showSuggested(),
             'view-dashboard': () => showDashboard(),
             'view-contacts': () => showContacts(),
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-prospecting':'navProspecting','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -992,14 +1068,15 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['tickets'] = 'view-settings'; // tickets moved into settings
 _hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
+_hashToView['prospecting'] = 'view-suggested'; // old prospecting view removed
 let _navFromPopstate = false;
 
 let _lastPushedHash = '';
@@ -1055,12 +1132,11 @@ window.addEventListener('popstate', (e) => {
         },
         'view-contacts': () => showContacts(),
         'view-dashboard': () => showDashboard(),
-        'view-prospecting': () => window.showProspecting(),
         'view-suggested': () => window.showSuggested(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting','view-suggested':'navProspecting'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-suggested':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -1102,7 +1178,6 @@ export function showView(viewId) {
     document.body.classList.toggle('on-settings', isSettings);
     // Close any open CRM drawers, reset split-pane state, and cancel in-flight fetches
     if (typeof closeCustDrawer === 'function') try { closeCustDrawer(); } catch(e) {}
-    if (typeof closeProspectDrawer === 'function') try { closeProspectDrawer(); } catch(e) {}
     if (typeof closeVendorDrawer === 'function') try { closeVendorDrawer(); } catch(e) {}
     if (typeof _abortAllCrmFetches === 'function') try { _abortAllCrmFetches(); } catch(e) {}
     // Clear top breadcrumb when switching views (CRM views will re-set it)
@@ -1385,7 +1460,7 @@ function renderContacts(q) {
             <td>${statusDropdown}</td>
             <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(cleanTitle)}">${esc(cleanTitle.length > 50 ? cleanTitle.slice(0, 50) + '…' : cleanTitle) || '—'}</td>
             <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
-            <td>${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.phone)+'</a>' : '<span class="muted-cell">—</span>'}</td>
+            <td>${c.phone ? phoneLink(c.phone, {vendor_card_id: c.vendor_id, company_id: c.company_id, origin: 'contacts_table'}) : '<span class="muted-cell">—</span>'}</td>
             <td>${c.interaction_count || 0}</td>
             <td class="muted-cell">${lastLabel}</td>
         </tr>`;
@@ -1446,7 +1521,7 @@ function openContactDrawer(vendorId, contactId) {
         </div>
         <div class="health-indicator" style="margin-bottom:12px"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label" style="font-weight:600">${healthLabel}</span></div>
         ${contact.email ? '<div class="drawer-field"><span class="drawer-field-label">Email</span><span class="drawer-field-value"><a href="mailto:'+escAttr(contact.email)+'">'+esc(contact.email)+'</a></span></div>' : ''}
-        ${contact.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value"><a href="tel:'+escAttr(contact.phone)+'">'+esc(contact.phone)+'</a></span></div>' : ''}
+        ${contact.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(contact.phone, {vendor_card_id: contact.vendor_id, origin: 'contact_drawer'})+'</span></div>' : ''}
         <div class="drawer-field"><span class="drawer-field-label">Company</span><span class="drawer-field-value">${esc(contact.vendor_name)}</span></div>
         <div class="drawer-field"><span class="drawer-field-label">Interactions</span><span class="drawer-field-value">${contact.interaction_count || 0}</span></div>
         <div class="drawer-field"><span class="drawer-field-label">Last Contact</span><span class="drawer-field-value">${contact.last_interaction_at ? getRelativeTime(contact.last_interaction_at) : 'Never'}</span></div>
@@ -2511,7 +2586,7 @@ export function closeModal(id) {
     }
 }
 
-export function showToast(msg, type = 'info') {
+export function showToast(msg, type = 'info', duration = 3000) {
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
@@ -2525,10 +2600,11 @@ export function showToast(msg, type = 'info') {
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
     toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:340px;opacity:0;transition:opacity .2s`;
-    toast.textContent = msg;
+    // Safe: all callers use esc() for user-controlled values before passing to showToast
+    toast.innerHTML = msg;
     container.appendChild(toast);
     requestAnimationFrame(() => toast.style.opacity = '1');
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
 }
 
 const _statusLabels = {draft:'Draft',active:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
@@ -6097,7 +6173,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         let contactHtml = '';
         if (cEmail) contactHtml += `<a href="mailto:${escAttr(cEmail)}" onclick="event.stopPropagation();_ddCopyContact('${escAttr(cEmail)}','Email')" title="${escAttr(cEmail)}" style="color:var(--muted);text-decoration:none">${esc(truncEmail)}</a>`;
         if (cEmail && cPhone) contactHtml += '<br>';
-        if (cPhone) contactHtml += `<a href="tel:${escAttr(cPhone)}" onclick="event.stopPropagation();_ddCopyContact('${escAttr(cPhone)}','Phone')" title="${escAttr(cPhone)}" style="color:var(--muted);text-decoration:none">${esc(truncPhone)}</a>`;
+        if (cPhone) contactHtml += phoneLink(cPhone, {vendor_card_id: (s.vendor_card && s.vendor_card.id) || null, requirement_id: s.requirement_id || null, origin: 'sighting_row'});
         // Price color-coding vs target
         let priceColor = s.unit_price ? 'var(--teal)' : 'var(--muted)';
         let priceTitle = '';
@@ -6700,6 +6776,7 @@ function renderReqList() {
     }
 
     // Update counts
+    const v = _currentMainView;
     const countEl = document.getElementById('reqStatusCount');
     if (countEl) countEl.textContent = `${data.length}`;
     // Show shared count hint for sourcing view
@@ -6726,7 +6803,6 @@ function renderReqList() {
     // Tab-aware table headers
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
-    const v = _currentMainView;
     const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select> <span style="position:relative;display:inline-block"><button class="btn-icon" onclick="event.stopPropagation();_toggleColGear()" title="Show/hide columns" style="font-size:14px;cursor:pointer;background:none;border:none;color:var(--muted);padding:0 2px">&#x2699;</button><span id="colGearWrap"></span></span></th>`;
     let thead;
     if (v === 'sourcing') {
@@ -7689,7 +7765,7 @@ export function sidebarNav(page, el) {
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
         dashboard: () => showDashboard(),
-        prospecting: () => window.showProspecting(),
+        prospecting: () => window.showSuggested(),
         suggested: () => window.showSuggested(),
         apihealth: () => window.showSettings('apihealth'),
         tickets: () => window.showSettings('tickets')
@@ -8560,7 +8636,7 @@ function renderSources() {
             })();
             const listingLink = _srcListingUrl ? `<a href="${escAttr(_srcListingUrl)}" target="_blank" class="btn-link" title="Search on ${esc(s.source_type || 'web')}">🔗 Listing</a>` : '';
             const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';
-            const phoneLink = s.vendor_phone ? `<a class="btn-call" href="tel:${ph}" onclick="logCall(event,'${vn}','${ph}','${mpn}')">📞 ${esc(s.vendor_phone)}</a>` : '';
+            const phoneLinkHtml = s.vendor_phone ? `<a class="btn-call phone-link" href="tel:${ph}" onclick="logCallInitiated(this)" data-phone="${ph}" data-ctx="${escAttr(JSON.stringify({vendor_card_id: vc.card_id || null, requirement_id: s.requirement_id || null, origin: 'search_results'}))}">📞 ${esc(s.vendor_phone)}</a>` : '';
             const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
 
             // Build price HTML
@@ -8599,7 +8675,7 @@ function renderSources() {
                     <div class="sc-badges">${visibleBadges}${overflowBadge}${s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== (group.label || '').trim().toUpperCase() ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.mpn_matched)}</span>` : ''}${s.manufacturer ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.manufacturer)}</span>` : ''}</div>
                 </div>
                 <div class="sc-actions-right">
-                    ${phoneLink}${listingLink}${vendorLink}${unavailBtn}
+                    ${phoneLinkHtml}${listingLink}${vendorLink}${unavailBtn}
                 </div>
             </div>`;
         }
@@ -9740,6 +9816,24 @@ export async function openVendorPopup(cardId) {
     if (intelEl && card.display_name) {
         loadCompanyIntel(card.display_name, vendorDomain, intelEl);
     }
+    // Last-called indicator
+    apiFetch('/api/activity/vendors/' + card.id + '/last-call').then(function(data) {
+        if (!data || !data.last_call) return;
+        var lc = data.last_call;
+        var calledAt = new Date(lc.called_at);
+        var daysAgo = Math.floor((Date.now() - calledAt.getTime()) / 86400000);
+        var timeStr = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : daysAgo + ' days ago';
+        var msg = data.is_current_user
+            ? 'You called ' + timeStr
+            : 'Last called ' + timeStr + ' by ' + (lc.user_name || 'unknown');
+        var header = document.querySelector('#vendorPopupContent .vp-header');
+        if (header) {
+            var el = document.createElement('div');
+            el.style.cssText = 'font-size:11px;color:var(--muted);margin-top:2px;font-style:italic';
+            el.textContent = msg;
+            header.appendChild(el);
+        }
+    }).catch(function() {});
 }
 
 async function loadVendorEmailMetrics(cardId) {
@@ -9892,9 +9986,9 @@ export async function loadVendorContacts(cardId) {
                 ? `<span class="contact-trend ${trendClasses[c.activity_trend] || 'trend-stable'}" title="${esc(c.activity_trend)}">${trendIcons[c.activity_trend] || '→'}</span>`
                 : '';
             // Phone links — both office and mobile as click-to-call with logging
-            const phoneLink = c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone) + '\')" title="Office">' + esc(c.phone) + '</a>' : '';
-            const mobileLink = c.phone_mobile ? '<a href="tel:' + escAttr(c.phone_mobile) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone_mobile) + '\')" title="Mobile">' + esc(c.phone_mobile) + '</a>' : '';
-            const phoneSep = phoneLink && mobileLink ? ' &middot; ' : '';
+            var vcPhoneLink = c.phone ? phoneLink(c.phone, {vendor_card_id: cardId, origin: 'vendor_popup'}) : '';
+            var vcMobileLink = c.phone_mobile ? phoneLink(c.phone_mobile, {vendor_card_id: cardId, origin: 'vendor_popup'}) : '';
+            var vcPhoneSep = vcPhoneLink && vcMobileLink ? ' &middot; ' : '';
             return `<div class="si-contact" style="padding:6px 0;border-bottom:1px solid var(--border)">
                 <div class="si-contact-info" style="flex:1;min-width:0">
                     <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
@@ -9904,8 +9998,8 @@ export async function loadVendorContacts(cardId) {
                     ${c.title ? '<div style="font-size:11px;color:var(--text2)">' + esc(c.title) + '</div>' : ''}
                     <div class="si-contact-meta">
                         ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">' + esc(c.email) + '</a>' : ''}
-                        ${c.email && (phoneLink || mobileLink) ? ' &middot; ' : ''}
-                        ${phoneLink}${phoneSep}${mobileLink}
+                        ${c.email && (vcPhoneLink || vcMobileLink) ? ' &middot; ' : ''}
+                        ${vcPhoneLink}${vcPhoneSep}${vcMobileLink}
                     </div>
                     ${c.label ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.label) + '</div>' : ''}
                 </div>
@@ -10537,11 +10631,29 @@ function _renderVendorDrawerOverview(vendorId) {
         <div class="drawer-field"><span class="drawer-field-label">Parts Tracked</span><span class="drawer-field-value">${v.sighting_count || 0}</span></div>
         <div class="drawer-field"><span class="drawer-field-label">Last Activity</span><span class="drawer-field-value">${v.last_sighting_at ? getRelativeTime(v.last_sighting_at) : 'Never'}</span></div>
         ${v.email ? '<div class="drawer-field"><span class="drawer-field-label">Email</span><span class="drawer-field-value"><a href="mailto:'+escAttr(v.email)+'">'+esc(v.email)+'</a></span></div>' : ''}
-        ${v.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+esc(v.phone)+'</span></div>' : ''}
+        ${v.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(v.phone, {vendor_card_id: v.id, origin: 'vendor_drawer'})+'</span></div>' : ''}
         ${v.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(v.website)+'" target="_blank">'+esc(v.website)+'</a></span></div>' : ''}
     </div>`;
 
     body.innerHTML = html;
+
+    // Async: fetch last-call indicator
+    apiFetch('/api/activity/vendors/' + vendorId + '/last-call').then(function(data) {
+        if (!data || !data.last_call) return;
+        var lc = data.last_call;
+        var calledAt = new Date(lc.called_at);
+        var daysAgo = Math.floor((Date.now() - calledAt.getTime()) / 86400000);
+        var timeStr = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : daysAgo + ' days ago';
+        var msg = data.is_current_user
+            ? 'You called ' + timeStr
+            : 'Last called ' + timeStr + ' by ' + (lc.user_name || 'unknown');
+        var el = document.createElement('div');
+        el.className = 'last-called-indicator';
+        el.style.cssText = 'font-size:11px;color:var(--muted);margin:4px 20px 0;font-style:italic';
+        el.textContent = msg;
+        var section = body.querySelector('.drawer-section');
+        if (section) section.appendChild(el);
+    }).catch(function() {});
 }
 
 async function _renderVendorDrawerScorecard(vendorId) {
@@ -10634,12 +10746,12 @@ async function _renderVendorDrawerContacts(vendorId) {
                 </div>
                 <div class="site-contact-actions">
                     ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="'+escAttr(c.email)+'">✉</a>' : ''}
-                    ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="'+escAttr(c.phone)+'">📞</a>' : ''}
+                    ${c.phone ? '<a href="tel:'+escAttr(toE164(c.phone) || c.phone)+'" class="phone-link" onclick="logCallInitiated(this)" data-phone="'+escAttr(c.phone)+'" data-ctx="'+escAttr(JSON.stringify({vendor_card_id: vendorId, origin: 'vendor_drawer_contacts'}))+'" title="'+escAttr(c.phone)+'">📞</a>' : ''}
                 </div>
             </div>`;
         }
         html += '</div>';
-        body.innerHTML = html;
+        body.innerHTML = html;  // All values escaped via esc()/escAttr()
     } catch (e) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading contacts</p></div>'; }
 }
 
@@ -11344,7 +11456,7 @@ async function viewThread(vendorName) {
             const labelColor = isCall ? 'var(--amber)' : 'var(--muted)';
             const durationStr = isCall && a.duration_seconds ? (' · ' + Math.floor(a.duration_seconds/60) + 'm ' + (a.duration_seconds%60) + 's') : '';
             const contactStr = a.contact_name ? (' · ' + esc(a.contact_name)) : '';
-            const phoneStr = isCall && a.contact_phone ? (' · <a href="tel:' + escAttr(a.contact_phone) + '" style="color:inherit;text-decoration:underline"' + (v.vendor_card_id ? ' onclick="autoLogVendorCall(' + v.vendor_card_id + ',\'' + escAttr(a.contact_phone) + '\')"' : '') + '>' + esc(a.contact_phone) + '</a>') : '';
+            const phoneStr = isCall && a.contact_phone ? (' · ' + phoneLink(a.contact_phone, {vendor_card_id: v.vendor_card_id || null, origin: 'activity_timeline'})) : '';
             const searchText = [a.contact_name, a.contact_phone, a.notes, a.user_name, label].filter(Boolean).join(' ').toLowerCase();
             html += '<div data-searchable="' + escAttr(searchText) + '" style="margin-bottom:12px;padding:10px 14px;background:' + bgColor + ';border-radius:8px;border:1px solid ' + borderColor + '">'
                 + '<div style="font-size:11px;color:' + labelColor + ';font-weight:600;margin-bottom:4px">'

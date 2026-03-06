@@ -506,6 +506,33 @@ def log_vendor_note(
     return record
 
 
+def get_last_call(vendor_card_id: int, db: Session) -> dict | None:
+    """Get the most recent phone call activity for a vendor card.
+
+    Returns {"user_id": int, "user_name": str, "called_at": datetime} or None.
+    """
+    from app.models import User
+
+    record = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.vendor_card_id == vendor_card_id,
+            ActivityLog.channel == "phone",
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .first()
+    )
+    if not record:
+        return None
+
+    user = db.get(User, record.user_id)
+    return {
+        "user_id": record.user_id,
+        "user_name": user.name if user else "Unknown",
+        "called_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+
 def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | None:
     """Days since last activity on a vendor card. None if no activity ever."""
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()

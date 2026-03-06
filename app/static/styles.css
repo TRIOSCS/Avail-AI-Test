@@ -237,6 +237,8 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .sc-actions-right{display:flex;flex-direction:column;gap:2px;align-items:flex-end;flex-shrink:0;margin-left:auto}
 .btn-call{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;background:var(--teal-light);color:var(--teal);border:1px solid rgba(61,104,149,.2);cursor:pointer;text-decoration:none;transition:.15s}
 .btn-call:hover{background:rgba(61,104,149,.15)}
+.phone-link{color:var(--teal,#3d6895);text-decoration:none;cursor:pointer;transition:color .15s}
+.phone-link:hover{text-decoration:underline;color:var(--blue,#2563eb)}
 .btn-link{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#eaeff5;color:#3d6895;border:1px solid rgba(61,104,149,.15);cursor:pointer;text-decoration:none;transition:.15s}
 .btn-link:hover{background:rgba(61,104,149,.12)}
 .sc-hist{border-left:3px solid #c4a0e8;opacity:0.85}
