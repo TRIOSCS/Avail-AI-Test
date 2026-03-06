@@ -124,12 +124,18 @@ function renderSubmitForm(container) {
         maxlength: '200',
         style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;',
     });
+    titleInput.addEventListener('keydown', function(e) { e.stopPropagation(); });
+    titleInput.addEventListener('keyup', function(e) { e.stopPropagation(); });
+    titleInput.addEventListener('keypress', function(e) { e.stopPropagation(); });
 
     var descArea = el('textarea', {
         id: 'ttDesc', required: 'required', rows: '5',
         placeholder: 'Describe what happened, what you expected, and steps to reproduce...',
         style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;',
     });
+    descArea.addEventListener('keydown', function(e) { e.stopPropagation(); });
+    descArea.addEventListener('keyup', function(e) { e.stopPropagation(); });
+    descArea.addEventListener('keypress', function(e) { e.stopPropagation(); });
 
     var submitBtn = el('button', {
         type: 'submit', className: 'btn btn-primary',
@@ -589,6 +595,9 @@ async function showTicketDetail(ticketId) {
                 rows: '3',
                 style: 'width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit;',
             });
+            notesArea.addEventListener('keydown', function(e) { e.stopPropagation(); });
+            notesArea.addEventListener('keyup', function(e) { e.stopPropagation(); });
+            notesArea.addEventListener('keypress', function(e) { e.stopPropagation(); });
             notesArea.value = t.admin_notes || '';
             notesDiv.appendChild(notesArea);
             var saveNotesBtn = el('button', { className: 'btn btn-sm', textContent: 'Save Notes', style: 'margin-top:4px;' });
@@ -1003,6 +1012,8 @@ document.addEventListener('keydown', function(e) {
     // Skip if user is typing in an input/textarea/select or contenteditable
     var tag = (e.target.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) return;
+    // Also skip if focus is inside any modal
+    if (e.target.closest && e.target.closest('.modal, [id$="-modal"], #report-issue-modal')) return;
 
     var container = document.getElementById('settings-tickets');
     if (!container || container.style.display === 'none') return;

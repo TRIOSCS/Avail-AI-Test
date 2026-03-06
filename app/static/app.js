@@ -263,7 +263,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var ds = document.getElementById('mainSearch');
     if (ms && ds) {
         ms.addEventListener('input', function(e) { e.stopPropagation(); ds.value = ms.value; });
+        ms.addEventListener('keydown', function(e) { e.stopPropagation(); });
+        ms.addEventListener('keyup', function(e) { e.stopPropagation(); });
         ds.addEventListener('input', function(e) { e.stopPropagation(); ms.value = ds.value; });
+        ds.addEventListener('keydown', function(e) { e.stopPropagation(); });
+        ds.addEventListener('keyup', function(e) { e.stopPropagation(); });
 
 
         // Sync on viewport change (device rotation / resize across breakpoint)
