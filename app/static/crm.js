@@ -895,7 +895,8 @@ function _renderCustDrawerOverview(companyId) {
     if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
 
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
-    if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
+    if (title) title.textContent = displayName;
+    if (title && c.is_strategic) title.innerHTML = esc(displayName) + ' <span style="color:var(--amber)">★</span>';
     const mTitle = document.getElementById('custDrawerMobileTitle');
     if (mTitle) mTitle.textContent = displayName;
 
