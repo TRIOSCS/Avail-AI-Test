@@ -14,6 +14,20 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     {{ vite_css_tags }}
+    <style>
+        .rfq-table-container { overflow-x: auto; }
+        #rfqs table, #view-list table.tbl { table-layout: fixed; width: 100%; }
+        #rfqs table colgroup col.col-actions, #view-list table.tbl colgroup col.col-actions { width: 13%; }
+        #rfqs table colgroup col.col-desc, #view-list table.tbl colgroup col.col-desc { width: 22%; }
+        #rfqs table td.td-desc, #view-list table.tbl td.td-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
+        #rfqs table td.td-actions, #view-list table.tbl td.td-actions { white-space: nowrap; }
+        #rfqs table td.td-actions .action-btns, #view-list table.tbl td.td-actions .action-btns { display: flex; gap: 4px; flex-wrap: nowrap; }
+        @media (max-width: 1400px) {
+            #rfqs table colgroup col.col-date2, #view-list table.tbl colgroup col.col-date2 { display: none; }
+            #rfqs table th.th-date2, #rfqs table td.td-date2,
+            #view-list table.tbl th.th-date2, #view-list table.tbl td.td-date2 { display: none; }
+        }
+    </style>
 </head>
 <body>
 {% if not logged_in %}
