@@ -167,6 +167,16 @@ def team_leaderboard(
     for i, e in enumerate(entries):
         e["rank"] = i + 1
 
+    # Recompute avail_rank and mult_rank from current data so they are
+    # consistent with the entries list (snapshot ranks may be stale).
+    by_avail = sorted(entries, key=lambda e: e["avail_score"], reverse=True)
+    for i, e in enumerate(by_avail):
+        e["avail_rank"] = i + 1
+
+    by_mult = sorted(entries, key=lambda e: e["total_points"], reverse=True)
+    for i, e in enumerate(by_mult):
+        e["mult_rank"] = i + 1
+
     return {
         "month": current_month.isoformat(),
         "role": role,

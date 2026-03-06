@@ -23,13 +23,17 @@ router = APIRouter()
 
 
 @router.get("/needs-attention")
-@cached_endpoint(prefix="needs_attention", ttl_hours=0.5, key_params=["days"])
+@cached_endpoint(prefix="needs_attention", ttl_hours=0.5, key_params=["days", "scope"])
 def needs_attention(
     days: int = Query(default=30, ge=0, le=366),
+    scope: str = Query(default="my", pattern="^(my|team)$"),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    """Return user's owned companies that haven't been contacted in `days` days.
+    """Return companies that haven't been contacted in `days` days.
+
+    scope=my: only companies where user owns at least one site.
+    scope=team: all active companies (team-wide view).
 
     Sorted by staleness (most stale first). Includes strategic flag,
     open req count, and open quote value for prioritization.
@@ -42,16 +46,23 @@ def needs_attention(
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    # Get all active companies where user owns at least one site
-    owned_company_ids = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
-    companies = (
-        db.query(Company)
-        .filter(
-            Company.id.in_(owned_company_ids.scalar_subquery()),
-            Company.is_active.is_(True),
+    # Get active companies — scope controls which ones
+    if scope == "team":
+        companies = (
+            db.query(Company)
+            .filter(Company.is_active.is_(True))
+            .all()
         )
-        .all()
-    )
+    else:
+        owned_company_ids = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
+        companies = (
+            db.query(Company)
+            .filter(
+                Company.id.in_(owned_company_ids.scalar_subquery()),
+                Company.is_active.is_(True),
+            )
+            .all()
+        )
 
     if not companies:
         return []

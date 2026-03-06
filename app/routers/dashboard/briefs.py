@@ -420,6 +420,9 @@ def buyer_brief(
     # ── Tile 3a: Revenue & Profit (from buy plans) ──
     from ...models.buy_plan import BuyPlanV3
 
+    # Cap per-plan revenue at $10M to exclude obvious test/junk data
+    BP_REVENUE_CAP = 10_000_000
+
     bp_financials = (
         db.query(
             func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
@@ -430,6 +433,7 @@ def buyer_brief(
             BuyPlanV3.status.in_(("active", "completed")),
             BuyPlanV3.created_at >= cutoff,
             _user_filter(BuyPlanV3.submitted_by_id),
+            BuyPlanV3.total_revenue <= BP_REVENUE_CAP,
         )
         .first()
     )
@@ -450,6 +454,7 @@ def buyer_brief(
             BuyPlanV3.status.in_(("draft", "pending", "active")),
             BuyPlanV3.created_at >= cutoff,
             _user_filter(BuyPlanV3.submitted_by_id),
+            BuyPlanV3.total_revenue <= BP_REVENUE_CAP,
         )
         .first()
     )
@@ -472,6 +477,7 @@ def buyer_brief(
             BuyPlanV3.status.in_(("active", "completed", "pending")),
             BuyPlanV3.created_at >= cutoff,
             _user_filter(BuyPlanV3.submitted_by_id),
+            BuyPlanV3.total_revenue <= BP_REVENUE_CAP,
         )
         .order_by(BuyPlanV3.created_at.desc())
         .limit(15)

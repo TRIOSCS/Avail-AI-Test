@@ -683,6 +683,17 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
 # ── Scorecard ──────────────────────────────────────────────────────────────
 
 
+def _cap_outlier(value: float, cap: float = 10_000_000) -> float:
+    """Cap unrealistic financial values to prevent test-data pollution.
+
+    Electronic component deals rarely exceed $10M per offer.
+    Values above the cap are replaced with 0 (treated as bad data).
+    """
+    if value > cap:
+        return 0.0
+    return value
+
+
 def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     """Get proactive offer scorecard metrics."""
     query = db.query(ProactiveOffer)
@@ -692,10 +703,10 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     all_offers = query.all()
     sent = len(all_offers)
     converted = sum(1 for o in all_offers if o.status == "converted")
-    converted_revenue = sum(float(o.total_sell or 0) for o in all_offers if o.status == "converted")
-    converted_cost = sum(float(o.total_cost or 0) for o in all_offers if o.status == "converted")
+    converted_revenue = sum(_cap_outlier(float(o.total_sell or 0)) for o in all_offers if o.status == "converted")
+    converted_cost = sum(_cap_outlier(float(o.total_cost or 0)) for o in all_offers if o.status == "converted")
     gross_profit = converted_revenue - converted_cost
-    pending_revenue = sum(float(o.total_sell or 0) for o in all_offers if o.status == "sent")
+    pending_revenue = sum(_cap_outlier(float(o.total_sell or 0)) for o in all_offers if o.status == "sent")
     quoted = sum(1 for o in all_offers if o.converted_quote_id is not None)
     converted_quote_ids = [o.converted_quote_id for o in all_offers if o.converted_quote_id]
     po_count = 0
@@ -730,9 +741,9 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             user_offers = [o for o in all_offers if o.salesperson_id == sid]
             u_sent = len(user_offers)
             u_conv = sum(1 for o in user_offers if o.status == "converted")
-            u_rev = sum(float(o.total_sell or 0) for o in user_offers if o.status == "converted")
-            u_cost = sum(float(o.total_cost or 0) for o in user_offers if o.status == "converted")
-            u_pending = sum(float(o.total_sell or 0) for o in user_offers if o.status == "sent")
+            u_rev = sum(_cap_outlier(float(o.total_sell or 0)) for o in user_offers if o.status == "converted")
+            u_cost = sum(_cap_outlier(float(o.total_cost or 0)) for o in user_offers if o.status == "converted")
+            u_pending = sum(_cap_outlier(float(o.total_sell or 0)) for o in user_offers if o.status == "sent")
             u_quoted = sum(1 for o in user_offers if o.converted_quote_id is not None)
             u_quote_ids = [o.converted_quote_id for o in user_offers if o.converted_quote_id]
             u_po = 0
