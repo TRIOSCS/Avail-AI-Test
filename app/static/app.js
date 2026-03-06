@@ -292,6 +292,17 @@ let searchResultsCache = {};  // keyed by reqId
 let selectedSightings = new Set();
 const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
 let rfqVendorData = [];
+
+function validatePartRows(parts) {
+    for (const part of parts) {
+        const qty = Number(part.qty);
+        if (!Number.isInteger(qty) || qty < 1 || qty > 1000000) {
+            showToast(`Invalid quantity "${part.qty}" for part ${part.part_number || part.mpn || ''}. Must be a whole number between 1 and 1,000,000.`, 'error');
+            return false;
+        }
+    }
+    return true;
+}
 let activeTabCache = {};  // reqId → tab name
 let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
