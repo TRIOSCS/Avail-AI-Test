@@ -262,8 +262,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var ms = document.getElementById('mobileMainSearch');
     var ds = document.getElementById('mainSearch');
     if (ms && ds) {
-        ms.addEventListener('input', function() { ds.value = ms.value; });
-        ds.addEventListener('input', function() { ms.value = ds.value; });
+        ms.addEventListener('input', function(e) { e.stopPropagation(); ds.value = ms.value; });
+        ds.addEventListener('input', function(e) { e.stopPropagation(); ms.value = ds.value; });
 
 
         // Sync on viewport change (device rotation / resize across breakpoint)
