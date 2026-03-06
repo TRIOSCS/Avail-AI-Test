@@ -42,6 +42,41 @@ Navigate to: {{BASE_URL}}/auth/login
 4. VERIFY: No sensitive configuration values are exposed in the HTML
 5. Use `browser_network_requests` to check that no authentication tokens are sent to unexpected endpoints
 
+### Test 6: Verify authenticated app loads fully
+1. Navigate to {{BASE_URL}}/ (with session cookie from dispatcher)
+2. Use browser_snapshot to read the full page
+3. VERIFY: Sidebar navigation is visible with sections (RFQs, Vendors, Customers, Admin, etc.)
+4. VERIFY: User name or email appears in header/profile area
+5. VERIFY: No "login" redirect — session cookie is working
+6. Check browser_console_messages for any auth-related errors
+
+### Test 7: Navigate all sidebar sections
+1. From the authenticated home page, click each sidebar item one by one
+2. For each: take a snapshot, verify content loads, check console for errors
+3. Test these sections: RFQs, Vendors, Customers, Pipeline/Dashboard, Admin
+4. VERIFY: Every section loads content (not blank pages)
+5. VERIFY: No 401 or 403 errors in network requests
+6. VERIFY: No redirect to login page during navigation
+
+### Test 8: Health endpoint
+1. Use Bash to run: `curl -s {{BASE_URL}}/health`
+2. VERIFY: Returns JSON with `{"status": "ok"}` or similar
+3. VERIFY: Response time < 2 seconds
+4. VERIFY: HTTP status code is 200
+
+### Test 9: Auth status endpoint
+1. Use Bash to run: `curl -s {{BASE_URL}}/auth/status -b "session=SESSION_COOKIE"`
+2. Or navigate to auth/status via browser
+3. VERIFY: Returns JSON with user info (connected status, email, role)
+4. VERIFY: No sensitive tokens in the response
+
+### Test 10: Error page handling
+1. Navigate to {{BASE_URL}}/#nonexistent-section
+2. VERIFY: Shows a graceful fallback or redirects to a valid section
+3. VERIFY: No crash, no white screen, no unhandled JS error
+4. Navigate to {{BASE_URL}}/api/nonexistent-endpoint
+5. VERIFY: Returns proper JSON error (not HTML error page or stack trace)
+
 ## What Correct Looks Like
 - Login page loads within 3 seconds at `/auth/login`
 - App name and version number are clearly displayed

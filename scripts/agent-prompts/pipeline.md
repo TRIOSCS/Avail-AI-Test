@@ -48,12 +48,88 @@ Navigate to: {{BASE_URL}}/#dashboard
 4. VERIFY: No loading spinners are stuck in a perpetual loading state
 5. VERIFY: All sections of the dashboard have populated with data (no empty placeholder sections)
 
+### Test 7: Filter by date range
+1. Look for date range filters, date pickers, or time period selectors on the dashboard
+2. If date filters exist, take a screenshot showing the current filter state
+3. Change the date range (e.g. select "Last 7 days", "Last 30 days", or pick a custom range)
+4. Take a screenshot after changing the filter
+5. VERIFY: The dashboard KPI values update after the date change (numbers should differ)
+6. VERIFY: Any charts or tables refresh to reflect the new date range
+7. VERIFY: No loading spinners get stuck during the filter change
+8. Check browser_console_messages for any JS errors during filtering
+9. Check browser_network_requests for any failed API calls
+10. If no date filters exist, note this as an observation
+
+### Test 8: Drill down from KPI cards
+1. Click on a KPI card or a pipeline stage element (e.g. a stage in a funnel or a metric card)
+2. Take a screenshot after clicking
+3. VERIFY: Clicking navigates to a detailed view, opens a drawer, or expands a section with more information
+4. VERIFY: The detailed view shows a list or breakdown related to the KPI (e.g. clicking "Open Requisitions" shows a list of open requisitions)
+5. VERIFY: The detailed data is consistent with the summary number on the KPI card
+6. VERIFY: Navigation back to the dashboard is possible (back button, breadcrumb, or close)
+7. Navigate back and VERIFY the dashboard is still intact
+8. Check browser_console_messages for any JS errors
+9. If clicking a KPI card does nothing, note this as an observation
+
+### Test 9: Refresh data
+1. Look for a refresh button, reload icon, or "Update" button on the dashboard
+2. If found, note the current KPI values, then click the refresh button
+3. Take a screenshot after clicking refresh
+4. VERIFY: The dashboard reloads its data (loading indicators may briefly appear)
+5. VERIFY: After refresh, all KPI cards still show valid data (not NaN or blank)
+6. VERIFY: Charts and tables re-render correctly after refresh
+7. VERIFY: No stuck loading spinners after refresh completes
+8. Check browser_console_messages for any JS errors during refresh
+9. If no refresh button exists, note this as an observation
+
+### Test 10: Sidebar navigation round-trip
+1. From the dashboard at {{BASE_URL}}/#dashboard, look for the sidebar navigation menu
+2. Click on a different section (e.g. "RFQs" or "Vendors" or "Customers")
+3. Take a screenshot to verify the new section loads
+4. VERIFY: The new section loads its content correctly
+5. Click back on the "Dashboard" or "Pipeline" sidebar item to return
+6. Take a screenshot of the returned dashboard
+7. VERIFY: The dashboard loads completely again with all KPI cards and charts
+8. VERIFY: No data is missing or stuck from the previous navigation
+9. VERIFY: The URL hash is back to #dashboard
+10. Check browser_console_messages for any JS errors across the round-trip
+
+### Test 11: Buy plan section
+1. Look for a "Buy Plan" section, tab, or link on the dashboard or in the sidebar
+2. If accessible, navigate to it and take a screenshot
+3. VERIFY: The buy plan area loads with content (not a blank page)
+4. VERIFY: If pending approvals are shown, each has an identifiable requisition or part reference
+5. VERIFY: Approval status labels are meaningful (e.g. "Pending", "Approved", "Rejected")
+6. VERIFY: Dollar amounts in buy plans use proper currency formatting (e.g. "$1,234.56")
+7. VERIFY: No entries show NaN, undefined, or [object Object]
+8. Check browser_console_messages for any JS errors
+9. If no buy plan section exists, note this as an observation
+
+### Test 12: Proactive offers
+1. Look for a "Proactive Offers" section, tab, or link on the dashboard or in the sidebar
+2. If accessible, navigate to it and take a screenshot
+3. Use browser_snapshot to read the proactive offers content
+4. VERIFY: The section loads with data (offers, part numbers, vendor names)
+5. VERIFY: Part numbers display as readable MPNs (not database IDs)
+6. VERIFY: Vendor names are readable text
+7. VERIFY: If prices are shown, they use proper currency formatting
+8. VERIFY: If dates are shown, they are in a readable format (not raw timestamps)
+9. VERIFY: No entries show NaN, undefined, or [object Object]
+10. Check browser_console_messages for any JS errors
+11. If no proactive offers section exists, note this as an observation
+
 ## What Correct Looks Like
 - Dashboard loads within 5 seconds at the #dashboard hash route
 - KPI cards display valid numeric values with proper formatting
 - Currency values use "$" prefix with comma separators (e.g. "$1,234,567.00")
 - Pipeline visualization (chart or table) renders with real data
 - All pipeline stages are labeled and show reasonable values
+- Date filters update the dashboard when changed
+- Clicking KPI cards drills down to relevant detail views
+- Refresh button reloads data without breaking the display
+- Sidebar navigation works round-trip without losing dashboard state
+- Buy plan shows pending approvals with proper formatting
+- Proactive offers show readable part numbers, vendors, and prices
 - No JavaScript errors in the console
 - No failed API requests
 - No stuck loading spinners or empty sections
@@ -69,3 +145,9 @@ Navigate to: {{BASE_URL}}/#dashboard
 - Currency values without proper formatting
 - Charts that fail to render or show blank
 - Pipeline stages with negative or impossible values
+- Date filters that do not update the dashboard
+- KPI drill-down that leads to a blank or error page
+- Refresh that breaks the dashboard or gets stuck loading
+- Sidebar navigation that causes dashboard data loss on return
+- Buy plan entries with missing or malformed data
+- Proactive offers showing database IDs instead of MPNs

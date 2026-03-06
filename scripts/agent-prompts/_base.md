@@ -55,4 +55,21 @@ If all tests pass with no issues, just output: PASS: {{AREA}}
 - Take a screenshot BEFORE and AFTER each major action
 - If a page doesn't load within 15 seconds, file a ticket and move on
 - Check console for errors after every navigation and click
-- Be thorough but finish within 3 minutes
+- Be thorough — work through COMPLETE workflows, not just surface checks
+
+## Deep Testing Strategy
+Go beyond just "does the page load" — exercise the full workflow:
+1. **Navigate** to the section and verify it renders
+2. **Interact** with every control: filters, dropdowns, tabs, search, sort, pagination
+3. **Submit data** where safe: fill forms, run searches, apply filters, expand/collapse sections
+4. **Follow chains**: click a result row → check detail drawer → click each tab → verify data loads
+5. **Test edge cases**: empty searches, special characters, very long inputs, rapid clicks
+6. **Check responsiveness**: verify tables have data, counts match, no stale/cached data
+7. **Verify API health**: check network tab for any 4xx/5xx responses on EVERY action
+8. **Console errors**: check after EVERY click and navigation, not just page load
+9. **Cross-reference**: if a count says "42 vendors", click through and verify the list has ~42 items
+10. **Try breaking things**: enter SQL-like input, paste HTML into text fields, use unicode characters
+
+File a ticket for ANYTHING wrong — broken layouts, missing data, slow loads (>5s),
+misleading labels, dead links, empty states that should have data, inconsistent counts,
+buttons that do nothing, modals that don't close, filters that don't filter.

@@ -41,6 +41,31 @@ Navigate to: {{BASE_URL}}/
 4. DO NOT actually upload any files (this could create test data in the system)
 5. Use `browser_network_requests` to verify no unexpected POST requests are made on load
 
+### Test 6: Upload within requisition context
+1. Navigate to {{BASE_URL}}/#rfqs
+2. Click on the first requisition to open its detail drawer
+3. Look for a "Files" or "Upload" tab within the drawer
+4. Click it if found
+5. VERIFY: File upload zone renders within the requisition context
+6. VERIFY: If previous uploads exist, they show filename, date, and file size
+7. VERIFY: No console errors
+8. Check browser_network_requests for failed calls
+
+### Test 7: Bulk upload / import section
+1. Look in sidebar for "Import", "Bulk Upload", or "Data Import"
+2. If found, navigate to it
+3. VERIFY: Page shows upload instructions or template download link
+4. VERIFY: If a template download link exists, it's a valid link (not #)
+5. VERIFY: Layout is clean, no broken elements
+6. Check browser_console_messages after every click
+
+### Test 8: Upload history / audit trail
+1. Look for any section showing previous uploads or import history
+2. If found, verify it shows: filename, upload date, row count, status
+3. VERIFY: Dates are human-readable (not Unix timestamps)
+4. VERIFY: Status values are meaningful labels (e.g., "Complete", "Failed", "Processing")
+5. VERIFY: No "[object Object]" or NaN in any column
+
 ## What Correct Looks Like
 - Upload section is accessible from the sidebar navigation
 - A clear file upload zone is displayed (drag-and-drop area or file browse button)

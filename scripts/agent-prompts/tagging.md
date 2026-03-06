@@ -37,6 +37,39 @@ Navigate to: {{BASE_URL}}/#vendors
 5. VERIFY: No network requests fail (check browser_network_requests)
 6. VERIFY: All views render content without blank screens
 
+### Test 5: Admin tagging dashboard
+1. Navigate to {{BASE_URL}}/#admin
+2. Look for a "Tagging" or "Material Tags" section in the admin sidebar
+3. Click it if found
+4. Take a screenshot
+5. VERIFY: Shows tag coverage statistics with percentages and counts
+6. VERIFY: Shows confidence distribution breakdown
+7. VERIFY: If backfill/enrichment buttons exist, they are properly labeled
+8. Check browser_console_messages for errors
+
+### Test 6: Tag filter on vendor/material views
+1. Navigate to {{BASE_URL}}/#vendors
+2. Look for tag filter dropdowns or tag search
+3. If filters exist, select a tag category (e.g., "Capacitor", "IC")
+4. VERIFY: The list filters to show only matching items
+5. VERIFY: Filter count updates to reflect filtered results
+6. Check browser_network_requests for any failed API calls
+
+### Test 7: Material card detail with tags
+1. From any material or vendor view, click on an item that shows tags
+2. Look for the material card detail or drawer
+3. VERIFY: Tags are shown with confidence scores (if applicable)
+4. VERIFY: Manufacturer field is populated
+5. VERIFY: MPN displays correctly
+6. VERIFY: No "[object Object]" or "undefined" in any field
+
+### Test 8: Tag data integrity
+1. Use browser_network_requests to monitor API calls
+2. Navigate to any view showing tags
+3. VERIFY: Tag API responses return valid JSON
+4. VERIFY: No 500 errors from tag-related endpoints
+5. VERIFY: All tag names are human-readable strings, not UUIDs or codes
+
 ## What Correct Looks Like
 - Tag statistics section shows coverage percentage and counts as formatted numbers
 - Material items display tag labels as readable text chips/badges

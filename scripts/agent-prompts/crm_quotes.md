@@ -39,6 +39,33 @@ Navigate to: {{BASE_URL}}/#customers
 4. VERIFY: No values overflow their container or get truncated
 5. VERIFY: No negative values display incorrectly (e.g., "-$100" or "($100)" are both acceptable)
 
+### Test 5: Quote line item calculations
+1. In any quote detail view, look at line items
+2. VERIFY: unit_price * quantity = line total for each row
+3. VERIFY: Sum of line totals = quote subtotal
+4. VERIFY: Margin percentage is between 0% and 100% (not negative or >100%)
+5. Take a screenshot of any inconsistent calculations
+
+### Test 6: Quote status transitions
+1. Look at quotes in different statuses (Draft, Sent, Accepted, Expired)
+2. VERIFY: Status badges use distinct colors or styles
+3. VERIFY: Status labels are human-readable
+4. If status change buttons exist (Send, Accept), verify they're present but DO NOT click them
+
+### Test 7: Quote navigation chain
+1. From the companies list, click a company → open drawer → Quotes tab
+2. Click a quote to see its detail
+3. VERIFY: The quote shows which requisition it's linked to
+4. VERIFY: Line items show part numbers matching the requisition's parts
+5. Navigate back to the company list
+6. VERIFY: The list is still intact after the deep navigation
+
+### Test 8: Multiple company quotes
+1. Check quotes across 2-3 different companies
+2. VERIFY: Each company's quotes are distinct (not showing the same data)
+3. VERIFY: Quote numbers follow a consistent format (e.g., Q-YYYY-NNNN)
+4. VERIFY: No duplicate quote numbers across companies
+
 ## What Correct Looks Like
 - Quotes tab is accessible within the company detail drawer
 - Quote rows show customer, total, and status in a readable table

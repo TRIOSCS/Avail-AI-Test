@@ -48,11 +48,69 @@ Navigate to: {{BASE_URL}}/
 3. VERIFY: No timestamps show as "Invalid Date" or raw ISO strings without formatting
 4. VERIFY: Cost values (if displayed) use proper currency formatting (not raw floats)
 
+### Test 6: Filter Tickets by Each Status
+1. Use `browser_snapshot` to locate status filter controls
+2. Use `browser_click` to filter by "open" status
+3. Use `browser_snapshot` and VERIFY: only open tickets are shown (if any exist)
+4. Use `browser_click` to filter by "in_progress" status
+5. Use `browser_snapshot` and VERIFY: only in-progress tickets are shown (if any exist)
+6. Use `browser_click` to filter by "resolved" status
+7. Use `browser_snapshot` and VERIFY: only resolved tickets are shown
+8. Use `browser_click` to filter by "rejected" status
+9. Use `browser_snapshot` and VERIFY: only rejected tickets are shown
+10. VERIFY: Each filter transition does not produce console errors
+11. Use `browser_console_messages` to check for JavaScript errors after each filter change
+
+### Test 7: Verify Ticket Detail View Thoroughly
+1. Navigate back to the full ticket list (clear any filters)
+2. Use `browser_click` on a ticket to open its detail view
+3. Use `browser_snapshot` to capture the full detail view
+4. VERIFY: The ticket title is displayed prominently and is not empty
+5. VERIFY: A description or body text is shown (may be short but should exist)
+6. VERIFY: The current status is displayed with a clear label
+7. VERIFY: A created-at timestamp is shown in readable format
+8. VERIFY: An updated-at timestamp is shown in readable format
+9. VERIFY: Both timestamps are not "Invalid Date" or raw ISO strings
+10. Use `browser_console_messages` to check for JavaScript errors
+
+### Test 8: Verify Ticket Number Format
+1. Use `browser_snapshot` to inspect ticket numbers/IDs in the list view
+2. VERIFY: Ticket numbers follow the format TT-YYYYMMDD-NNN (e.g. TT-20260302-001)
+3. VERIFY: No ticket number is blank, "undefined", or just a raw integer
+4. VERIFY: The date portion of ticket numbers is plausible (not in the future, not from years ago)
+5. VERIFY: Ticket numbers are unique (no duplicates visible in the list)
+
+### Test 9: Verify Risk Tier Badges
+1. Use `browser_snapshot` to look for risk tier badges or labels on tickets
+2. VERIFY: Risk tier badges are displayed (e.g. "low", "medium", "high", "critical")
+3. VERIFY: Badges use appropriate visual styling (color-coded or labeled clearly)
+4. VERIFY: No badge shows "undefined", "null", or is completely missing where expected
+5. VERIFY: Badge text is readable against its background color
+
+### Test 10: Verify Category Labels
+1. Use `browser_snapshot` to inspect category labels on tickets
+2. VERIFY: Each ticket has a category label displayed (e.g. "api_failure", "data_quality", "performance")
+3. VERIFY: Category labels are human-readable (not raw codes or undefined)
+4. VERIFY: Category labels are consistently formatted across all tickets
+
+### Test 11: Test Pagination for Large Ticket Lists
+1. Use `browser_snapshot` to check the total number of tickets displayed
+2. If more than 50 tickets exist, VERIFY: pagination controls are present
+3. If pagination exists, use `browser_click` on "Next" or page 2
+4. Use `browser_snapshot` to verify new tickets load on the next page
+5. VERIFY: Page navigation does not produce console errors
+6. VERIFY: Tickets on page 2 are different from page 1 (not duplicated)
+7. Use `browser_network_requests` to verify the API call for the next page succeeds
+
 ## What Correct Looks Like
 - Ticket list loads within 3 seconds showing a table with title, status, and source columns
 - Status values are one of: submitted, diagnosed, in_progress, awaiting_verification, resolved, rejected
 - Clicking a ticket opens a detail view with diagnosis information and action history
 - Status filters narrow the displayed list to only matching tickets
+- Ticket numbers follow the TT-YYYYMMDD-NNN format
+- Risk tier badges are color-coded and readable
+- Category labels are human-readable and consistent
+- Pagination works correctly when more than 50 tickets exist
 - All text values are properly rendered (no undefined, NaN, or object references)
 - Timestamps are human-readable
 - Cost values use currency formatting (e.g. "$2.00" not "2")
@@ -66,3 +124,8 @@ Navigate to: {{BASE_URL}}/
 - Buttons that don't respond to clicks
 - Filter controls that don't update the list
 - Detail view that fails to load ticket information
+- Ticket numbers not following TT-YYYYMMDD-NNN format
+- Risk tier badges missing, unreadable, or showing undefined
+- Category labels missing or displaying raw codes
+- Pagination controls missing when ticket count exceeds 50
+- Duplicate tickets appearing across pages

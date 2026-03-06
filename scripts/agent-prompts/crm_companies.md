@@ -49,12 +49,80 @@ Navigate to: {{BASE_URL}}/#customers
 4. VERIFY: Company names are readable text
 5. VERIFY: No raw JSON or ciphertext is displayed anywhere
 
+### Test 6: Search/filter companies
+1. Look for a search input or filter field on the companies list page
+2. Type a partial company name (e.g. the first 3-4 characters of a company visible in the list)
+3. Take a screenshot after typing
+4. VERIFY: The list filters down to show only matching companies
+5. VERIFY: Results update dynamically without a full page reload
+6. VERIFY: Clearing the search field restores the full list
+7. Check browser_console_messages for any JS errors during search
+8. Check browser_network_requests for any failed API calls during filtering
+
+### Test 7: Company site details
+1. Click on a company that shows a site count of 1 or more
+2. In the detail drawer, click the Sites tab
+3. Click on the first site listed in the Sites tab
+4. Take a screenshot of the site detail
+5. VERIFY: The site shows a name or location identifier
+6. VERIFY: Contact information is visible (at least one of: contact name, email, phone number)
+7. VERIFY: Phone numbers display as readable formatted numbers (not raw digits or ciphertext)
+8. VERIFY: Email addresses display as readable addresses (not encrypted blobs)
+9. Check browser_console_messages for any JS errors
+
+### Test 8: Activity history
+1. Open a company detail drawer by clicking on a company
+2. Look for an Activity tab or activity/history section in the drawer
+3. If an Activity tab exists, click it and take a screenshot
+4. VERIFY: Activity entries are listed with timestamps (dates and/or times)
+5. VERIFY: Each activity entry has a description or action type (e.g. "RFQ sent", "Quote received", "Contact added")
+6. VERIFY: Timestamps are in a readable date format (not Unix timestamps or raw ISO strings)
+7. VERIFY: Activities are in chronological order (most recent first or last)
+8. If no Activity tab exists, note this as an observation but do not file a failure
+
+### Test 9: Add company form
+1. On the companies list page, look for an "Add Company" or "New Company" button
+2. If found, click it and take a screenshot
+3. VERIFY: A form modal or panel opens
+4. VERIFY: The form contains a field for company name
+5. VERIFY: The form contains a field for website or domain
+6. VERIFY: The form contains a field for industry or category
+7. VERIFY: The form has a submit/save button and a cancel/close button
+8. Click cancel or close without submitting
+9. VERIFY: The modal closes and the companies list is still intact
+10. If no Add Company button exists, note this as an observation
+
+### Test 10: Owner assignment
+1. Examine the companies list for an owner or assignee column
+2. VERIFY: If an owner column exists, it shows real user names (not IDs, UUIDs, or "null")
+3. Open a company detail drawer
+4. Look for an owner/assignee field in the drawer header or overview section
+5. VERIFY: The owner displays as a human-readable name
+6. VERIFY: The owner is not "undefined", "null", or an empty string where an assignment is expected
+7. Take a screenshot showing the owner field
+
+### Test 11: Cross-reference site count
+1. On the companies list, note the site count displayed for the first company (record the number)
+2. Click on that company to open the detail drawer
+3. Click the Sites tab
+4. Count the number of sites actually listed in the Sites tab
+5. VERIFY: The site count from the list matches the actual number of sites shown in the tab
+6. VERIFY: If the list says "3 sites", exactly 3 sites appear in the Sites tab
+7. Take a screenshot showing both the count and the sites list
+8. If counts do not match, report the exact discrepancy (e.g. "List shows 5, but Sites tab shows 3")
+
 ## What Correct Looks Like
 - Companies list loads promptly (under 2 seconds) with names and counts
 - Clicking a company opens a detail drawer with multiple tabs
 - Each tab (Sites, Contacts, Requisitions) loads its own content
 - Load More pagination adds rows without losing existing ones
 - All numeric values display as formatted numbers
+- Search/filter narrows the list dynamically and clears properly
+- Site details show contact info with properly formatted phone/email
+- Activity history shows timestamped, chronologically ordered entries
+- Add Company form has all required fields and can be cancelled safely
+- Owner fields show real user names, never raw IDs or null
+- Site counts in the list match actual site counts in the drawer
 - No console errors during any interaction
 
 ## What to Report
@@ -67,3 +135,9 @@ Navigate to: {{BASE_URL}}/#customers
 - Drawer that fails to open or shows blank content
 - Tabs that don't load their content
 - Pagination that breaks the list or duplicates entries
+- Search that does not filter or throws errors
+- Site details missing contact info or showing ciphertext
+- Activity entries without timestamps or in wrong order
+- Add Company form missing required fields or failing to close
+- Owner fields showing IDs, UUIDs, or null instead of names
+- Site count mismatch between list and drawer tabs
