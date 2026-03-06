@@ -1,0 +1,34 @@
+Now let me do a final summary of the test results.
+
+## Admin Settings Test Results
+
+### Tests Passed
+1. **Users API** (200) - 14 users returned with names, emails, roles, all properly populated
+2. **System Health** (200) - Version 3.0.1, all DB stats present with real data (757K material cards, 265K sightings, etc.)
+3. **System Config** (200) - 16 config keys with descriptions, values, and audit trail (updated_by, updated_at)
+4. **Connector Health** (200) - 38 connectors listed with status, categories, and error details
+5. **API Health Dashboard** (200) - 38 sources listed with status info
+6. **Data Integrity** (200) - Returns meaningful data with health checks
+7. **Material Audit** (200) - 11,318 audit entries with proper structure
+8. **Teams Config** (200) - Config properly returned with team/channel IDs
+9. **Credentials Masking** - All API keys properly masked with `●●●●●●●●` pattern across all tested sources (nexar, brokerbin, digikey, mouser, oemsecrets)
+10. **Auth Enforcement** (401) - Unauthenticated requests to admin endpoints correctly rejected
+11. **CSRF Protection** - Config updates correctly require CSRF token
+12. **Vendor Dedup Suggestions** (200) - Returns candidates with scores
+13. **Company Dedup Suggestions** (200) - Returns candidates with auto_keep_id
+14. **Trouble Tickets** (200) - Pagination working, 696 tickets total
+
+### Issues Found & Tickets Filed
+1. **TT-20260306-028**: Data integrity critical — 39K orphaned requirements, 214K orphaned sightings, 82K orphaned offers, 13K duplicate cards, offers linkage at only 5%
+2. **TT-20260306-029**: Mouser connector in error state since Mar 4 — "Invalid unique identifier"
+3. **TT-20260306-030**: TME connector shows confusing error+disabled status — 0 results across 134 searches
+
+### Pre-existing Issues (not re-filed)
+- manifest.json and favicon.ico return 404 (tickets 672-674)
+- API health dashboard recent_checks/recent_failures always zero (ticket 694)
+- Teams Notifications error status (ticket 696)
+
+### Notes
+- Could not test browser UI rendering due to Playwright MCP conflict (two instances fighting over same user-data-dir). All testing done via API.
+- The `browser_evaluate` and `browser_run_code` tools were blocked by permissions, preventing cookie injection for browser-based testing.
+- `/api/vendor-analytics` returns 404 but the router file exists — may be mounted under a different prefix or not yet deployed.

@@ -1,0 +1,1 @@
+[    1018ms] [WARNING] SW registration failed: AbortError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): Operation has been aborted @ https://app.availai.net/:1460

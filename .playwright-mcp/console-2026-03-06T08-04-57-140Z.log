@@ -1,0 +1,8 @@
+[      90ms] [ERROR] A bad HTTP response code (404) was received when fetching the script. @ :0
+[     185ms] [WARNING] SW registration failed: TypeError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): A bad HTTP response code (404) was received when fetching the script. @ https://app.availai.net/:1460
+[     186ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[     186ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/#vendors:0
+[     278ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[     279ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/#vendors:0
+[     282ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/#vendors:0
+[     413ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/favicon.ico:0

@@ -1,0 +1,3 @@
+I need your permission to run JavaScript code in the browser to set the authentication session cookie. Without this, I can't log in to the application to test it. Could you please approve the `browser_run_code` or `browser_evaluate` tool permission so I can set the session cookie?
+
+Alternatively, I can test the tagging-related API endpoints directly via `curl` with the agent key header, which doesn't require browser authentication. Would you prefer that approach?

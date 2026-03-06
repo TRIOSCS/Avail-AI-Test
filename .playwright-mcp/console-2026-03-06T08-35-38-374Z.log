@@ -1,0 +1,7 @@
+[      49ms] [WARNING] SW registration failed: InvalidStateError: Failed to register a ServiceWorker: The document is in an invalid state. @ https://app.availai.net/:36
+[      88ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[      88ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/:0
+[      95ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[      95ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/:0
+[      97ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/:0
+[     104ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/favicon.ico:0

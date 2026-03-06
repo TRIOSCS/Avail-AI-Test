@@ -1,0 +1,6 @@
+[     893ms] [WARNING] SW registration failed: AbortError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): Operation has been aborted @ https://app.availai.net/:36
+[     895ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[     895ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/#contacts:0
+[     897ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/#contacts:0
+[     910ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/favicon.ico:0
+[    8897ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ https://autologon.microsoftazuread-sso.com/6c994069-c22c-4f36-bd02-2670eaa78799/winauth/ssoprobe?client-request-id=ac8ea148-e017-4475-9615-a34219908394&_=1772787097216:0

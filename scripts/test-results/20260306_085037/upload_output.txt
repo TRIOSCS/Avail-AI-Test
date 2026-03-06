@@ -1,0 +1,1 @@
+I need permission to run JavaScript in the browser to set cookies. Could you approve the `browser_run_code` or `browser_evaluate` tool so I can set the authentication session cookie? Without it, I can't log in to test the upload functionality.

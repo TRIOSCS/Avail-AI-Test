@@ -1,0 +1,26 @@
+Site Agent Deep Test — Final Summary
+Date: Fri Mar  6 09:00:14 UTC 2026
+Rounds completed: 2
+
+RESULTS:
+  [PASS]    search
+  [FAIL]    requisitions
+  [FAIL]    rfq
+  [PASS]    crm_companies
+  [FAIL]    crm_contacts
+  [FAIL]    crm_quotes
+  [PASS]    prospecting
+  [FAIL]    vendors
+  [FAIL]    tagging
+  [FAIL]    tickets
+  [PASS]    admin_api_health
+  [FAIL]    admin_settings
+  [PASS]    notifications
+  [PASS]    auth
+  [FAIL]    upload
+  [FAIL]    pipeline
+  [PASS]    activity
+
+Total: 7 pass, 10 fail, 0 timeout
+
+ISSUES FOUND:

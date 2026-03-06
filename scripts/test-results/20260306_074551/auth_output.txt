@@ -1,0 +1,29 @@
+Two tickets filed. Now let me summarize the test results:
+
+## Auth Test Results
+
+### Test 1: Login Page Renders ✅
+- Root `/` shows a clean login page with AVAIL branding, "Trio Supply Chain Solutions", and version **v3.0.1**
+- Page loads quickly, proper styling applied
+
+### Test 2: Microsoft OAuth Button ✅
+- "Sign in with Microsoft" button is present with Microsoft icon
+- Button is styled, clickable, and links to `/auth/login`
+
+### Test 3: Login Page Layout ✅
+- Centered card layout, clean design, no overlapping elements or broken images
+- Logo, company name, OAuth button, and version number all properly positioned
+
+### Test 4: Session-Protected Content ✅
+- Without an active session, `/` correctly shows the login page (no redirect loop)
+- `/auth/login` correctly redirects to Microsoft OAuth flow
+
+### Test 5: No Credential Leaks ✅
+- No API keys, tokens, or secrets visible in page content
+- No sensitive data in network requests to unexpected endpoints
+
+### Issues Filed
+- **TT-20260306-001**: `manifest.json` returns 404 — causes PWA manifest errors and service worker registration failure (6 console errors)
+- **TT-20260306-002**: `favicon.ico` returns 404 — missing favicon
+
+PASS: auth (with 2 non-blocking issues filed)

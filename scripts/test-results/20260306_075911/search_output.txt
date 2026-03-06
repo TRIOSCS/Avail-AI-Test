@@ -1,0 +1,8 @@
+Ticket filed: **TT-20260306-003** — PWA resource 404s.
+
+## Summary
+
+**PARTIAL PASS: search** — The search functionality on `#rfqs` works correctly (filters requisitions by part number), but I could only complete Test 1 of 4 before the browser session was lost due to a Chrome crash. The remaining tests (detail expansion, empty search handling, special characters) could not be verified.
+
+**Issues filed:**
+- TT-20260306-003: manifest.json, favicon.ico, and service worker all return 404 on every page load

@@ -1,0 +1,55 @@
+Still blocked. Let me summarize the testing results based on API-level testing.
+
+## CRM Contacts Test Results
+
+### Tests Completed (API-level — browser auth blocked)
+
+**Test 1: Contacts list loads** — PASS
+- `/api/vendor-contacts/bulk` returns 5000 vendor contacts in 1.2s
+- `/api/customer-contacts` returns 5000 customer contacts in 1.2s
+- All contacts have readable names and vendor/company associations
+
+**Test 2: Contact detail view** — PASS
+- `/api/vendors/{id}/contacts` returns proper contact detail with all fields
+- Contact summary endpoint works correctly
+
+**Test 3: Encrypted fields** — PASS
+- Zero ciphertext (gAAAAA) values found in phone or email fields across all 10,000 contacts
+- All emails are readable addresses, all phones are human-readable
+
+**Test 4: Contact data integrity** — ISSUES FOUND
+- No `[object Object]`, `undefined`, or `null` name values
+- 94 duplicate name+vendor pairs, 73 duplicate emails → **Filed TT-20260306-047**
+- 97 customer contacts with phone numbers embedded in `site_name` → **Filed TT-20260306-048**
+
+**Test 5: Search/filter** — Could not test (requires browser JS)
+
+**Test 6: Contact detail field completeness** — PASS
+- Full names, titles, company names all present
+- 2919/5000 vendor contacts missing phone (58%) — expected for Salesforce imports
+- 217/5000 vendor contacts missing email (4%)
+
+**Test 7: Phone number formatting** — ISSUE FOUND
+- 55 vendor contacts + 55 customer contacts have unformatted raw digit strings → **Filed TT-20260306-046**
+- Remaining contacts have properly formatted phones
+
+**Test 8: Email links** — Could not test (requires browser JS for mailto: href check)
+
+**Test 9: Vendor card association** — PASS
+- All 5000 vendor contacts have a vendor_name association
+- Contact timeline and summary endpoints work correctly
+
+**Test 10: Duplicate detection** — No dedup UI (noted in TT-20260306-047)
+
+### Tickets Filed
+| Ticket | Issue |
+|--------|-------|
+| TT-20260306-046 | 55 vendor contacts have unformatted raw-digit phone numbers |
+| TT-20260306-047 | 94 duplicate vendor contacts (same name+vendor) with no dedup UI |
+| TT-20260306-048 | 97 customer contacts have phone numbers embedded in site_name field |
+
+### Not Filed (already exists)
+- Missing manifest.json/favicon.ico (TT-20260306-038)
+
+### Limitation
+Browser-level testing (UI rendering, search/filter, email mailto links, visual layout) could not be completed because `browser_evaluate` and `browser_run_code` permissions were denied, preventing session cookie injection for authentication.

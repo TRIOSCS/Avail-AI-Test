@@ -1,0 +1,142 @@
+==============================================
+  Site Agent Deep Test — up to 5 rounds
+  Areas: 17
+  Started: Fri Mar  6 08:31:33 UTC 2026
+==============================================
+
+>>> Round 1: testing 17 areas (08:31:33)
+
+╔══════════════════════════════════════════════════════╗
+║  AvailAI Site Agent Test Runner                     ║
+╚══════════════════════════════════════════════════════╝
+
+  Target:   https://app.availai.net
+  Areas:    17
+  Parallel: 8
+
+  Health check... OK
+  Agent auth... OK
+
+  Run ID:  20260306_083133
+  Results: /root/availai/scripts/test-results/20260306_083133
+
+─────────────────────────────────────────────────────────
+  >> Launching agent: search
+  >> Launching agent: requisitions
+  >> Launching agent: rfq
+  >> Launching agent: crm_companies
+  >> Launching agent: crm_contacts
+  >> Launching agent: crm_quotes
+  >> Launching agent: prospecting
+  >> Launching agent: vendors
+  >> Launching agent: tagging
+  >> Launching agent: tickets
+  >> Launching agent: admin_api_health
+  >> Launching agent: admin_settings
+  >> Launching agent: notifications
+  >> Launching agent: auth
+  >> Launching agent: upload
+  >> Launching agent: pipeline
+  >> Launching agent: activity
+
+  Waiting for 17 agents to complete...
+
+  [PASS] search
+  [FAIL] requisitions -- issues found (see /root/availai/scripts/test-results/20260306_083133/requisitions_output.txt)
+  [PASS] rfq
+  [PASS] crm_companies
+  [TIME] crm_contacts -- timed out after 600s
+  [PASS] crm_quotes
+  [TIME] prospecting -- timed out after 600s
+  [PASS] vendors
+  [PASS] tagging
+  [FAIL] tickets -- issues found (see /root/availai/scripts/test-results/20260306_083133/tickets_output.txt)
+  [PASS] admin_api_health
+  [FAIL] admin_settings -- issues found (see /root/availai/scripts/test-results/20260306_083133/admin_settings_output.txt)
+  [PASS] notifications
+  [PASS] auth
+  [TIME] upload -- timed out after 600s
+  [FAIL] pipeline -- issues found (see /root/availai/scripts/test-results/20260306_083133/pipeline_output.txt)
+  [PASS] activity
+
+═══════════════════════════════════════════════════════
+  RESULTS: 10 pass, 4 fail, 3 error
+  Output:  /root/availai/scripts/test-results/20260306_083133/
+═══════════════════════════════════════════════════════
+
+  Changes from last run:
+
+--- Round 1 Summary ---
+  Passed:  6 (search crm_companies admin_api_health notifications auth activity)
+  Failed:  8 (requisitions rfq crm_quotes vendors tagging tickets admin_settings pipeline)
+  Retry:   3 (crm_contacts prospecting upload)
+
+Waiting 30s before retry...
+>>> Round 2: testing 3 areas (08:50:37)
+
+╔══════════════════════════════════════════════════════╗
+║  AvailAI Site Agent Test Runner                     ║
+╚══════════════════════════════════════════════════════╝
+
+  Target:   https://app.availai.net
+  Areas:    3
+  Parallel: 8
+
+  Health check... OK
+  Agent auth... OK
+
+  Run ID:  20260306_085037
+  Results: /root/availai/scripts/test-results/20260306_085037
+
+─────────────────────────────────────────────────────────
+  >> Launching agent: crm_contacts
+  >> Launching agent: prospecting
+  >> Launching agent: upload
+
+  Waiting for 3 agents to complete...
+
+  [FAIL] crm_contacts -- issues found (see /root/availai/scripts/test-results/20260306_085037/crm_contacts_output.txt)
+  [PASS] prospecting
+  [PASS] upload
+
+═══════════════════════════════════════════════════════
+  RESULTS: 2 pass, 1 fail, 0 error
+  Output:  /root/availai/scripts/test-results/20260306_085037/
+═══════════════════════════════════════════════════════
+
+  Changes from last run:
+    crm_contacts: TIMEOUT -> FAIL
+    prospecting: TIMEOUT -> PASS
+    upload: TIMEOUT -> PASS
+
+--- Round 2 Summary ---
+  Passed:  1 (prospecting)
+  Failed:  2 (crm_contacts upload)
+  Retry:   0 (none)
+
+All areas have definitive results!
+
+══════════════════════════════════════════════════════════
+  FINAL RESULTS (Fri Mar  6 09:00:14 UTC 2026)
+══════════════════════════════════════════════════════════
+  [PASS]    search
+  [FAIL]    requisitions
+  [FAIL]    rfq
+  [PASS]    crm_companies
+  [FAIL]    crm_contacts
+  [FAIL]    crm_quotes
+  [PASS]    prospecting
+  [FAIL]    vendors
+  [FAIL]    tagging
+  [FAIL]    tickets
+  [PASS]    admin_api_health
+  [FAIL]    admin_settings
+  [PASS]    notifications
+  [PASS]    auth
+  [FAIL]    upload
+  [FAIL]    pipeline
+  [PASS]    activity
+
+  Total: 7 pass, 10 fail, 0 timeout
+  Summary: /root/availai/scripts/test-results/final-summary.txt
+══════════════════════════════════════════════════════════

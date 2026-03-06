@@ -1,0 +1,5 @@
+[     903ms] [WARNING] SW registration failed: AbortError: Failed to register a ServiceWorker for scope ('https://app.availai.net/static/') with script ('https://app.availai.net/static/sw.js'): Operation has been aborted @ https://app.availai.net/:36
+[     908ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/static/manifest.json:0
+[     908ms] [ERROR] Manifest fetch from https://app.availai.net/static/manifest.json failed, code 404 @ https://app.availai.net/#suggested:0
+[     909ms] [WARNING] <meta name="apple-mobile-web-app-capable" content="yes"> is deprecated. Please include <meta name="mobile-web-app-capable" content="yes"> @ https://app.availai.net/#suggested:0
+[     919ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://app.availai.net/favicon.ico:0
