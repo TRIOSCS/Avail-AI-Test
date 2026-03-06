@@ -47,6 +47,42 @@ produce exact search/replace patches. Rules:
 - Each patch targets ONE contiguous block of code"""
 
 
+def validate_patches(patches: list[dict], source_dir: Path | None = None) -> tuple[bool, list[str]]:
+    """Validate that all patch search strings exist in their target files.
+
+    Returns (ok, errors) where ok=True means all patches are valid.
+    """
+    base = source_dir or SOURCE_DIR
+    errors = []
+
+    for i, patch in enumerate(patches):
+        rel_path = patch.get("file", "")
+        search = patch.get("search", "")
+
+        if not rel_path:
+            errors.append(f"Patch [{i}]: missing 'file' field")
+            continue
+
+        target = base / rel_path
+        if not target.is_file():
+            errors.append(f"Patch [{i}]: file not found: {rel_path}")
+            continue
+
+        try:
+            content = target.read_text(encoding="utf-8")
+        except Exception as exc:
+            errors.append(f"Patch [{i}]: cannot read {rel_path}: {exc}")
+            continue
+
+        if search and search not in content:
+            preview = search[:80].replace("\n", "\\n")
+            errors.append(
+                f"Patch [{i}]: search string not found in {rel_path}: '{preview}...'"
+            )
+
+    return (len(errors) == 0, errors)
+
+
 async def generate_patches(
     title: str,
     diagnosis: dict,
@@ -96,10 +132,10 @@ Generate the minimal search/replace patches to fix this issue."""
 
     try:
         result = await claude_structured(
-            system_prompt=SYSTEM_PROMPT,
-            user_prompt=user_prompt,
-            schema=PATCH_SCHEMA,
-            model="claude-sonnet-4-20250514",
+            user_prompt,
+            PATCH_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="smart",
         )
     except Exception as e:
         logger.error("patch_generator: Claude API call failed: {}", e)
@@ -110,5 +146,13 @@ Generate the minimal search/replace patches to fix this issue."""
         return None
 
     patches = result.get("patches", [])
+    if patches:
+        ok, errors = validate_patches(patches)
+        if not ok:
+            for err in errors:
+                logger.warning("patch_generator: validation failed: {}", err)
+            logger.warning("patch_generator: rejecting {} invalid patches for '{}'", len(patches), title)
+            return None
+
     logger.info("patch_generator: generated {} patches for '{}'", len(patches), title)
     return result
