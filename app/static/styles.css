@@ -489,7 +489,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .sidebar .sb-group-header .sb-group-label,.sidebar .sb-group-header .sb-group-chevron{display:initial}
     .sidebar .sb-group-header .sb-group-icon{width:24px;height:24px;border-radius:6px}
     .sidebar .sb-group-header .sb-group-icon svg{width:14px;height:14px}
-    .sidebar 
+    .sidebar .sb-top-gradient{display:block}
     .sidebar .sidebar-nav{padding:12px 10px;gap:2px}
     .sidebar .sidebar-nav button{justify-content:flex-start;padding:10px 14px;gap:10px;font-size:13px;color:var(--text2)}
     .sidebar .sidebar-nav button::after{display:none}
@@ -1238,19 +1238,6 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 /* Sidebar badge — small count pill on nav buttons */
 .sb-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:8px;background:var(--green);color:#fff;font-size:9px;font-weight:700;margin-left:auto;line-height:1}
 /* ── Command Center — section header style ── */
-
-/* Active highlight — matches section-colored active states */
-
-/* Icon: rotate on active */
-
-/* Collapsed: tooltip like other icons */
-.sidebar 
-.sidebar 
-.sidebar 
-/* Hover glow on icon */
-
-/* Top gradient bar — colored lines above each sidebar section */
-
 .sb-cc-group{margin-bottom:4px}
 .sb-cc-header{cursor:pointer;pointer-events:auto;transition:all var(--speed) cubic-bezier(.4,0,.2,1)}
 .sb-cc-header:hover{background:rgba(59,110,168,.06)}
@@ -1282,7 +1269,6 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .sidebar .sb-group-header .sb-group-icon{width:20px;height:20px;border-radius:4px;pointer-events:auto}
 .sidebar .sb-group-header .sb-group-icon svg{width:12px;height:12px}
 html .sidebar .sb-group-items{max-height:none;opacity:1;pointer-events:auto}
-.sidebar 
 .sidebar .sidebar-nav{padding:12px 0 8px;gap:2px;scrollbar-width:none;justify-content:flex-start;align-items:center}
 .sidebar .sidebar-nav::-webkit-scrollbar{display:none}
 .sidebar .sidebar-nav button{justify-content:center;align-items:center;padding:6px 0;gap:0;overflow:hidden;font-size:0;color:transparent;width:100%}
@@ -1308,7 +1294,8 @@ body.sb-open .sb-user-menu:hover .sb-user-popover{opacity:1;visibility:visible;t
 .sb-user-popover button:hover{background:var(--surface);color:var(--text)}
 .sb-user-popover button:last-child:hover{color:var(--red);background:var(--red-light)}
 /* Expanded state overrides — both pinned (sb-open) and hover */
-
+body.sb-open .sb-section-dot,.sidebar:hover .sb-section-dot{display:none}
+body.sb-open .sidebar .sb-group-header,.sidebar:hover .sb-group-header{display:flex;padding:8px 12px;justify-content:flex-start;pointer-events:auto}
 body.sb-open .sidebar .sb-group-header .sb-group-label,body.sb-open .sidebar .sb-group-header .sb-group-chevron,.sidebar:hover .sb-group-header .sb-group-label,.sidebar:hover .sb-group-header .sb-group-chevron{display:initial}
 body.sb-open .sidebar .sb-group-header .sb-group-icon,.sidebar:hover .sb-group-header .sb-group-icon{width:24px;height:24px;border-radius:6px}
 body.sb-open .sidebar .sb-group-header .sb-group-icon svg,.sidebar:hover .sb-group-header .sb-group-icon svg{width:14px;height:14px}
@@ -1316,7 +1303,6 @@ body.sb-open .sidebar .sb-group-items,.sidebar:hover .sb-group-items{transition:
 body.sb-open .sidebar .sb-group-items .sb-nav-btn,.sidebar:hover .sb-group-items .sb-nav-btn{padding-left:22px}
 .sb-nav-group + .sb-nav-group::before{content:'';display:none;height:1px;background:var(--section-border,rgba(0,0,0,.06));margin:4px 12px 6px;border-radius:1px}
 body.sb-open .sb-nav-group + .sb-nav-group::before,.sidebar:hover .sb-nav-group + .sb-nav-group::before{display:block}
-body.sb-open .sb-section-dot,.sidebar:hover .sb-section-dot{display:none}
 body.sb-open .sidebar .sb-top-gradient,.sidebar:hover .sb-top-gradient{display:block}
 body.sb-open .sidebar .sidebar-nav,.sidebar:hover .sidebar-nav{padding:12px 10px;gap:2px}
 body.sb-open .sidebar .sidebar-nav button,.sidebar:hover .sidebar-nav button{justify-content:flex-start;padding:10px 14px;gap:10px;font-size:13px;color:var(--text2)}
