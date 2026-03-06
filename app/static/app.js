@@ -130,6 +130,19 @@ function validatePartRowInputs(qty, targetPrice) {
 }
 window.validatePartRowInputs = validatePartRowInputs;
 
+function validatePartRowInputs(qty, targetPrice) {
+    if (!Number.isInteger(Number(qty)) || Number(qty) <= 0) {
+        showToast('Quantity must be a positive whole number.', 'error');
+        return false;
+    }
+    if (isNaN(Number(targetPrice)) || Number(targetPrice) <= 0) {
+        showToast('Target price must be a positive value.', 'error');
+        return false;
+    }
+    return true;
+}
+window.validatePartRowInputs = validatePartRowInputs;
+
 function toggleMobileSidebar() {
     var sb = document.getElementById('sidebar');
     var ov = document.getElementById('sidebarOverlay');
