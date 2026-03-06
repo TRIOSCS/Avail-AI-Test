@@ -39,6 +39,47 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["vendors"])
 
 
+# -- Manufacturer Enrichment Helpers ------------------------------------------
+
+
+def _infer_manufacturer_from_prefix(db: Session, mpn: str) -> str | None:
+    """Walk from longest to shortest prefix to find a known manufacturer."""
+    for length in range(len(mpn) - 1, 6, -1):  # minimum 7-char prefix
+        prefix = mpn[:length]
+        match = (
+            db.query(MaterialCard)
+            .filter(
+                MaterialCard.normalized_mpn == prefix,
+                MaterialCard.manufacturer.isnot(None),
+                MaterialCard.manufacturer != "",
+            )
+            .first()
+        )
+        if match:
+            return match.manufacturer
+    return None
+
+
+def backfill_missing_manufacturers(db: Session) -> int:
+    """Bulk-update all rows where manufacturer IS NULL/empty and a prefix-match donor exists."""
+    null_parts = (
+        db.query(MaterialCard)
+        .filter(
+            (MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")
+        )
+        .all()
+    )
+    updated = 0
+    for part in null_parts:
+        inferred = _infer_manufacturer_from_prefix(db, part.normalized_mpn)
+        if inferred:
+            part.manufacturer = inferred
+            db.add(part)
+            updated += 1
+    db.commit()
+    return updated
+
+
 # -- Material Card Serialization -----------------------------------------------
 
 
@@ -262,6 +303,12 @@ async def get_material(card_id: int, user: User = Depends(require_user), db: Ses
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
+    if not card.manufacturer:
+        inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
+        if inferred:
+            card.manufacturer = inferred
+            db.add(card)
+            db.commit()
     return material_card_to_dict(card, db)
 
 
@@ -272,6 +319,12 @@ async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: 
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
+    if not card.manufacturer:
+        inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
+        if inferred:
+            card.manufacturer = inferred
+            db.add(card)
+            db.commit()
     return material_card_to_dict(card, db)
 
 
@@ -534,6 +587,16 @@ async def merge_material_cards(
         "vendor_histories_merged": vh_merged,
         "vendor_histories_moved": vh_moved,
     }
+
+
+# -- Admin: Backfill Missing Manufacturers ------------------------------------
+
+
+@router.post("/materials/backfill-manufacturers", tags=["admin"])
+async def backfill_manufacturers(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """One-time admin endpoint to enrich all material cards missing a manufacturer via prefix-match."""
+    count = backfill_missing_manufacturers(db)
+    return {"enriched_records": count}
 
 
 # -- Standalone Stock Import ---------------------------------------------------
