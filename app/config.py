@@ -143,6 +143,7 @@ class Settings:
 
     # Activity tracking & customer ownership (v1.3.0)
     activity_tracking_enabled: bool = os.getenv("ACTIVITY_TRACKING_ENABLED", "true").lower() == "true"
+    ownership_sweep_enabled: bool = os.getenv("OWNERSHIP_SWEEP_ENABLED", "false").lower() == "true"
     customer_inactivity_days: int = int(os.getenv("CUSTOMER_INACTIVITY_DAYS", "30"))
     strategic_inactivity_days: int = int(os.getenv("STRATEGIC_INACTIVITY_DAYS", "90"))
     customer_warning_days: int = int(os.getenv("CUSTOMER_WARNING_DAYS", "23"))
