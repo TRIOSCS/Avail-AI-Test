@@ -23,6 +23,7 @@ nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contaminat
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
+os.environ.setdefault("AGENT_API_KEY", "test-agent-key-secret")  # Agent session tests
 
 from datetime import datetime, timezone
 
@@ -236,7 +237,7 @@ def client(db_session: Session, test_user: User) -> TestClient:
     skip M365 auth entirely.
     """
     from app.database import get_db
-    from app.dependencies import require_buyer, require_user
+    from app.dependencies import require_buyer, require_sales, require_user
     from app.main import app
 
     def _override_db():
@@ -251,6 +252,7 @@ def client(db_session: Session, test_user: User) -> TestClient:
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_buyer
+    app.dependency_overrides[require_sales] = _override_user
 
     with TestClient(app) as c:
         yield c

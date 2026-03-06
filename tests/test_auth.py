@@ -8,7 +8,6 @@ Called by: pytest
 Depends on: app.routers.auth, conftest fixtures
 """
 
-import os
 from datetime import datetime, timezone
 
 import pytest
@@ -16,12 +15,8 @@ from fastapi.testclient import TestClient
 
 from app.models import User
 
-# Set AGENT_API_KEY before importing app
-os.environ.setdefault("AGENT_API_KEY", "test-agent-key-secret")
-
 from app.database import get_db
 from app.main import app
-from tests.conftest import TestSessionLocal, engine
 
 
 @pytest.fixture()
