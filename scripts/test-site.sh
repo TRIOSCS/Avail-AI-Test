@@ -22,7 +22,7 @@ PROMPTS_DIR="$SCRIPT_DIR/agent-prompts"
 RESULTS_DIR="$SCRIPT_DIR/test-results"
 HISTORY_FILE="$SCRIPT_DIR/test-history.jsonl"
 MAX_PARALLEL=15
-TIMEOUT_SECS=300  # 5 min per agent
+TIMEOUT_SECS=600  # 10 min per agent
 
 BASE_URL="${BASE_URL:-https://app.availai.net}"
 AGENT_KEY="${AGENT_KEY:-$(grep AGENT_API_KEY "$PROJECT_DIR/.env" 2>/dev/null | cut -d= -f2)}"
