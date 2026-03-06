@@ -10,7 +10,7 @@ Depends on: nothing (pure validation)
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class TroubleTicketCreate(BaseModel):
@@ -20,6 +20,13 @@ class TroubleTicketCreate(BaseModel):
     current_page: str | None = None
     frontend_errors: list[dict] | None = None
     source: str | None = None  # 'report_button' | 'ticket_form'
+
+    # Agent coordination fields (from playwright/agent sources)
+    tested_area: str | None = None
+    dom_snapshot: str | None = None
+    network_errors: list[dict] | None = None
+    performance_timings: dict | None = None
+    reproduction_steps: list[str] | None = None
 
     # Error-report fields (from report button)
     screenshot_b64: str | None = None
