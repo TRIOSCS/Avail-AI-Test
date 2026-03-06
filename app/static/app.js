@@ -290,6 +290,7 @@ let searchResults = {};
 let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
 let searchResultsCache = {};  // keyed by reqId
 let selectedSightings = new Set();
+const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
 let rfqVendorData = [];
 let activeTabCache = {};  // reqId → tab name
 let _vendorListData = [];   // cached vendor list for client-side filtering
