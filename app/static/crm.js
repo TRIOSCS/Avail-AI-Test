@@ -585,7 +585,7 @@ function bulkExportAccounts() {
     const ids = [..._custSelectedIds];
     const data = crmCustomers.filter(c => ids.includes(c.id));
     const csv = ['Name,Industry,Owner,Sites,Domain'].concat(
-        data.map(c => [c.name, c.industry || '', c.account_owner_name || '', c.site_count || 0, c.domain || ''].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
+        data.map(c => [c.name, Array.isArray(c.industry) ? c.industry.join(';') : (c.industry || ''), c.account_owner_name || '', c.site_count || 0, c.domain || ''].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
     ).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -952,7 +952,7 @@ function _renderCustDrawerOverview(companyId) {
     html += `<div class="drawer-section">
         <div class="drawer-section-title">Account Details</div>
         <div class="drawer-field"><span class="drawer-field-label">Owner</span><span class="drawer-field-value">${c.account_owner_name ? esc(c.account_owner_name) : '<span style="color:var(--red)">Unassigned</span>'}</span></div>
-        <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${esc(c.industry || '—')}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${Array.isArray(c.industry) ? esc(c.industry.join(', ')) : esc(c.industry || '—')}</span></div>
         ${c.domain ? '<div class="drawer-field"><span class="drawer-field-label">Domain</span><span class="drawer-field-value"><a href="https://'+escAttr(c.domain)+'" target="_blank">'+esc(c.domain)+'</a></span></div>' : ''}
         ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value">' + (c.website.match(/^https?:\/\//i) ? '<a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a>' : esc(c.website)) + '</span></div>' : ''}
         ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(c.phone, {company_id: c.id, origin: 'company_drawer'})+'</span></div>' : ''}
