@@ -305,6 +305,7 @@ let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
 let searchResultsCache = {};  // keyed by reqId
 let selectedSightings = new Set();
 const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
+const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
 let rfqVendorData = [];
 
 function validatePartRows(parts) {
