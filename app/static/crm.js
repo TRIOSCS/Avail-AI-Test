@@ -373,7 +373,7 @@ function renderCustomers() {
         </tr></thead><tbody>`;
 
     for (const c of filtered) {
-        const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+        const displayName = c.name.replace(/\s*\(Pass\)\s*$/i, '').trim();
         const healthColor = _custHealthColor(c);
         const healthLabel = _custHealthLabel(c);
         const openReqs = c.open_req_count || 0;
@@ -415,7 +415,7 @@ function renderCustomers() {
 }
 
 function _renderCustCardMobile(c) {
-    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    const displayName = c.name.replace(/\s*\(Pass\)\s*$/i, '').trim();
     const healthColor = _custHealthColor(c);
     const openReqs = c.open_req_count || 0;
     const rev90 = c.revenue_90d != null ? '$' + Number(c.revenue_90d).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0}) : '';
@@ -612,7 +612,7 @@ async function openCustDrawer(companyId, tab) {
     if (drawer) drawer.classList.add('open');
     // Show drill-down breadcrumb in top bar
     const comp = crmCustomers.find(x => x.id === companyId);
-    _setTopDrillLabel(comp ? comp.name.replace(/\s*(bucket|pass)\s*$/i, '').trim() : 'Account');
+    _setTopDrillLabel(comp ? comp.name.replace(/\s*\(Pass\)\s*$/i, '').trim() : 'Account');
     // Ensure company data is loaded (may be called from Contacts view before CRM tab)
     if (!crmCustomers.find(x => x.id === companyId)) {
         const cached = _getCachedCompanyDetail('_all');
@@ -676,7 +676,7 @@ function _renderMiniList(activeId) {
 
     let itemsHtml = '';
     for (const c of filtered) {
-        const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+        const displayName = c.name.replace(/\s*\(Pass\)\s*$/i, '').trim();
         const hc = _custHealthColor(c);
         const hl = _custHealthLabel(c);
         const isActive = c.id === activeId;
@@ -894,7 +894,7 @@ function _renderCustDrawerOverview(companyId) {
     const c = crmCustomers.find(x => x.id === companyId);
     if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
 
-    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    const displayName = c.name.replace(/\s*\(Pass\)\s*$/i, '').trim();
     if (title) title.textContent = displayName;
     if (title && c.is_strategic) { title.textContent = displayName; const star = document.createElement('span'); star.style.color = 'var(--amber)'; star.textContent = ' ★'; title.appendChild(star); }
     const mTitle = document.getElementById('custDrawerMobileTitle');
