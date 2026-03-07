@@ -5,7 +5,7 @@
  */
 
 import {
-    apiFetch, esc, showToast, sidebarNav,
+    apiFetch, esc, friendlyError, showToast, sidebarNav,
 } from 'app';
 
 // ── Common Issues dropdown options ─────────────────────────────────────
@@ -179,7 +179,7 @@ async function submitTicket(form, container) {
         showToast('Ticket ' + data.ticket_number + ' submitted', 'success');
         renderMyTickets(container);
     } catch (e) {
-        showToast('Failed to submit ticket: ' + e.message, 'error');
+        showToast('Couldn\'t submit ticket — ' + friendlyError(e, 'please try again'), 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Submit Ticket'; }
     }
 }
@@ -224,11 +224,7 @@ var _adminRefreshTimer = null;
 
 async function renderAdminDashboard(container) {
     clearNode(container);
-    var findTroubleBtn = el('button', {
-        className: 'btn btn-sm',
-        textContent: 'Find Trouble',
-        onclick: function() { startFindTrouble(container); },
-    });
+
     var header = el('div', { className: 'vendor-header' }, [
         el('h2', {}, ['Trouble Tickets']),
         el('div', { style: 'display:flex;gap:8px;' }, [
@@ -237,7 +233,6 @@ async function renderAdminDashboard(container) {
                 textContent: '+ New Ticket',
                 onclick: function() { renderSubmitForm(container); },
             }),
-            findTroubleBtn,
         ]),
     ]);
     container.appendChild(header);
@@ -945,66 +940,6 @@ document.addEventListener('click', function(e) {
     if (panel.contains(e.target) || (bell && bell.contains(e.target))) return;
     panel.style.display = 'none';
 });
-
-// ── Find Trouble — Automated Site Audit ──────────────────────────────
-
-async function startFindTrouble(container) {
-    if (!confirm('Launch Find Trouble?\n\nPlaywright will sweep all 17 areas, click every button, and create tickets for any issues found.\n\nProceed?')) return;
-
-    try {
-        await apiFetch('/api/trouble-tickets/find-trouble', { method: 'POST' });
-        showToast('Find Trouble started — sweeping all areas...', 'info');
-        listenToFindTroubleStream(container);
-    } catch (e) {
-        if (e.message && e.message.indexOf('409') !== -1) {
-            showToast('Find Trouble is already running', 'warning');
-        } else {
-            showToast('Failed to start: ' + e.message, 'error');
-        }
-    }
-}
-
-function listenToFindTroubleStream(container) {
-    var evtSource = new EventSource('/api/trouble-tickets/find-trouble/stream');
-    var statusBar = document.getElementById('ftStatusBar');
-    if (!statusBar) {
-        statusBar = el('div', {
-            id: 'ftStatusBar',
-            style: 'padding:8px 12px;margin-bottom:12px;border-radius:6px;background:var(--bg);border:1px solid var(--border);font-size:12px;color:var(--muted);',
-        });
-        var header = container.querySelector('.vendor-header');
-        if (header && header.nextSibling) {
-            header.parentNode.insertBefore(statusBar, header.nextSibling);
-        } else {
-            container.appendChild(statusBar);
-        }
-    }
-    statusBar.textContent = 'Starting sweep...';
-
-    evtSource.onmessage = function(event) {
-        try {
-            var data = JSON.parse(event.data);
-            if (data.type === 'stream_end') {
-                evtSource.close();
-                statusBar.textContent = 'Sweep complete.';
-                showToast('Find Trouble finished', 'success');
-                setTimeout(function() { renderAdminDashboard(container); }, 1500);
-                return;
-            }
-            if (data.type === 'error') {
-                statusBar.style.color = 'var(--red)';
-                statusBar.textContent = data.message;
-            } else {
-                statusBar.textContent = data.message || data.type;
-            }
-        } catch (_) {}
-    };
-
-    evtSource.onerror = function() {
-        evtSource.close();
-        statusBar.textContent = 'Stream disconnected.';
-    };
-}
 
 // ── Keyboard shortcuts for ticket detail (admin only) ────────────────
 document.addEventListener('keydown', function(e) {

@@ -1,9 +1,5 @@
 """Trouble ticket router -- unified CRUD endpoints for the self-heal pipeline.
 
-POST /api/trouble-tickets/find-trouble       -- start Find Trouble loop (admin)
-POST /api/trouble-tickets/find-trouble/stop  -- cancel running loop (admin)
-GET  /api/trouble-tickets/find-trouble/stream-- SSE progress stream (admin)
-GET  /api/trouble-tickets/find-trouble/prompts-- agent test prompts (admin)
 POST /api/trouble-tickets            -- create (any authenticated user)
 GET  /api/trouble-tickets            -- list all (admin, status/source filter + pagination)
 GET  /api/trouble-tickets/my-tickets -- current user's tickets
@@ -23,7 +19,6 @@ Depends on: services/trouble_ticket_service.py, dependencies.py
 """
 
 import asyncio
-import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -39,79 +34,9 @@ from app.schemas.trouble_ticket import TroubleTicketCreate, TroubleTicketUpdate
 from app.services import trouble_ticket_service as svc
 from app.services.diagnosis_service import diagnose_full
 from app.services.execution_service import execute_fix
-from app.services.find_trouble_service import get_find_trouble_service
 from app.services.pattern_tracker import get_health_status, get_weekly_stats
 
 router = APIRouter(tags=["trouble-tickets"])
-
-
-# ── Find Trouble endpoints (must be before /{ticket_id} routes) ────────
-
-@router.post("/api/trouble-tickets/find-trouble")
-async def start_find_trouble(
-    request: Request,
-    user: User = Depends(require_admin),
-):
-    """Launch the Find Trouble test loop (admin only)."""
-    svc_ft = get_find_trouble_service()
-    session_cookie = request.cookies.get("session", "")
-    # Always use localhost — Playwright runs inside the same container
-    base_url = "http://localhost:8000"
-
-    result = svc_ft.try_start(base_url, session_cookie)
-    if result is None:
-        raise HTTPException(409, "Find Trouble is already running")
-    return result
-
-
-@router.post("/api/trouble-tickets/find-trouble/stop")
-async def stop_find_trouble(
-    user: User = Depends(require_admin),
-):
-    """Cancel the running Find Trouble loop."""
-    svc_ft = get_find_trouble_service()
-    if svc_ft.stop():
-        return {"ok": True, "message": "Stop requested"}
-    raise HTTPException(404, "No Find Trouble job running")
-
-
-@router.get("/api/trouble-tickets/find-trouble/stream")
-async def find_trouble_stream(
-    user: User = Depends(require_admin),
-):
-    """SSE stream of Find Trouble progress events."""
-    svc_ft = get_find_trouble_service()
-
-    async def event_generator():
-        cursor = 0
-        while True:
-            events = svc_ft.consume_events(after=cursor)
-            for evt in events:
-                yield f"data: {json.dumps(evt)}\n\n"
-                cursor += 1
-
-            status = svc_ft.get_status()
-            if not status["running"] and cursor >= len(svc_ft._events):
-                yield f"data: {json.dumps({'type': 'stream_end'})}\n\n"
-                break
-
-            await asyncio.sleep(1)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
-@router.get("/api/trouble-tickets/find-trouble/prompts")
-async def find_trouble_prompts(
-    user: User = Depends(require_admin),
-):
-    """Get Claude agent test prompts for all areas."""
-    from app.services.test_prompts import generate_all_prompts
-
-    return {"prompts": generate_all_prompts()}
 
 
 @router.post("/api/trouble-tickets")

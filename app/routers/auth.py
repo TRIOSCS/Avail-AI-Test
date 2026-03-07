@@ -244,29 +244,6 @@ async def password_login(
     )
 
 
-@router.post("/auth/agent-session")
-async def agent_session(request: Request, db: Session = Depends(get_db)):
-    """Create a browser session for headless agent auth.
-
-    Validates x-agent-key header against settings.agent_api_key,
-    looks up the agent@availai.local service user, and sets
-    session cookie. Used by Playwright test agents.
-
-    Called by: test-site.sh dispatcher (machine-to-machine)
-    Depends on: config.settings.agent_api_key, User model
-    """
-    agent_key = request.headers.get("x-agent-key")
-    if not agent_key or not settings.agent_api_key or agent_key != settings.agent_api_key:
-        return JSONResponse({"error": "Invalid or missing agent key"}, status_code=401)
-
-    agent_user = db.query(User).filter_by(email="agent@availai.local").first()
-    if not agent_user:
-        return JSONResponse({"error": "Agent user not found"}, status_code=401)
-
-    request.session["user_id"] = agent_user.id
-    return JSONResponse({"ok": True, "user": "agent@availai.local"})
-
-
 @router.get("/auth/login-form", response_class=HTMLResponse)
 async def password_login_form():
     """Simple HTML form for local/test password login."""
@@ -334,21 +311,3 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/auth/agent-session")
-async def agent_session(request: Request, db: Session = Depends(get_db)):
-    """Create a session for headless agent testing.
-
-    Validates x-agent-key header, sets session cookie for the agent user.
-    Called by: scripts/test-site.sh before launching Playwright agents.
-    """
-    agent_key = request.headers.get("x-agent-key")
-    if not agent_key or not settings.agent_api_key or agent_key != settings.agent_api_key:
-        return JSONResponse({"error": "Invalid agent key"}, status_code=401)
-
-    agent_user = db.query(User).filter_by(email="agent@availai.local").first()
-    if not agent_user:
-        logger.error("agent-session: agent@availai.local user not found")
-        return JSONResponse({"error": "Agent user not configured"}, status_code=500)
-
-    request.session["user_id"] = agent_user.id
-    return JSONResponse({"ok": True, "user_id": agent_user.id, "email": agent_user.email})
