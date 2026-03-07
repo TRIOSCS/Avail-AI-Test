@@ -130,19 +130,6 @@ function validatePartRowInputs(qty, targetPrice) {
 }
 window.validatePartRowInputs = validatePartRowInputs;
 
-function validatePartRowInputs(qty, targetPrice) {
-    if (!Number.isInteger(Number(qty)) || Number(qty) <= 0) {
-        showToast('Quantity must be a positive whole number.', 'error');
-        return false;
-    }
-    if (isNaN(Number(targetPrice)) || Number(targetPrice) <= 0) {
-        showToast('Target price must be a positive value.', 'error');
-        return false;
-    }
-    return true;
-}
-window.validatePartRowInputs = validatePartRowInputs;
-
 function toggleMobileSidebar() {
     var sb = document.getElementById('sidebar');
     var ov = document.getElementById('sidebarOverlay');
@@ -310,19 +297,7 @@ let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
 let searchResultsCache = {};  // keyed by reqId
 let selectedSightings = new Set();
 const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
-const ACTIVE_RFQ_STATUSES = ['pending', 'active'];
 let rfqVendorData = [];
-
-function validatePartRows(parts) {
-    for (const part of parts) {
-        const qty = Number(part.qty);
-        if (!Number.isInteger(qty) || qty < 1 || qty > 1000000) {
-            showToast(`Invalid quantity "${part.qty}" for part ${part.part_number || part.mpn || ''}. Must be a whole number between 1 and 1,000,000.`, 'error');
-            return false;
-        }
-    }
-    return true;
-}
 
 function validatePartRows(parts) {
     for (const part of parts) {
@@ -1033,19 +1008,6 @@ function _setOfferFeedFilter(filter, btn) {
     document.querySelectorAll('#offerFeedTabs .m-tab-pill').forEach(b => b.classList.remove('active'));
     if (btn) btn.classList.add('active');
 }
-
-function switchEnrichmentTab(tabId, btn) {
-    document.querySelectorAll('.enrichment-tab-content').forEach(function(el) {
-        el.classList.remove('active');
-    });
-    var panel = document.getElementById('enrichment-' + tabId);
-    if (panel) panel.classList.add('active');
-    document.querySelectorAll('.enrichment-tab-btn').forEach(function(b) {
-        b.classList.remove('active');
-    });
-    if (btn) btn.classList.add('active');
-}
-window.switchEnrichmentTab = switchEnrichmentTab;
 
 function switchEnrichmentTab(tabId, btn) {
     document.querySelectorAll('.enrichment-tab-content').forEach(function(el) {
