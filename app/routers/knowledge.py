@@ -252,3 +252,132 @@ async def refresh_insights(
         "generated_at": entries[0].created_at.isoformat() if entries else None,
         "has_expired": False,
     }
+
+
+# --- Phase 3: AI Sprinkles endpoints ---
+
+sprinkles_router = APIRouter(prefix="/api", tags=["ai-sprinkles"])
+
+
+@sprinkles_router.get("/vendors/{vendor_id}/insights")
+def get_vendor_insights(
+    vendor_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = knowledge_service.get_cached_vendor_insights(db, vendor_id)
+    now = datetime.now(timezone.utc)
+    return {
+        "vendor_card_id": vendor_id,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
+    }
+
+
+@sprinkles_router.post("/vendors/{vendor_id}/insights/refresh")
+async def refresh_vendor_insights(
+    vendor_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = await knowledge_service.generate_vendor_insights(db, vendor_id)
+    now = datetime.now(timezone.utc)
+    return {
+        "vendor_card_id": vendor_id,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": False,
+    }
+
+
+@sprinkles_router.get("/companies/{company_id}/insights")
+def get_company_insights(
+    company_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = knowledge_service.get_cached_company_insights(db, company_id)
+    now = datetime.now(timezone.utc)
+    return {
+        "company_id": company_id,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
+    }
+
+
+@sprinkles_router.post("/companies/{company_id}/insights/refresh")
+async def refresh_company_insights(
+    company_id: int,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = await knowledge_service.generate_company_insights(db, company_id)
+    now = datetime.now(timezone.utc)
+    return {
+        "company_id": company_id,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": False,
+    }
+
+
+@sprinkles_router.get("/dashboard/pipeline-insights")
+def get_pipeline_insights(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = knowledge_service.get_cached_pipeline_insights(db)
+    now = datetime.now(timezone.utc)
+    return {
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
+    }
+
+
+@sprinkles_router.post("/dashboard/pipeline-insights/refresh")
+async def refresh_pipeline_insights(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = await knowledge_service.generate_pipeline_insights(db)
+    now = datetime.now(timezone.utc)
+    return {
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": False,
+    }
+
+
+@sprinkles_router.get("/materials/insights")
+def get_mpn_insights(
+    mpn: str = Query(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = knowledge_service.get_cached_mpn_insights(db, mpn)
+    now = datetime.now(timezone.utc)
+    return {
+        "mpn": mpn,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
+    }
+
+
+@sprinkles_router.post("/materials/insights/refresh")
+async def refresh_mpn_insights(
+    mpn: str = Query(...),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    entries = await knowledge_service.generate_mpn_insights(db, mpn)
+    now = datetime.now(timezone.utc)
+    return {
+        "mpn": mpn,
+        "insights": [_entry_to_response(e, now) for e in entries],
+        "generated_at": entries[0].created_at.isoformat() if entries else None,
+        "has_expired": False,
+    }
