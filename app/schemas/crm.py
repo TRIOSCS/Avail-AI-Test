@@ -135,6 +135,7 @@ class SiteCreate(BaseModel):
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
+    contact_phone_2: str | None = None
     contact_title: str | None = None
     contact_linkedin: str | None = None
     address_line1: str | None = None
@@ -185,6 +186,7 @@ class SiteUpdate(BaseModel):
     contact_name: str | None = None
     contact_email: str | None = None
     contact_phone: str | None = None
+    contact_phone_2: str | None = None
     contact_title: str | None = None
     contact_linkedin: str | None = None
     address_line1: str | None = None

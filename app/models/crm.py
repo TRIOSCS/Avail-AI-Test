@@ -100,6 +100,7 @@ class CustomerSite(Base):
     contact_name = Column(String(255))
     contact_email = Column(String(255))
     contact_phone = Column(String(100))
+    contact_phone_2 = Column(String(100))
     contact_title = Column(String(255))
     contact_linkedin = Column(String(500))
 
