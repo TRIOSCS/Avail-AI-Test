@@ -561,3 +561,589 @@ def get_cached_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry
         .order_by(KnowledgeEntry.created_at.desc())
         .all()
     )
+
+
+# ---------------------------------------------------------------------------
+# Entity-scoped context builders and insight generators
+# ---------------------------------------------------------------------------
+
+MPN_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
+Given knowledge entries about a specific MPN (manufacturer part number), generate 3-5 actionable insights.
+
+Focus on:
+- Pricing trends across quotes and offers (historical highs/lows, direction)
+- Quote frequency and demand signals
+- Vendor diversity (single-source risk, preferred vendors)
+- Availability patterns and lead time trends
+
+Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
+Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
+
+VENDOR_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
+Given knowledge entries about a specific vendor, generate 3-5 actionable insights.
+
+Focus on:
+- Response patterns (speed, consistency, ghosting)
+- Pricing competitiveness relative to other vendors
+- Part specialization (what categories do they dominate?)
+- Red flags (cancellation rates, quality issues, declining engagement)
+
+Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
+Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
+
+PIPELINE_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
+Given a summary of the active requisition pipeline, generate 3-5 actionable insights.
+
+Focus on:
+- Stalling deals (requisitions with no recent activity)
+- Coverage gaps (MPNs with few or no offers)
+- Win/loss trends (status distribution over time)
+- Pipeline health (bottlenecks, overloaded buyers, deadlines at risk)
+
+Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
+
+COMPANY_INSIGHT_PROMPT = """You are a procurement intelligence analyst for an electronic component sourcing company.
+Given knowledge entries about a specific customer company, generate 3-5 actionable insights.
+
+Focus on:
+- Engagement trends (increasing/decreasing order frequency)
+- Open deal status and progress
+- Response time and communication patterns
+- Relationship health (strategic value, risk of churn, growth potential)
+
+Entries marked [OUTDATED] are expired — mention they may be outdated. Weight them at 0.3x.
+Keep each insight to 1-2 sentences. Be specific with numbers, dates, and names."""
+
+
+def build_mpn_context(db: Session, *, mpn: str) -> str:
+    """Gather all relevant knowledge for an MPN and format for AI prompt."""
+    from app.models.offers import Offer
+
+    now = datetime.now(timezone.utc)
+    sections = []
+
+    # 1. Knowledge entries for this MPN
+    entries = (
+        db.query(KnowledgeEntry)
+        .filter(KnowledgeEntry.mpn == mpn)
+        .filter(KnowledgeEntry.entry_type != "ai_insight")
+        .order_by(KnowledgeEntry.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    if entries:
+        lines = []
+        for e in entries:
+            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            lines.append("- {}{}: {} (source: {}, req #{}, {})".format(
+                prefix, e.entry_type, e.content, e.source,
+                e.requisition_id or "N/A", e.created_at.strftime('%Y-%m-%d'),
+            ))
+        sections.append("## Knowledge entries for MPN {}\n{}".format(mpn, "\n".join(lines)))
+
+    # 2. Offers for this MPN
+    offers = (
+        db.query(Offer)
+        .filter(Offer.mpn == mpn)
+        .order_by(Offer.created_at.desc())
+        .limit(30)
+        .all()
+    )
+    if offers:
+        lines = []
+        for o in offers:
+            price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
+            lines.append("- {} from {} — {} qty:{} lead:{} (req #{}, {})".format(
+                o.mpn, o.vendor_name, price_str,
+                o.qty_available or "?", o.lead_time or "?",
+                o.requisition_id, o.created_at.strftime('%Y-%m-%d'),
+            ))
+        sections.append("## Offer history for MPN {}\n{}".format(mpn, "\n".join(lines)))
+
+    # 3. Requisitions containing this MPN
+    from app.models.sourcing import Requirement, Requisition
+    req_ids = [
+        r.requisition_id for r in
+        db.query(Requirement.requisition_id)
+        .filter(Requirement.primary_mpn == mpn)
+        .distinct()
+        .limit(20)
+        .all()
+    ]
+    if req_ids:
+        reqs = db.query(Requisition).filter(Requisition.id.in_(req_ids)).all()
+        if reqs:
+            lines = []
+            for r in reqs:
+                lines.append("- Req #{} '{}' status={} ({})".format(
+                    r.id, r.name, r.status, r.created_at.strftime('%Y-%m-%d'),
+                ))
+            sections.append("## Requisitions containing MPN {}\n{}".format(mpn, "\n".join(lines)))
+
+    if not sections:
+        return ""
+    return "\n\n".join(sections)
+
+
+def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
+    """Gather all relevant knowledge for a vendor and format for AI prompt."""
+    from app.models.offers import Offer
+    from app.models.vendors import VendorCard
+
+    now = datetime.now(timezone.utc)
+    sections = []
+
+    vendor = db.get(VendorCard, vendor_card_id)
+    if not vendor:
+        return ""
+
+    sections.append("## Vendor: {} (ID {})".format(vendor.display_name, vendor.id))
+    meta = []
+    if vendor.domain:
+        meta.append("Domain: {}".format(vendor.domain))
+    if vendor.industry:
+        meta.append("Industry: {}".format(vendor.industry))
+    if vendor.ghost_rate is not None:
+        meta.append("Ghost rate: {:.0%}".format(vendor.ghost_rate))
+    if vendor.total_responses is not None and vendor.total_outreach:
+        meta.append("Response rate: {}/{} ({:.0%})".format(
+            vendor.total_responses, vendor.total_outreach,
+            vendor.total_responses / max(vendor.total_outreach, 1),
+        ))
+    if vendor.cancellation_rate is not None:
+        meta.append("Cancellation rate: {:.0%}".format(vendor.cancellation_rate))
+    if meta:
+        sections.append("## Vendor stats\n" + "\n".join("- " + m for m in meta))
+
+    # Knowledge entries
+    entries = (
+        db.query(KnowledgeEntry)
+        .filter(KnowledgeEntry.vendor_card_id == vendor_card_id)
+        .filter(KnowledgeEntry.entry_type != "ai_insight")
+        .order_by(KnowledgeEntry.created_at.desc())
+        .limit(40)
+        .all()
+    )
+    if entries:
+        lines = []
+        for e in entries:
+            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime('%Y-%m-%d')))
+        sections.append("## Knowledge entries\n" + "\n".join(lines))
+
+    # Offer history
+    offers = (
+        db.query(Offer)
+        .filter(Offer.vendor_card_id == vendor_card_id)
+        .order_by(Offer.created_at.desc())
+        .limit(30)
+        .all()
+    )
+    if offers:
+        lines = []
+        for o in offers:
+            price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
+            lines.append("- {} {} qty:{} lead:{} status={} (req #{}, {})".format(
+                o.mpn, price_str, o.qty_available or "?",
+                o.lead_time or "?", o.status,
+                o.requisition_id, o.created_at.strftime('%Y-%m-%d'),
+            ))
+        sections.append("## Recent offers\n" + "\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
+def build_pipeline_context(db: Session) -> str:
+    """Gather pipeline-level context for AI analysis."""
+    from app.models.sourcing import Requisition
+
+    now = datetime.now(timezone.utc)
+    sections = []
+
+    # 1. Status breakdown
+    all_reqs = db.query(Requisition).order_by(Requisition.created_at.desc()).limit(200).all()
+    if not all_reqs:
+        return ""
+
+    status_counts: dict[str, int] = {}
+    for r in all_reqs:
+        status_counts[r.status or "unknown"] = status_counts.get(r.status or "unknown", 0) + 1
+    lines = ["- {}: {}".format(s, c) for s, c in sorted(status_counts.items(), key=lambda x: -x[1])]
+    sections.append("## Pipeline status breakdown (last 200 reqs)\n" + "\n".join(lines))
+
+    # 2. Active reqs summary
+    active = [r for r in all_reqs if r.status in ("active", "in_progress", "quoting")]
+    if active:
+        lines = []
+        for r in active[:30]:
+            age_days = (now - r.created_at.replace(tzinfo=timezone.utc) if r.created_at.tzinfo is None else now - r.created_at).days if r.created_at else 0
+            lines.append("- Req #{} '{}' — {} days old, deadline: {}".format(
+                r.id, r.name, age_days, r.deadline or "none",
+            ))
+        sections.append("## Active requisitions\n" + "\n".join(lines))
+
+    # 3. Stale deals (active but no update in 14+ days)
+    stale_threshold = now - timedelta(days=14)
+    stale = []
+    for r in active:
+        if not r.updated_at:
+            continue
+        ts = r.updated_at if r.updated_at.tzinfo else r.updated_at.replace(tzinfo=timezone.utc)
+        if ts < stale_threshold:
+            stale.append(r)
+    if stale:
+        lines = []
+        for r in stale[:20]:
+            lines.append("- Req #{} '{}' — last updated {}".format(
+                r.id, r.name,
+                r.updated_at.strftime('%Y-%m-%d') if r.updated_at else "never",
+            ))
+        sections.append("## Stale deals (no update in 14+ days)\n" + "\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
+def build_company_context(db: Session, *, company_id: int) -> str:
+    """Gather all relevant knowledge for a company and format for AI prompt."""
+    from app.models.crm import Company, CustomerSite
+    from app.models.sourcing import Requisition
+
+    now = datetime.now(timezone.utc)
+    sections = []
+
+    company = db.get(Company, company_id)
+    if not company:
+        return ""
+
+    # Company header
+    meta = ["Name: {}".format(company.name)]
+    if company.industry:
+        meta.append("Industry: {}".format(company.industry))
+    if company.account_type:
+        meta.append("Account type: {}".format(company.account_type))
+    if company.is_strategic:
+        meta.append("Strategic account: Yes")
+    if company.last_activity_at:
+        meta.append("Last activity: {}".format(company.last_activity_at.strftime('%Y-%m-%d')))
+    sections.append("## Company profile\n" + "\n".join("- " + m for m in meta))
+
+    # Knowledge entries
+    entries = (
+        db.query(KnowledgeEntry)
+        .filter(KnowledgeEntry.company_id == company_id)
+        .filter(KnowledgeEntry.entry_type != "ai_insight")
+        .order_by(KnowledgeEntry.created_at.desc())
+        .limit(40)
+        .all()
+    )
+    if entries:
+        lines = []
+        for e in entries:
+            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime('%Y-%m-%d')))
+        sections.append("## Knowledge entries\n" + "\n".join(lines))
+
+    # Open requisitions via customer sites
+    site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
+    if site_ids:
+        reqs = (
+            db.query(Requisition)
+            .filter(
+                Requisition.customer_site_id.in_(site_ids),
+                Requisition.status.in_(["active", "in_progress", "quoting"]),
+            )
+            .order_by(Requisition.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        if reqs:
+            lines = []
+            for r in reqs:
+                lines.append("- Req #{} '{}' status={} ({})".format(
+                    r.id, r.name, r.status, r.created_at.strftime('%Y-%m-%d'),
+                ))
+            sections.append("## Open requisitions\n" + "\n".join(lines))
+
+    if not sections:
+        return ""
+    return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Entity-scoped insight generators
+# ---------------------------------------------------------------------------
+
+
+async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
+    """Generate AI insights for an MPN using the context engine."""
+    from app.utils.claude_client import claude_structured
+
+    context = build_mpn_context(db, mpn=mpn)
+    if not context:
+        logger.debug("No context for MPN {} — skipping insight generation", mpn)
+        return []
+
+    # Delete old AI insights for this MPN (not tied to a specific requisition)
+    old_insights = (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.mpn == mpn,
+            KnowledgeEntry.entry_type == "ai_insight",
+            KnowledgeEntry.requisition_id.is_(None),
+        )
+        .all()
+    )
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
+
+    result = await claude_structured(
+        prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
+        schema=INSIGHT_SCHEMA,
+        system=MPN_INSIGHT_PROMPT,
+        model_tier="smart",
+        max_tokens=2048,
+        thinking_budget=5000,
+    )
+
+    if not result or "insights" not in result:
+        logger.warning("AI insight generation returned no results for MPN {}", mpn)
+        return []
+
+    entries = []
+    now = datetime.now(timezone.utc)
+    for insight in result["insights"][:5]:
+        entry = create_entry(
+            db,
+            user_id=0,
+            entry_type="ai_insight",
+            content=insight["content"],
+            source="ai_generated",
+            confidence=insight.get("confidence", 0.8),
+            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
+            mpn=mpn,
+        )
+        entries.append(entry)
+
+    logger.info("Generated {} insights for MPN {}", len(entries), mpn)
+    return entries
+
+
+async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
+    """Generate AI insights for a vendor using the context engine."""
+    from app.utils.claude_client import claude_structured
+
+    context = build_vendor_context(db, vendor_card_id=vendor_card_id)
+    if not context:
+        logger.debug("No context for vendor {} — skipping insight generation", vendor_card_id)
+        return []
+
+    # Delete old AI insights for this vendor
+    old_insights = (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.vendor_card_id == vendor_card_id,
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .all()
+    )
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
+
+    result = await claude_structured(
+        prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
+        schema=INSIGHT_SCHEMA,
+        system=VENDOR_INSIGHT_PROMPT,
+        model_tier="smart",
+        max_tokens=2048,
+        thinking_budget=5000,
+    )
+
+    if not result or "insights" not in result:
+        logger.warning("AI insight generation returned no results for vendor {}", vendor_card_id)
+        return []
+
+    entries = []
+    now = datetime.now(timezone.utc)
+    for insight in result["insights"][:5]:
+        entry = create_entry(
+            db,
+            user_id=0,
+            entry_type="ai_insight",
+            content=insight["content"],
+            source="ai_generated",
+            confidence=insight.get("confidence", 0.8),
+            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
+            vendor_card_id=vendor_card_id,
+        )
+        entries.append(entry)
+
+    logger.info("Generated {} insights for vendor {}", len(entries), vendor_card_id)
+    return entries
+
+
+async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
+    """Generate AI insights for the overall pipeline health."""
+    from app.utils.claude_client import claude_structured
+
+    context = build_pipeline_context(db)
+    if not context:
+        logger.debug("No context for pipeline — skipping insight generation")
+        return []
+
+    # Delete old pipeline insights (sentinel mpn='__pipeline__')
+    old_insights = (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.mpn == "__pipeline__",
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .all()
+    )
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
+
+    result = await claude_structured(
+        prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
+        schema=INSIGHT_SCHEMA,
+        system=PIPELINE_INSIGHT_PROMPT,
+        model_tier="smart",
+        max_tokens=2048,
+        thinking_budget=5000,
+    )
+
+    if not result or "insights" not in result:
+        logger.warning("AI insight generation returned no results for pipeline")
+        return []
+
+    entries = []
+    now = datetime.now(timezone.utc)
+    for insight in result["insights"][:5]:
+        entry = create_entry(
+            db,
+            user_id=0,
+            entry_type="ai_insight",
+            content=insight["content"],
+            source="ai_generated",
+            confidence=insight.get("confidence", 0.8),
+            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
+            mpn="__pipeline__",
+        )
+        entries.append(entry)
+
+    logger.info("Generated {} pipeline insights", len(entries))
+    return entries
+
+
+async def generate_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
+    """Generate AI insights for a company using the context engine."""
+    from app.utils.claude_client import claude_structured
+
+    context = build_company_context(db, company_id=company_id)
+    if not context:
+        logger.debug("No context for company {} — skipping insight generation", company_id)
+        return []
+
+    # Delete old AI insights for this company
+    old_insights = (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.company_id == company_id,
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .all()
+    )
+    for old in old_insights:
+        db.delete(old)
+    db.flush()
+
+    result = await claude_structured(
+        prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
+        schema=INSIGHT_SCHEMA,
+        system=COMPANY_INSIGHT_PROMPT,
+        model_tier="smart",
+        max_tokens=2048,
+        thinking_budget=5000,
+    )
+
+    if not result or "insights" not in result:
+        logger.warning("AI insight generation returned no results for company {}", company_id)
+        return []
+
+    entries = []
+    now = datetime.now(timezone.utc)
+    for insight in result["insights"][:5]:
+        entry = create_entry(
+            db,
+            user_id=0,
+            entry_type="ai_insight",
+            content=insight["content"],
+            source="ai_generated",
+            confidence=insight.get("confidence", 0.8),
+            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
+            company_id=company_id,
+        )
+        entries.append(entry)
+
+    logger.info("Generated {} insights for company {}", len(entries), company_id)
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Entity-scoped cached insight getters
+# ---------------------------------------------------------------------------
+
+
+def get_cached_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
+    """Return pre-computed AI insights for an MPN (not tied to a requisition)."""
+    return (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.mpn == mpn,
+            KnowledgeEntry.entry_type == "ai_insight",
+            KnowledgeEntry.requisition_id.is_(None),
+        )
+        .order_by(KnowledgeEntry.created_at.desc())
+        .all()
+    )
+
+
+def get_cached_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
+    """Return pre-computed AI insights for a vendor."""
+    return (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.vendor_card_id == vendor_card_id,
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .order_by(KnowledgeEntry.created_at.desc())
+        .all()
+    )
+
+
+def get_cached_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
+    """Return pre-computed AI insights for the pipeline."""
+    return (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.mpn == "__pipeline__",
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .order_by(KnowledgeEntry.created_at.desc())
+        .all()
+    )
+
+
+def get_cached_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
+    """Return pre-computed AI insights for a company."""
+    return (
+        db.query(KnowledgeEntry)
+        .filter(
+            KnowledgeEntry.company_id == company_id,
+            KnowledgeEntry.entry_type == "ai_insight",
+        )
+        .order_by(KnowledgeEntry.created_at.desc())
+        .all()
+    )
