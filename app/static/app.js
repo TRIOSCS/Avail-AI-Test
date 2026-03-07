@@ -400,6 +400,24 @@ export async function apiFetch(url, opts = {}) {
     return doFetch();
 }
 
+/** Extract a user-friendly error message from caught exceptions. */
+export function friendlyError(e, fallback) {
+    if (!e) return fallback || 'Something went wrong';
+    const msg = e.message || '';
+    // Try to parse JSON error responses from the API
+    try {
+        const parsed = JSON.parse(msg);
+        if (parsed.error) return parsed.error;
+        if (parsed.detail) return typeof parsed.detail === 'string' ? parsed.detail : fallback || 'Something went wrong';
+    } catch (_) { /* not JSON */ }
+    // Filter out raw technical messages
+    if (msg.includes('<!DOCTYPE') || msg.includes('<html') || msg.length > 200) return fallback || 'Something went wrong';
+    if (msg === 'Failed to fetch') return 'Could not reach the server — check your connection';
+    if (msg === 'Duplicate request blocked') return 'Please wait a moment before trying again';
+    if (msg && msg.length > 0 && msg.length <= 200) return msg;
+    return fallback || 'Something went wrong';
+}
+
 export function debounce(fn, ms = 300) {
     let timer;
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
@@ -516,7 +534,7 @@ function logCallInitiated(el) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(body),
         keepalive: true
-    }).catch(function() {});
+    }).catch(function(e) { console.warn('logCallInitiated:', e); });
 }
 window.logCallInitiated = logCallInitiated;
 
@@ -3221,7 +3239,7 @@ async function checkForReplies(reqId, btn) {
         if (panel) await _loadDdSubTab(reqId, 'activity', panel);
         showToast('Inbox checked for replies', 'info');
     } catch (e) {
-        showToast('Failed to check inbox: ' + (e.message || e), 'error');
+        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         btn.disabled = false;
         btn.innerHTML = origText;
@@ -3322,7 +3340,7 @@ async function _acceptParsedOffers(reqId, responseId, btn) {
         }
         renderReqList();
     } catch (e) {
-        showToast('Failed to save offers: ' + (e.message || e), 'error');
+        showToast('Couldn\'t save offers — ' + friendlyError(e, 'please try again'), 'error');
         btn.disabled = false;
         btn.textContent = 'Accept';
     }
@@ -3717,7 +3735,7 @@ async function ddReconfirmOffer(offerId, reqId) {
             if (btn) { btn.textContent = '\u2713 ' + (res.reconfirm_count || 1) + 'x'; btn.style.color = 'var(--green)'; }
         }
     } catch (e) {
-        showToast('Failed to reconfirm: ' + (e.message || e), 'error');
+        showToast('Couldn\'t reconfirm — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4066,7 +4084,7 @@ async function ddSaveEditOffer(reqId, offerId) {
             if (panel) await _loadDdSubTab(reqId, 'offers', panel);
         }
     } catch (e) {
-        showToast('Failed to update: ' + (e.message || e), 'error');
+        showToast('Couldn\'t update — ' + friendlyError(e, 'please try again'), 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Save Changes'; }
     }
 }
@@ -4089,7 +4107,7 @@ async function ddDeleteOffer(reqId, offerId) {
             renderReqList();
         }
     } catch (e) {
-        showToast('Failed to delete: ' + (e.message || e), 'error');
+        showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4179,7 +4197,7 @@ async function uploadReqAttachment(reqId, input) {
         const panel = input.closest('.dd-panel') || input.closest('[class*="panel"]');
         if (panel) await _loadDdSubTab(reqId, 'files', panel);
     } catch(e) {
-        showToast('Upload failed: ' + (e.message || e), 'error');
+        showToast('Upload failed — ' + friendlyError(e, 'please try again'), 'error');
     }
     input.value = '';
 }
@@ -4196,7 +4214,7 @@ async function deleteReqAttachment(reqId, attId) {
         const panel = document.querySelector('.dd-panel') || document.querySelector('[class*="dd-sub-content"]');
         if (panel) _renderDdFiles(reqId, data, panel);
     } catch(e) {
-        showToast('Delete failed: ' + (e.message || e), 'error');
+        showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4444,7 +4462,7 @@ async function ddSaveQuoteDraft(reqId) {
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
     } catch (e) {
-        showToast('Error saving draft: ' + (e.message || e), 'error');
+        showToast('Couldn\'t save draft — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         ddSaveQuoteDraft._busy = false;
     }
@@ -4466,7 +4484,7 @@ async function ddSendQuote(reqId) {
             }
         });
     } catch (e) {
-        showToast('Could not save quote: ' + (e.message || e), 'error');
+        showToast('Couldn\'t save quote — ' + friendlyError(e, 'please try again'), 'error');
         return;
     }
 
@@ -4601,7 +4619,7 @@ async function ddAddNewContact(reqId) {
         // Try to enrich in the background
         ddEnrichNewContact(reqId, email, name);
     } catch (e) {
-        showToast('Failed to add contact: ' + (e.message || e), 'error');
+        showToast('Couldn\'t add contact — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Add & Select'; }
     }
@@ -4816,7 +4834,7 @@ async function ddConfirmSendQuote(reqId) {
         }
     } catch (e) {
         if (btn) { btn.disabled = false; btn.textContent = 'Send Quote'; }
-        showToast('Failed to send: ' + (e.message || e), 'error');
+        showToast('Couldn\'t send — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4845,7 +4863,7 @@ async function ddMarkQuoteResult(reqId, result) {
         }
         if (window._refreshCustPipeline) window._refreshCustPipeline();
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
     }
 }
 
@@ -4961,7 +4979,7 @@ async function ddCreateBuyPlanDraft(reqId) {
         if (overlay) overlay.remove();
         if (typeof window.showBuyPlans === 'function') { window.showBuyPlans(); if (typeof window.loadBuyPlans === 'function') window.loadBuyPlans(); }
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
     }
     if (btn) { btn.disabled = false; btn.textContent = 'Create as draft'; }
 }
@@ -4992,7 +5010,7 @@ async function ddSubmitBuyPlan(reqId) {
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Mark Won & Submit Buy Plan'; }
     }
 }
@@ -5010,7 +5028,7 @@ async function ddReviseQuote(reqId) {
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
     } catch (e) {
-        showToast('Error revising: ' + (e.message || e), 'error');
+        showToast('Couldn\'t revise — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -5026,7 +5044,7 @@ async function ddDeleteQuote(reqId, quoteId) {
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
     }
 }
 
@@ -6605,7 +6623,7 @@ async function ddResearchPart(reqId, requirementId) {
         showToast('Search complete', 'success');
     } catch(e) {
         _ddSearchOverlay(reqId, false);
-        showToast('Search failed: ' + (e.message || e), 'error');
+        showToast('Search failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6636,7 +6654,7 @@ async function ddResearchAll(reqId) {
         showToast('All parts re-searched', 'success');
     } catch(e) {
         _ddSearchOverlay(reqId, false);
-        showToast('Search failed: ' + (e.message || e), 'error');
+        showToast('Search failed — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '&#x1f50d; Search All'; }
     }
@@ -6800,7 +6818,7 @@ async function submitLogOffer() {
         }
         renderReqList();
     } catch(e) {
-        showToast('Failed to log offer: ' + (e.message || e), 'error');
+        showToast('Couldn\'t log offer — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         btn.disabled = false; btn.textContent = 'Log Offer';
     }
@@ -8062,7 +8080,7 @@ async function archiveFromList(reqId) {
             if (row) row.remove();
             _updateToolbarStats();
             renderReqList();
-        } catch (e) { showToast('Failed to restore: ' + (e.message || e), 'error'); }
+        } catch (e) { showToast('Couldn\'t restore — ' + friendlyError(e, 'please try again'), 'error'); }
         return;
     }
     // Show outcome modal
@@ -8113,7 +8131,7 @@ async function _archiveWithOutcome(reqId, outcome) {
         if (row) row.remove();
         _updateToolbarStats();
         renderReqList();
-    } catch (e) { showToast('Failed to archive: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t archive — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 async function cloneFromList(reqId) {
@@ -8145,7 +8163,7 @@ async function requoteFromList(reqId) {
         } else {
             showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
         }
-    } catch (e) { showToast('Failed to re-quote: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t re-quote — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
@@ -9044,7 +9062,7 @@ async function openBatchRfqModal(prebuiltGroups) {
 
     const prep2 = document.getElementById('rfqPrepare'); if (prep2) prep2.style.display = 'none';
     const rdy2 = document.getElementById('rfqReady'); if (rdy2) rdy2.style.display = '';
-    try { renderRfqVendors(); } catch(e) { console.error('renderRfqVendors failed:', e); showToast('Error rendering vendor list — try again', 'error'); }
+    try { renderRfqVendors(); } catch(e) { console.error('renderRfqVendors failed:', e); showToast('Couldn\'t load vendor list — please try again', 'error'); }
     try { renderRfqMessage(); } catch(e) { console.error('renderRfqMessage failed:', e); }
 }
 
@@ -9939,7 +9957,7 @@ export async function openVendorPopup(cardId) {
             el.textContent = msg;
             header.appendChild(el);
         }
-    }).catch(function() {});
+    }).catch(function(e) { console.warn('last-call lookup:', e); });
 }
 
 async function loadVendorEmailMetrics(cardId) {
@@ -10342,7 +10360,7 @@ async function saveVendorLogCall() {
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlcReqId = null;
-    } catch(e) { console.error('saveVendorLogCall:', e); showToast('Error logging call', 'error'); }
+    } catch(e) { console.error('saveVendorLogCall:', e); showToast('Couldn\'t log call — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 function openVendorLogNoteModal(cardId, vendorName, reqId) {
@@ -10372,7 +10390,7 @@ async function saveVendorLogNote() {
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlnReqId = null;
-    } catch(e) { console.error('saveVendorLogNote:', e); showToast('Error adding note', 'error'); }
+    } catch(e) { console.error('saveVendorLogNote:', e); showToast('Couldn\'t add note — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 // ── Confirmed Quotes ─────────────────────────────────────────────────
@@ -10506,7 +10524,7 @@ async function unifiedEnrichVendor(cardId) {
         }
         openVendorPopup(cardId);
     } catch (e) {
-        showToast('Enrichment failed: ' + (e.message || e), 'error');
+        showToast('Enrichment failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -10759,7 +10777,7 @@ function _renderVendorDrawerOverview(vendorId) {
         el.textContent = msg;
         var section = body.querySelector('.drawer-section');
         if (section) section.appendChild(el);
-    }).catch(function() {});
+    }).catch(function(e) { console.warn('vendor activities:', e); });
 }
 
 async function _renderVendorDrawerScorecard(vendorId) {

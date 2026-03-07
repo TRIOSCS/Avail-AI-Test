@@ -6,7 +6,7 @@
  * Only activates on touch devices (passive listeners, no desktop overhead).
  */
 
-import { apiFetch, esc } from 'app';
+import { apiFetch, esc, friendlyError } from 'app';
 
 class SwipeHandler {
     constructor(el, opts = {}) {
@@ -228,7 +228,7 @@ async function loadAlertsFeed() {
         _renderAlertsFeed();
         _updateAlertsBadge(data.unread_count || 0);
     } catch (err) {
-        list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--fg3)">Failed to load alerts</div>';
+        list.innerHTML = '<div style="padding:24px;text-align:center;color:var(--fg3)">Couldn\'t load alerts — pull down to retry</div>';
     }
 }
 

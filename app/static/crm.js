@@ -11,7 +11,7 @@ function sanitiseContactName(name) {
 }
 
 import {
-    apiFetch, debounce, esc, escAttr, logCatchError, showToast,
+    apiFetch, debounce, esc, escAttr, friendlyError, logCatchError, showToast,
     fmtDate, fmtDateTime, fmtRelative, openModal, closeModal,
     showView, sidebarNav, navHighlight, autoLogEmail,
     initNameAutocomplete, notifyStatusChange, loadRequisitions,
@@ -1748,7 +1748,7 @@ async function saveEditCompany() {
         showToast('Company updated', 'success');
         invalidateCompanyCache();
         loadCustomers();
-    } catch (e) { showToast('Failed to update company: ' + (e.message || ''), 'error'); }
+    } catch (e) { showToast('Couldn\'t update company — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 function openAddSiteModal(companyId, companyName) {
@@ -2916,7 +2916,7 @@ async function submitDraftBuyPlan() {
         _currentBuyPlan = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id);
         renderBuyPlanStatus(_bpRenderTarget);
         if (typeof loadBuyPlan === 'function') loadBuyPlan();
-    } catch (e) { showToast('Failed to submit: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t submit — ' + friendlyError(e, 'please try again'), 'error'); }
     finally { submitDraftBuyPlan._busy = false; }
 }
 
@@ -2932,7 +2932,7 @@ async function approveBuyPlan() {
         });
         showToast('Buy plan approved — buyers notified', 'success');
         loadBuyPlan();
-    } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t approve — ' + friendlyError(e, 'please try again'), 'error'); }
     finally { approveBuyPlan._busy = false; }
 }
 
@@ -2992,7 +2992,7 @@ async function saveBuyPlanPOs() {
         });
         showToast(result.changes + ' PO number(s) updated', 'success');
         loadBuyPlan();
-    } catch (e) { showToast('Failed to save POs: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t save POs — ' + friendlyError(e, 'please try again'), 'error'); }
     finally { saveBuyPlanPOs._busy = false; }
 }
 
@@ -3004,7 +3004,7 @@ async function completeBuyPlan() {
         await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/complete', { method: 'PUT' });
         showToast('Buy plan marked complete', 'success');
         loadBuyPlan();
-    } catch (e) { showToast('Failed to complete: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t complete — ' + friendlyError(e, 'please try again'), 'error'); }
     finally { completeBuyPlan._busy = false; }
 }
 
@@ -3018,7 +3018,7 @@ async function cancelBuyPlan() {
         });
         showToast('Buy plan cancelled', 'info');
         loadBuyPlan();
-    } catch (e) { showToast('Failed to cancel: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t cancel — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 async function resubmitBuyPlan() {
@@ -3032,7 +3032,7 @@ async function resubmitBuyPlan() {
         showToast('Buy plan resubmitted for approval', 'success');
         _currentBuyPlan = await apiFetch('/api/buy-plans/' + res.new_plan_id);
         renderBuyPlanStatus();
-    } catch (e) { showToast('Failed to resubmit: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t resubmit — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 async function verifyBuyPlanPOs() {
@@ -3070,7 +3070,7 @@ async function markQuoteWonV3() {
         showToast('AI buy plan built \u2014 review and submit', 'success');
     } catch (e) {
         logCatchError('markQuoteWonV3', e);
-        showToast('Failed: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Action failed — please try again'), 'error');
         if (el) el.innerHTML = '';
     } finally { markQuoteWonV3._busy = false; }
 }
@@ -3368,7 +3368,7 @@ async function submitBuyPlanV3() {
             renderBuyPlanV3Status();
         } catch (e) {
             logCatchError('submitBuyPlanV3', e);
-            showToast('Failed to submit: ' + (e.message || e), 'error');
+            showToast('Couldn\'t submit — ' + friendlyError(e, 'please try again'), 'error');
         }
     });
 }
@@ -3406,7 +3406,7 @@ async function approveBuyPlanV3() {
         });
     } catch (e) {
         logCatchError('approveBuyPlanV3', e);
-        showToast('Failed to approve: ' + (e.message || e), 'error');
+        showToast('Couldn\'t approve — ' + friendlyError(e, 'please try again'), 'error');
     } finally { approveBuyPlanV3._busy = false; }
 }
 
@@ -3429,7 +3429,7 @@ async function rejectBuyPlanV3() {
         renderBuyPlanV3Status();
     } catch (e) {
         logCatchError('rejectBuyPlanV3', e);
-        showToast('Failed to reject: ' + (e.message || e), 'error');
+        showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error');
     } finally { rejectBuyPlanV3._busy = false; }
 }
 
@@ -3449,7 +3449,7 @@ async function confirmPOV3(planId, lineId) {
         showToast('PO confirmed', 'success');
         _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
         renderBuyPlanV3Status();
-    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 function openFlagIssueV3(planId, lineId) {
@@ -3483,7 +3483,7 @@ async function submitFlagIssueV3(planId, lineId) {
         showToast('Issue flagged', 'info');
         _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
         renderBuyPlanV3Status();
-    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 // ── Ops Verification ────────────────────────────────────────────────
@@ -3515,7 +3515,7 @@ async function verifySOV3(action) {
         showToast(action === 'approve' ? 'SO verified' : 'SO ' + action + 'ed', action === 'approve' ? 'success' : 'info');
         _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
         renderBuyPlanV3Status();
-    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 async function verifyPOV3(planId, lineId, action) {
@@ -3526,7 +3526,7 @@ async function verifyPOV3(planId, lineId, action) {
         showToast('PO ' + (action === 'approve' ? 'verified' : 'rejected'), action === 'approve' ? 'success' : 'info');
         _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
         renderBuyPlanV3Status();
-    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 function openRejectPOV3(planId, lineId) {
@@ -3541,7 +3541,7 @@ function openRejectPOV3(planId, lineId) {
     }).then(plan => {
         _currentBuyPlanV3 = plan;
         renderBuyPlanV3Status();
-    }).catch(e => showToast('Failed: ' + (e.message || e), 'error'));
+    }).catch(e => showToast(friendlyError(e, 'Action failed — please try again'), 'error'));
 }
 
 // ── Resubmit ────────────────────────────────────────────────────────
@@ -3559,7 +3559,7 @@ async function resubmitBuyPlanV3() {
         showToast(res.auto_approved ? 'Resubmitted and auto-approved!' : 'Resubmitted for approval', 'success');
         _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + res.plan_id);
         renderBuyPlanV3Status();
-    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 async function openOfferComparisonV3(planId, reqId, currentLineId) {
@@ -3835,7 +3835,7 @@ async function tokenApprovePlan(token) {
             method: 'PUT', body: { sales_order_number: soNumber, manager_notes: notes }
         });
         _showTokenResult('approved', 'Buy plan approved — buyers have been notified.');
-    } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t approve — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 async function tokenRejectPlan(token) {
@@ -3846,7 +3846,7 @@ async function tokenRejectPlan(token) {
             method: 'PUT', body: { reason }
         });
         _showTokenResult('rejected', 'Buy plan has been rejected.');
-    } catch (e) { showToast('Failed to reject: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 function _showTokenResult(status, message) {
@@ -4124,7 +4124,7 @@ async function searchSuggestedContacts() {
         scResults = data.contacts || [];
         renderSuggestedContacts();
     } catch (e) {
-        el.innerHTML = '<p class="empty" style="padding:12px">' + esc(e.message || 'Error searching contacts') + '</p>';
+        el.innerHTML = '<p class="empty" style="padding:12px">' + esc(friendlyError(e, 'Couldn\'t search contacts — please try again')) + '</p>';
         console.error('searchSuggestedContacts:', e);
     }
 }
@@ -4242,7 +4242,7 @@ async function unifiedEnrichCompany(companyId) {
         loadCustomers();
     } catch (e) {
         console.error('unifiedEnrichCompany:', e);
-        showToast('Enrichment failed: ' + (e.message || e), 'error');
+        showToast('Enrichment failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4279,7 +4279,7 @@ async function verifyContactEmail(contactId, email) {
         const score = res.score || 0;
         showToast(`Email ${email}: ${status} (score: ${score})`, status === 'valid' ? 'success' : 'warn');
     } catch (e) {
-        showToast('Email verification failed: ' + (e.message || e), 'error');
+        showToast('Email verification failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -4343,7 +4343,7 @@ async function startCustomerBackfill() {
         if (status) status.textContent = `Done: ${res.enriched || 0} enriched, ${res.errors || 0} errors`;
         loadCustomerGaps();
     } catch (e) {
-        if (status) status.textContent = 'Error: ' + (e.message || e);
+        if (status) status.textContent = friendlyError(e, 'Enrichment failed — please try again');
     }
 }
 
@@ -4363,7 +4363,7 @@ async function unifiedEnrichVendor(vendorId) {
         openVendorPopup(vendorId);
     } catch (e) {
         console.error('unifiedEnrichVendor:', e);
-        showToast('Enrichment failed: ' + (e.message || e), 'error');
+        showToast('Enrichment failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -5638,7 +5638,7 @@ async function refreshVendorScorecards() {
         await apiFetch('/api/performance/vendors/refresh', {method:'POST'});
         loadVendorScorecards();
     } catch (e) {
-        showToast('Error refreshing: ' + (e.message || e), 'error');
+        showToast('Couldn\'t refresh — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -5737,7 +5737,7 @@ async function refreshBuyerLeaderboard() {
         await apiFetch('/api/performance/buyers/refresh', {method:'POST'});
         loadBuyerLeaderboard(_leaderboardMonth);
     } catch (e) {
-        showToast('Error refreshing: ' + (e.message || e), 'error');
+        showToast('Couldn\'t refresh — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6270,7 +6270,7 @@ async function saveCredential(sourceId, varName) {
         cancelCredEdit(sourceId, varName);
         loadSettingsSources();
     } catch (e) {
-        showToast('Failed to save credential: ' + (e.message || e), 'error');
+        showToast('Couldn\'t save credential — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6283,7 +6283,7 @@ async function deleteCredential(sourceId, varName) {
         showToast('Credential removed', 'success');
         loadSettingsSources();
     } catch (e) {
-        showToast('Failed to remove credential: ' + (e.message || e), 'error');
+        showToast('Couldn\'t remove credential — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6311,7 +6311,7 @@ async function testSourceCred(sourceId) {
             else src.last_error = null;
         }
     } catch (e) {
-        resultEl.innerHTML = `<div class="s-test-result s-test-err">Test error: ${e.message || e}</div>`;
+        resultEl.innerHTML = `<div class="s-test-result s-test-err">Test error: ${esc(friendlyError(e, 'couldn\'t reach the connector'))}</div>`;
     }
     btn.disabled = false;
     btn.textContent = 'Test';
@@ -6327,7 +6327,7 @@ async function toggleSourceStatus(sourceId, currentStatus) {
         showToast(`Source ${newStatus === 'disabled' ? 'disabled' : 'enabled'}`, 'success');
         loadSettingsSources();
     } catch (e) {
-        showToast('Failed to toggle source: ' + (e.message || e), 'error');
+        showToast('Couldn\'t toggle source — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6337,7 +6337,7 @@ async function toggleSourceActive(sourceId) {
         showToast(`Source marked ${data.is_active ? 'Active' : 'Planned'}`, 'success');
         loadSettingsSources();
     } catch (e) {
-        showToast('Failed to toggle active state: ' + (e.message || e), 'error');
+        showToast('Couldn\'t toggle active state — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6444,7 +6444,7 @@ async function saveConfig(key, value) {
         });
         loadSettingsConfig();
     } catch (e) {
-        showToast('Error saving: ' + (e.message || e), 'error');
+        showToast('Couldn\'t save — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6498,7 +6498,7 @@ async function updateUserField(userId, field, value) {
         body[field] = value;
         await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', body:body});
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
         loadAdminUsers();
     }
 }
@@ -6510,7 +6510,7 @@ async function deleteAdminUser(userId, name) {
         _userListCache = null;  // Invalidate cache
         loadAdminUsers();
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
     }
 }
 
@@ -6528,7 +6528,7 @@ async function createUser() {
         showToast('User created successfully', 'success');
         if (typeof loadAdminUsers === 'function') loadAdminUsers();
     } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
+        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
     }
 }
 
@@ -6584,7 +6584,7 @@ async function loadTeamsConfig() {
         }
         refreshTeamsChannels();
     } catch (e) {
-        el.innerHTML = `<p class="empty" style="color:var(--red)">Error loading Teams config: ${e.message || e}</p>`;
+        el.innerHTML = `<p class="empty" style="color:var(--red)">Couldn't load Teams config — ${esc(friendlyError(e, 'please try again'))}</p>`;
     }
 }
 
@@ -6752,7 +6752,7 @@ async function loadEnrichmentQueue() {
         html += '</tbody></table>';
         list.innerHTML = html;
     } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load enrichment queue'))}</p>`;
     }
 }
 
@@ -6784,7 +6784,7 @@ async function approveEnrichItem(id) {
         loadEnrichmentQueue();
         loadEnrichmentStats();
     } catch (e) {
-        showToast('Approve failed: ' + (e.message || e), 'error');
+        showToast('Couldn\'t approve item — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6794,7 +6794,7 @@ async function rejectEnrichItem(id) {
         showToast('Rejected');
         loadEnrichmentQueue();
     } catch (e) {
-        showToast('Reject failed: ' + (e.message || e), 'error');
+        showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6810,7 +6810,7 @@ async function bulkApproveSelected() {
         loadEnrichmentQueue();
         loadEnrichmentStats();
     } catch (e) {
-        showToast('Bulk approve failed: ' + (e.message || e), 'error');
+        showToast('Couldn\'t bulk approve — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6835,7 +6835,7 @@ async function startBackfill() {
         if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">Job #${res.job_id} started</span>`;
         pollBackfillProgress(res.job_id);
     } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t start backfill'))}</span>`;
     }
 }
 
@@ -6896,7 +6896,7 @@ async function loadEnrichmentJobs() {
         html += '</tbody></table>';
         list.innerHTML = html;
     } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load enrichment jobs'))}</p>`;
     }
 }
 
@@ -6906,7 +6906,7 @@ async function cancelEnrichJob(jobId) {
         showToast('Job cancelled');
         loadEnrichmentJobs();
     } catch (e) {
-        showToast('Cancel failed: ' + (e.message || e), 'error');
+        showToast('Couldn\'t cancel — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -6962,7 +6962,7 @@ async function startEmailBackfill() {
         if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
         loadEnrichmentStats();
     } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t run email backfill'))}</span>`;
     }
 }
 
@@ -6979,7 +6979,7 @@ async function startWebsiteScrape() {
         if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
         loadEnrichmentStats();
     } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t start website scrape'))}</span>`;
     }
 }
 
@@ -7013,7 +7013,7 @@ async function loadM365Status() {
         html += '</tbody></table>';
         list.innerHTML = html;
     } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load M365 status'))}</p>`;
     }
 }
 
@@ -7025,7 +7025,7 @@ async function triggerDeepScan(userId) {
         loadM365Status();
         loadEnrichmentStats();
     } catch (e) {
-        showToast('Deep scan failed: ' + (e.message || e), 'error');
+        showToast('Deep scan failed — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -7122,7 +7122,7 @@ async function executeTransfer() {
         });
         showToast(`Transferred ${result.transferred} site(s)${result.skipped ? `, ${result.skipped} skipped` : ''}`, 'success');
         loadTransferPreview();
-    } catch (e) { showToast('Transfer failed: ' + (e.message || e), 'error'); }
+    } catch (e) { showToast('Transfer failed — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
 
@@ -7888,7 +7888,7 @@ async function apolloDiscover() {
         container.innerHTML = html;
 
     } catch (e) {
-        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">Apollo search failed: ' + esc(String(e.message || e)) + '</p>';
+        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">' + esc(friendlyError(e, 'Apollo search failed — please try again')) + '</p>';
     }
 }
 
@@ -7958,7 +7958,7 @@ async function apolloEnrichSelected() {
         _apolloLoadCredits();
 
     } catch (e) {
-        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">Enrichment failed: ' + esc(String(e.message || e)) + '</p>';
+        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">' + esc(friendlyError(e, 'Enrichment failed — please try again')) + '</p>';
     }
 }
 
@@ -8377,7 +8377,7 @@ async function _openMobileBuyPlanForm(reqId) {
             _currentBuyPlanV3 = existingPlan;
         } catch (e) {
             logCatchError('_openMobileBuyPlanForm', e);
-            showToast('Failed to build buy plan: ' + (e.message || ''), 'error');
+            showToast('Couldn\'t build buy plan — ' + friendlyError(e, 'please try again'), 'error');
             return;
         }
     }
@@ -8486,7 +8486,7 @@ async function _mbpSubmit() {
         renderBuyPlanV3Status();
     } catch (e) {
         logCatchError('_mbpSubmit', e);
-        showToast('Failed to submit: ' + (e.message || e), 'error');
+        showToast('Couldn\'t submit — ' + friendlyError(e, 'please try again'), 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Submit Buy Plan'; }
     }
 }
@@ -8719,7 +8719,7 @@ async function _submitMobileOffer(reqId) {
         }
     } catch (e) {
         logCatchError('_submitMobileOffer', e);
-        showToast('Failed to log offer: ' + (e.message || e), 'error');
+        showToast('Couldn\'t log offer — ' + friendlyError(e, 'please try again'), 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = 'Save Offer'; }
     }
