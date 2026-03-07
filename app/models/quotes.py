@@ -43,6 +43,7 @@ class Quote(Base):
 
     status = Column(String(20), default="draft")
     sent_at = Column(DateTime)
+    followup_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     result = Column(String(20))
     result_reason = Column(String(255))
     result_notes = Column(Text)

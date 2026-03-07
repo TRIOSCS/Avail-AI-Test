@@ -517,7 +517,60 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         db.rollback()
         return []
 
+    # Fire Teams DM alerts for quoted vendor responses (batched after commit)
+    try:
+        await _fire_vendor_quote_alerts(pending_parse, db)
+    except Exception:
+        logger.debug("Vendor quote alert dispatch failed", exc_info=True)
+
     return results
+
+
+async def _fire_vendor_quote_alerts(vendor_responses: list, db: Session) -> None:
+    """Send Teams DM alerts for quoted vendor responses with high confidence.
+
+    Batches alerts per buyer — if multiple quotes came in for the same buyer,
+    sends a single consolidated message instead of one per quote.
+    """
+    from .services.teams_alert_service import send_alert
+
+    # Group qualifying VRs by buyer (contact.user_id)
+    buyer_quotes: dict[int, list] = {}
+    for vr in vendor_responses:
+        if (
+            vr.classification == "quoted"
+            and vr.confidence
+            and vr.confidence >= 0.8
+            and vr.contact_id
+            and not vr.teams_alert_sent_at
+        ):
+            contact = db.get(Contact, vr.contact_id) if vr.contact_id else None
+            if contact and contact.user_id:
+                buyer_quotes.setdefault(contact.user_id, []).append((vr, contact))
+
+    for buyer_id, items in buyer_quotes.items():
+        if len(items) == 1:
+            vr, contact = items[0]
+            req = db.get(Requisition, vr.requisition_id) if vr.requisition_id else None
+            price_str = ""
+            if vr.parsed_data and vr.parsed_data.get("unit_price"):
+                price_str = f"${vr.parsed_data['unit_price']}"
+            msg = (
+                f"Quote in: {vr.vendor_name} on {vr.parsed_data.get('mpn', 'N/A') if vr.parsed_data else 'N/A'}"
+                f"{' at ' + price_str if price_str else ''}"
+                f"{' for ' + req.customer_name if req and req.customer_name else ''}"
+            )
+        else:
+            vendors = set(vr.vendor_name for vr, _ in items)
+            msg = f"{len(items)} new quotes from {', '.join(list(vendors)[:3])}"
+            if len(vendors) > 3:
+                msg += f" +{len(vendors) - 3} more"
+
+        ok = await send_alert(db, buyer_id, msg, "vendor_quote", str(items[0][0].id))
+        if ok:
+            for vr, _ in items:
+                vr.teams_alert_sent_at = datetime.now(timezone.utc)
+            db.commit()
 
 
 def _classify_response(parsed: dict, body: str, subject: str) -> dict:

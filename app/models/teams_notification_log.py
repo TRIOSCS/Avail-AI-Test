@@ -25,4 +25,8 @@ class TeamsNotificationLog(Base):
     channel_id = Column(String(200), nullable=True)
     success = Column(Boolean, nullable=False, default=False)
     error_msg = Column(Text, nullable=True)
+    user_id = Column(Integer, nullable=True)
+    ai_priority = Column(String(20), nullable=True)
+    ai_decision = Column(String(20), nullable=True)  # sent/batched/suppressed
+    batch_id = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)

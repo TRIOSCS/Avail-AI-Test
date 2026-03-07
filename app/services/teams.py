@@ -346,6 +346,27 @@ def _build_mention(email: str, name: str) -> tuple[str, dict]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _intelligence_gate(event_type: str, entity_id, context: dict | None = None) -> bool:
+    """Check notification intelligence — returns False if alert should be suppressed.
+
+    Replaces _is_rate_limited() with smarter evaluation.
+    Falls through to True (allow) on any error.
+    """
+    try:
+        from app.services.notify_intelligence import evaluate_channel_alert, is_intelligence_enabled
+        if not is_intelligence_enabled():
+            return not _is_rate_limited(event_type, entity_id)
+
+        decision = evaluate_channel_alert(event_type, str(entity_id), context)
+        if decision.action == "SUPPRESS":
+            logger.debug("Intelligence suppressed %s:%s — %s", event_type, entity_id, decision.reason)
+            return False
+        return True
+    except Exception:
+        # Fire-and-forget: fall through to legacy rate limiting
+        return not _is_rate_limited(event_type, entity_id)
+
+
 async def send_hot_requirement_alert(
     requirement_id: int,
     mpn: str,
@@ -365,15 +386,14 @@ async def send_hot_requirement_alert(
     channel_id, team_id, enabled = _get_channel_for_event("hot_requirement")
     if not enabled:
         return False
-    if _is_rate_limited("hot_requirement", requirement_id):
+    total_value = target_qty * target_price
+    if not _intelligence_gate("hot_requirement", requirement_id, {"total_value": total_value}):
         return False
 
     if not token:
         token = await _get_system_token()
         if not token:
             return False
-
-    total_value = target_qty * target_price
     mentions = []
     subtitle = f"High-value requirement: {mpn} (${total_value:,.0f})"
     if owner_email and owner_name:
@@ -427,7 +447,8 @@ async def send_competitive_quote_alert(
     channel_id, team_id, enabled = _get_channel_for_event("competitive_quote")
     if not enabled:
         return False
-    if _is_rate_limited("competitive_quote", offer_id):
+    savings_pct = ((best_price - offer_price) / best_price) * 100 if best_price else 0
+    if not _intelligence_gate("competitive_quote", offer_id, {"savings_pct": savings_pct}):
         return False
 
     if not token:
@@ -435,7 +456,6 @@ async def send_competitive_quote_alert(
         if not token:
             return False
 
-    savings_pct = ((best_price - offer_price) / best_price) * 100 if best_price else 0
     mentions = []
     subtitle = f"{vendor_name} undercuts best price by {savings_pct:.0f}%"
     if creator_email and creator_name:
@@ -490,7 +510,7 @@ async def send_ownership_warning(
     channel_id, team_id, enabled = _get_channel_for_event("ownership_expiring")
     if not enabled:
         return False
-    if _is_rate_limited("ownership_expiring", company_id):
+    if not _intelligence_gate("ownership_expiring", company_id):
         return False
 
     if not token:
@@ -545,7 +565,7 @@ async def send_stock_match_alert(
         return False
 
     rate_key = f"{vendor_name}:{filename}"
-    if _is_rate_limited("stock_match", rate_key):
+    if not _intelligence_gate("stock_match", rate_key):
         return False
 
     if not token:
@@ -607,7 +627,7 @@ async def send_buyplan_card(
     channel_id, team_id, enabled = _get_channel_for_event(event_type)
     if not enabled:
         return False
-    if _is_rate_limited(event_type, plan_id):
+    if not _intelligence_gate(event_type, plan_id):
         return False
 
     if not token:
@@ -728,7 +748,7 @@ async def send_trouble_ticket_alert(
     channel_id, team_id, enabled = _get_channel_for_event(event_type)
     if not enabled:
         return False
-    if _is_rate_limited(event_type, ticket_id):
+    if not _intelligence_gate(event_type, ticket_id):
         return False
 
     if not token:
@@ -771,7 +791,7 @@ async def send_connector_down_alert(
     channel_id, team_id, enabled = _get_channel_for_event("connector_down")
     if not enabled:
         return False
-    if _is_rate_limited("connector_down", source_name):
+    if not _intelligence_gate("connector_down", source_name):
         return False
 
     if not token:
@@ -815,7 +835,7 @@ async def send_price_drop_alert(
     if not enabled:
         return False
     rate_key = f"{mpn}:{vendor_name}"
-    if _is_rate_limited("price_drop", rate_key):
+    if not _intelligence_gate("price_drop", rate_key):
         return False
 
     if not token:
@@ -858,7 +878,7 @@ async def send_pipeline_milestone_alert(
     channel_id, team_id, enabled = _get_channel_for_event("pipeline_milestone")
     if not enabled:
         return False
-    if _is_rate_limited("pipeline_milestone", requisition_id):
+    if not _intelligence_gate("pipeline_milestone", requisition_id, {"status": status}):
         return False
 
     if not token:

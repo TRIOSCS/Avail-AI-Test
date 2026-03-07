@@ -1013,3 +1013,9 @@ app.include_router(tags_router)
 from .routers.activity import router as activity_router
 
 app.include_router(activity_router)
+
+from .routers.teams_alerts import router as teams_alerts_router
+from .routers.teams_bot import router as teams_bot_router
+
+app.include_router(teams_alerts_router)
+app.include_router(teams_bot_router)

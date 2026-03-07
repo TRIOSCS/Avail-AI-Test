@@ -62,3 +62,51 @@ async def mark_all_read(
     """Mark all notifications as read for the current user."""
     count = svc.mark_all_read(db=db, user_id=user.id)
     return {"ok": True, "count": count}
+
+
+@router.post("/api/notifications/{notification_id}/clicked")
+async def record_clicked(
+    notification_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Record that a user clicked on a notification."""
+    from app.models.notification import Notification
+    from app.services.notify_intelligence import record_engagement
+
+    notif = db.get(Notification, notification_id)
+    if not notif or notif.user_id != user.id:
+        raise HTTPException(404, "Notification not found")
+    record_engagement(
+        user_id=user.id,
+        event_type=notif.event_type or "unknown",
+        entity_id=str(notification_id),
+        action="clicked",
+        db=db,
+    )
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/notifications/{notification_id}/dismissed")
+async def record_dismissed(
+    notification_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Record that a user dismissed a notification."""
+    from app.models.notification import Notification
+    from app.services.notify_intelligence import record_engagement
+
+    notif = db.get(Notification, notification_id)
+    if not notif or notif.user_id != user.id:
+        raise HTTPException(404, "Notification not found")
+    record_engagement(
+        user_id=user.id,
+        event_type=notif.event_type or "unknown",
+        entity_id=str(notification_id),
+        action="dismissed",
+        db=db,
+    )
+    db.commit()
+    return {"ok": True}

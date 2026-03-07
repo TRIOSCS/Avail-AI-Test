@@ -175,6 +175,7 @@ class VendorResponse(Base):
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
+    teams_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

@@ -397,6 +397,18 @@ def _build_requisition_list(q, status, limit, offset, user, db):
     }
 
 
+@router.get("/api/requisitions/{req_id}/risk-assessment")
+async def requisition_risk_assessment(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get AI-powered risk assessment for a requisition."""
+    from app.services.deal_risk import assess_risk
+
+    return assess_risk(req_id, db)
+
+
 @router.get("/api/requisitions/{req_id}/sourcing-score")
 async def requisition_sourcing_score(
     req_id: int,
@@ -431,6 +443,18 @@ async def create_requisition(
     db.add(req)
     db.commit()
     invalidate_prefix("req_list")
+
+    # Teams DM alert: notify all active buyers about new requisition
+    try:
+        from ...services.teams_alert_service import send_alert_to_role
+
+        msg = f"New RFQ: {body.customer_name or 'Unknown customer'} — {body.name}"
+        asyncio.create_task(
+            send_alert_to_role(db, "buyer", msg, "new_requisition", str(req.id), exclude_user_id=user.id)
+        )
+    except Exception:
+        pass  # Non-critical — don't fail req creation
+
     return {"id": req.id, "name": req.name}
 
 

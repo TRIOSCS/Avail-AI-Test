@@ -40,6 +40,7 @@ from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # Notifications (self-heal pipeline)
 from .notification import Notification  # noqa: F401
+from .notification_engagement import NotificationEngagement  # noqa: F401
 
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401
@@ -104,6 +105,9 @@ from .sync import SyncLog  # noqa: F401
 
 # Tagging (AI classification + entity propagation)
 from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
+
+# Teams alert config (per-user DM preferences)
+from .teams_alert_config import TeamsAlertConfig  # noqa: F401
 
 # Teams notification audit log
 from .teams_notification_log import TeamsNotificationLog  # noqa: F401
