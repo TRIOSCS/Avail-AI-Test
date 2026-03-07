@@ -836,46 +836,6 @@ async function switchCustDrawerTab(tab, btn) {
     else if (tab === 'apollo') _renderCustDrawerApollo(_selectedCustId);
 }
 
-async function _renderCustDrawerApollo(companyId) {
-    const body = document.getElementById('custDrawerBody');
-    if (!body) return;
-    body.innerHTML = '<div class="drawer-section"><div class="spinner-row"><div class="spinner"></div>Loading Apollo data…</div></div>';
-    try {
-        const data = await apiFetch('/api/apollo/credits');
-        if (data && data.error) {
-            console.error('Apollo credits fetch error:', data.error);
-            const creditsEl = body.querySelector ? null : null;
-            body.innerHTML = `<div class="drawer-section"><div class="drawer-section-title">Apollo</div><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value" style="color:var(--muted)" title="Error: ${escAttr(String(data.error))}">unavailable</span></div></div>`;
-        } else {
-            const credits = (data && data.credits !== null && data.credits !== undefined) ? data.credits : null;
-            body.innerHTML = `<div class="drawer-section"><div class="drawer-section-title">Apollo</div><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value">${credits !== null ? credits : 'unavailable'}</span></div></div>`;
-        }
-    } catch (e) {
-        logCatchError('_renderCustDrawerApollo', e);
-        body.innerHTML = '<div class="drawer-section"><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value" style="color:var(--muted)">unavailable</span></div></div>';
-    }
-}
-
-async function _renderCustDrawerApollo(companyId) {
-    const body = document.getElementById('custDrawerBody');
-    if (!body) return;
-    body.innerHTML = '<div class="drawer-section"><div class="spinner-row"><div class="spinner"></div>Loading Apollo data…</div></div>';
-    try {
-        const data = await apiFetch('/api/apollo/credits');
-        if (data && data.error) {
-            console.error('Apollo credits fetch error:', data.error);
-            const creditsEl = body.querySelector ? null : null;
-            body.innerHTML = `<div class="drawer-section"><div class="drawer-section-title">Apollo</div><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value" style="color:var(--muted)" title="Error: ${escAttr(String(data.error))}">unavailable</span></div></div>`;
-        } else {
-            const credits = (data && data.credits !== null && data.credits !== undefined) ? data.credits : null;
-            body.innerHTML = `<div class="drawer-section"><div class="drawer-section-title">Apollo</div><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value">${credits !== null ? credits : 'unavailable'}</span></div></div>`;
-        }
-    } catch (e) {
-        logCatchError('_renderCustDrawerApollo', e);
-        body.innerHTML = '<div class="drawer-section"><div class="drawer-field"><span class="drawer-field-label">Credits</span><span class="drawer-field-value" style="color:var(--muted)">unavailable</span></div></div>';
-    }
-}
-
 async function _ensureCompanyDetail(companyId) {
     const c = crmCustomers.find(x => x.id === companyId);
     if (!c) return;
