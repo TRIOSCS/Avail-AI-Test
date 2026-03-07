@@ -683,7 +683,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
 # ── Scorecard ──────────────────────────────────────────────────────────────
 
 
-def _cap_outlier(value: float, cap: float = 10_000_000) -> float:
+def _cap_outlier(value: float, cap: float = 500_000) -> float:
     """Cap unrealistic financial values to prevent test-data pollution.
 
     Electronic component deals rarely exceed $10M per offer.
