@@ -964,6 +964,10 @@ async function _renderCustDrawerOverview(companyId) {
     }
     // Auto-load AI summary
     _autoLoadAccountSummary(c.id);
+    // Knowledge-based company insights (Phase 3)
+    if (typeof _renderEntityInsightsCard === 'function') {
+        _renderEntityInsightsCard('companies', companyId, body, { title: 'AI Knowledge Insights' });
+    }
 }
 
 async function _renderCustDrawerSites(companyId) {
