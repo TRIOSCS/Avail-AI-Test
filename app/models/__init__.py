@@ -42,6 +42,9 @@ from .trouble_ticket import TroubleTicket  # noqa: F401
 from .notification import Notification  # noqa: F401
 from .notification_engagement import NotificationEngagement  # noqa: F401
 
+# Knowledge Ledger
+from .knowledge import KnowledgeEntry  # noqa: F401
+
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
