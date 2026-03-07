@@ -43,30 +43,114 @@ def register_knowledge_jobs(scheduler, settings):
 
 
 async def _job_refresh_insights():
-    """Re-generate insights for reqs updated in the last 24h, cap 50."""
+    """Re-generate insights for recently active reqs, vendors, companies, MPNs, and pipeline."""
+    from sqlalchemy import func
+
     from app.database import SessionLocal
+    from app.models.crm import CustomerSite
+    from app.models.offers import Offer
     from app.models.sourcing import Requisition
     from app.services import knowledge_service
 
     db = SessionLocal()
     try:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-        active_reqs = (
-            db.query(Requisition.id)
-            .filter(Requisition.updated_at >= cutoff)
-            .order_by(Requisition.updated_at.desc())
-            .limit(50)
-            .all()
-        )
-        count = 0
-        for (req_id,) in active_reqs:
-            try:
-                entries = await knowledge_service.generate_insights(db, req_id)
-                if entries:
-                    count += 1
-            except Exception as e:
-                logger.warning("Insight generation failed for req {}: {}", req_id, e)
-        logger.info("Refreshed insights for {}/{} active reqs", count, len(active_reqs))
+
+        # --- Requisition insights (top 50 recently active) ---
+        try:
+            active_reqs = (
+                db.query(Requisition.id)
+                .filter(Requisition.updated_at >= cutoff)
+                .order_by(Requisition.updated_at.desc())
+                .limit(50)
+                .all()
+            )
+            req_ok = 0
+            for (req_id,) in active_reqs:
+                try:
+                    entries = await knowledge_service.generate_insights(db, req_id)
+                    if entries:
+                        req_ok += 1
+                except Exception as e:
+                    logger.warning("Insight generation failed for req {}: {}", req_id, e)
+            logger.info("Refreshed insights for {}/{} active reqs", req_ok, len(active_reqs))
+        except Exception as e:
+            logger.error("Requisition insight refresh failed: {}", e)
+
+        # --- Pipeline insights (1 per run) ---
+        try:
+            entries = await knowledge_service.generate_pipeline_insights(db)
+            logger.info("Pipeline insights generated: {} entries", len(entries) if entries else 0)
+        except Exception as e:
+            logger.error("Pipeline insight refresh failed: {}", e)
+
+        # --- Vendor insights (top 20 most active by recent offers) ---
+        try:
+            top_vendors = (
+                db.query(Offer.vendor_card_id)
+                .filter(Offer.created_at >= cutoff, Offer.vendor_card_id.isnot(None))
+                .group_by(Offer.vendor_card_id)
+                .order_by(func.count(Offer.id).desc())
+                .limit(20)
+                .all()
+            )
+            vendor_ok = 0
+            for (vid,) in top_vendors:
+                try:
+                    entries = await knowledge_service.generate_vendor_insights(db, vid)
+                    if entries:
+                        vendor_ok += 1
+                except Exception as e:
+                    logger.warning("Vendor insight failed for vendor_card {}: {}", vid, e)
+            logger.info("Refreshed insights for {}/{} active vendors", vendor_ok, len(top_vendors))
+        except Exception as e:
+            logger.error("Vendor insight refresh failed: {}", e)
+
+        # --- Company insights (top 20 most active by recent requisitions) ---
+        try:
+            top_companies = (
+                db.query(CustomerSite.company_id)
+                .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
+                .filter(Requisition.updated_at >= cutoff, CustomerSite.company_id.isnot(None))
+                .group_by(CustomerSite.company_id)
+                .order_by(func.count(Requisition.id).desc())
+                .limit(20)
+                .all()
+            )
+            company_ok = 0
+            for (cid,) in top_companies:
+                try:
+                    entries = await knowledge_service.generate_company_insights(db, cid)
+                    if entries:
+                        company_ok += 1
+                except Exception as e:
+                    logger.warning("Company insight failed for company {}: {}", cid, e)
+            logger.info("Refreshed insights for {}/{} active companies", company_ok, len(top_companies))
+        except Exception as e:
+            logger.error("Company insight refresh failed: {}", e)
+
+        # --- MPN insights (top 50 most-quoted MPNs) ---
+        try:
+            top_mpns = (
+                db.query(Offer.mpn)
+                .filter(Offer.created_at >= cutoff, Offer.mpn.isnot(None), Offer.mpn != "")
+                .group_by(Offer.mpn)
+                .order_by(func.count(Offer.id).desc())
+                .limit(50)
+                .all()
+            )
+            mpn_ok = 0
+            for (mpn,) in top_mpns:
+                try:
+                    entries = await knowledge_service.generate_mpn_insights(db, mpn)
+                    if entries:
+                        mpn_ok += 1
+                except Exception as e:
+                    logger.warning("MPN insight failed for {}: {}", mpn, e)
+            logger.info("Refreshed insights for {}/{} active MPNs", mpn_ok, len(top_mpns))
+        except Exception as e:
+            logger.error("MPN insight refresh failed: {}", e)
+
     except Exception as e:
         logger.error("refresh_active_insights job failed: {}", e)
     finally:
