@@ -76,7 +76,7 @@ class TestDealRisk:
 
     def test_generate_explanation_no_issues(self):
         from app.services.deal_risk import _generate_explanation
-        explanation, action = _generate_explanation("green", {"days_idle": 0}, MagicMock())
+        explanation, action = _generate_explanation("green", {"days_idle": 0, "offer_count": 5, "vendor_response_rate": 0.5}, MagicMock())
         assert "On track" in explanation
         assert action == ""
 
