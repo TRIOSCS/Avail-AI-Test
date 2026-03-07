@@ -8,7 +8,7 @@ Called by: v13_features package __init__.py
 Depends on: services/activity_service, services/webhook_service
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -304,8 +304,8 @@ async def log_vendor_note_endpoint(
 
 @router.get("/api/activities/unmatched")
 async def list_unmatched_activities(
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

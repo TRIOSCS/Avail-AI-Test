@@ -151,9 +151,20 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
 
 def get_system_health(db: Session) -> dict:
     """System health: version, DB stats, scheduler status, connector health."""
-    # Row counts
+    # Row counts — use display-friendly labels
+    TABLE_LABELS = {
+        "users": "Users",
+        "requisitions": "Requisitions",
+        "requirements": "Requirements",
+        "sightings": "Sightings",
+        "companies": "Companies",
+        "vendor_cards": "Vendor Cards",
+        "material_cards": "Material Cards",
+        "offers": "Offers",
+        "quotes": "Quotes",
+    }
     counts = {}
-    for label, model in [
+    for key, model in [
         ("users", User),
         ("requisitions", Requisition),
         ("requirements", Requirement),
@@ -165,9 +176,9 @@ def get_system_health(db: Session) -> dict:
         ("quotes", Quote),
     ]:
         try:
-            counts[label] = db.query(sqlfunc.count(model.id)).scalar() or 0
+            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = db.query(sqlfunc.count(model.id)).scalar() or 0
         except Exception:
-            counts[label] = -1
+            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = -1
 
     # Per-user scheduler status
     users = db.query(User).all()

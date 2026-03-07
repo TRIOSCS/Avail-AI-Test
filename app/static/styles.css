@@ -1785,7 +1785,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .cc-stat-row{display:flex;gap:8px;margin-bottom:10px}
 .cc-stat{flex:1;background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;text-align:center}
 .cc-stat-num{font-size:18px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--blue)}
-.cc-stat-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-top:1px}
+.cc-stat-label{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-top:1px;white-space:nowrap;overflow:visible}
 .cc-cards-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px}
 .cc-card{padding:12px}
 .cc-card-title{font-size:12px;font-weight:700;margin:0 0 6px;display:flex;align-items:center;gap:5px}

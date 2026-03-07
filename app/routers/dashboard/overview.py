@@ -441,6 +441,17 @@ def attention_feed(
     except ImportError:  # pragma: no cover
         pass
 
+    # Deduplicate: max 2 items per requisition
+    seen = {}
+    deduped_items = []
+    for item in items:
+        rid = item.get("link_id")
+        if rid and item.get("link_type") == "requisition":
+            seen[rid] = seen.get(rid, 0) + 1
+            if seen[rid] > 2:
+                continue
+        deduped_items.append(item)
+
     # Sort by urgency: critical > warning > info, then by type for stability
-    items.sort(key=lambda x: (urgency_order.get(x["urgency"], 9), x["type"]))
-    return items[:12]
+    deduped_items.sort(key=lambda x: (urgency_order.get(x["urgency"], 9), x["type"]))
+    return deduped_items[:12]

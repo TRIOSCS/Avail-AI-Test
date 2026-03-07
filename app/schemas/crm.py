@@ -56,6 +56,19 @@ class CompanyCreate(BaseModel):
             raise ValueError("Company name is required")
         return v
 
+    @field_validator("website")
+    @classmethod
+    def validate_website(cls, v: str | None) -> str | None:
+        if not v or not v.strip():
+            return None
+        v = v.strip()
+        if not v.startswith(("http://", "https://")):
+            v = "https://" + v
+        import re
+        if not re.match(r'^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}', v):
+            raise ValueError("Please enter a valid website URL")
+        return v
+
     @field_validator("phone")
     @classmethod
     def normalize_phone(cls, v: str | None) -> str | None:

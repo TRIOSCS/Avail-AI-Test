@@ -609,11 +609,24 @@ async def import_stock_list_standalone(
     """Import a vendor stock list -- stores ALL rows as MaterialCard + MaterialVendorHistory."""
     form = await request.form()
     file = form.get("file")
-    vendor_name = (form.get("vendor_name") or "").strip()
     if not file:
         raise HTTPException(400, "No file uploaded")
+
+    # Validate file type
+    import os as _os
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    allowed_extensions = {".csv", ".xlsx", ".xls", ".tsv"}
+    if ext not in allowed_extensions:
+        raise HTTPException(400, f"Invalid file type '{ext}'. Allowed: {', '.join(sorted(allowed_extensions))}")
+
+    # Sanitize vendor name — strip HTML before length check
+    import re as _re
+    vendor_name = (form.get("vendor_name") or "").strip()
+    vendor_name = _re.sub(r'<[^>]+>', '', vendor_name).strip()
     if not vendor_name:
         raise HTTPException(400, "Vendor name is required")
+    if len(vendor_name) > 255:
+        raise HTTPException(400, "Vendor name must be 255 characters or fewer")
 
     content = await file.read()
     if len(content) > 10_000_000:

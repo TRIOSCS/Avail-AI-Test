@@ -51,7 +51,7 @@ class RequisitionArchiveOut(BaseModel):
 class RequirementCreate(BaseModel):
     primary_mpn: str
     target_qty: int = Field(default=1, ge=1)
-    target_price: float | None = None
+    target_price: float | None = Field(default=None, ge=0)
     substitutes: list[str] = Field(default_factory=list, max_length=20)
     condition: str | None = None
     date_codes: str | None = None

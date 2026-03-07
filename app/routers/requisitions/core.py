@@ -69,7 +69,7 @@ async def requisition_counts(
     """Lightweight counts for dashboard widgets — avoids the heavy list query."""
     total = db.scalar(select(sqlfunc.count(Requisition.id)))
     open_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["open", "active", "sourcing"]))
+        select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["open", "active", "sourcing", "draft"]))
     )
     archive_cnt = db.scalar(select(sqlfunc.count(Requisition.id)).where(Requisition.status == "archive"))
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}

@@ -2357,7 +2357,7 @@ async function loadDashboard() {
         html += `<div class="cc-stat-row">
             <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div><div class="cc-stat-sub">Team avg: ${avgOpenReqs}</div></div>
             <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div><div class="cc-stat-sub">Team avg: ${avgQuotesOut}</div></div>
-            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div><div class="cc-stat-sub">Team avg: ${avgWon}</div></div>
+            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won (30d)</div><div class="cc-stat-sub">Team avg: ${avgWon}</div></div>
             <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">Team avg: ${teamWinRate}%</div></div>
         </div>`;
 
@@ -2450,7 +2450,7 @@ async function loadDashboard() {
                 if (r.deadline === 'ASAP') {
                     dotColor = 'var(--red)';
                 } else {
-                    const dl = new Date(r.deadline);
+                    const dl = new Date(r.deadline + 'T12:00:00Z');
                     const daysLeft = Math.floor((dl - now) / 86400000);
                     if (daysLeft <= 0) { dotColor = 'var(--red)'; deadlineLabel = daysLeft === 0 ? 'Today' : Math.abs(daysLeft) + 'd overdue'; }
                     else if (daysLeft <= 3) { dotColor = 'var(--amber)'; deadlineLabel = daysLeft + 'd left'; }
@@ -6849,7 +6849,7 @@ function renderReqList() {
                 case 'status': va = a.status || ''; vb = b.status || ''; break;
                 case 'sales': va = a.created_by_name || ''; vb = b.created_by_name || ''; break;
                 case 'age': va = a.created_at || ''; vb = b.created_at || ''; break;
-                case 'deadline': va = a.deadline === 'ASAP' ? '0000-00-00' : (a.deadline || '9999-12-31'); vb = b.deadline === 'ASAP' ? '0000-00-00' : (b.deadline || '9999-12-31'); break;
+                case 'deadline': va = a.deadline === 'ASAP' ? '9999-12-31' : (a.deadline || '9999-12-31'); vb = b.deadline === 'ASAP' ? '9999-12-31' : (b.deadline || '9999-12-31'); break;
                 case 'sent': va = a.rfq_sent_count || 0; vb = b.rfq_sent_count || 0; break;
                 case 'resp': { const sa = a.rfq_sent_count || 0; const sb = b.rfq_sent_count || 0; va = sa > 0 ? (a.reply_count || 0) / sa : 0; vb = sb > 0 ? (b.reply_count || 0) / sb : 0; break; }
                 case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
@@ -7081,7 +7081,7 @@ function _renderReqRow(r) {
     if (r.deadline === 'ASAP') {
         dl = '<span class="dl dl-asap">ASAP</span>';
     } else if (r.deadline) {
-        const d = new Date(r.deadline);
+        const d = new Date(r.deadline + 'T12:00:00Z');
         const now = new Date(); now.setHours(0,0,0,0);
         const diff = Math.round((d - now) / 86400000);
         const fmt = fmtDate(r.deadline);
@@ -7220,7 +7220,7 @@ function _renderReqRow(r) {
         // RFQ tab button state machine: blue Source → yellow Sourcing → green Offers
         let rfqBtn;
         if (r.status === 'draft') {
-            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing — search supplier APIs for parts">&#x25b6; Source</button>`;
+            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing — search supplier APIs for parts">&#x25b6; Sourcing</button>`;
         } else if (r.status === 'quoted' || r.status === 'quoting') {
             const hasQuoteSent = r.quote_status === 'sent';
             rfqBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="View quote">Quoted</button>`;
@@ -7255,7 +7255,7 @@ function _renderReqRow(r) {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Source</button>
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Sourcing</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
@@ -8419,7 +8419,7 @@ async function inlineSourceAll(reqId) {
     } catch(e) {
         showToast('Search error: ' + e.message, 'error');
     } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '\u25b6 Source'; }
+        if (btn) { btn.disabled = false; btn.textContent = '\u25b6 Sourcing'; }
     }
 }
 
@@ -12102,7 +12102,7 @@ async function loadNotifications() {
                 </div>
                 <div id="${gid}" class="${collapsed ? 'hidden' : ''}">
             `;
-            group.slice(0, 5).forEach(n => {
+            group.slice(0, 10).forEach(n => {
                 // Clean up raw API metadata from notes before display
                 let cleanNotes = n.notes || '';
                 cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\s{2,}/g, ' ').trim();
@@ -12146,8 +12146,11 @@ async function loadNotificationBadge() {
     const badge = document.getElementById('notifBadge');
     if (!badge) return;
     try {
-        const data = await apiFetch('/api/sales/notifications/count');
-        const count = data.count || 0;
+        const [salesData, sysData] = await Promise.all([
+            apiFetch('/api/sales/notifications/count').catch(() => ({count: 0})),
+            apiFetch('/api/notifications/unread-count').catch(() => ({count: 0})),
+        ]);
+        const count = (salesData.count || 0) + (sysData.count || 0);
         badge.textContent = count;
         badge.style.display = count > 0 ? 'flex' : 'none';
     } catch { badge.style.display = 'none'; }
@@ -12368,6 +12371,87 @@ async function submitTrouble(btn) {
         // Auto-close after 2.5s
         setTimeout(function() { closeTroubleChat(); }, 2500);
     });
+}
+
+// ── Ticket Detail Modal (from app.js context) ────────────────────────
+function openTicketDetail(id) {
+    apiFetch('/api/trouble-tickets/' + id).then(function(t) {
+        var modal = document.getElementById('ticketDetailModal');
+        if (!modal) {
+            var div = document.createElement('div');
+            div.id = 'ticketDetailModal';
+            div.className = 'modal-bg';
+            div.onclick = function(e) { if (e.target === div) div.style.display = 'none'; };
+            var inner = document.createElement('div');
+            inner.className = 'modal';
+            inner.style.maxWidth = '600px';
+            var bodyDiv = document.createElement('div');
+            bodyDiv.id = 'ticketDetailBody';
+            inner.appendChild(bodyDiv);
+            var actions = document.createElement('div');
+            actions.className = 'mactions';
+            var closeBtn = document.createElement('button');
+            closeBtn.className = 'btn btn-ghost';
+            closeBtn.textContent = 'Close';
+            closeBtn.onclick = function() { div.style.display = 'none'; };
+            actions.appendChild(closeBtn);
+            inner.appendChild(actions);
+            div.appendChild(inner);
+            document.body.appendChild(div);
+            modal = div;
+        }
+        var body = document.getElementById('ticketDetailBody');
+        if (!body) return;
+        body.textContent = '';
+
+        var h = document.createElement('h3');
+        h.textContent = t.title;
+        body.appendChild(h);
+
+        var pStatus = document.createElement('p');
+        pStatus.appendChild(document.createTextNode('Status: '));
+        var bStatus = document.createElement('strong');
+        bStatus.textContent = t.status;
+        pStatus.appendChild(bStatus);
+        body.appendChild(pStatus);
+
+        var pCat = document.createElement('p');
+        pCat.appendChild(document.createTextNode('Category: '));
+        var bCat = document.createElement('strong');
+        bCat.textContent = t.category || '\u2014';
+        pCat.appendChild(bCat);
+        body.appendChild(pCat);
+
+        var pCreated = document.createElement('p');
+        pCreated.appendChild(document.createTextNode('Created: '));
+        var bCreated = document.createElement('strong');
+        bCreated.textContent = t.created_at ? new Date(t.created_at).toLocaleDateString() : '\u2014';
+        pCreated.appendChild(bCreated);
+        body.appendChild(pCreated);
+
+        var pDescLabel = document.createElement('p');
+        var bDesc = document.createElement('strong');
+        bDesc.textContent = 'Description:';
+        pDescLabel.appendChild(bDesc);
+        body.appendChild(pDescLabel);
+        var pre = document.createElement('pre');
+        pre.style.whiteSpace = 'pre-wrap';
+        pre.style.fontSize = '12px';
+        pre.style.maxHeight = '300px';
+        pre.style.overflow = 'auto';
+        pre.textContent = t.description || '\u2014';
+        body.appendChild(pre);
+
+        if (t.resolution_notes) {
+            var pRes = document.createElement('p');
+            var bRes = document.createElement('strong');
+            bRes.textContent = 'Resolution: ';
+            pRes.appendChild(bRes);
+            pRes.appendChild(document.createTextNode(t.resolution_notes));
+            body.appendChild(pRes);
+        }
+        modal.style.display = 'flex';
+    }).catch(function() { showToast('Failed to load ticket', 'error'); });
 }
 
 // ── Gradient AI Feature Integrations ──────────────────────────────────
@@ -12656,7 +12740,7 @@ Object.assign(window, {
     _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
     createRequisition, debouncedFilterSites, debouncedFilterVendors,
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
-    doStockImport, filterVendorList, openNewReqModal, openTroubleChat,
+    doStockImport, filterVendorList, openNewReqModal, openTicketDetail, openTroubleChat,
     rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact, sendBulkFollowUp,
     saveVendorLogCall, saveVendorLogNote, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,

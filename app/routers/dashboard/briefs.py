@@ -207,6 +207,16 @@ def hot_offers(
             .all()
         )
 
+        # Deduplicate: max 2 offers per requisition
+        seen_reqs = {}
+        deduped = []
+        for o in offers:
+            req_id = o.requisition_id
+            seen_reqs[req_id] = seen_reqs.get(req_id, 0) + 1
+            if seen_reqs[req_id] <= 2:
+                deduped.append(o)
+        offers = deduped
+
         results = []
         for o in offers:
             ca = _ensure_aware(o.created_at)
