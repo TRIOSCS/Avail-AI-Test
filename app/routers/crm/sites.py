@@ -2,6 +2,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ...cache.decorators import invalidate_prefix
@@ -274,6 +275,14 @@ async def create_site_contact(
     site = db.get(CustomerSite, site_id)
     if not site:
         raise HTTPException(404, "Site not found")
+    # Dedup guard: if email provided, check for existing contact on same site
+    if payload.email:
+        existing = db.query(SiteContact).filter(
+            SiteContact.customer_site_id == site_id,
+            func.lower(SiteContact.email) == payload.email.strip().lower(),
+        ).first()
+        if existing:
+            return {"id": existing.id, "full_name": existing.full_name}
     if payload.is_primary:
         db.query(SiteContact).filter(
             SiteContact.customer_site_id == site_id,
