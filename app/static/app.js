@@ -2492,6 +2492,17 @@ async function loadDashboard() {
 
         html += '</div>'; // close cc-cards-grid
         el.innerHTML = html;
+
+        // Pipeline Health AI insights card
+        var pipelineWrap = document.createElement('div');
+        pipelineWrap.className = 'card';
+        pipelineWrap.style.marginTop = '12px';
+        var pipelineTitle = document.createElement('h3');
+        pipelineTitle.style.cssText = 'font-size:14px;margin:0 0 8px';
+        pipelineTitle.textContent = 'Pipeline Health';
+        pipelineWrap.appendChild(pipelineTitle);
+        el.appendChild(pipelineWrap);
+        _renderEntityInsightsCard('dashboard', 'pipeline', pipelineWrap, { title: 'Pipeline Health AI' });
     } catch (err) {
         console.error('loadDashboard error:', err);
         el.innerHTML = '<p class="empty">Failed to load Command Center data.</p>';
@@ -3671,6 +3682,157 @@ async function _refreshInsights(reqId) {
         errSpan.style.cssText = 'font-size:11px;color:var(--red)';
         errSpan.textContent = 'Failed to generate insights';
         body.appendChild(errSpan);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reusable Entity Insights Card (vendors, dashboard, materials)
+// ---------------------------------------------------------------------------
+
+async function _renderEntityInsightsCard(entityType, entityId, container, opts) {
+    var title = (opts && opts.title) || 'AI Insights';
+    var queryParam = (opts && opts.queryParam) || '';
+    var storageKey = 'sprinkle_collapsed_' + entityType;
+    var collapsed = localStorage.getItem(storageKey) === '1';
+
+    var wrap = document.createElement('div');
+    wrap.className = 'insights-card';
+    wrap.id = 'sprinkle-' + entityType + '-' + entityId;
+
+    var hdr = document.createElement('div');
+    hdr.className = 'insights-header';
+    hdr.onclick = function() {
+        var b = wrap.querySelector('.insights-body');
+        var t = wrap.querySelector('.insights-toggle');
+        if (b.style.display === 'none') {
+            b.style.display = '';
+            t.textContent = '\u25bc';
+            localStorage.removeItem(storageKey);
+        } else {
+            b.style.display = 'none';
+            t.textContent = '\u25b6';
+            localStorage.setItem(storageKey, '1');
+        }
+    };
+
+    var titleSpan = document.createElement('span');
+    titleSpan.style.cssText = 'font-weight:600;font-size:12px';
+    titleSpan.textContent = title;
+    hdr.appendChild(titleSpan);
+
+    var controls = document.createElement('span');
+    controls.style.cssText = 'display:flex;gap:6px;align-items:center';
+
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn btn-ghost btn-sm';
+    refreshBtn.style.fontSize = '10px';
+    refreshBtn.textContent = '\u21bb Refresh';
+    refreshBtn.onclick = function(e) {
+        e.stopPropagation();
+        _refreshEntityInsights(entityType, entityId, queryParam);
+    };
+    controls.appendChild(refreshBtn);
+
+    var toggle = document.createElement('span');
+    toggle.className = 'insights-toggle';
+    toggle.textContent = collapsed ? '\u25b6' : '\u25bc';
+    controls.appendChild(toggle);
+    hdr.appendChild(controls);
+    wrap.appendChild(hdr);
+
+    var body = document.createElement('div');
+    body.className = 'insights-body';
+    body.style.display = collapsed ? 'none' : '';
+    var loading = document.createElement('span');
+    loading.style.cssText = 'font-size:11px;color:var(--muted)';
+    loading.textContent = 'Loading\u2026';
+    body.appendChild(loading);
+    wrap.appendChild(body);
+
+    container.prepend(wrap);
+
+    var url;
+    if (entityType === 'dashboard') {
+        url = '/api/dashboard/pipeline-insights';
+    } else if (entityType === 'materials') {
+        url = '/api/materials/insights' + queryParam;
+    } else {
+        url = '/api/' + entityType + '/' + entityId + '/insights';
+    }
+
+    try {
+        var data = await apiFetch(url);
+        _populateInsightsBody(body, data);
+    } catch (e) {
+        body.textContent = '';
+        var errSpan = document.createElement('span');
+        errSpan.style.cssText = 'font-size:11px;color:var(--red)';
+        errSpan.textContent = 'Failed to load insights';
+        body.appendChild(errSpan);
+    }
+}
+
+async function _refreshEntityInsights(entityType, entityId, queryParam) {
+    var wrap = document.getElementById('sprinkle-' + entityType + '-' + entityId);
+    if (!wrap) return;
+    var body = wrap.querySelector('.insights-body');
+    body.textContent = '';
+    var loading = document.createElement('span');
+    loading.style.cssText = 'font-size:11px;color:var(--muted)';
+    loading.textContent = 'Regenerating\u2026';
+    body.appendChild(loading);
+
+    var url;
+    if (entityType === 'dashboard') {
+        url = '/api/dashboard/pipeline-insights/refresh';
+    } else if (entityType === 'materials') {
+        url = '/api/materials/insights/refresh' + (queryParam || '');
+    } else {
+        url = '/api/' + entityType + '/' + entityId + '/insights/refresh';
+    }
+
+    try {
+        var data = await apiFetch(url, { method: 'POST' });
+        _populateInsightsBody(body, data);
+    } catch (e) {
+        body.textContent = '';
+        var errSpan = document.createElement('span');
+        errSpan.style.cssText = 'font-size:11px;color:var(--red)';
+        errSpan.textContent = 'Refresh failed';
+        body.appendChild(errSpan);
+    }
+}
+
+function _populateInsightsBody(body, data) {
+    body.textContent = '';
+    if (!data.insights || !data.insights.length) {
+        var empty = document.createElement('span');
+        empty.style.cssText = 'font-size:11px;color:var(--muted)';
+        empty.textContent = 'No insights yet. Click Refresh to generate.';
+        body.appendChild(empty);
+        return;
+    }
+    for (var i = 0; i < data.insights.length; i++) {
+        var ins = data.insights[i];
+        var item = document.createElement('div');
+        item.className = 'insight-item' + (ins.is_expired ? ' insight-expired' : '');
+        var text = document.createElement('span');
+        text.style.fontSize = '11px';
+        text.textContent = ins.content;
+        item.appendChild(text);
+        if (ins.is_expired) {
+            var badge = document.createElement('span');
+            badge.style.cssText = 'font-size:9px;color:var(--amber);margin-left:4px';
+            badge.textContent = '(may be outdated)';
+            item.appendChild(badge);
+        }
+        body.appendChild(item);
+    }
+    if (data.has_expired) {
+        var warn = document.createElement('div');
+        warn.style.cssText = 'font-size:10px;color:var(--amber);margin-top:4px';
+        warn.textContent = 'Some insights based on outdated data';
+        body.appendChild(warn);
     }
 }
 
@@ -10563,6 +10725,11 @@ export async function openVendorPopup(cardId) {
     if (vpcEl) vpcEl.innerHTML = html;
     openModal('vendorPopup');
 
+    // Vendor Intelligence insights card
+    if (vpcEl) {
+        _renderEntityInsightsCard('vendors', card.id, vpcEl, { title: 'Vendor Intelligence' });
+    }
+
     // Load contacts, activities, metrics, and intel asynchronously
     loadVendorContacts(card.id);
     loadVendorActivities(card.id);
@@ -11796,6 +11963,29 @@ async function openMaterialPopup(cardId) {
 
     const mpc = document.getElementById('materialPopupContent'); if (mpc) mpc.innerHTML = html;
     openModal('materialPopup');
+
+    // Sourcing history badge after MPN heading
+    var mpnVal = card.display_mpn || card.normalized_mpn;
+    if (mpnVal && mpc) {
+        var mpnHeader = mpc.querySelector('.mp-header');
+        if (mpnHeader) {
+            var histBadge = document.createElement('div');
+            histBadge.style.cssText = 'margin:4px 0;font-size:11px;color:var(--muted)';
+            histBadge.textContent = 'Loading sourcing history\u2026';
+            mpnHeader.appendChild(histBadge);
+
+            apiFetch('/api/materials/insights?mpn=' + encodeURIComponent(mpnVal)).then(function(data) {
+                if (data.insights && data.insights.length) {
+                    histBadge.textContent = data.insights[0].content;
+                    histBadge.style.color = 'var(--primary)';
+                } else {
+                    histBadge.textContent = 'No sourcing history';
+                }
+            }).catch(function() {
+                histBadge.textContent = '';
+            });
+        }
+    }
 }
 
 async function openVendorPopupByName(vendorName) {
