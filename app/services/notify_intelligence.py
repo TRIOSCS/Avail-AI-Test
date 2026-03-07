@@ -455,12 +455,21 @@ def get_batch_queue(user_id: int) -> list[dict]:
 
 
 def is_intelligence_enabled() -> bool:
-    """Check if notification intelligence feature flag is on."""
+    """Check if notification intelligence feature flag is on. Enabled by default."""
     if os.environ.get("TESTING"):
+        # In tests, default off unless explicitly enabled
         return os.environ.get("NOTIFICATION_INTELLIGENCE_ENABLED", "").lower() == "true"
     try:
-        from app.services.credential_service import get_credential_cached
-        val = get_credential_cached("system", "NOTIFICATION_INTELLIGENCE_ENABLED")
-        return str(val).lower() == "true" if val else False
+        from app.models.config import SystemConfig
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            row = db.query(SystemConfig).filter(SystemConfig.key == "notification_intelligence_enabled").first()
+            if row:
+                return row.value.lower() == "true"
+        finally:
+            db.close()
     except Exception:
-        return os.environ.get("NOTIFICATION_INTELLIGENCE_ENABLED", "").lower() == "true"
+        pass
+    # Default: enabled
+    return True

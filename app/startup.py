@@ -229,6 +229,8 @@ def _seed_system_config(conn) -> None:
         ("email_mining_enabled", "false", "Enable email mining background job"),
         ("proactive_matching_enabled", "true", "Enable proactive offer matching"),
         ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
+        ("notification_intelligence_enabled", "true", "Enable AI notification intelligence (smart suppression, batching, priority)"),
+        ("teams_bot_enabled", "false", "Enable Teams conversational bot (requires HMAC secret)"),
     ]
     for key, value, desc in seeds:
         _exec(
