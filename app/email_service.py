@@ -950,6 +950,13 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 db.add(offer)
                 db.flush()
 
+                # Auto-capture offer facts into Knowledge Ledger
+                try:
+                    from app.services.knowledge_service import capture_offer_fact
+                    capture_offer_fact(db, offer=offer)
+                except Exception as e:
+                    logger.warning("Knowledge auto-capture (email offer) failed: {}", e)
+
                 # Tag propagation: propagate material card tags to vendor
                 try:
                     if offer.material_card_id and offer.vendor_name_normalized:

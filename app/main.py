@@ -1019,3 +1019,9 @@ from .routers.teams_bot import router as teams_bot_router
 
 app.include_router(teams_alerts_router)
 app.include_router(teams_bot_router)
+
+from .routers.knowledge import router as knowledge_router
+from .routers.knowledge import insights_router as knowledge_insights_router
+
+app.include_router(knowledge_router)
+app.include_router(knowledge_insights_router)

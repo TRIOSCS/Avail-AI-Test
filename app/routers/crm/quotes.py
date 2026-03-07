@@ -193,6 +193,13 @@ async def create_quote(
         db.add(ql)
     db.commit()
 
+    # Auto-capture quote facts into Knowledge Ledger
+    try:
+        from app.services.knowledge_service import capture_quote_fact
+        capture_quote_fact(db, quote=quote, user_id=user.id)
+    except Exception as e:
+        logger.warning("Knowledge auto-capture (quote) failed: {}", e)
+
     result = quote_to_dict(quote, db)
     result["req_status"] = req.status
     result["status_changed"] = req.status != old_status

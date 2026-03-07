@@ -400,6 +400,13 @@ async def create_offer(
         req.status = "offers"
     db.commit()
 
+    # Auto-capture offer facts into Knowledge Ledger
+    try:
+        from app.services.knowledge_service import capture_offer_fact
+        capture_offer_fact(db, offer=offer, user_id=user.id)
+    except Exception as e:
+        logger.warning("Knowledge auto-capture (offer) failed: {}", e)
+
     # Background vendor enrichment — fire after commit so card is persisted
     if _enrich_new_card:
         from ...utils.vendor_helpers import _background_enrich_vendor

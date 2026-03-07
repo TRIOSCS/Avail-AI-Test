@@ -22,6 +22,7 @@ def register_all_jobs(scheduler, settings):
     from .tagging_jobs import register_tagging_jobs
     from .notify_intelligence_jobs import register_notify_intelligence_jobs
     from .teams_alert_jobs import register_teams_alert_jobs
+    from .knowledge_jobs import register_knowledge_jobs
 
     register_core_jobs(scheduler, settings)
     register_email_jobs(scheduler, settings)
@@ -36,6 +37,7 @@ def register_all_jobs(scheduler, settings):
     register_eight_by_eight_jobs(scheduler, settings)
     register_teams_alert_jobs(scheduler, settings)
     register_notify_intelligence_jobs(scheduler, settings)
+    register_knowledge_jobs(scheduler, settings)
 
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
