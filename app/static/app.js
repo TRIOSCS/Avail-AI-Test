@@ -201,9 +201,9 @@ function _toggleMobileSearch() {
 }
 
 function _showMobileUserMenu() {
-    if (confirm('Sign out of AvailAI?')) {
+    confirmAction('Sign Out', 'Sign out of AvailAI?', function() {
         window.location.href = '/auth/logout';
-    }
+    });
 }
 
 // Close More popover on any outside click
@@ -2701,6 +2701,122 @@ export function closeModal(id) {
     }
 }
 
+/* ── Confirm / Prompt replacements ─────────────────────────────────── */
+function confirmAction(title, message, onConfirm, opts) {
+    opts = opts || {};
+    var id = '_confirmModal';
+    var existing = document.getElementById(id);
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'modal-bg open';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--white,#fff);border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25)';
+
+    var h = document.createElement('h3');
+    h.style.cssText = 'margin:0 0 8px;font-size:16px';
+    h.textContent = title;
+
+    var p = document.createElement('p');
+    p.style.cssText = 'margin:0 0 20px;font-size:13px;color:var(--text2,#555)';
+    p.textContent = message;
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+    cancelBtn.onclick = function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); };
+
+    var confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn ' + (opts.confirmClass || 'btn-primary');
+    confirmBtn.textContent = opts.confirmLabel || 'Confirm';
+    confirmBtn.onclick = function() { overlay.remove(); onConfirm(); };
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(confirmBtn);
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Close on Escape
+    var escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+    confirmBtn.focus();
+}
+
+function promptInput(title, label, onSubmit, opts) {
+    opts = opts || {};
+    var id = '_promptModal';
+    var existing = document.getElementById(id);
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'modal-bg open';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--white,#fff);border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25)';
+
+    var h = document.createElement('h3');
+    h.style.cssText = 'margin:0 0 8px;font-size:16px';
+    h.textContent = title;
+
+    var lbl = document.createElement('label');
+    lbl.style.cssText = 'display:block;font-size:13px;color:var(--text2,#555);margin-bottom:6px';
+    lbl.textContent = label;
+
+    var inp = document.createElement('input');
+    inp.type = opts.inputType || 'text';
+    inp.className = 'form-input';
+    inp.style.cssText = 'width:100%;margin-bottom:16px';
+    if (opts.placeholder) inp.placeholder = opts.placeholder;
+    if (opts.defaultValue) inp.value = opts.defaultValue;
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn';
+    cancelBtn.textContent = opts.cancelLabel || 'Cancel';
+    cancelBtn.onclick = function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); };
+
+    var submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-primary';
+    submitBtn.textContent = opts.submitLabel || 'Submit';
+    submitBtn.onclick = function() {
+        var val = inp.value;
+        if (opts.required && !val.trim()) { inp.classList.add('field-error'); return; }
+        overlay.remove();
+        onSubmit(val);
+    };
+
+    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') submitBtn.click(); });
+
+    btnRow.appendChild(cancelBtn);
+    btnRow.appendChild(submitBtn);
+    box.appendChild(h);
+    box.appendChild(lbl);
+    box.appendChild(inp);
+    box.appendChild(btnRow);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    var escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
+    document.addEventListener('keydown', escHandler);
+    inp.focus();
+}
+
+window.confirmAction = confirmAction;
+window.promptInput = promptInput;
+
 export function showToast(msg, type = 'info', duration = 3000) {
     let container = document.getElementById('toastContainer');
     if (!container) {
@@ -3685,15 +3801,17 @@ async function ddApproveOffer(reqId, offerId) {
 }
 
 async function ddRejectOffer(reqId, offerId) {
-    const reason = prompt('Rejection reason (optional):') || '';
-    try {
-        await apiFetch(`/api/offers/${offerId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'PUT' });
-        showToast('Offer rejected', 'success');
-        delete _ddTabCache[reqId]?.offers;
-        const drow = document.getElementById('d-' + reqId);
-        const panel = drow?.querySelector('.dd-panel');
-        if (panel) await _loadDdSubTab(reqId, 'offers', panel);
-    } catch(e) { logCatchError('ddRejectOffer', e); showToast('Failed to reject', 'error'); }
+    promptInput('Reject Offer', 'Rejection reason (optional):', async function(reason) {
+        reason = reason || '';
+        try {
+            await apiFetch(`/api/offers/${offerId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'PUT' });
+            showToast('Offer rejected', 'success');
+            delete _ddTabCache[reqId]?.offers;
+            const drow = document.getElementById('d-' + reqId);
+            const panel = drow?.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+        } catch(e) { logCatchError('ddRejectOffer', e); showToast('Failed to reject', 'error'); }
+    }, {submitLabel: 'Reject', placeholder: 'Enter reason...'});
 }
 
 // ── Changelog Popover ──────────────────────────────────────────────────
@@ -4090,25 +4208,26 @@ async function ddSaveEditOffer(reqId, offerId) {
 }
 
 async function ddDeleteOffer(reqId, offerId) {
-    if (!confirm('Delete this offer?')) return;
-    try {
-        await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE' });
-        showToast('Offer deleted', 'success');
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
-        const drow = document.getElementById('d-' + reqId);
-        if (drow) {
-            const panel = drow.querySelector('.dd-panel');
-            if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+    confirmAction('Delete Offer', 'Delete this offer?', async function() {
+        try {
+            await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE' });
+            showToast('Offer deleted', 'success');
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+            const drow = document.getElementById('d-' + reqId);
+            if (drow) {
+                const panel = drow.querySelector('.dd-panel');
+                if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+            }
+            // Update list count
+            const reqInfo = _reqListData.find(r => r.id === reqId);
+            if (reqInfo && reqInfo.offer_count > 0) {
+                reqInfo.offer_count--;
+                renderReqList();
+            }
+        } catch (e) {
+            showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
         }
-        // Update list count
-        const reqInfo = _reqListData.find(r => r.id === reqId);
-        if (reqInfo && reqInfo.offer_count > 0) {
-            reqInfo.offer_count--;
-            renderReqList();
-        }
-    } catch (e) {
-        showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
-    }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
 }
 
 function _renderDdQuotes(reqId, data, panel) {
@@ -4203,19 +4322,20 @@ async function uploadReqAttachment(reqId, input) {
 }
 
 async function deleteReqAttachment(reqId, attId) {
-    if (!confirm('Remove this file?')) return;
-    try {
-        await apiFetch(`/api/requisition-attachments/${attId}`, { method: 'DELETE' });
-        showToast('File removed', 'success');
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].files;
-        // Re-render files tab
-        const data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
-        if (_ddTabCache[reqId]) _ddTabCache[reqId].files = data;
-        const panel = document.querySelector('.dd-panel') || document.querySelector('[class*="dd-sub-content"]');
-        if (panel) _renderDdFiles(reqId, data, panel);
-    } catch(e) {
-        showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
-    }
+    confirmAction('Remove File', 'Remove this file?', async function() {
+        try {
+            await apiFetch(`/api/requisition-attachments/${attId}`, { method: 'DELETE' });
+            showToast('File removed', 'success');
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].files;
+            // Re-render files tab
+            const data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
+            if (_ddTabCache[reqId]) _ddTabCache[reqId].files = data;
+            const panel = document.querySelector('.dd-panel') || document.querySelector('[class*="dd-sub-content"]');
+            if (panel) _renderDdFiles(reqId, data, panel);
+        } catch(e) {
+            showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
+        }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Remove'});
 }
 
 // Expand/collapse a single quote detail row
@@ -4842,13 +4962,34 @@ async function ddMarkQuoteResult(reqId, result) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
     if (result === 'won') { ddOpenBuyPlanModal(reqId); return; }
-    let reason = '';
     if (result === 'lost') {
-        reason = prompt('Reason for loss (optional):') || '';
+        promptInput('Mark as Lost', 'Reason for loss (optional):', async function(reason) {
+            reason = reason || '';
+            try {
+                const markResult = await apiFetch('/api/quotes/' + q.id + '/result', {
+                    method: 'POST', body: { result, reason }
+                });
+                showToast('Quote marked as ' + result, 'success');
+                notifyStatusChange(markResult);
+                const reqInfo = _reqListData.find(r => r.id === reqId);
+                if (reqInfo) reqInfo.quote_status = result;
+                _refreshReqRow(reqId);
+                if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+                const drow = document.getElementById('d-' + reqId);
+                if (drow) {
+                    const panel = drow.querySelector('.dd-panel');
+                    if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+                }
+                if (window._refreshCustPipeline) window._refreshCustPipeline();
+            } catch (e) {
+                showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
+            }
+        }, {submitLabel: 'Mark Lost', placeholder: 'Enter reason...'});
+        return;
     }
     try {
         const markResult = await apiFetch('/api/quotes/' + q.id + '/result', {
-            method: 'POST', body: { result, reason }
+            method: 'POST', body: { result, reason: '' }
         });
         showToast('Quote marked as ' + result, 'success');
         notifyStatusChange(markResult);
@@ -5033,19 +5174,20 @@ async function ddReviseQuote(reqId) {
 }
 
 async function ddDeleteQuote(reqId, quoteId) {
-    if (!confirm('Delete this draft quote? This cannot be undone.')) return;
-    try {
-        await apiFetch('/api/quotes/' + quoteId, { method: 'DELETE' });
-        showToast('Draft deleted', 'success');
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
-        const drow = document.getElementById('d-' + reqId);
-        if (drow) {
-            const panel = drow.querySelector('.dd-panel');
-            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+    confirmAction('Delete Draft Quote', 'Delete this draft quote? This cannot be undone.', async function() {
+        try {
+            await apiFetch('/api/quotes/' + quoteId, { method: 'DELETE' });
+            showToast('Draft deleted', 'success');
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+            const drow = document.getElementById('d-' + reqId);
+            if (drow) {
+                const panel = drow.querySelector('.dd-panel');
+                if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+            }
+        } catch (e) {
+            showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
         }
-    } catch (e) {
-        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
-    }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
 }
 
 export async function toggleDrillDown(reqId) {
@@ -5845,8 +5987,8 @@ function _cancelAddRow(rfqId) {
 }
 
 async function deleteDrillRow(rfqId, reqId) {
-    if (!confirm('Remove this part?')) return;
-    try {
+    confirmAction('Remove Part', 'Remove this part?', async function() {
+        try {
         await apiFetch(`/api/requirements/${reqId}`, { method: 'DELETE' });
         const reqs = _ddReqCache[rfqId];
         if (reqs) {
@@ -5872,6 +6014,7 @@ async function deleteDrillRow(rfqId, reqId) {
             if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
         }
     } catch(e) { showToast('Failed to remove part', 'error'); }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Remove'});
 }
 
 // ── Bulk Upload (CSV/Excel) ───────────────────────────────────────────────
@@ -6555,8 +6698,9 @@ async function _ddSaveEmail(reqId, sightingId, vendorName, email) {
     }
 }
 function _ddPromptFallback(reqId, sightingId, vendorName) {
-    const email = prompt(`Enter email for ${vendorName}:`);
-    if (email) _ddSaveEmail(reqId, sightingId, vendorName, email);
+    promptInput('Enter Email', 'Email for ' + vendorName + ':', function(email) {
+        if (email) _ddSaveEmail(reqId, sightingId, vendorName, email);
+    }, {inputType: 'email', placeholder: 'vendor@example.com'});
 }
 
 function ddSendBulkRfq(reqId) {
@@ -7915,15 +8059,16 @@ function setMainPill(view) {
 const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 
 async function sendFollowUp(contactId, vendorName) {
-    if (!confirm(`Send follow-up email to ${vendorName}?`)) return;
-    if (sendFollowUp._busy) return; sendFollowUp._busy = true;
-    try {
-        const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
-        showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
-        if (typeof loadActivity === 'function') loadActivity();
-        loadFollowUpsPanel();
-    } catch (e) { showToast('Failed to send follow-up', 'error'); }
-    finally { sendFollowUp._busy = false; }
+    confirmAction('Send Follow-Up', 'Send follow-up email to ' + vendorName + '?', async function() {
+        if (sendFollowUp._busy) return; sendFollowUp._busy = true;
+        try {
+            const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
+            showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
+            if (typeof loadActivity === 'function') loadActivity();
+            loadFollowUpsPanel();
+        } catch (e) { showToast('Failed to send follow-up', 'error'); }
+        finally { sendFollowUp._busy = false; }
+    });
 }
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
@@ -8035,17 +8180,18 @@ function clearNrSite() {
 }
 
 async function markReqOutcome(id, outcome) {
-    if (!confirm(`Mark this requisition as ${outcome.toUpperCase()}?`)) return;
-    try {
-        await apiFetch(`/api/requisitions/${id}/outcome`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({outcome})
-        });
-        showToast(`Requisition marked as ${outcome}`, 'success');
-        const q = document.getElementById('mainSearch')?.value?.trim() || '';
-        loadRequisitions(q);
-    } catch (e) { showToast('Failed to update outcome', 'error'); }
+    confirmAction('Mark Requisition', 'Mark this requisition as ' + outcome.toUpperCase() + '?', async function() {
+        try {
+            await apiFetch(`/api/requisitions/${id}/outcome`, {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({outcome})
+            });
+            showToast(`Requisition marked as ${outcome}`, 'success');
+            const q = document.getElementById('mainSearch')?.value?.trim() || '';
+            loadRequisitions(q);
+        } catch (e) { showToast('Failed to update outcome', 'error'); }
+    });
 }
 
 async function toggleArchive(id) {
@@ -8146,24 +8292,25 @@ async function cloneFromList(reqId) {
 }
 
 async function requoteFromList(reqId) {
-    if (!confirm('Create a new open requisition with the same parts and customer?')) return;
-    try {
-        const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
-        const reName = resp.name.replace('(copy)', '(re-quote)');
-        if (reName !== resp.name) {
-            await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
-        }
-        showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
-        const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
-        if (srcBtn) setMainView('sourcing', srcBtn);
-        await loadRequisitions();
-        const found = _reqListData.find(r => r.id === resp.id);
-        if (found) {
-            expandToSubTab(resp.id, 'sightings');
-        } else {
-            showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
-        }
-    } catch (e) { showToast('Couldn\'t re-quote — ' + friendlyError(e, 'please try again'), 'error'); }
+    confirmAction('Re-Quote Requisition', 'Create a new open requisition with the same parts and customer?', async function() {
+        try {
+            const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
+            const reName = resp.name.replace('(copy)', '(re-quote)');
+            if (reName !== resp.name) {
+                await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
+            }
+            showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
+            const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
+            if (srcBtn) setMainView('sourcing', srcBtn);
+            await loadRequisitions();
+            const found = _reqListData.find(r => r.id === resp.id);
+            if (found) {
+                expandToSubTab(resp.id, 'sightings');
+            } else {
+                showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
+            }
+        } catch (e) { showToast('Couldn\'t re-quote — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
@@ -8343,16 +8490,17 @@ async function addReq() {
 }
 
 async function deleteReq(id) {
-    if (!confirm('Remove this requirement?')) return;
-    try { await apiFetch(`/api/requirements/${id}`, { method: 'DELETE' }); } catch(e) { showToast('Failed to delete requirement', 'error'); return; }
-    // Clear cached search results & selections for this requirement
-    delete searchResults[id];
-    _rebuildSightingIndex();
-    for (const key of [...selectedSightings]) {
-        if (key.startsWith(id + ':')) selectedSightings.delete(key);
-    }
-    if (currentReqId) searchResultsCache[currentReqId] = searchResults;
-    loadRequirements();
+    confirmAction('Remove Requirement', 'Remove this requirement?', async function() {
+        try { await apiFetch(`/api/requirements/${id}`, { method: 'DELETE' }); } catch(e) { showToast('Failed to delete requirement', 'error'); return; }
+        // Clear cached search results & selections for this requirement
+        delete searchResults[id];
+        _rebuildSightingIndex();
+        for (const key of [...selectedSightings]) {
+            if (key.startsWith(id + ':')) selectedSightings.delete(key);
+        }
+        if (currentReqId) searchResultsCache[currentReqId] = searchResults;
+        loadRequirements();
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Remove'});
 }
 
 
@@ -9340,17 +9488,18 @@ function rfqApplyTemplate(templateId) {
 }
 
 function rfqSaveTemplate() {
-    const name = prompt('Template name:');
-    if (!name || !name.trim()) return;
-    const subject = document.getElementById('rfqSubject')?.value || '';
-    const body = document.getElementById('rfqBody')?.value || '';
-    const id = 'custom_' + Date.now();
-    const customs = JSON.parse(safeGet('rfq_templates', '[]'));
-    customs.push({ id, name: name.trim(), subject, body });
-    safeSet('rfq_templates', JSON.stringify(customs));
-    rfqLoadTemplates();
-    document.getElementById('rfqTemplateSelect').value = id;
-    showToast('Template saved', 'success');
+    promptInput('Save Template', 'Template name:', function(name) {
+        if (!name || !name.trim()) return;
+        const subject = document.getElementById('rfqSubject')?.value || '';
+        const body = document.getElementById('rfqBody')?.value || '';
+        const id = 'custom_' + Date.now();
+        const customs = JSON.parse(safeGet('rfq_templates', '[]'));
+        customs.push({ id, name: name.trim(), subject, body });
+        safeSet('rfq_templates', JSON.stringify(customs));
+        rfqLoadTemplates();
+        document.getElementById('rfqTemplateSelect').value = id;
+        showToast('Template saved', 'success');
+    }, {required: true, placeholder: 'Enter template name...'});
 }
 
 function rfqDeleteTemplate() {
@@ -10047,13 +10196,14 @@ function editVendorField(cardId, field, el) {
 }
 
 async function deleteVendor(cardId, name) {
-    if (!confirm(`Delete vendor "${name}"? This cannot be undone.`)) return;
-    try {
-        await apiFetch(`/api/vendors/${cardId}`, { method: 'DELETE' });
-        showToast('Vendor deleted', 'success');
-        document.getElementById('vendorPopup')?.classList.remove('open');
-        if (typeof loadVendorList === 'function') loadVendorList();
-    } catch (e) { showToast('Failed to delete vendor: ' + e.message, 'error'); }
+    confirmAction('Delete Vendor', 'Delete vendor "' + name + '"? This cannot be undone.', async function() {
+        try {
+            await apiFetch(`/api/vendors/${cardId}`, { method: 'DELETE' });
+            showToast('Vendor deleted', 'success');
+            document.getElementById('vendorPopup')?.classList.remove('open');
+            if (typeof loadVendorList === 'function') loadVendorList();
+        } catch (e) { showToast('Failed to delete vendor: ' + e.message, 'error'); }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
 }
 
 let vpRating = 0;
@@ -10075,12 +10225,13 @@ async function vpSubmitReview(cardId) {
 
 async function vpToggleBlacklist(cardId, blacklisted) {
     const action = blacklisted ? 'blacklist' : 'remove from blacklist';
-    if (!confirm(`Are you sure you want to ${action} this vendor?`)) return;
-    try {
-        await apiFetch(`/api/vendors/${cardId}/blacklist`, { method: 'POST', body: { blacklisted } });
-        openVendorPopup(cardId);
-        if (currentReqId && Object.keys(searchResults).length) renderSources();
-    } catch (e) { showToast('Failed to update blacklist', 'error'); }
+    confirmAction('Vendor Blacklist', 'Are you sure you want to ' + action + ' this vendor?', async function() {
+        try {
+            await apiFetch(`/api/vendors/${cardId}/blacklist`, { method: 'POST', body: { blacklisted } });
+            openVendorPopup(cardId);
+            if (currentReqId && Object.keys(searchResults).length) renderSources();
+        } catch (e) { showToast('Failed to update blacklist', 'error'); }
+    });
 }
 
 // ── Vendor Contacts CRUD ──────────────────────────────────────────────
@@ -10245,12 +10396,13 @@ async function saveVendorContact() {
 }
 
 async function deleteVendorContact(cardId, contactId, name) {
-    if (!confirm('Remove contact "' + name + '"?')) return;
-    try {
-        await apiFetch(`/api/vendors/${cardId}/contacts/${contactId}`, { method: 'DELETE' });
-        showToast('Contact removed', 'info');
-        loadVendorContacts(cardId);
-    } catch(e) { showToast('Failed to delete contact', 'error'); }
+    confirmAction('Remove Contact', 'Remove contact "' + name + '"?', async function() {
+        try {
+            await apiFetch(`/api/vendors/${cardId}/contacts/${contactId}`, { method: 'DELETE' });
+            showToast('Contact removed', 'info');
+            loadVendorContacts(cardId);
+        } catch(e) { showToast('Failed to delete contact', 'error'); }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Remove'});
 }
 
 // ── Vendor Activity ──────────────────────────────────────────────────
@@ -11205,13 +11357,14 @@ function editMaterialField(cardId, field, el) {
 }
 
 async function deleteMaterial(cardId, mpn) {
-    if (!confirm(`Delete material "${mpn}"? This cannot be undone.`)) return;
-    try {
-        await apiFetch(`/api/materials/${cardId}`, { method: 'DELETE' });
-        showToast('Material deleted', 'success');
-        document.getElementById('materialPopup')?.classList.remove('open');
-        if (typeof loadMaterialList === 'function') loadMaterialList();
-    } catch (e) { showToast('Failed to delete material: ' + e.message, 'error'); }
+    confirmAction('Delete Material', 'Delete material "' + mpn + '"? This cannot be undone.', async function() {
+        try {
+            await apiFetch(`/api/materials/${cardId}`, { method: 'DELETE' });
+            showToast('Material deleted', 'success');
+            document.getElementById('materialPopup')?.classList.remove('open');
+            if (typeof loadMaterialList === 'function') loadMaterialList();
+        } catch (e) { showToast('Failed to delete material: ' + e.message, 'error'); }
+    }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
 }
 
 async function openMaterialPopupByMpn(mpn) {
@@ -12123,7 +12276,7 @@ async function loadNotifications() {
             group.slice(0, 10).forEach(n => {
                 // Clean up raw API metadata from notes before display
                 let cleanNotes = n.notes || '';
-                cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\s{2,}/g, ' ').trim();
+                cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\{[^}]*\}/g, '').replace(/\b\w+_\w+=\S+/g, '').replace(/\s{2,}/g, ' ').trim();
                 const notesHtml = cleanNotes ? `<div class="notif-item-notes">${esc(cleanNotes)}</div>` : '';
                 const hasLink = n.requisition_id || n.company_id || n.vendor_card_id || n.buy_plan_id;
                 html += `<div class="notif-item" onclick="${_notifClickAction(n)}">

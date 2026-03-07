@@ -12,7 +12,7 @@ from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import Company, CustomerSite, Requisition, User
+from ...models import Company, CustomerSite, Quote, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
 from ...utils.sql_helpers import escape_like
@@ -111,6 +111,31 @@ async def list_companies(
                     "last_req_date": row.last_req_date.isoformat() if row.last_req_date else None,
                 }
 
+        # 90-day won revenue per company
+        from datetime import datetime as _dt
+        from datetime import timedelta, timezone as _tz
+
+        rev_cutoff = _dt.now(_tz.utc) - timedelta(days=90)
+        revenue_map: dict[int, float] = {}
+        if company_ids:
+            rev_rows = (
+                db.query(
+                    CustomerSite.company_id,
+                    sqlfunc.coalesce(sqlfunc.sum(Quote.subtotal), 0).label("revenue"),
+                )
+                .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
+                .join(Quote, Quote.requisition_id == Requisition.id)
+                .filter(
+                    CustomerSite.company_id.in_(company_ids),
+                    Requisition.status == "won",
+                    Quote.created_at >= rev_cutoff,
+                )
+                .group_by(CustomerSite.company_id)
+                .all()
+            )
+            for row in rev_rows:
+                revenue_map[row.company_id] = float(row.revenue)
+
         items = []
         for c in companies:
             st = stats_map.get(c.id, {})
@@ -151,6 +176,7 @@ async def list_companies(
                     "open_req_count": c.open_req_count or 0,
                     "win_rate": st.get("win_rate"),
                     "last_req_date": st.get("last_req_date"),
+                    "revenue_90d": revenue_map.get(c.id, 0),
                 }
             )
         return {"items": items, "total": total, "limit": limit, "offset": offset}

@@ -330,10 +330,13 @@ function renderCustomers() {
     let filtered = [...crmCustomers];
     // Owner filtering is now server-side via owner_id param; skip client filter
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
-    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'at-risk') {
+        const daysSince = window.daysSince || (() => 999);
+        filtered = filtered.filter(c => (c.open_req_count || 0) > 0 && daysSince(c.last_req_date || c.last_enriched_at) > 14);
+    }
     if (_custFilterMode === 'stale') {
         const daysSince = window.daysSince || (() => 999);
-        filtered = filtered.filter(c => daysSince(c.last_enriched_at) > 30);
+        filtered = filtered.filter(c => daysSince(c.last_req_date || c.last_enriched_at) > 90);
     }
 
     // Sort
@@ -461,10 +464,13 @@ function renderMobileAccountList(companies) {
     // Apply same view filters as desktop
     let filtered = [...companies];
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
-    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'at-risk') {
+        const daysSince = window.daysSince || (() => 999);
+        filtered = filtered.filter(c => (c.open_req_count || 0) > 0 && daysSince(c.last_req_date || c.last_enriched_at) > 14);
+    }
     if (_custFilterMode === 'stale') {
         const daysSince = window.daysSince || (() => 999);
-        filtered = filtered.filter(c => daysSince(c.last_enriched_at) > 30);
+        filtered = filtered.filter(c => daysSince(c.last_req_date || c.last_enriched_at) > 90);
     }
 
     // Sort alphabetically by name (mobile default)
@@ -567,18 +573,17 @@ function _updateCustBulkBar() {
 }
 
 async function bulkAssignOwner() {
-    // Simple prompt for now
-    const name = prompt('Assign owner (enter user ID):');
-    if (!name) return;
-    const ownerId = parseInt(name);
-    if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
-    for (const cid of _custSelectedIds) {
-        try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
-        catch (e) { console.error('bulk assign error', cid, e); }
-    }
-    showToast(_custSelectedIds.size + ' accounts updated', 'success');
-    clearCustSelection();
-    loadCustomers();
+    promptInput('Assign Owner', 'Enter user ID', async function(name) {
+        const ownerId = parseInt(name);
+        if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
+        for (const cid of _custSelectedIds) {
+            try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
+            catch (e) { console.error('bulk assign error', cid, e); }
+        }
+        showToast(_custSelectedIds.size + ' accounts updated', 'success');
+        clearCustSelection();
+        loadCustomers();
+    });
 }
 
 function bulkExportAccounts() {
@@ -658,7 +663,10 @@ function _renderMiniList(activeId) {
     let filtered = [...crmCustomers];
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
     if (_custFilterMode === 'healthy') filtered = filtered.filter(c => _custHealthColor(c) === 'green');
-    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'at-risk') {
+        const daysSince = window.daysSince || (() => 999);
+        filtered = filtered.filter(c => (c.open_req_count || 0) > 0 && daysSince(c.last_req_date || c.last_enriched_at) > 14);
+    }
     if (_custFilterMode === 'unassigned') filtered = filtered.filter(c => !c.account_owner_id);
     filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
@@ -1371,17 +1379,18 @@ async function _loadContactRecentNotes(siteId, contactId) {
 
 async function toggleContactArchive(siteId, contactId, currentlyActive) {
     const action = currentlyActive ? 'archive' : 'restore';
-    if (!confirm('Are you sure you want to ' + action + ' this contact?')) return;
-    try {
-        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, {
-            method: 'PUT', body: { is_active: !currentlyActive }
-        });
-        showToast('Contact ' + (currentlyActive ? 'archived' : 'restored'));
-        // Reload the current view
-        if (typeof renderCustomerDetail === 'function' && window._lastCustDetailId) {
-            renderCustomerDetail(window._lastCustDetailId);
-        }
-    } catch (e) { logCatchError('toggleContactArchive', e); }
+    confirmAction('Confirm Action', 'Are you sure you want to ' + action + ' this contact?', async function() {
+        try {
+            await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, {
+                method: 'PUT', body: { is_active: !currentlyActive }
+            });
+            showToast('Contact ' + (currentlyActive ? 'archived' : 'restored'));
+            // Reload the current view
+            if (typeof renderCustomerDetail === 'function' && window._lastCustDetailId) {
+                renderCustomerDetail(window._lastCustDetailId);
+            }
+        } catch (e) { logCatchError('toggleContactArchive', e); }
+    }, {confirmClass: 'btn-danger'});
 }
 
 function filterDrawerContacts(query) {
@@ -1669,13 +1678,11 @@ async function createCompany(forceCreate) {
                     const errData = JSON.parse(e.message);
                     if (errData.duplicates && errData.duplicates.length) {
                         const dup = errData.duplicates[0];
-                        const msg = `Similar company found: "${dup.name}" (${dup.match} match).\n\nAdd a site to the existing company instead?\n\n(Click Cancel to create a separate account — this is fine if different salespeople own different sites.)`;
-                        if (confirm(msg)) {
+                        const msg = 'Similar company found: "' + dup.name + '" (' + dup.match + ' match). Add a site to the existing company instead? (Click Cancel to create a separate account — this is fine if different salespeople own different sites.)';
+                        confirmAction('Duplicate Found', msg, function() {
                             closeModal('newCompanyModal');
                             openAddSiteModal(dup.id, dup.name);
-                        } else {
-                            await createCompany(true);
-                        }
+                        }, {cancelLabel: 'Create Separate', onCancel: function() { createCompany(true); }});
                         return;
                     }
                 } catch (_) { /* parse failed, fall through */ }
@@ -2123,22 +2130,24 @@ async function selectOneDriveFile(itemId) {
 }
 
 async function deleteOfferAttachment(attId) {
-    if (!confirm('Remove this attachment?')) return;
-    try {
-        await apiFetch('/api/offer-attachments/' + attId, { method: 'DELETE' });
-        showToast('Attachment removed', 'info');
-        loadOffers();
-    } catch (e) { showToast('Failed to remove attachment', 'error'); }
+    confirmAction('Remove Attachment', 'Remove this attachment?', async function() {
+        try {
+            await apiFetch('/api/offer-attachments/' + attId, { method: 'DELETE' });
+            showToast('Attachment removed', 'info');
+            loadOffers();
+        } catch (e) { showToast('Failed to remove attachment', 'error'); }
+    }, {confirmClass: 'btn-danger'});
 }
 
 async function deleteOffer(offerId) {
-    if (!confirm('Remove this offer?')) return;
-    try {
-        await apiFetch('/api/offers/' + offerId, { method: 'DELETE' });
-        showToast('Offer removed', 'info');
-        selectedOffers.delete(offerId);
-        loadOffers();
-    } catch (e) { console.error('deleteOffer:', e); showToast('Error deleting offer', 'error'); }
+    confirmAction('Remove Offer', 'Remove this offer?', async function() {
+        try {
+            await apiFetch('/api/offers/' + offerId, { method: 'DELETE' });
+            showToast('Offer removed', 'info');
+            selectedOffers.delete(offerId);
+            loadOffers();
+        } catch (e) { console.error('deleteOffer:', e); showToast('Error deleting offer', 'error'); }
+    }, {confirmClass: 'btn-danger'});
 }
 
 function openEditOffer(offerId) {
@@ -2998,41 +3007,42 @@ async function saveBuyPlanPOs() {
 
 async function completeBuyPlan() {
     if (!_currentBuyPlan) return;
-    if (!confirm('Mark this buy plan as complete?')) return;
-    if (completeBuyPlan._busy) return; completeBuyPlan._busy = true;
-    try {
-        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/complete', { method: 'PUT' });
-        showToast('Buy plan marked complete', 'success');
-        loadBuyPlan();
-    } catch (e) { showToast('Couldn\'t complete — ' + friendlyError(e, 'please try again'), 'error'); }
-    finally { completeBuyPlan._busy = false; }
+    confirmAction('Complete Buy Plan', 'Mark this buy plan as complete?', async function() {
+        if (completeBuyPlan._busy) return; completeBuyPlan._busy = true;
+        try {
+            await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/complete', { method: 'PUT' });
+            showToast('Buy plan marked complete', 'success');
+            loadBuyPlan();
+        } catch (e) { showToast('Couldn\'t complete — ' + friendlyError(e, 'please try again'), 'error'); }
+        finally { completeBuyPlan._busy = false; }
+    });
 }
 
 async function cancelBuyPlan() {
     if (!_currentBuyPlan) return;
-    const reason = prompt('Cancellation reason (optional):');
-    if (reason === null) return;
-    try {
-        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/cancel', {
-            method: 'PUT', body: { reason }
-        });
-        showToast('Buy plan cancelled', 'info');
-        loadBuyPlan();
-    } catch (e) { showToast('Couldn\'t cancel — ' + friendlyError(e, 'please try again'), 'error'); }
+    promptInput('Cancel Buy Plan', 'Cancellation reason (optional)', async function(reason) {
+        try {
+            await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/cancel', {
+                method: 'PUT', body: { reason }
+            });
+            showToast('Buy plan cancelled', 'info');
+            loadBuyPlan();
+        } catch (e) { showToast('Couldn\'t cancel — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 async function resubmitBuyPlan() {
     if (!_currentBuyPlan) return;
-    const notes = prompt('Updated notes for resubmission (optional):');
-    if (notes === null) return;
-    try {
-        const res = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/resubmit', {
-            method: 'PUT', body: { salesperson_notes: notes }
-        });
-        showToast('Buy plan resubmitted for approval', 'success');
-        _currentBuyPlan = await apiFetch('/api/buy-plans/' + res.new_plan_id);
-        renderBuyPlanStatus();
-    } catch (e) { showToast('Couldn\'t resubmit — ' + friendlyError(e, 'please try again'), 'error'); }
+    promptInput('Resubmit Buy Plan', 'Updated notes (optional)', async function(notes) {
+        try {
+            const res = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/resubmit', {
+                method: 'PUT', body: { salesperson_notes: notes }
+            });
+            showToast('Buy plan resubmitted for approval', 'success');
+            _currentBuyPlan = await apiFetch('/api/buy-plans/' + res.new_plan_id);
+            renderBuyPlanStatus();
+        } catch (e) { showToast('Couldn\'t resubmit — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 async function verifyBuyPlanPOs() {
@@ -3530,18 +3540,17 @@ async function verifyPOV3(planId, lineId, action) {
 }
 
 function openRejectPOV3(planId, lineId) {
-    const note = prompt('Reason for rejecting this PO:');
-    if (note === null) return;
-    if (!note.trim()) { showToast('Reason is required', 'error'); return; }
-    apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
-        method: 'POST', body: { action: 'reject', rejection_note: note.trim() }
-    }).then(() => {
-        showToast('PO rejected', 'info');
-        return apiFetch('/api/buy-plans-v3/' + planId);
-    }).then(plan => {
-        _currentBuyPlanV3 = plan;
-        renderBuyPlanV3Status();
-    }).catch(e => showToast(friendlyError(e, 'Action failed — please try again'), 'error'));
+    promptInput('Reject PO', 'Reason for rejection', function(note) {
+        apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
+            method: 'POST', body: { action: 'reject', rejection_note: note.trim() }
+        }).then(() => {
+            showToast('PO rejected', 'info');
+            return apiFetch('/api/buy-plans-v3/' + planId);
+        }).then(plan => {
+            _currentBuyPlanV3 = plan;
+            renderBuyPlanV3Status();
+        }).catch(e => showToast(friendlyError(e, 'Action failed — please try again'), 'error'));
+    }, {required: true});
 }
 
 // ── Resubmit ────────────────────────────────────────────────────────
@@ -3839,14 +3848,14 @@ async function tokenApprovePlan(token) {
 }
 
 async function tokenRejectPlan(token) {
-    const reason = prompt('Rejection reason:');
-    if (reason === null) return;
-    try {
-        await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
-            method: 'PUT', body: { reason }
-        });
-        _showTokenResult('rejected', 'Buy plan has been rejected.');
-    } catch (e) { showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error'); }
+    promptInput('Reject', 'Rejection reason', async function(reason) {
+        try {
+            await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
+                method: 'PUT', body: { reason }
+            });
+            _showTokenResult('rejected', 'Buy plan has been rejected.');
+        } catch (e) { showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error'); }
+    }, {required: true});
 }
 
 function _showTokenResult(status, message) {
@@ -3935,13 +3944,14 @@ async function openPricingHistory(mpn) {
 // ── Clone Requisition ──────────────────────────────────────────────────
 
 async function cloneRequisition(reqId) {
-    if (!confirm('Clone this requisition? All parts and offers will be copied.')) return;
-    try {
-        const data = await apiFetch('/api/requisitions/' + reqId + '/clone', { method: 'POST' });
-        showToast('Requisition cloned', 'success');
-        await loadRequisitions();
-        toggleDrillDown(data.id);
-    } catch (e) { console.error('cloneRequisition:', e); showToast('Error cloning requisition', 'error'); }
+    confirmAction('Clone Requisition', 'Clone this requisition? All parts and offers will be copied.', async function() {
+        try {
+            const data = await apiFetch('/api/requisitions/' + reqId + '/clone', { method: 'POST' });
+            showToast('Requisition cloned', 'success');
+            await loadRequisitions();
+            toggleDrillDown(data.id);
+        } catch (e) { console.error('cloneRequisition:', e); showToast('Error cloning requisition', 'error'); }
+    });
 }
 
 // ── User list loader for owner dropdowns ──────────────────────────────
@@ -4498,15 +4508,16 @@ async function saveAIContact(contactId) {
 }
 
 async function deleteAIContact(contactId) {
-    if (!confirm('Remove this contact?')) return;
-    try {
-        await apiFetch(`/api/ai/prospect-contacts/${contactId}`, { method: 'DELETE' });
-        const row = document.getElementById(`aiRow${contactId}`);
-        if (row) row.remove();
-        showToast('Contact removed', 'info');
-    } catch (e) {
-        showToast('Delete error', 'error');
-    }
+    confirmAction('Remove Contact', 'Remove this contact?', async function() {
+        try {
+            await apiFetch(`/api/ai/prospect-contacts/${contactId}`, { method: 'DELETE' });
+            const row = document.getElementById(`aiRow${contactId}`);
+            if (row) row.remove();
+            showToast('Contact removed', 'info');
+        } catch (e) {
+            showToast('Delete error', 'error');
+        }
+    }, {confirmClass: 'btn-danger'});
 }
 
 
@@ -4736,13 +4747,14 @@ async function saveSiteContact() {
 }
 
 async function deleteSiteContact(siteId, contactId, name) {
-    if (!confirm('Remove contact "' + name + '"?')) return;
-    try {
-        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, { method: 'DELETE' });
-        showToast('Contact removed', 'info');
-        const panel = document.getElementById('siteDetail-' + siteId);
-        if (panel) { panel.style.display = 'none'; toggleSiteDetail(siteId); }
-    } catch (e) { console.error('deleteSiteContact:', e); showToast('Error deleting contact', 'error'); }
+    confirmAction('Remove Contact', 'Remove contact "' + name + '"?', async function() {
+        try {
+            await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, { method: 'DELETE' });
+            showToast('Contact removed', 'info');
+            const panel = document.getElementById('siteDetail-' + siteId);
+            if (panel) { panel.style.display = 'none'; toggleSiteDetail(siteId); }
+        } catch (e) { console.error('deleteSiteContact:', e); showToast('Error deleting contact', 'error'); }
+    }, {confirmClass: 'btn-danger'});
 }
 
 function filterSiteContacts(input, siteId) {
@@ -5360,14 +5372,15 @@ function renderProactiveSent() {
 }
 
 async function convertProactiveOffer(offerId) {
-    if (!confirm('Convert this proactive offer to a Win? This will create a requisition, quote, and buy plan.')) return;
-    if (convertProactiveOffer._busy) return; convertProactiveOffer._busy = true;
-    try {
-        const result = await apiFetch('/api/proactive/convert/' + offerId, { method: 'POST' });
-        showToast('Converted! Requisition #' + result.requisition_id + ' created with buy plan.', 'success');
-        loadProactiveSent();
-    } catch (e) { showToast('Conversion failed', 'error'); }
-    finally { convertProactiveOffer._busy = false; }
+    confirmAction('Convert to Win', 'Convert this proactive offer to a Win? This will create a requisition, quote, and buy plan.', async function() {
+        if (convertProactiveOffer._busy) return; convertProactiveOffer._busy = true;
+        try {
+            const result = await apiFetch('/api/proactive/convert/' + offerId, { method: 'POST' });
+            showToast('Converted! Requisition #' + result.requisition_id + ' created with buy plan.', 'success');
+            loadProactiveSent();
+        } catch (e) { showToast('Conversion failed', 'error'); }
+        finally { convertProactiveOffer._busy = false; }
+    });
 }
 
 async function loadProactiveScorecard() {
@@ -6275,16 +6288,17 @@ async function saveCredential(sourceId, varName) {
 }
 
 async function deleteCredential(sourceId, varName) {
-    if (!confirm(`Remove ${varName}? The source may stop working.`)) return;
-    try {
-        await apiFetch(`/api/admin/sources/${sourceId}/credentials/${varName}`, {
-            method: 'DELETE',
-        });
-        showToast('Credential removed', 'success');
-        loadSettingsSources();
-    } catch (e) {
-        showToast('Couldn\'t remove credential — ' + friendlyError(e, 'please try again'), 'error');
-    }
+    confirmAction('Remove Variable', 'Remove ' + varName + '? The source may stop working.', async function() {
+        try {
+            await apiFetch(`/api/admin/sources/${sourceId}/credentials/${varName}`, {
+                method: 'DELETE',
+            });
+            showToast('Credential removed', 'success');
+            loadSettingsSources();
+        } catch (e) {
+            showToast('Couldn\'t remove credential — ' + friendlyError(e, 'please try again'), 'error');
+        }
+    }, {confirmClass: 'btn-danger'});
 }
 
 async function testSourceCred(sourceId) {
@@ -6504,14 +6518,15 @@ async function updateUserField(userId, field, value) {
 }
 
 async function deleteAdminUser(userId, name) {
-    if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
-    try {
-        await apiFetch(`/api/admin/users/${userId}`, {method:'DELETE'});
-        _userListCache = null;  // Invalidate cache
-        loadAdminUsers();
-    } catch (e) {
-        showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
-    }
+    confirmAction('Delete User', 'Delete user "' + name + '"? This cannot be undone.', async function() {
+        try {
+            await apiFetch(`/api/admin/users/${userId}`, {method:'DELETE'});
+            _userListCache = null;  // Invalidate cache
+            loadAdminUsers();
+        } catch (e) {
+            showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
+        }
+    }, {confirmClass: 'btn-danger'});
 }
 
 async function createUser() {
@@ -7114,15 +7129,16 @@ async function executeTransfer() {
     if (!sourceId || !targetId) return showToast('Select both source and target users', 'error');
     if (sourceId === targetId) return showToast('Source and target must be different', 'error');
     if (!_transferSelected.size) return showToast('No sites selected', 'error');
-    if (!confirm(`Transfer ${_transferSelected.size} site(s)?`)) return;
-    try {
-        const result = await apiFetch('/api/admin/transfer/execute', {
-            method: 'POST',
-            body: { source_user_id: sourceId, target_user_id: targetId, site_ids: [..._transferSelected] },
-        });
-        showToast(`Transferred ${result.transferred} site(s)${result.skipped ? `, ${result.skipped} skipped` : ''}`, 'success');
-        loadTransferPreview();
-    } catch (e) { showToast('Transfer failed — ' + friendlyError(e, 'please try again'), 'error'); }
+    confirmAction('Transfer Sites', 'Transfer ' + _transferSelected.size + ' site(s)?', async function() {
+        try {
+            const result = await apiFetch('/api/admin/transfer/execute', {
+                method: 'POST',
+                body: { source_user_id: sourceId, target_user_id: targetId, site_ids: [..._transferSelected] },
+            });
+            showToast(`Transferred ${result.transferred} site(s)${result.skipped ? `, ${result.skipped} skipped` : ''}`, 'success');
+            loadTransferPreview();
+        } catch (e) { showToast('Transfer failed — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 
@@ -7401,24 +7417,25 @@ function toggleScoringGuide() {
 }
 
 async function claimSuggestedAccount(id, name) {
-    if (!confirm('Claim "' + name + '"? It will be added to your Accounts list.')) return;
-    try {
-        const result = await apiFetch('/api/prospects/suggested/' + id + '/claim', { method: 'POST' });
-        const companyName = esc(result.company_name || name);
-        const crmLink = result.company_id
-            ? ' <a href="#" onclick="event.preventDefault();sidebarNav(\'customers\');setTimeout(function(){openCompanyDrawer(' + result.company_id + ')},300)" style="color:var(--blue);text-decoration:underline">Go to Account</a>'
-            : '';
-        showToast('Claimed: ' + companyName + crmLink, 'success', 5000);
-        const card = document.getElementById('sg-card-' + id);
-        if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+    confirmAction('Claim Account', 'Claim "' + name + '"? It will be added to your Accounts list.', async function() {
         try {
-            const stats = await apiFetch('/api/prospects/suggested/stats');
-            renderSuggestedStats(stats);
-        } catch(e) {}
-    } catch (e) {
-        if (e.message && e.message.includes('409')) showToast('Already claimed by another user', 'error');
-        else showToast(e.message || 'Failed to claim account', 'error');
-    }
+            const result = await apiFetch('/api/prospects/suggested/' + id + '/claim', { method: 'POST' });
+            const companyName = esc(result.company_name || name);
+            const crmLink = result.company_id
+                ? ' <a href="#" onclick="event.preventDefault();sidebarNav(\'customers\');setTimeout(function(){openCompanyDrawer(' + result.company_id + ')},300)" style="color:var(--blue);text-decoration:underline">Go to Account</a>'
+                : '';
+            showToast('Claimed: ' + companyName + crmLink, 'success', 5000);
+            const card = document.getElementById('sg-card-' + id);
+            if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+            try {
+                const stats = await apiFetch('/api/prospects/suggested/stats');
+                renderSuggestedStats(stats);
+            } catch(e) {}
+        } catch (e) {
+            if (e.message && e.message.includes('409')) showToast('Already claimed by another user', 'error');
+            else showToast(e.message || 'Failed to claim account', 'error');
+        }
+    });
 }
 
 async function dismissSuggestedAccount(id, name, reason) {
@@ -7917,49 +7934,50 @@ async function apolloEnrichSelected() {
         return;
     }
 
-    if (!confirm(`Enrich ${ids.length} contact${ids.length !== 1 ? 's' : ''}? This will use ${ids.length} lead credit${ids.length !== 1 ? 's' : ''}.`)) return;
+    confirmAction('Enrich Contacts', 'Enrich ' + ids.length + ' contact' + (ids.length !== 1 ? 's' : '') + '? This will use ' + ids.length + ' lead credit' + (ids.length !== 1 ? 's' : '') + '.', async function() {
+        const container = document.getElementById('apolloEnrichResults');
+        if (!container) return;
+        container.style.display = '';
+        // NOTE: innerHTML usage here is safe — all dynamic values are escaped via esc()
+        container.innerHTML = '<p class="crm-empty">Enriching contacts...</p>';
 
-    const container = document.getElementById('apolloEnrichResults');
-    if (!container) return;
-    container.style.display = '';
-    container.innerHTML = '<p class="crm-empty">Enriching contacts...</p>';
+        try {
+            const data = await apiFetch('/api/apollo/enrich', {
+                method: 'POST',
+                body: { apollo_ids: ids, vendor_card_id: vendorCardId },
+            });
 
-    try {
-        const data = await apiFetch('/api/apollo/enrich', {
-            method: 'POST',
-            body: { apollo_ids: ids, vendor_card_id: vendorCardId },
-        });
+            let html = '<div style="margin-top:12px;padding:12px;background:var(--surface);border-radius:8px">'
+                + '<div style="font-weight:600;margin-bottom:8px">Enrichment Results</div>'
+                + '<div style="font-size:12px;color:var(--muted);margin-bottom:8px">'
+                + esc(data.enriched) + ' enriched · ' + esc(data.verified) + ' verified · ' + esc(data.credits_used) + ' credits used · ' + esc(data.credits_remaining) + ' remaining'
+                + '</div>';
 
-        let html = `<div style="margin-top:12px;padding:12px;background:var(--surface);border-radius:8px">
-            <div style="font-weight:600;margin-bottom:8px">Enrichment Results</div>
-            <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
-                ${data.enriched} enriched &middot; ${data.verified} verified &middot; ${data.credits_used} credits used &middot; ${data.credits_remaining} remaining
-            </div>`;
-
-        if (data.contacts && data.contacts.length) {
-            html += '<table class="crm-table" style="font-size:12px"><thead><tr>';
-            html += '<th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>Verified</th>';
-            html += '</tr></thead><tbody>';
-            for (const ct of data.contacts) {
-                html += `<tr>
-                    <td>${esc(ct.full_name || '')}</td>
-                    <td>${esc(ct.title || '')}</td>
-                    <td>${esc(ct.email || 'N/A')}</td>
-                    <td>${esc(ct.phone || '')}</td>
-                    <td>${ct.is_verified ? '<span style="color:var(--green)">Yes</span>' : 'No'}</td>
-                </tr>`;
+            if (data.contacts && data.contacts.length) {
+                html += '<table class="crm-table" style="font-size:12px"><thead><tr>';
+                html += '<th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th>Verified</th>';
+                html += '</tr></thead><tbody>';
+                for (const ct of data.contacts) {
+                    html += '<tr>'
+                        + '<td>' + esc(ct.full_name || '') + '</td>'
+                        + '<td>' + esc(ct.title || '') + '</td>'
+                        + '<td>' + esc(ct.email || 'N/A') + '</td>'
+                        + '<td>' + esc(ct.phone || '') + '</td>'
+                        + '<td>' + (ct.is_verified ? '<span style="color:var(--green)">Yes</span>' : 'No') + '</td>'
+                        + '</tr>';
+                }
+                html += '</tbody></table>';
             }
-            html += '</tbody></table>';
+            html += '</div>';
+            container.innerHTML = html;
+
+            // Refresh credits badge
+            _apolloLoadCredits();
+
+        } catch (e) {
+            container.innerHTML = '<p class="crm-empty" style="color:var(--red)">' + esc(friendlyError(e, 'Enrichment failed — please try again')) + '</p>';
         }
-        html += '</div>';
-        container.innerHTML = html;
-
-        // Refresh credits badge
-        _apolloLoadCredits();
-
-    } catch (e) {
-        container.innerHTML = '<p class="crm-empty" style="color:var(--red)">' + esc(friendlyError(e, 'Enrichment failed — please try again')) + '</p>';
-    }
+    });
 }
 
 // ── Mobile Offer Feed ─────────────────────────────────────────────────

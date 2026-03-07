@@ -2670,3 +2670,28 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .col-gear-dd{position:absolute;right:0;top:100%;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-lg);padding:6px 0;z-index:700;min-width:160px}
 .col-gear-dd label:hover{background:var(--bg)}
 
+/* ── Confirm/Prompt modal + validation classes ─────────────────────── */
+.field-error {
+    border-color: var(--red) !important;
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, .25);
+}
+.field-error-msg {
+    color: var(--red);
+    font-size: 11px;
+    margin-top: 2px;
+}
+.btn-danger {
+    background: var(--red);
+    color: #fff;
+    border: none;
+}
+.btn-danger:hover {
+    background: #dc2626;
+}
+.dd-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--white);
+}
+

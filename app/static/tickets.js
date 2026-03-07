@@ -640,7 +640,7 @@ async function showTicketDetail(ticketId) {
                     className: 'btn btn-sm', textContent: 'Escalate',
                     style: 'background:#f59e0b;color:#fff;',
                     onclick: function() {
-                        if (confirm('Escalate this ticket to human review?')) updateTicketStatus(ticketId, 'escalated', container);
+                        window.confirmAction('Escalate Ticket', 'Escalate this ticket to human review?', function() { updateTicketStatus(ticketId, 'escalated', container); });
                     },
                 }));
             }
@@ -648,7 +648,7 @@ async function showTicketDetail(ticketId) {
                 className: 'btn btn-sm', textContent: 'Resolve',
                 style: 'background:#16a34a;color:#fff;',
                 onclick: function() {
-                    if (confirm('Mark this ticket as resolved?')) updateTicketStatus(ticketId, 'resolved', container);
+                    window.confirmAction('Resolve Ticket', 'Mark this ticket as resolved?', function() { updateTicketStatus(ticketId, 'resolved', container); });
                 },
             }));
             body.appendChild(adminRow);
@@ -707,16 +707,18 @@ async function diagnoseTicket(ticketId, container) {
 }
 
 async function executeTicketFix(ticketId, container) {
-    if (!confirm('Execute AI-generated fix for this ticket?')) return;
-    try {
-        showToast('Executing fix...', 'info');
-        var result = await apiFetch('/api/trouble-tickets/' + ticketId + '/execute', { method: 'POST' });
-        showToast(result.message || 'Fix executed', 'success');
-        showTicketDetail(ticketId);
-    } catch (e) {
-        showToast('Execution failed: ' + e.message, 'error');
-        showTicketDetail(ticketId);
-    }
+    window.confirmAction('Execute Fix', 'Execute AI-generated fix for this ticket?', async function() {
+        try {
+            showToast('Executing fix...', 'info');
+            var result = await apiFetch('/api/trouble-tickets/' + ticketId + '/execute', { method: 'POST' });
+            showToast(result.message || 'Fix executed', 'success');
+            showTicketDetail(ticketId);
+        } catch (e) {
+            showToast('Execution failed: ' + e.message, 'error');
+            showTicketDetail(ticketId);
+        }
+    });
+    return;
 }
 
 async function updateTicketStatus(ticketId, newStatus, container) {

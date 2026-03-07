@@ -66,7 +66,7 @@ def compute_engagement_score(
         return {
             "engagement_score": COLD_START_SCORE,
             "response_rate": 0,
-            "ghost_rate": 1.0 if total_outreach > 0 and total_responses == 0 else 0,
+            "ghost_rate": None,
             "recency_score": 0,
             "velocity_score": 0,
             "win_rate": 0,
@@ -77,8 +77,8 @@ def compute_engagement_score(
     response_score = response_rate * 100
 
     # ── 2. Ghost Rate penalty (0-100, inverted: 0 ghosts = 100) ──
-    ghost_rate = 1.0 - response_rate if total_outreach > 0 else 1.0
-    ghost_score = (1.0 - ghost_rate) * 100
+    ghost_rate = 1.0 - response_rate if total_outreach > 0 else None
+    ghost_score = (1.0 - ghost_rate) * 100 if ghost_rate is not None else 0
 
     # ── 3. Recency (0-100) ──
     recency_score = 0.0
@@ -126,7 +126,7 @@ def compute_engagement_score(
     return {
         "engagement_score": round(engagement_score, 1),
         "response_rate": round(response_rate, 3),
-        "ghost_rate": round(ghost_rate, 3),
+        "ghost_rate": round(ghost_rate, 3) if ghost_rate is not None else None,
         "recency_score": round(recency_score, 1),
         "velocity_score": round(velocity_score, 1),
         "win_rate": round(win_rate, 3),

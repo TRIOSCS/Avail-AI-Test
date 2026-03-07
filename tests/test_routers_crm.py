@@ -850,6 +850,71 @@ class TestCompaniesAdditional:
         assert "open_req_count" in item
         assert "sites" not in item
 
+    def test_list_companies_revenue_90d_with_won_quote(self, client, db_session, test_company, test_customer_site, test_user):
+        """revenue_90d reflects sum of Quote.subtotal for won requisitions in last 90 days."""
+        req = Requisition(
+            name="REQ-WON-1",
+            customer_site_id=test_customer_site.id,
+            status="won",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="WON-Q-001",
+            subtotal=5000.00,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        match = [i for i in items if i["id"] == test_company.id]
+        assert len(match) == 1
+        assert match[0]["revenue_90d"] == 5000.0
+
+    def test_list_companies_revenue_90d_zero_when_no_won(self, client, db_session, test_company):
+        """Companies with no won quotes should have revenue_90d=0."""
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        match = [i for i in items if i["id"] == test_company.id]
+        assert len(match) == 1
+        assert match[0]["revenue_90d"] == 0
+
+    def test_list_companies_revenue_90d_excludes_old(self, client, db_session, test_company, test_customer_site, test_user):
+        """Quotes older than 90 days should not count toward revenue_90d."""
+        req = Requisition(
+            name="REQ-OLD-1",
+            customer_site_id=test_customer_site.id,
+            status="won",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=180),
+        )
+        db_session.add(req)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="OLD-Q-001",
+            subtotal=9999.00,
+            created_at=datetime.now(timezone.utc) - timedelta(days=100),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        match = [i for i in items if i["id"] == test_company.id]
+        assert len(match) == 1
+        assert match[0]["revenue_90d"] == 0
+
     def test_update_company_not_found(self, client):
         resp = client.put("/api/companies/99999", json={"notes": "nope"})
         assert resp.status_code == 404

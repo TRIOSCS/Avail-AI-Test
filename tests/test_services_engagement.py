@@ -33,12 +33,12 @@ class TestColdStart:
     def test_zero_outreach_returns_cold_start(self):
         result = compute_engagement_score(0, 0, 0, None, None, now=NOW)
         assert result["engagement_score"] == 50  # COLD_START_SCORE
-        assert result["ghost_rate"] == 0
+        assert result["ghost_rate"] is None
 
     def test_one_outreach_below_threshold(self):
         result = compute_engagement_score(1, 0, 0, None, None, now=NOW)
         assert result["engagement_score"] == 50  # COLD_START_SCORE
-        assert result["ghost_rate"] == 1.0  # 1 outreach, 0 responses
+        assert result["ghost_rate"] is None  # not enough data to determine
 
     def test_one_outreach_with_response(self):
         result = compute_engagement_score(1, 1, 0, None, None, now=NOW)
@@ -47,6 +47,23 @@ class TestColdStart:
     def test_exactly_min_outreach(self):
         result = compute_engagement_score(2, 1, 0, 2.0, NOW - timedelta(days=1), now=NOW)
         assert result["engagement_score"] is not None
+
+
+class TestGhostRateNoneForColdStart:
+    def test_zero_outreach_ghost_rate_none(self):
+        """compute_engagement_score(total_outreach=0) returns ghost_rate=None."""
+        result = compute_engagement_score(0, 0, 0, None, None, now=NOW)
+        assert result["ghost_rate"] is None
+
+    def test_below_min_outreach_ghost_rate_none(self):
+        """total_outreach=1 (below MIN_OUTREACH_FOR_SCORE) returns ghost_rate=None."""
+        result = compute_engagement_score(1, 0, 0, None, None, now=NOW)
+        assert result["ghost_rate"] is None
+
+    def test_sufficient_outreach_ghost_rate_numeric(self):
+        """total_outreach=5, total_responses=0 (enough data) returns ghost_rate=1.0."""
+        result = compute_engagement_score(5, 0, 0, None, None, now=NOW)
+        assert result["ghost_rate"] == 1.0
 
 
 # ── Response rate ───────────────────────────────────────────────────
