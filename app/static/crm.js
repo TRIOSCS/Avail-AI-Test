@@ -66,11 +66,6 @@ let _custUnassigned = false;
 let _custSortCol = null;
 let _custSortDir = 'asc';
 
-function _custSortArrow(col) {
-    if (_custSortCol !== col) return '\u21c5';
-    return _custSortDir === 'asc' ? '\u25b2' : '\u25bc';
-}
-
 function sortCustList(col) {
     if (_custSortCol === col) {
         if (_custSortDir === 'asc') _custSortDir = 'desc';
@@ -4942,16 +4937,6 @@ function _scoreBadge(score) {
     else if (score >= 40) bg = 'var(--amber)';
     else bg = 'var(--red)';
     return `<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;color:#fff;background:${bg}">${score}</span>`;
-}
-
-function _fmtDaysAgo(isoDate) {
-    if (!isoDate) return '—';
-    const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / 86400000);
-    if (days <= 0) return 'Today';
-    if (days === 1) return '1d ago';
-    if (days < 30) return days + 'd ago';
-    if (days < 365) return Math.floor(days / 30) + 'mo ago';
-    return Math.floor(days / 365) + 'y ago';
 }
 
 function renderProactiveStatsBar() {

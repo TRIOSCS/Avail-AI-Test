@@ -2250,28 +2250,12 @@ function _goBackFromBreadcrumb() {
     }
 }
 
-function _ccUrgencyClass(score) {
-    if (score >= 80) return 'cc-urgency-red';
-    if (score >= 60) return 'cc-urgency-amber';
-    return 'cc-urgency-blue';
-}
-
 function _ccTrend(curr, prev) {
     if (curr > prev) return '<span style="color:var(--green);font-size:10px;margin-left:4px">&#9650;</span>';
     if (curr < prev) return '<span style="color:var(--red);font-size:10px;margin-left:4px">&#9660;</span>';
     return '';
 }
 
-function _attnTypeBadge(type) {
-    const map = {
-        stale_account: 'account',
-        req_at_risk: 'req',
-        needs_quote: 'quote',
-        expiring_quote: 'expiring',
-        buyplan_pending: 'buy plan',
-    };
-    return map[type] || type;
-}
 
 function _renderTeamSummaryCard(teamLb) {
     const entries = (teamLb && teamLb.entries) ? teamLb.entries : [];
