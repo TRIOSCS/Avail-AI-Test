@@ -29,6 +29,21 @@
             #rfqs table th.th-date2, #rfqs table td.td-date2,
             #view-list table.tbl th.th-date2, #view-list table.tbl td.td-date2 { display: none; }
         }
+        /* Knowledge Ledger: Insights card + Q&A tab */
+        .insights-card{background:var(--bg-alt,#f8f9fa);border:1px solid var(--border,#e0e0e0);border-radius:8px;margin-bottom:8px;overflow:hidden}
+        .insights-header{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;cursor:pointer;user-select:none}
+        .insights-header:hover{background:var(--hover,#f0f0f0)}
+        .insights-body{padding:8px 12px}
+        .insight-item{padding:4px 0;border-bottom:1px solid var(--border-light,#eee)}
+        .insight-item:last-child{border-bottom:none}
+        .insight-expired{opacity:0.6;font-style:italic}
+        .qa-entry{padding:8px 12px;border-bottom:1px solid var(--border-light,#eee)}
+        .qa-entry:last-child{border-bottom:none}
+        .qa-answer{margin-left:20px;padding:6px 10px;background:var(--bg-alt,#f8f9fa);border-radius:6px;margin-top:4px}
+        .qa-badge{font-size:9px;padding:2px 6px;border-radius:10px;font-weight:600}
+        .qa-resolved{background:var(--green-light,#e6f4ea);color:var(--green,#1a7f37)}
+        .qa-pending{background:var(--amber-light,#fff8e1);color:var(--amber,#f57c00)}
+        .qa-auto{background:var(--bg-alt,#f0f0f0);color:var(--muted,#666);font-size:10px}
     </style>
 </head>
 <body>

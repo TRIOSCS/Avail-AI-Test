@@ -3023,11 +3023,11 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'files'];
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'files'];
+    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'qa', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'qa', 'files'];
     // Mobile: include buy plans and activity tabs for full drill-down
-    if (window.__isMobile) return ['parts', 'offers', 'quotes', 'buyplans', 'activity'];
-    return ['parts', 'offers', 'quotes', 'files']; // rfq tab
+    if (window.__isMobile) return ['parts', 'offers', 'quotes', 'buyplans', 'activity', 'qa'];
+    return ['parts', 'offers', 'quotes', 'qa', 'files']; // rfq tab
 }
 
 function _ddDefaultTab(mainView) {
@@ -3035,7 +3035,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', qa:'Q&A'};
     return map[tab] || tab;
 }
 
@@ -3152,6 +3152,9 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = plans;
                 break;
             }
+            case 'qa':
+                data = await apiFetch(`/api/knowledge?requisition_id=${reqId}`);
+                break;
             case 'files':
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
@@ -3177,8 +3180,9 @@ function _renderDdTab(reqId, tabName, data, panel) {
             case 'offers': _renderMobileOffersList(data, reqId, panel); break;
             case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
             case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
+            case 'qa': _renderDdQA(reqId, data, panel); break;
             case 'files': _renderDdFiles(reqId, data, panel); break;
-            default: panel.innerHTML = '';
+            default: panel.textContent = '';
         }
         return;
     }
@@ -3195,8 +3199,9 @@ function _renderDdTab(reqId, tabName, data, panel) {
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
+        case 'qa': _renderDdQA(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
-        default: panel.innerHTML = '';
+        default: panel.textContent = '';
     }
 }
 
@@ -3531,6 +3536,445 @@ let _ddSelectedOffers = {};   // reqId → Set of offer IDs
 let _ddQuoteData = {};        // reqId → quote object for in-memory editing
 let _ddHistoryExpanded = {};  // "reqId-requirementId" → bool
 
+
+// ---------------------------------------------------------------------------
+// Knowledge Ledger: AI Insights Card (collapsible, top of parts tab)
+// ---------------------------------------------------------------------------
+
+async function _renderInsightsCard(reqId, container) {
+    var collapsed = localStorage.getItem('insights_collapsed') === '1';
+    var wrap = document.createElement('div');
+    wrap.className = 'insights-card';
+    wrap.id = 'insights-' + reqId;
+
+    var header = document.createElement('div');
+    header.className = 'insights-header';
+    header.onclick = function() { _toggleInsightsCard(reqId); };
+
+    var title = document.createElement('span');
+    title.style.cssText = 'font-weight:600;font-size:12px';
+    title.textContent = 'AI Insights';
+    header.appendChild(title);
+
+    var controls = document.createElement('span');
+    controls.style.cssText = 'display:flex;gap:6px;align-items:center';
+
+    var refreshBtn = document.createElement('button');
+    refreshBtn.className = 'btn btn-ghost btn-sm';
+    refreshBtn.style.fontSize = '10px';
+    refreshBtn.textContent = '\u21bb Refresh';
+    refreshBtn.title = 'Regenerate insights';
+    refreshBtn.onclick = function(e) { e.stopPropagation(); _refreshInsights(reqId); };
+    controls.appendChild(refreshBtn);
+
+    var toggle = document.createElement('span');
+    toggle.className = 'insights-toggle';
+    toggle.textContent = collapsed ? '\u25b6' : '\u25bc';
+    controls.appendChild(toggle);
+    header.appendChild(controls);
+    wrap.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'insights-body';
+    body.style.display = collapsed ? 'none' : '';
+    var loadingSpan = document.createElement('span');
+    loadingSpan.style.cssText = 'font-size:11px;color:var(--muted)';
+    loadingSpan.textContent = 'Loading\u2026';
+    body.appendChild(loadingSpan);
+    wrap.appendChild(body);
+
+    container.prepend(wrap);
+
+    try {
+        var data = await apiFetch('/api/requisitions/' + reqId + '/insights');
+        body.textContent = '';
+        if (!data.insights || !data.insights.length) {
+            var emptySpan = document.createElement('span');
+            emptySpan.style.cssText = 'font-size:11px;color:var(--muted)';
+            emptySpan.textContent = 'No insights yet. Click Refresh to generate.';
+            body.appendChild(emptySpan);
+            return;
+        }
+        for (var i = 0; i < data.insights.length; i++) {
+            var ins = data.insights[i];
+            var item = document.createElement('div');
+            item.className = 'insight-item' + (ins.is_expired ? ' insight-expired' : '');
+            var text = document.createElement('span');
+            text.style.fontSize = '11px';
+            text.textContent = ins.content;
+            item.appendChild(text);
+            if (ins.is_expired) {
+                var badge = document.createElement('span');
+                badge.style.cssText = 'font-size:9px;color:var(--amber);margin-left:4px';
+                badge.textContent = '(may be outdated)';
+                item.appendChild(badge);
+            }
+            body.appendChild(item);
+        }
+        if (data.has_expired) {
+            var warn = document.createElement('div');
+            warn.style.cssText = 'font-size:10px;color:var(--amber);margin-top:4px';
+            warn.textContent = 'Some insights based on outdated data';
+            body.appendChild(warn);
+        }
+    } catch (e) {
+        body.textContent = '';
+        var errSpan = document.createElement('span');
+        errSpan.style.cssText = 'font-size:11px;color:var(--red)';
+        errSpan.textContent = 'Failed to load insights';
+        body.appendChild(errSpan);
+    }
+}
+
+function _toggleInsightsCard(reqId) {
+    var card = document.getElementById('insights-' + reqId);
+    if (!card) return;
+    var body = card.querySelector('.insights-body');
+    var toggle = card.querySelector('.insights-toggle');
+    var hidden = body.style.display === 'none';
+    body.style.display = hidden ? '' : 'none';
+    toggle.textContent = hidden ? '\u25bc' : '\u25b6';
+    localStorage.setItem('insights_collapsed', hidden ? '0' : '1');
+}
+
+async function _refreshInsights(reqId) {
+    var card = document.getElementById('insights-' + reqId);
+    if (!card) return;
+    var body = card.querySelector('.insights-body');
+    body.textContent = '';
+    var loading = document.createElement('span');
+    loading.style.cssText = 'font-size:11px;color:var(--muted)';
+    loading.textContent = 'Generating\u2026';
+    body.appendChild(loading);
+    try {
+        var data = await apiFetch('/api/requisitions/' + reqId + '/insights/refresh', { method: 'POST' });
+        body.textContent = '';
+        var insights = data.insights || [];
+        for (var i = 0; i < insights.length; i++) {
+            var item = document.createElement('div');
+            item.className = 'insight-item';
+            var text = document.createElement('span');
+            text.style.fontSize = '11px';
+            text.textContent = insights[i].content;
+            item.appendChild(text);
+            body.appendChild(item);
+        }
+        if (!insights.length) {
+            var emptySpan = document.createElement('span');
+            emptySpan.style.cssText = 'font-size:11px;color:var(--muted)';
+            emptySpan.textContent = 'No insights generated.';
+            body.appendChild(emptySpan);
+        }
+    } catch (e) {
+        body.textContent = '';
+        var errSpan = document.createElement('span');
+        errSpan.style.cssText = 'font-size:11px;color:var(--red)';
+        errSpan.textContent = 'Failed to generate insights';
+        body.appendChild(errSpan);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge Ledger: Q&A Tab
+// ---------------------------------------------------------------------------
+
+function _renderDdQA(reqId, entries, panel) {
+    var filterBar = document.createElement('div');
+    filterBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+
+    var filterGroup = document.createElement('div');
+    filterGroup.style.display = 'flex';
+    filterGroup.style.gap = '4px';
+    var filters = ['all', 'question', 'note', 'fact'];
+    var filterLabels = {all: 'All', question: 'Questions', note: 'Notes', fact: 'Facts'};
+    for (var fi = 0; fi < filters.length; fi++) {
+        var fbtn = document.createElement('button');
+        fbtn.className = 'btn btn-ghost btn-sm qa-filter' + (filters[fi] === 'all' ? ' active' : '');
+        fbtn.textContent = filterLabels[filters[fi]];
+        fbtn.dataset.filter = filters[fi];
+        fbtn.onclick = (function(f, b) { return function() { _filterQA(reqId, f, b); }; })(filters[fi], fbtn);
+        filterGroup.appendChild(fbtn);
+    }
+    filterBar.appendChild(filterGroup);
+
+    var askBtn = document.createElement('button');
+    askBtn.className = 'btn btn-sm';
+    askBtn.textContent = 'Ask Question';
+    askBtn.onclick = function() { _openAskQuestionModal(reqId); };
+    filterBar.appendChild(askBtn);
+
+    panel.textContent = '';
+    panel.appendChild(filterBar);
+
+    if (!entries || !entries.length) {
+        var emptyDiv = document.createElement('div');
+        emptyDiv.style.cssText = 'font-size:11px;color:var(--muted);padding:20px 0;text-align:center';
+        emptyDiv.textContent = 'No knowledge entries yet. Ask a question or add a note.';
+        panel.appendChild(emptyDiv);
+        return;
+    }
+
+    var list = document.createElement('div');
+    list.id = 'qa-list-' + reqId;
+    for (var j = 0; j < entries.length; j++) {
+        list.appendChild(_renderQAEntry(entries[j], reqId));
+    }
+    panel.appendChild(list);
+}
+
+function _renderQAEntry(e, reqId) {
+    var wrapper = document.createElement('div');
+    wrapper.className = 'qa-entry' + (e.source === 'system' ? ' qa-auto' : '');
+    wrapper.dataset.type = e.entry_type;
+    if (e.is_expired) wrapper.style.opacity = '0.6';
+
+    var topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start';
+
+    var contentDiv = document.createElement('div');
+    var icon = '';
+    if (e.entry_type === 'question') icon = '\u2753 ';
+    else if (e.entry_type === 'fact') icon = '\ud83d\udcca ';
+    else if (e.entry_type === 'note') icon = '\ud83d\udcdd ';
+
+    var contentSpan = document.createElement('span');
+    contentSpan.style.cssText = 'font-size:12px;font-weight:600';
+    contentSpan.textContent = icon + e.content;
+    contentDiv.appendChild(contentSpan);
+
+    if (e.is_expired) {
+        var expBadge = document.createElement('span');
+        expBadge.style.cssText = 'font-size:9px;color:var(--amber);margin-left:4px';
+        expBadge.textContent = '(may be outdated)';
+        contentDiv.appendChild(expBadge);
+    }
+    topRow.appendChild(contentDiv);
+
+    var badgeArea = document.createElement('span');
+    if (e.entry_type === 'question') {
+        var statusBadge = document.createElement('span');
+        statusBadge.className = 'qa-badge ' + (e.is_resolved ? 'qa-resolved' : 'qa-pending');
+        statusBadge.textContent = e.is_resolved ? 'Resolved' : 'Awaiting answer';
+        badgeArea.appendChild(statusBadge);
+    }
+    if (e.source === 'system') {
+        var autoBadge = document.createElement('span');
+        autoBadge.className = 'qa-badge qa-auto';
+        autoBadge.textContent = 'auto';
+        autoBadge.style.marginLeft = '4px';
+        badgeArea.appendChild(autoBadge);
+    }
+    topRow.appendChild(badgeArea);
+    wrapper.appendChild(topRow);
+
+    var meta = document.createElement('div');
+    meta.style.cssText = 'font-size:10px;color:var(--muted);margin-top:2px';
+    meta.textContent = (e.creator_name || 'System') + ' \u00b7 ' + _timeAgo(e.created_at);
+    wrapper.appendChild(meta);
+
+    if (e.answers && e.answers.length) {
+        for (var k = 0; k < e.answers.length; k++) {
+            var a = e.answers[k];
+            var ansDiv = document.createElement('div');
+            ansDiv.className = 'qa-answer';
+            var ansText = document.createElement('span');
+            ansText.style.fontSize = '11px';
+            ansText.textContent = a.content;
+            ansDiv.appendChild(ansText);
+            var ansMeta = document.createElement('div');
+            ansMeta.style.cssText = 'font-size:10px;color:var(--muted);margin-top:2px';
+            ansMeta.textContent = (a.creator_name || 'Unknown') + ' \u00b7 ' + _timeAgo(a.created_at);
+            ansDiv.appendChild(ansMeta);
+            wrapper.appendChild(ansDiv);
+        }
+    }
+
+    if (e.entry_type === 'question' && !e.is_resolved) {
+        var ansRow = document.createElement('div');
+        ansRow.style.marginTop = '4px';
+        var ansBtn = document.createElement('button');
+        ansBtn.className = 'btn btn-ghost btn-sm';
+        ansBtn.style.fontSize = '10px';
+        ansBtn.textContent = 'Answer';
+        ansBtn.onclick = (function(rId, eId) { return function() { _openAnswerModal(rId, eId); }; })(reqId, e.id);
+        ansRow.appendChild(ansBtn);
+        wrapper.appendChild(ansRow);
+    }
+
+    return wrapper;
+}
+
+function _filterQA(reqId, type, btn) {
+    var list = document.getElementById('qa-list-' + reqId);
+    if (!list) return;
+    var entries = list.querySelectorAll('.qa-entry');
+    for (var i = 0; i < entries.length; i++) {
+        entries[i].style.display = (type === 'all' || entries[i].dataset.type === type) ? '' : 'none';
+    }
+    var allBtns = btn.parentNode.querySelectorAll('.qa-filter');
+    for (var j = 0; j < allBtns.length; j++) allBtns[j].classList.remove('active');
+    btn.classList.add('active');
+}
+
+// ---------------------------------------------------------------------------
+// Q&A Modals: Ask Question + Answer
+// ---------------------------------------------------------------------------
+
+async function _openAskQuestionModal(reqId) {
+    var buyers = [];
+    try {
+        var users = await apiFetch('/api/users');
+        buyers = (users || []).filter(function(u) { return u.role === 'buyer' || u.role === 'admin'; });
+    } catch (e) { /* fallback: empty list */ }
+
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'askQuestionModal';
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '480px';
+
+    var h3 = document.createElement('h3');
+    h3.style.cssText = 'margin:0 0 12px';
+    h3.textContent = 'Ask a Question';
+    box.appendChild(h3);
+
+    var ta = document.createElement('textarea');
+    ta.id = 'qaQuestionText';
+    ta.rows = 4;
+    ta.style.cssText = 'width:100%;resize:vertical;font-size:12px';
+    ta.placeholder = 'Type your question...';
+    box.appendChild(ta);
+
+    var selectWrap = document.createElement('div');
+    selectWrap.style.marginTop = '8px';
+    var label = document.createElement('label');
+    label.style.cssText = 'font-size:11px;font-weight:600';
+    label.textContent = 'Assign to buyers:';
+    selectWrap.appendChild(label);
+    var sel = document.createElement('select');
+    sel.id = 'qaAssignBuyers';
+    sel.multiple = true;
+    sel.style.cssText = 'width:100%;height:80px;font-size:11px';
+    for (var i = 0; i < buyers.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = buyers[i].id;
+        opt.textContent = buyers[i].display_name || buyers[i].email;
+        sel.appendChild(opt);
+    }
+    selectWrap.appendChild(sel);
+    var hint = document.createElement('span');
+    hint.style.cssText = 'font-size:9px;color:var(--muted)';
+    hint.textContent = 'Hold Ctrl/Cmd to select multiple';
+    selectWrap.appendChild(hint);
+    box.appendChild(selectWrap);
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = function() { document.getElementById('askQuestionModal').remove(); };
+    btnRow.appendChild(cancelBtn);
+    var submitBtn = document.createElement('button');
+    submitBtn.className = 'btn';
+    submitBtn.textContent = 'Post Question';
+    submitBtn.onclick = function() { _submitQuestion(reqId); };
+    btnRow.appendChild(submitBtn);
+    box.appendChild(btnRow);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    ta.focus();
+}
+
+async function _submitQuestion(reqId) {
+    var text = document.getElementById('qaQuestionText');
+    var sel = document.getElementById('qaAssignBuyers');
+    if (!text || !text.value.trim()) return;
+    var buyerIds = Array.from(sel.selectedOptions).map(function(o) { return parseInt(o.value); });
+    if (!buyerIds.length) { alert('Select at least one buyer'); return; }
+
+    try {
+        await apiFetch('/api/knowledge/question', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: text.value.trim(),
+                assigned_to_ids: buyerIds,
+                requisition_id: reqId,
+            }),
+        });
+        document.getElementById('askQuestionModal').remove();
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].qa;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'qa', panel);
+    } catch (e) {
+        alert('Failed to post question');
+    }
+}
+
+async function _openAnswerModal(reqId, entryId) {
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'answerModal';
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '480px';
+
+    var h3 = document.createElement('h3');
+    h3.style.cssText = 'margin:0 0 12px';
+    h3.textContent = 'Post Answer';
+    box.appendChild(h3);
+
+    var ta = document.createElement('textarea');
+    ta.id = 'qaAnswerText';
+    ta.rows = 4;
+    ta.style.cssText = 'width:100%;resize:vertical;font-size:12px';
+    ta.placeholder = 'Type your answer...';
+    box.appendChild(ta);
+
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px';
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = function() { document.getElementById('answerModal').remove(); };
+    btnRow.appendChild(cancelBtn);
+    var submitBtn = document.createElement('button');
+    submitBtn.className = 'btn';
+    submitBtn.textContent = 'Post Answer';
+    submitBtn.onclick = function() { _submitAnswer(reqId, entryId); };
+    btnRow.appendChild(submitBtn);
+    box.appendChild(btnRow);
+
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    ta.focus();
+}
+
+async function _submitAnswer(reqId, entryId) {
+    var text = document.getElementById('qaAnswerText');
+    if (!text || !text.value.trim()) return;
+
+    try {
+        await apiFetch('/api/knowledge/' + entryId + '/answer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: text.value.trim() }),
+        });
+        document.getElementById('answerModal').remove();
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].qa;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'qa', panel);
+    } catch (e) {
+        alert('Failed to post answer');
+    }
+}
 
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
@@ -5726,6 +6170,8 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     }
     dd.innerHTML = html;
     if (_addRowActive[rfqId]) _appendAddRow(rfqId, dd);
+    // AI Insights card above parts table
+    _renderInsightsCard(rfqId, dd);
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
@@ -12918,7 +13364,9 @@ Object.assign(window, {
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
     _ddRefreshQuoteTotals, _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
     _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
-    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderParsedSummary,
+    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderDdQA, _renderParsedSummary,
+    _renderQAEntry, _filterQA, _openAskQuestionModal, _submitQuestion,
+    _openAnswerModal, _submitAnswer, _renderInsightsCard, _toggleInsightsCard, _refreshInsights,
     _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,
     _renderDetailDeadline, _renderDrillDownTable, _renderReqRow,
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
