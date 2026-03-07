@@ -144,6 +144,13 @@ def post_question(
     requirement_id: int | None = None,
 ) -> KnowledgeEntry:
     """Post a Q&A question and notify assigned buyers."""
+    # Check daily question cap
+    from app.services.teams_qa_service import check_question_quota
+
+    quota = check_question_quota(db, user_id)
+    if not quota["allowed"]:
+        raise ValueError("Daily question limit reached ({}/{})".format(quota["used"], quota["limit"]))
+
     entry = create_entry(
         db,
         user_id=user_id,
@@ -178,6 +185,7 @@ def post_answer(
     user_id: int,
     question_id: int,
     content: str,
+    answered_via: str = "web",
 ) -> KnowledgeEntry | None:
     """Answer a question. Marks question resolved and notifies asker."""
     question = db.get(KnowledgeEntry, question_id)
@@ -197,6 +205,9 @@ def post_answer(
         requisition_id=question.requisition_id,
         requirement_id=question.requirement_id,
     )
+
+    # Track answer source
+    answer.answered_via = answered_via
 
     # Mark question as resolved
     question.is_resolved = True

@@ -137,24 +137,69 @@ def delete_entry_endpoint(
     return {"ok": True}
 
 
+@router.get("/quota")
+def get_quota(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Get the user's daily question quota."""
+    from app.services.teams_qa_service import check_question_quota
+    return check_question_quota(db, user.id)
+
+
+@router.get("/config")
+def get_knowledge_config(
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Get knowledge config values."""
+    from app.models.knowledge import KnowledgeConfig
+    rows = db.query(KnowledgeConfig).all()
+    return {row.key: row.value for row in rows}
+
+
+@router.put("/config")
+def update_knowledge_config(
+    payload: dict,
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Update knowledge config (admin only). Body: {key: value, ...}."""
+    from app.models.knowledge import KnowledgeConfig
+    from app.config import settings
+    if user.email not in (settings.ADMIN_EMAILS or "").split(","):
+        raise HTTPException(403, "Admin only")
+    for key, value in payload.items():
+        row = db.query(KnowledgeConfig).filter(KnowledgeConfig.key == key).first()
+        if row:
+            row.value = str(value)
+        else:
+            db.add(KnowledgeConfig(key=key, value=str(value)))
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/question")
 def post_question(
     payload: QuestionCreate,
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    entry = knowledge_service.post_question(
-        db,
-        user_id=user.id,
-        content=payload.content,
-        assigned_to_ids=payload.assigned_to_ids,
-        mpn=payload.mpn,
-        vendor_card_id=payload.vendor_card_id,
-        company_id=payload.company_id,
-        requisition_id=payload.requisition_id,
-        requirement_id=payload.requirement_id,
-    )
-    return _entry_to_response(entry)
+    try:
+        entry = knowledge_service.post_question(
+            db,
+            user_id=user.id,
+            content=payload.content,
+            assigned_to_ids=payload.assigned_to_ids,
+            mpn=payload.mpn,
+            vendor_card_id=payload.vendor_card_id,
+            company_id=payload.company_id,
+            requisition_id=payload.requisition_id,
+            requirement_id=payload.requirement_id,
+        )
+        return _entry_to_response(entry)
+    except ValueError as e:
+        raise HTTPException(429, str(e))
 
 
 @router.post("/{entry_id}/answer")

@@ -26,6 +26,7 @@ class TeamsAlertConfig(Base):
     batch_digest_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     quiet_hours_start = Column(Time, nullable=True)
     quiet_hours_end = Column(Time, nullable=True)
+    knowledge_digest_hour = Column(Integer, nullable=False, default=14, server_default="14")
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
 

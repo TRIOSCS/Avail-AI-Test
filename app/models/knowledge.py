@@ -42,6 +42,11 @@ class KnowledgeEntry(Base):
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
 
+    # Phase 2: Teams Q&A routing
+    nudged_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    answered_via = Column(String(10), nullable=True)  # 'web' or 'teams'
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -65,3 +70,16 @@ class KnowledgeEntry(Base):
         Index("ix_ke_parent", "parent_id"),
         Index("ix_ke_expires", "expires_at", postgresql_where="expires_at IS NOT NULL"),
     )
+
+
+class KnowledgeConfig(Base):
+    """Key-value config for knowledge ledger (e.g., daily_question_cap).
+
+    Called by: services/teams_qa_service.py
+    Depends on: models/base.py
+    """
+    __tablename__ = "knowledge_config"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key = Column(String(50), unique=True, nullable=False)
+    value = Column(String(255), nullable=False)

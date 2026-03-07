@@ -3827,6 +3827,11 @@ async function _openAskQuestionModal(reqId) {
         buyers = (users || []).filter(function(u) { return u.role === 'buyer' || u.role === 'admin'; });
     } catch (e) { /* fallback: empty list */ }
 
+    var quota = { used: 0, limit: 10, remaining: 10, allowed: true };
+    try {
+        quota = await apiFetch('/api/knowledge/quota');
+    } catch (e) { /* fallback: no limit shown */ }
+
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.id = 'askQuestionModal';
@@ -3870,6 +3875,16 @@ async function _openAskQuestionModal(reqId) {
     selectWrap.appendChild(hint);
     box.appendChild(selectWrap);
 
+    var quotaDiv = document.createElement('div');
+    quotaDiv.style.cssText = 'margin-top:8px;font-size:11px;color:var(--muted)';
+    if (quota.allowed) {
+        quotaDiv.textContent = quota.remaining + '/' + quota.limit + ' questions remaining today';
+    } else {
+        quotaDiv.textContent = 'Daily question limit reached (' + quota.limit + '/' + quota.limit + '). Try again tomorrow.';
+        quotaDiv.style.color = 'var(--danger, #e74c3c)';
+    }
+    box.appendChild(quotaDiv);
+
     var btnRow = document.createElement('div');
     btnRow.style.cssText = 'display:flex;justify-content:flex-end;gap:8px;margin-top:12px';
     var cancelBtn = document.createElement('button');
@@ -3881,6 +3896,10 @@ async function _openAskQuestionModal(reqId) {
     submitBtn.className = 'btn';
     submitBtn.textContent = 'Post Question';
     submitBtn.onclick = function() { _submitQuestion(reqId); };
+    if (!quota.allowed) {
+        submitBtn.disabled = true;
+        submitBtn.style.opacity = '0.5';
+    }
     btnRow.appendChild(submitBtn);
     box.appendChild(btnRow);
 

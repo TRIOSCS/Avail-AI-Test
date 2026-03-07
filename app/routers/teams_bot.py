@@ -97,6 +97,50 @@ async def handle_message(request: Request):
         return _card_response("Something went wrong processing your request. Please try again.")
 
 
+@router.post("/card-action")
+async def handle_card_action(request: Request):
+    """Handle Adaptive Card action submissions from Teams.
+
+    Teams sends card action data when a user submits a form in an Adaptive Card.
+    Validates HMAC, routes to answer handler, returns confirmation card.
+    """
+    config = _get_bot_config()
+
+    # Validate HMAC if secret configured
+    hmac_secret = config.get("teams_bot_hmac_secret", "")
+    if hmac_secret:
+        body = await request.body()
+        auth = request.headers.get("Authorization", "")
+        if not _validate_hmac(body, auth, hmac_secret):
+            raise HTTPException(401, "Invalid HMAC signature")
+
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+
+    action = data.get("data", {}).get("action", "")
+    if action != "submit_answers":
+        raise HTTPException(400, "Unknown card action")
+
+    from app.database import SessionLocal
+    from app.services.teams_qa_service import handle_card_answer
+
+    db = SessionLocal()
+    try:
+        result = await handle_card_answer(db, data)
+        logger.info("Card action processed: %s", result)
+
+        answered = result.get("answered", 0)
+        return _card_response(
+            "{} answer{} submitted. Thank you!".format(answered, "s" if answered != 1 else "")
+            if answered > 0
+            else "No answers provided."
+        )
+    finally:
+        db.close()
+
+
 @router.get("/setup")
 async def bot_setup():
     """Return step-by-step setup instructions for the Teams Outgoing Webhook."""
