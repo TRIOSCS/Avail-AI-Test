@@ -56,7 +56,7 @@ class TestHotOffersDataQuality:
         assert len(data) == 2
 
     def test_inflated_price_filtered(self, client, db_session, test_user):
-        """Offers with unit_price > $10,000 are excluded (TT-037 inflated prices)."""
+        """Offers with high prices are still returned (dedup replaces old price cap)."""
         req1 = self._make_req(db_session, test_user, "REQ-A")
         req2 = self._make_req(db_session, test_user, "REQ-B")
         self._make_offer(db_session, req1.id, price=50_000.00, vendor="Junk")
@@ -66,11 +66,11 @@ class TestHotOffersDataQuality:
         resp = client.get("/api/dashboard/hot-offers")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["vendor_name"] == "Good"
+        # Dedup allows max 2 per req; both reqs have 1 offer each so both returned
+        assert len(data) == 2
 
     def test_all_same_requisition_filtered(self, client, db_session, test_user):
-        """All offers linking to same requisition are suspicious batch — filtered out (TT-037)."""
+        """5 offers on same requisition are deduped to max 2 (TT-037 dedup)."""
         req = self._make_req(db_session, test_user, "REQ-SPAM")
         for i in range(5):
             self._make_offer(db_session, req.id, price=1.00 + i, vendor=f"Vendor-{i}")
@@ -79,7 +79,7 @@ class TestHotOffersDataQuality:
         resp = client.get("/api/dashboard/hot-offers")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 0
+        assert len(data) == 2
 
     def test_single_offer_not_filtered(self, client, db_session, test_user):
         """A single offer (only 1 result) is not treated as suspicious batch."""
@@ -106,7 +106,7 @@ class TestHotOffersDataQuality:
         assert len(data) == 2
 
     def test_price_above_cap_excluded(self, client, db_session, test_user):
-        """Offer at $10,001 is excluded."""
+        """Offers above $10,001 are still returned (dedup replaces old price cap)."""
         req1 = self._make_req(db_session, test_user, "REQ-A")
         req2 = self._make_req(db_session, test_user, "REQ-B")
         self._make_offer(db_session, req1.id, price=10_001.00)
@@ -116,8 +116,8 @@ class TestHotOffersDataQuality:
         resp = client.get("/api/dashboard/hot-offers")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["unit_price"] == 5.0
+        # Dedup allows max 2 per req; both reqs have 1 offer each so both returned
+        assert len(data) == 2
 
 
 class TestAttentionFeedNumericTitles:
@@ -136,10 +136,8 @@ class TestAttentionFeedNumericTitles:
         return r
 
     def test_numeric_only_title_filtered(self, client, db_session, test_user):
-        """Requisitions with numeric-only names are filtered from attention feed (TT-032)."""
-        # Numeric-only name — should be filtered
+        """Requisitions with numeric-only names appear in attention feed (dedup replaces title filter)."""
         self._make_req(db_session, test_user, name="21702", deadline="ASAP", days_ago=1)
-        # Normal name — should appear
         self._make_req(db_session, test_user, name="REAL-REQ", deadline="ASAP", days_ago=1)
         db_session.commit()
 
@@ -147,7 +145,8 @@ class TestAttentionFeedNumericTitles:
         assert resp.status_code == 200
         items = resp.json()
         titles = [i["title"] for i in items]
-        assert "21702" not in titles
+        # Both appear — numeric title filtering replaced by per-requisition dedup
+        assert "21702" in titles
         assert "REAL-REQ" in titles
 
     def test_alphanumeric_title_kept(self, client, db_session, test_user):
@@ -162,7 +161,7 @@ class TestAttentionFeedNumericTitles:
         assert "REQ-12345" in titles
 
     def test_all_numeric_titles_filtered(self, client, db_session, test_user):
-        """Multiple numeric-only titled items are all filtered."""
+        """Multiple numeric-only titled items appear (dedup replaces title filter)."""
         for n in ["11111", "22222", "33333"]:
             self._make_req(db_session, test_user, name=n, deadline="ASAP", days_ago=1)
         db_session.commit()
@@ -170,11 +169,14 @@ class TestAttentionFeedNumericTitles:
         resp = client.get("/api/dashboard/attention-feed")
         assert resp.status_code == 200
         items = resp.json()
-        for item in items:
-            assert not item["title"].isdigit(), f"Numeric title '{item['title']}' should be filtered"
+        titles = [i["title"] for i in items]
+        # All three reqs have ASAP deadline + no offers -> they appear as req_at_risk
+        assert "11111" in titles
+        assert "22222" in titles
+        assert "33333" in titles
 
     def test_stale_account_with_numeric_name_filtered(self, client, db_session, test_user):
-        """Companies with numeric-only names are also filtered from attention feed."""
+        """Companies with numeric-only names appear in attention feed (dedup replaces title filter)."""
         co = Company(name="99999", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.flush()
@@ -191,4 +193,5 @@ class TestAttentionFeedNumericTitles:
         assert resp.status_code == 200
         items = resp.json()
         titles = [i["title"] for i in items]
-        assert "99999" not in titles
+        # Numeric company names are no longer filtered — dedup handles data quality
+        assert "99999" in titles

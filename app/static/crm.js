@@ -25,10 +25,10 @@ import {
 function fmtCurrency(n) {
     const v = Math.abs(Number(n || 0));
     const sign = Number(n || 0) < 0 ? '-' : '';
-    if (v >= 1e9) return sign + '$' + (v / 1e9).toFixed(2) + 'B';
-    if (v >= 1e6) return sign + '$' + (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e9) return sign + '$' + (v / 1e9).toFixed(4) + 'B';
+    if (v >= 1e6) return sign + '$' + (v / 1e6).toFixed(4) + 'M';
     if (v >= 1e3) return sign + '$' + (v / 1e3).toFixed(1) + 'K';
-    return sign + '$' + v.toFixed(2);
+    return sign + '$' + v.toFixed(4);
 }
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -1907,8 +1907,8 @@ function renderOffers() {
         </select>
     </div>`;
     const groupsHtml = crmOffers.map(group => {
-        const targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(2) : 'no target';
-        const lastQ = group.last_quoted?.sell_price != null ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(2) : '';
+        const targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(4) : 'no target';
+        const lastQ = group.last_quoted?.sell_price != null ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
         let visibleOffers = group.offers;
         if (_offerStatusFilter !== 'all') {
             visibleOffers = visibleOffers.filter(o => (o.status || 'active') === _offerStatusFilter);
@@ -1943,7 +1943,7 @@ function renderOffers() {
             <tr class="${rowCls}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
                 <td>${esc(o.vendor_name)}${isSub ? ' <span class="badge b-sub">SUB</span>' : ''}${o.mpn && isSub ? '<div style="font-size:10px;color:#0e7490;font-weight:600">'+esc(o.mpn)+'</div>' : ''}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr ? '<div>'+noteStr+'</div>' : ''}${photoHtml || fileHtml ? '<div style="margin-top:2px">'+photoHtml+(fileHtml?' '+fileHtml:'')+'</div>' : ''}</td>
-                <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(2) : '—'}</td>
+                <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
                 <td>${esc(o.condition || '—')}</td>
@@ -2249,8 +2249,8 @@ function renderQuote() {
     const q = crmQuote;
     const isDraft = q.status === 'draft';
     const lines = (q.line_items || []).map((item, i) => {
-        const diffBadge = item._priceDiff ? ` <span style="font-size:9px;color:${item._priceDiff > 0 ? 'var(--red)' : 'var(--green)'}">${item._priceDiff > 0 ? '\u2191' : '\u2193'} $${Math.abs(item._priceDiff).toFixed(2)}</span>` : '';
-        const sellInput = isDraft ? `<input type="number" step="0.01" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},'sell_price',this.value)">` : '$'+Number(item.sell_price||0).toFixed(2) + diffBadge;
+        const diffBadge = item._priceDiff ? ` <span style="font-size:9px;color:${item._priceDiff > 0 ? 'var(--red)' : 'var(--green)'}">${item._priceDiff > 0 ? '\u2191' : '\u2193'} $${Math.abs(item._priceDiff).toFixed(4)}</span>` : '';
+        const sellInput = isDraft ? `<input type="number" step="0.0001" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},'sell_price',this.value)">` : '$'+Number(item.sell_price||0).toFixed(4) + diffBadge;
         const leadInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.lead_time||'')}" onchange="updateQuoteLineField(${i},'lead_time',this.value)" placeholder="—" style="width:60px">` : esc(item.lead_time || '—');
         const condInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.condition||'')}" onchange="updateQuoteLineField(${i},'condition',this.value)" placeholder="—" style="width:50px">` : esc(item.condition || '—');
         const dcInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.date_code||'')}" onchange="updateQuoteLineField(${i},'date_code',this.value)" placeholder="—" style="width:50px">` : esc(item.date_code || '—');
@@ -2260,8 +2260,8 @@ function renderQuote() {
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.manufacturer || '—')}</td>
             <td>${(item.qty||0).toLocaleString()}</td>
-            <td class="quote-cost">$${Number(item.cost_price||0).toFixed(2)}</td>
-            <td>${item.target_price != null ? '$'+Number(item.target_price).toFixed(2) : '—'}</td>
+            <td class="quote-cost">$${Number(item.cost_price||0).toFixed(4)}</td>
+            <td>${item.target_price != null ? '$'+Number(item.target_price).toFixed(4) : '—'}</td>
             <td>${sellInput}</td>
             <td class="quote-margin" id="qm-${i}" style="color:${(item.margin_pct||0) >= 20 ? 'var(--green)' : (item.margin_pct||0) >= 10 ? 'var(--amber)' : 'var(--red)'}">${Number(item.margin_pct||0).toFixed(1)}%</td>
             <td>${leadInput}</td>
@@ -2641,8 +2641,8 @@ function openBuyPlanModal() {
             <td>${esc(item.vendor_name || '\u2014')}</td>
             <td>${qty.toLocaleString()}</td>
             <td><input type="number" class="bp-plan-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="_debouncedUpdateBpTotals()"></td>
-            <td>$${Number(item.cost_price||0).toFixed(2)}</td>
-            <td class="bp-line-total">$${(qty * Number(item.cost_price||0)).toFixed(2)}</td>
+            <td>$${Number(item.cost_price||0).toFixed(4)}</td>
+            <td class="bp-line-total">$${(qty * Number(item.cost_price||0)).toFixed(4)}</td>
             <td>${esc(item.lead_time || '\u2014')}</td>
         </tr>`;
     }).join('');
@@ -2662,7 +2662,7 @@ function updateBpTotals() {
         total += lineTotal;
         const row = input.closest('tr');
         const totalCell = row.querySelector('.bp-line-total');
-        if (totalCell) totalCell.textContent = '$' + lineTotal.toFixed(2);
+        if (totalCell) totalCell.textContent = '$' + lineTotal.toFixed(4);
     });
     const bpTot = document.getElementById('bpTotal'); if (bpTot) bpTot.textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
@@ -2803,7 +2803,7 @@ function renderBuyPlanStatus(targetId) {
             <td>${vsBadge}</td>
             <td style="font-size:11px">${esc(item.entered_by_name||'\u2014')}</td>
             <td>${planQty.toLocaleString()}</td>
-            <td>$${Number(item.cost_price||0).toFixed(2)}</td>
+            <td>$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${esc(item.lead_time||'\u2014')}</td>
             ${poCell}
         </tr>`;
@@ -3240,7 +3240,7 @@ function renderBuyPlanV3Status(targetId) {
             + '<td>' + _bpV3ScoreBadge(l.ai_score) + '</td>'
             + '<td style="font-size:11px">' + esc(l.buyer_name || '\u2014') + '</td>'
             + '<td class="mono">' + qtyCell + '</td>'
-            + '<td class="mono">$' + Number(l.unit_cost||0).toFixed(2) + '</td>'
+            + '<td class="mono">$' + Number(l.unit_cost||0).toFixed(4) + '</td>'
             + '<td class="mono">' + (l.margin_pct != null ? Number(l.margin_pct).toFixed(1) + '%' : '\u2014') + '</td>'
             + '<td>' + esc(l.lead_time || '\u2014') + '</td>'
             + (isDraft ? '' : '<td>' + _bpV3LineBadge(l.status) + '</td>')
@@ -3584,7 +3584,7 @@ async function openOfferComparisonV3(planId, reqId, currentLineId) {
                 html += '<tr' + stale + ' onclick="swapLineOfferV3(' + currentLineId + ',' + o.offer_id + ',' + reqId + ')" style="cursor:pointer' + (sel ? ';background:var(--teal-light)' : '') + '">'
                     + '<td>' + (sel ? '<strong>\u2713</strong>' : '') + '</td>'
                     + '<td>' + esc(o.vendor_name) + (o.is_stale ? ' <span style="font-size:10px;color:var(--red)">(stale)</span>' : '') + '</td>'
-                    + '<td class="mono">' + (o.unit_price != null ? '$' + Number(o.unit_price).toFixed(2) : '\u2014') + '</td>'
+                    + '<td class="mono">' + (o.unit_price != null ? '$' + Number(o.unit_price).toFixed(4) : '\u2014') + '</td>'
                     + '<td class="mono">' + (o.qty_available != null ? o.qty_available.toLocaleString() : '\u2014') + '</td>'
                     + '<td>' + esc(o.lead_time || '\u2014') + '</td>'
                     + '<td>' + esc(o.condition || '\u2014') + '</td>'
@@ -3801,7 +3801,7 @@ async function checkTokenApproval() {
                 <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
                 <table class="tbl" style="margin-bottom:12px">
                     <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th></tr></thead>
-                    <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+esc(li.mpn)+'</td><td>'+esc(li.vendor_name)+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(2))+'</td><td>'+esc(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
+                    <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+esc(li.mpn)+'</td><td>'+esc(li.vendor_name)+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(4))+'</td><td>'+esc(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
                 </table>
                 </div>
                 ${bp.status === 'pending_approval' ? `
@@ -3924,10 +3924,10 @@ async function openPricingHistory(mpn) {
         }
         let html = '<table class="tbl"><thead><tr><th>Date</th><th>Qty</th><th>Sell</th><th>Margin</th><th>Customer</th><th>Result</th></tr></thead><tbody>';
         data.history.forEach(h => {
-            html += '<tr><td>' + fmtDate(h.date) + '</td><td>' + (h.qty||0).toLocaleString() + '</td><td>$' + Number(h.sell_price||0).toFixed(2) + '</td><td>' + Number(h.margin_pct||0).toFixed(1) + '%</td><td>' + esc(h.customer||'') + '</td><td>' + (h.result ? '<span class="status-badge status-'+h.result+'">'+h.result+'</span>' : '—') + '</td></tr>';
+            html += '<tr><td>' + fmtDate(h.date) + '</td><td>' + (h.qty||0).toLocaleString() + '</td><td>$' + Number(h.sell_price||0).toFixed(4) + '</td><td>' + Number(h.margin_pct||0).toFixed(1) + '%</td><td>' + esc(h.customer||'') + '</td><td>' + (h.result ? '<span class="status-badge status-'+h.result+'">'+h.result+'</span>' : '—') + '</td></tr>';
         });
         html += '</tbody></table>';
-        html += '<div class="ph-summary">Avg: $' + Number(data.avg_price||0).toFixed(2) + ' · Margin: ' + Number(data.avg_margin||0).toFixed(1) + '%' + (data.price_range ? ' · Range: $'+Number(data.price_range[0]).toFixed(2)+' – $'+Number(data.price_range[1]).toFixed(2) : '') + '</div>';
+        html += '<div class="ph-summary">Avg: $' + Number(data.avg_price||0).toFixed(4) + ' · Margin: ' + Number(data.avg_margin||0).toFixed(1) + '%' + (data.price_range ? ' · Range: $'+Number(data.price_range[0]).toFixed(4)+' – $'+Number(data.price_range[1]).toFixed(4) : '') + '</div>';
         if (phContent) phContent.innerHTML = html;
     } catch (e) { logCatchError('pricingHistory', e); if (phContent) phContent.innerHTML = '<p class="empty">Error loading pricing</p>'; }
 }
@@ -4542,7 +4542,7 @@ function openParsePreviewModal(data, responseId) {
             <td><strong>${esc(p.mpn || '—')}</strong></td>
             <td>${esc(p.status || '—')}</td>
             <td>${p.qty_available || '—'}</td>
-            <td>${p.unit_price ? '$' + Number(p.unit_price).toFixed(2) : '—'}</td>
+            <td>${p.unit_price ? '$' + Number(p.unit_price).toFixed(4) : '—'}</td>
             <td>${esc(p.lead_time || '—')}</td>
             <td>${esc(p.condition || '—')}</td>
             <td>${esc(p.date_code || '—')}</td>
@@ -5094,7 +5094,7 @@ function renderProactiveMatches() {
                     <td>${esc(m.warranty || '—')}</td>
                     <td>${esc(m.lead_time || '—')}</td>
                     <td>${esc(m.country_of_origin || '—')}</td>
-                    <td style="text-align:right;font-family:monospace;font-size:11px">${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(2) : '—'}</td>
+                    <td style="text-align:right;font-family:monospace;font-size:11px">${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
                     <td style="text-align:right">${(m.qty_available || 0).toLocaleString()}</td>
                     <td><span>${esc(m.vendor_name)}</span> <span style="font-size:9px;padding:1px 5px;border-radius:8px;border:1px solid var(--border);${_vendorScoreClass(m.vendor_score)}" title="${_vendorTip(m)}">${vs}</span></td>
                     <td style="font-size:10px;color:var(--muted)">${esc(m.entered_by_name || '—')}</td>
@@ -5191,13 +5191,13 @@ async function openProactiveSendModal(siteId) {
         });
     }
     itemsEl.innerHTML = selectedMatches.map(m => {
-        const defaultSell = m.our_cost ? (m.our_cost * 1.3).toFixed(2) : (m.unit_price ? (m.unit_price * 1.3).toFixed(2) : '0');
+        const defaultSell = m.our_cost ? (m.our_cost * 1.3).toFixed(4) : (m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0');
         return `<tr>
             <td>${esc(m.mpn)}</td>
             <td>${esc(m.vendor_name)}</td>
             <td>${(m.qty_available||0).toLocaleString()}</td>
-            <td>$${m.our_cost != null ? Number(m.our_cost).toFixed(2) : (m.unit_price != null ? Number(m.unit_price).toFixed(2) : '—')}</td>
-            <td><input type="number" step="0.01" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="_debouncedUpdateProactivePreview()"></td>
+            <td>$${m.our_cost != null ? Number(m.our_cost).toFixed(4) : (m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—')}</td>
+            <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="_debouncedUpdateProactivePreview()"></td>
             <td class="ps-margin" data-id="${m.id}"></td>
         </tr>`;
     }).join('');
@@ -8082,10 +8082,10 @@ function _renderOfferFeed(filter) {
 
     // Render offer cards
     var cards = filtered.map(function(o) {
-        var price = o.unit_price != null ? '$' + Number(o.unit_price).toFixed(2) : '\u2014';
+        var price = o.unit_price != null ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
         var qty = o.qty_available != null ? Number(o.qty_available).toLocaleString() : '\u2014';
         var total = (o.unit_price != null && o.qty_available != null)
-            ? '$' + (Number(o.unit_price) * Number(o.qty_available)).toFixed(2)
+            ? '$' + (Number(o.unit_price) * Number(o.qty_available)).toFixed(4)
             : '\u2014';
         var dateStr = o.created_at ? fmtRelative(o.created_at) : '';
         var statusCls = acceptedStatuses.indexOf(o.status) !== -1 ? 'color:var(--green)'
@@ -8186,7 +8186,7 @@ async function _openMobileQuoteForm(reqId) {
     } else {
         for (var i = 0; i < allOffers.length; i++) {
             var of2 = allOffers[i];
-            var priceStr = of2.unit_price != null ? '$' + Number(of2.unit_price).toFixed(2) : '\u2014';
+            var priceStr = of2.unit_price != null ? '$' + Number(of2.unit_price).toFixed(4) : '\u2014';
             var qtyStr = of2.qty_available ? Number(of2.qty_available).toLocaleString() : '\u2014';
             offersHtml += '<label style="display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border)">'
                 + '<input type="checkbox" class="mq-offer-check" data-offer-id="' + of2.id + '" '
@@ -8398,9 +8398,9 @@ async function _openMobileBuyPlanForm(reqId) {
             + '<div style="font-size:12px;color:var(--muted)">' + esc(l.vendor_name || '\u2014') + '</div>'
             + '</div>'
             + '<div style="text-align:right;flex-shrink:0;margin-left:12px">'
-            + '<div style="font-weight:600;font-size:13px">$' + Number(l.unit_cost || 0).toFixed(2) + '</div>'
+            + '<div style="font-weight:600;font-size:13px">$' + Number(l.unit_cost || 0).toFixed(4) + '</div>'
             + '<div style="font-size:12px;color:var(--muted)">Qty ' + (l.quantity || 0).toLocaleString() + '</div>'
-            + '<div style="font-size:11px;color:var(--text2)">= $' + lineCost.toFixed(2) + '</div>'
+            + '<div style="font-size:11px;color:var(--text2)">= $' + lineCost.toFixed(4) + '</div>'
             + '</div>'
             + '</div>';
     }
@@ -8564,7 +8564,7 @@ async function _openMobileOfferForm(reqId) {
         + '</div>'
         + '<div style="flex:1">'
         + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Unit Price</label>'
-        + '<input id="moPrice" type="number" inputmode="decimal" step="0.01" placeholder="0.00"'
+        + '<input id="moPrice" type="number" inputmode="decimal" step="0.0001" placeholder="0.00"'
         + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
         + '</div>'
         + '</div>'

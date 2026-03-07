@@ -522,25 +522,42 @@ class TestAutoProcessTicket:
         assert ticket.status == "diagnosed"
 
     @patch("app.database.SessionLocal")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     @patch("app.services.trouble_ticket_service.settings")
-    def test_skips_execute_high_risk(self, mock_settings, mock_claude, mock_session_local, db_session, test_user):
-        """High-risk ticket should be diagnosed and escalated, NOT auto-executed."""
+    def test_skips_execute_high_risk(self, mock_settings, mock_claude, mock_gen, mock_session_local, db_session, test_user):
+        """Aggressive mode: high-risk ticket is auto-diagnosed AND auto-executed."""
         import asyncio
 
         mock_settings.self_heal_enabled = True
         mock_settings.self_heal_auto_diagnose = True
         mock_settings.self_heal_auto_execute_low = True
         mock_session_local.return_value = self._mock_session(db_session)
+        # Two Claude calls in aggressive mode: classification + diagnosis
         mock_claude.side_effect = [
             {"category": "data", "risk_tier": "high", "confidence": 0.9, "summary": "Data loss risk"},
+            {
+                "root_cause": "Data corruption",
+                "affected_files": ["app/models/foo.py"],
+                "fix_approach": "Fix data",
+                "test_strategy": "Test data",
+                "estimated_complexity": "complex",
+                "requires_migration": False,
+            },
         ]
+        mock_gen.return_value = {
+            "success": True,
+            "patches": [{"file": "app/models/foo.py", "search": "a", "replace": "b"}],
+            "summary": "Fixed data issue",
+            "cost_usd": 0.10,
+        }
         ticket = create_ticket(
             db=db_session, user_id=test_user.id, title="Data Bug", description="Records disappearing"
         )
-        asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
+        with patch("app.services.execution_service._write_fix_queue"):
+            asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
-        assert ticket.status == "escalated"
+        assert ticket.status == "fix_queued"
 
     @patch("app.database.SessionLocal")
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)

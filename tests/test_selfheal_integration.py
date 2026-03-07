@@ -115,10 +115,12 @@ class TestLowRiskFullFlow:
 
 
 class TestHighRiskEscalation:
-    """High-risk ticket gets blocked from execution, stays diagnosed."""
+    """High-risk ticket is now executed in aggressive mode (no longer blocked)."""
 
+    @patch("app.services.execution_service._write_fix_queue")
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
-    def test_high_risk_blocked(self, mock_claude, db_session, integ_user):
+    def test_high_risk_blocked(self, mock_claude, mock_gen, mock_write, db_session, integ_user):
         # 1. Submit
         ticket = create_ticket(
             db=db_session,
@@ -127,7 +129,7 @@ class TestHighRiskEscalation:
             description="Schema change required",
         )
 
-        # 2. Diagnose — returns high risk
+        # 2. Diagnose — returns high risk (migration forces high)
         mock_claude.side_effect = [
             {"category": "database", "risk_tier": "high", "confidence": 0.95, "summary": "Schema migration"},
             {
@@ -144,19 +146,23 @@ class TestHighRiskEscalation:
         assert ticket.risk_tier == "high"
         assert ticket.status == "diagnosed"
 
-        # 3. Attempt execute — should be rejected (human intervention required)
+        # 3. Execute — aggressive mode allows high-risk execution
+        mock_gen.return_value = {
+            "success": True,
+            "patches": [{"file": "alembic/versions/x.py", "search": "a", "replace": "b"}],
+            "summary": "Added column",
+            "cost_usd": 0.10,
+        }
         exec_result = _run(execute_fix(ticket.id, db_session))
-        assert "error" in exec_result
-        assert "human" in exec_result["error"].lower()
+        assert exec_result["ok"] is True
         db_session.refresh(ticket)
-        # Status unchanged — high-risk tickets stay diagnosed until manual action
-        assert ticket.status == "diagnosed"
+        assert ticket.status == "fix_queued"
 
-        # 4. Health status counts only tickets with status in ("open", "in_progress").
-        # A "diagnosed" ticket is not counted as open, so health stays green.
-        # This is by design: diagnosed tickets have been triaged and are awaiting action.
+        # 4. Health status counts any non-resolved/rejected ticket as "open".
+        # A high-risk ticket in "fix_queued" triggers yellow (high_risk_count > 0).
         health = get_health_status(db_session)
-        assert health["status"] == "green"
+        assert health["status"] == "yellow"
+        assert health["high_risk_count"] == 1
 
 
 class TestBudgetExceeded:
@@ -170,13 +176,12 @@ class TestBudgetExceeded:
             description="D",
         )
 
-        # Simulate heavy prior spending exceeding weekly budget ($50 cap)
-        # Create SelfHealLog entries with cost_usd directly
-        for i in range(30):
-            t = create_ticket(db=db_session, user_id=integ_user.id, title=f"Old-{i}", description="D")
-            db_session.add(SelfHealLog(ticket_id=t.id, cost_usd=2.0))
-        db_session.commit()
-
-        budget = check_budget(db_session, ticket.id)
+        # Mock weekly spend to exceed budget cap.
+        # Uses patch.object on settings to ensure a known cap value,
+        # and mocks get_weekly_spend to avoid SQLite datetime comparison issues.
+        import app.services.cost_controller as cc
+        with patch.object(cc, "get_weekly_spend", return_value=55.0), \
+             patch.object(cc.settings, "self_heal_weekly_budget", 50.0):
+            budget = cc.check_budget(db_session, ticket.id)
         assert budget["allowed"] is False
         assert "weekly" in budget["reason"].lower()

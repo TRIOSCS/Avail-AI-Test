@@ -150,13 +150,24 @@ class TestDiagnoseFull:
 
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_high_risk_skips_detailed_diagnosis(self, mock_claude, db_session, test_user):
-        mock_claude.return_value = {"category": "data", "risk_tier": "high", "confidence": 0.9, "summary": "Data loss"}
+        # Aggressive mode: diagnosis runs for ALL risk levels, so two Claude calls needed
+        mock_claude.side_effect = [
+            {"category": "data", "risk_tier": "high", "confidence": 0.9, "summary": "Data loss"},
+            {
+                "root_cause": "Data corruption",
+                "affected_files": ["app/models/foo.py"],
+                "fix_approach": "Fix data",
+                "test_strategy": "Test data",
+                "estimated_complexity": "complex",
+                "requires_migration": False,
+            },
+        ]
         ticket = _make_ticket(db_session, test_user)
         result = _run(diagnose_full(ticket.id, db_session))
         assert result["risk_tier"] == "high"
-        assert result["diagnosis"] is None
-        # Only one Claude call (classification, no diagnosis)
-        assert mock_claude.call_count == 1
+        assert result["diagnosis"] is not None
+        # Two Claude calls in aggressive mode (classification + diagnosis)
+        assert mock_claude.call_count == 2
 
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_migration_forces_high(self, mock_claude, db_session, test_user):
@@ -252,12 +263,24 @@ class TestDiagnoseFull:
 
     @patch("app.services.diagnosis_service.claude_structured", new_callable=AsyncMock)
     def test_high_risk_emits_escalated_notification(self, mock_claude, db_session, test_user):
-        mock_claude.return_value = {
-            "category": "data",
-            "risk_tier": "high",
-            "confidence": 0.95,
-            "summary": "DB issue",
-        }
+        # Aggressive mode: diagnosis runs for all risk levels, prompt is generated,
+        # so notification event becomes "prompt_ready" instead of "escalated"
+        mock_claude.side_effect = [
+            {
+                "category": "data",
+                "risk_tier": "high",
+                "confidence": 0.95,
+                "summary": "DB issue",
+            },
+            {
+                "root_cause": "Schema issue",
+                "affected_files": ["app/models/foo.py"],
+                "fix_approach": "Fix schema",
+                "test_strategy": "Test migration",
+                "estimated_complexity": "complex",
+                "requires_migration": False,
+            },
+        ]
         ticket = _make_ticket(db_session, test_user)
         _run(diagnose_full(ticket.id, db_session))
         notifs = (
@@ -269,4 +292,4 @@ class TestDiagnoseFull:
             .all()
         )
         assert len(notifs) == 1
-        assert notifs[0].event_type == "escalated"
+        assert notifs[0].event_type == "prompt_ready"

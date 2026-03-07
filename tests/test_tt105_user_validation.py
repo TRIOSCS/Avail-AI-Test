@@ -46,7 +46,7 @@ class TestCreateUserValidation:
         c = self._admin_client(db_session, admin_user)
         resp = c.post("/api/admin/users", json={"name": "Jane", "email": "notanemail"})
         assert resp.status_code == 400
-        assert "valid email" in resp.json()["detail"].lower()
+        assert "valid email" in resp.json()["error"].lower()
 
     def test_invalid_email_no_domain(self, db_session, admin_user):
         """Email with @ but no domain part is rejected."""
@@ -66,7 +66,7 @@ class TestCreateUserValidation:
         long_name = "A" * 101
         resp = c.post("/api/admin/users", json={"name": long_name, "email": "jane@example.com"})
         assert resp.status_code == 400
-        assert "100 characters" in resp.json()["detail"]
+        assert "100 characters" in resp.json()["error"]
 
     def test_name_exactly_100_chars(self, db_session, admin_user):
         """Name at exactly 100 chars is accepted."""
@@ -81,7 +81,7 @@ class TestCreateUserValidation:
         c = self._admin_client(db_session, admin_user)
         resp = c.post("/api/admin/users", json={"name": "   ", "email": "jane@example.com"})
         assert resp.status_code == 400
-        assert "required" in resp.json()["detail"].lower()
+        assert "required" in resp.json()["error"].lower()
 
     def test_empty_email(self, db_session, admin_user):
         """Empty email is rejected."""

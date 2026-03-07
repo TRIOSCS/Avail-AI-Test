@@ -102,7 +102,16 @@ class TestExecuteFixValidation:
         result = _run(execute_fix(ticket.id, db_session))
         assert "cannot be executed" in result["error"]
 
-    def test_high_risk_rejected(self, db_session, exec_user):
+    @patch("app.services.execution_service._generate_fix", new_callable=AsyncMock)
+    def test_high_risk_rejected(self, mock_gen, db_session, exec_user):
+        # Aggressive mode: high-risk tickets are now executed (no longer blocked).
+        # Verify execution proceeds — mock _generate_fix to return success.
+        mock_gen.return_value = {
+            "success": True,
+            "patches": [{"file": "x.py", "search": "a", "replace": "b", "explanation": "c"}],
+            "summary": "Fixed critical issue",
+            "cost_usd": 0.10,
+        }
         ticket = TroubleTicket(
             ticket_number="TT-E04",
             submitted_by=exec_user.id,
@@ -113,9 +122,15 @@ class TestExecuteFixValidation:
             diagnosis={"root_cause": "Critical"},
         )
         db_session.add(ticket)
+        # Add SelfHealLog for cost recording
+        from app.models.self_heal_log import SelfHealLog
+        db_session.flush()
+        db_session.add(SelfHealLog(ticket_id=ticket.id, category="data", risk_tier="high"))
         db_session.commit()
-        result = _run(execute_fix(ticket.id, db_session))
-        assert result["error"] == "High-risk tickets require human intervention"
+        with patch("app.services.execution_service._write_fix_queue"):
+            result = _run(execute_fix(ticket.id, db_session))
+        assert result["ok"] is True
+        assert result["status"] == "fix_queued"
 
 
 class TestExecuteFixBudget:

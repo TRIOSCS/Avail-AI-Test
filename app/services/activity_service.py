@@ -198,6 +198,7 @@ def log_call_activity(
     external_id: str | None,
     contact_name: str | None,
     db: Session,
+    subject: str | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     if external_id:
@@ -208,6 +209,12 @@ def log_call_activity(
     match = match_phone_to_entity(phone, db)
 
     activity_type = f"call_{direction}"
+
+    # Auto-generate subject if not explicitly provided
+    if not subject:
+        verb = "to" if direction == "outbound" else "from"
+        target = contact_name or phone or "unknown"
+        subject = f"Call {verb} {target}"
 
     record = ActivityLog(
         user_id=user_id,
@@ -221,6 +228,7 @@ def log_call_activity(
         contact_name=contact_name,
         duration_seconds=duration_seconds,
         external_id=external_id,
+        subject=subject,
     )
     db.add(record)
     db.flush()

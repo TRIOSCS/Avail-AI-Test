@@ -140,13 +140,13 @@ class TestSystemHealth:
     def test_returns_db_stats(self, db_session):
         result = get_system_health(db_session)
         assert "db_stats" in result
-        assert "users" in result["db_stats"]
-        assert "requisitions" in result["db_stats"]
+        assert "Users" in result["db_stats"]
+        assert "Requisitions" in result["db_stats"]
 
     def test_counts_match(self, db_session, test_user, test_company):
         result = get_system_health(db_session)
-        assert result["db_stats"]["users"] >= 1
-        assert result["db_stats"]["companies"] >= 1
+        assert result["db_stats"]["Users"] >= 1
+        assert result["db_stats"]["Companies"] >= 1
 
     def test_scheduler_status(self, db_session, test_user):
         result = get_system_health(db_session)

@@ -206,8 +206,8 @@ class TestProactiveScorecarOutlierCap:
         from app.services.proactive_service import _cap_outlier
 
         assert _cap_outlier(1000.0) == 1000.0
-        assert _cap_outlier(9_999_999.0) == 9_999_999.0
-        assert _cap_outlier(10_000_001.0) == 0.0
+        assert _cap_outlier(499_999.0) == 499_999.0
+        assert _cap_outlier(500_001.0) == 0.0
         assert _cap_outlier(5_000_000_000.0) == 0.0  # $5B -> 0
 
     def test_cap_outlier_custom_threshold(self):

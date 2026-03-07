@@ -1136,7 +1136,7 @@ function applyRoleGating() {
     }
     const ccGroup = document.querySelector('.sb-cc-group');
     if (ccGroup) ccGroup.style.display = role === 'buyer' ? 'none' : '';
-    const perfNav = document.getElementById('navScorecards');
+    const perfNav = document.getElementById('navScorecard');
     if (perfNav) perfNav.style.display = '';
 
     // ── Settings: admin only ──

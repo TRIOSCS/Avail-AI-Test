@@ -60,12 +60,32 @@ def api_create_user(
 ):
     if body.role not in VALID_ROLES:
         raise HTTPException(400, f"Role must be one of: {', '.join(VALID_ROLES)}")
-    existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
+
+    # Validate name
+    name = body.name.strip() if body.name else ""
+    if not name:
+        raise HTTPException(400, "Name is required")
+    if len(name) > 100:
+        raise HTTPException(400, "Name must be 100 characters or fewer")
+
+    # Validate email
+    email = body.email.strip().lower() if body.email else ""
+    if not email:
+        raise HTTPException(400, "A valid email address is required")
+    if " " in body.email.strip():
+        raise HTTPException(400, "A valid email address is required")
+    if "@" not in email:
+        raise HTTPException(400, "A valid email address is required")
+    local, _, domain = email.partition("@")
+    if not local or not domain or "." not in domain:
+        raise HTTPException(400, "A valid email address is required")
+
+    existing = db.query(User).filter(User.email == email).first()
     if existing:
         raise HTTPException(409, "User with this email already exists")
     new_user = User(
-        name=body.name.strip(),
-        email=body.email.lower().strip(),
+        name=name,
+        email=email,
         role=body.role,
     )
     db.add(new_user)

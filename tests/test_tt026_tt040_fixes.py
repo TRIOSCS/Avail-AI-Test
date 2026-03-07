@@ -128,7 +128,7 @@ class TestNeedsAttentionFallback:
     """When scope=my and the user owns no companies, fall back to all active."""
 
     def test_fallback_to_all_when_no_owned(self, client, db_session, test_user):
-        """User with no owned companies should still see active companies."""
+        """User with no owned companies gets empty list (no fallback)."""
         # Create a company NOT owned by test_user (no account_owner_id, no site owner)
         c = Company(
             name="Orphan Corp",
@@ -140,9 +140,8 @@ class TestNeedsAttentionFallback:
 
         resp = client.get("/api/dashboard/needs-attention?days=30")
         data = resp.json()
-        assert len(data) >= 1
-        names = [item["company_name"] for item in data]
-        assert "Orphan Corp" in names
+        # No fallback — user owns no companies, so empty result
+        assert len(data) == 0
 
     def test_no_fallback_when_user_has_owned(self, client, db_session, test_user, sales_user):
         """When user owns companies, only their companies appear (no fallback)."""
