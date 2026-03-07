@@ -17,23 +17,21 @@ from typing import Any
 from loguru import logger
 
 TEST_AREAS: list[dict[str, str]] = [
-    {"name": "search", "hash": "#view-sourcing", "description": "Part number search and sourcing results"},
-    {"name": "requisitions", "hash": "#view-requisitions", "description": "Purchase requisitions management"},
-    {"name": "rfq", "hash": "#view-rfq", "description": "Request for quote workflows"},
-    {"name": "crm_companies", "hash": "#view-companies", "description": "CRM company management"},
-    {"name": "crm_contacts", "hash": "#view-contacts", "description": "CRM contact management"},
-    {"name": "crm_quotes", "hash": "#view-quotes", "description": "CRM quote management"},
-    {"name": "prospecting", "hash": "#view-suggested", "description": "Discovery pool and prospecting"},
-    {"name": "vendors", "hash": "#view-vendors", "description": "Vendor intelligence and cards"},
-    {"name": "tagging", "hash": "#view-tagging", "description": "AI material tagging dashboard"},
-    {"name": "tickets", "hash": "#view-tickets", "description": "Trouble tickets and self-heal"},
-    {"name": "admin_api_health", "hash": "#view-api-health", "description": "API health monitoring dashboard"},
-    {"name": "admin_settings", "hash": "#view-settings", "description": "Admin settings and configuration"},
-    {"name": "notifications", "hash": "#", "description": "Notification bell and panel"},
-    {"name": "auth", "hash": "#", "description": "Authentication and session handling"},
-    {"name": "upload", "hash": "#view-upload", "description": "BOM and file upload interface"},
-    {"name": "pipeline", "hash": "#view-pipeline", "description": "Sourcing pipeline overview"},
-    {"name": "activity", "hash": "#view-activity", "description": "Activity log and audit trail"},
+    {"name": "search", "hash": "#rfqs", "description": "Part number search and sourcing results"},
+    {"name": "vendors", "hash": "#vendors", "description": "Vendor intelligence and cards"},
+    {"name": "materials", "hash": "#materials", "description": "AI material tagging dashboard"},
+    {"name": "customers", "hash": "#customers", "description": "CRM company management"},
+    {"name": "contacts", "hash": "#contacts", "description": "CRM contact management"},
+    {"name": "prospecting", "hash": "#suggested", "description": "Discovery pool and prospecting"},
+    {"name": "dashboard", "hash": "#dashboard", "description": "Sourcing pipeline overview"},
+    {"name": "scorecard", "hash": "#scorecard", "description": "Vendor scorecard and performance"},
+    {"name": "proactive", "hash": "#proactive", "description": "Proactive offers management"},
+    {"name": "offers", "hash": "#offers", "description": "Vendor offers and quotes"},
+    {"name": "buyplans", "hash": "#buyplans", "description": "Buy plans management"},
+    {"name": "alerts", "hash": "#alerts", "description": "Alerts and notifications view"},
+    {"name": "settings", "hash": "#settings", "description": "Admin settings and configuration"},
+    {"name": "tickets", "hash": "#tickets", "description": "Trouble tickets and self-heal"},
+    {"name": "apihealth", "hash": "#apihealth", "description": "API health monitoring dashboard"},
 ]
 
 # Buttons containing these words are skipped to avoid destructive actions

@@ -6583,6 +6583,9 @@ async function loadTeamsConfig() {
             _populateChannelDropdown(config.team_id, config.channel_id, config.channel_name);
         }
         refreshTeamsChannels();
+        // Load routing and notification log sections
+        loadTeamsChannelRouting();
+        loadTeamsNotificationLog();
     } catch (e) {
         el.innerHTML = `<p class="empty" style="color:var(--red)">Couldn't load Teams config — ${esc(friendlyError(e, 'please try again'))}</p>`;
     }
@@ -6657,12 +6660,179 @@ async function saveTeamsConfig() {
 
 async function testTeamsPost() {
     const status = document.getElementById('teamsStatus');
-    if (status) status.innerHTML = '<span style="color:var(--muted)">Sending test card...</span>';
+    if (status) status.textContent = 'Sending test card...';
     try {
         const res = await apiFetch('/api/admin/teams/test', {method: 'POST'});
-        if (status) status.innerHTML = `<span style="color:var(--green)">${res.message || 'Test card sent!'}</span>`;
+        if (status) { status.style.color = 'var(--green)'; status.textContent = res.message || 'Test card sent!'; }
     } catch (e) {
-        if (status) status.innerHTML = `<span style="color:var(--red)">Test failed: ${e.message || e}</span>`;
+        if (status) { status.style.color = 'var(--red)'; status.textContent = 'Test failed: ' + (e.message || e); }
+    }
+}
+
+// ── Channel Routing ─────────────────────────────────────────────────
+
+const _routingEvents = [
+    {key: 'teams_channel_hot', label: 'Hot Requirements'},
+    {key: 'teams_channel_quotes', label: 'Competitive Quotes'},
+    {key: 'teams_channel_inventory', label: 'Stock Matches / Price Drops'},
+    {key: 'teams_channel_ownership', label: 'Ownership Warnings'},
+    {key: 'teams_channel_buyplan', label: 'Buy Plan Lifecycle'},
+    {key: 'teams_channel_ops', label: 'Ops (Tickets / Connectors)'},
+];
+
+async function loadTeamsChannelRouting() {
+    const el = document.getElementById('teamsRoutingContent');
+    if (!el) return;
+    el.textContent = 'Loading channel routing...';
+    try {
+        const [routing, channelsData] = await Promise.all([
+            apiFetch('/api/admin/teams/channel-routing'),
+            apiFetch('/api/admin/teams/channels'),
+        ]);
+        const channels = channelsData.channels || [];
+        const r = routing.routing || {};
+        // Build DOM safely
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card s-card';
+        const h3 = document.createElement('h3');
+        h3.textContent = 'Channel Routing';
+        wrapper.appendChild(h3);
+        const desc = document.createElement('p');
+        desc.className = 's-desc';
+        desc.textContent = 'Route different event types to different Teams channels. Leave blank to use the default channel.';
+        wrapper.appendChild(desc);
+        const form = document.createElement('div');
+        form.className = 's-form';
+        for (const evt of _routingEvents) {
+            const currentVal = r[evt.key] ? `${r[evt.key + '_team'] || ''}|${r[evt.key]}` : '';
+            const row = document.createElement('div');
+            row.className = 's-row';
+            row.style.marginBottom = '6px';
+            const lbl = document.createElement('label');
+            lbl.className = 's-label';
+            lbl.style.width = '220px';
+            lbl.textContent = evt.label;
+            row.appendChild(lbl);
+            const sel = document.createElement('select');
+            sel.className = 's-select routing-select';
+            sel.dataset.key = evt.key;
+            sel.style.flex = '1';
+            const defOpt = document.createElement('option');
+            defOpt.value = '';
+            defOpt.textContent = '— Default channel —';
+            sel.appendChild(defOpt);
+            for (const ch of channels) {
+                const val = `${ch.team_id}|${ch.channel_id}`;
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = `${ch.team_name} → ${ch.channel_name}`;
+                if (val === currentVal) opt.selected = true;
+                sel.appendChild(opt);
+            }
+            row.appendChild(sel);
+            form.appendChild(row);
+        }
+        const btnRow = document.createElement('div');
+        btnRow.className = 's-row';
+        btnRow.style.marginTop = '8px';
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'btn btn-primary';
+        saveBtn.textContent = 'Save Routing';
+        saveBtn.onclick = saveTeamsRouting;
+        btnRow.appendChild(saveBtn);
+        form.appendChild(btnRow);
+        const statusDiv = document.createElement('div');
+        statusDiv.id = 'teamsRoutingStatus';
+        statusDiv.className = 's-status';
+        form.appendChild(statusDiv);
+        wrapper.appendChild(form);
+        el.replaceChildren(wrapper);
+    } catch (e) {
+        el.textContent = 'Couldn\'t load routing — ' + (e.message || e);
+        el.style.color = 'var(--red)';
+    }
+}
+
+async function saveTeamsRouting() {
+    const status = document.getElementById('teamsRoutingStatus');
+    const body = {};
+    document.querySelectorAll('.routing-select').forEach(sel => {
+        const key = sel.dataset.key;
+        const val = sel.value;
+        if (val) {
+            const [teamId, channelId] = val.split('|');
+            body[key] = channelId;
+            body[key + '_team'] = teamId;
+        } else {
+            body[key] = '';
+            body[key + '_team'] = '';
+        }
+    });
+    try {
+        await apiFetch('/api/admin/teams/channel-routing', {method: 'POST', body});
+        if (status) { status.style.color = 'var(--green)'; status.textContent = 'Routing saved.'; }
+    } catch (e) {
+        if (status) { status.style.color = 'var(--red)'; status.textContent = 'Save failed: ' + (e.message || e); }
+    }
+}
+
+// ── Notification Log ────────────────────────────────────────────────
+
+async function loadTeamsNotificationLog() {
+    const el = document.getElementById('teamsLogContent');
+    if (!el) return;
+    el.textContent = 'Loading notification log...';
+    try {
+        const data = await apiFetch('/api/admin/teams/notifications?limit=50');
+        const items = data.notifications || [];
+        if (!items.length) {
+            el.textContent = 'No notifications sent yet.';
+            return;
+        }
+        const table = document.createElement('table');
+        table.style.cssText = 'width:100%;border-collapse:collapse';
+        const thead = document.createElement('thead');
+        const hrow = document.createElement('tr');
+        hrow.style.background = 'var(--bg-alt)';
+        for (const h of ['Time', 'Event', 'Entity', 'OK', 'Error']) {
+            const th = document.createElement('th');
+            th.style.cssText = 'padding:4px 8px;text-align:left;font-size:11px';
+            th.textContent = h;
+            hrow.appendChild(th);
+        }
+        thead.appendChild(hrow);
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        for (const n of items) {
+            const tr = document.createElement('tr');
+            const vals = [
+                n.created_at ? new Date(n.created_at).toLocaleString() : '',
+                n.event_type || '',
+                n.entity_name || n.entity_id || '',
+                n.success ? '✓' : '✗',
+                n.error_msg || '',
+            ];
+            const colors = [null, null, null, n.success ? 'var(--green)' : 'var(--red)', 'var(--red)'];
+            vals.forEach((v, i) => {
+                const td = document.createElement('td');
+                td.style.cssText = 'padding:4px 8px;font-size:11px';
+                if (colors[i]) td.style.color = colors[i];
+                td.textContent = v;
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        const wrapper = document.createElement('div');
+        wrapper.className = 'card s-card';
+        const h3 = document.createElement('h3');
+        h3.textContent = 'Recent Notifications';
+        wrapper.appendChild(h3);
+        wrapper.appendChild(table);
+        el.replaceChildren(wrapper);
+    } catch (e) {
+        el.textContent = 'Couldn\'t load log — ' + (e.message || e);
+        el.style.color = 'var(--red)';
     }
 }
 

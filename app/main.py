@@ -998,6 +998,10 @@ from .routers.notifications import router as notifications_router
 
 app.include_router(notifications_router)
 
+from .routers.teams_actions import router as teams_actions_router
+
+app.include_router(teams_actions_router)
+
 from .routers.tagging_admin import router as tagging_admin_router
 
 app.include_router(tagging_admin_router)

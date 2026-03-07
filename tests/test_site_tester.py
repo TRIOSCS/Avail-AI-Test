@@ -22,23 +22,21 @@ from app.services.site_tester import (
 def test_test_areas_comprehensive():
     area_names = [a["name"] for a in TEST_AREAS]
     assert "search" in area_names
-    assert "crm_companies" in area_names
-    assert "crm_contacts" in area_names
-    assert "crm_quotes" in area_names
-    assert "requisitions" in area_names
-    assert "rfq" in area_names
-    assert "prospecting" in area_names
     assert "vendors" in area_names
-    assert "tagging" in area_names
+    assert "materials" in area_names
+    assert "customers" in area_names
+    assert "contacts" in area_names
+    assert "prospecting" in area_names
+    assert "dashboard" in area_names
+    assert "scorecard" in area_names
+    assert "proactive" in area_names
+    assert "offers" in area_names
+    assert "buyplans" in area_names
+    assert "alerts" in area_names
+    assert "settings" in area_names
     assert "tickets" in area_names
-    assert "admin_api_health" in area_names
-    assert "admin_settings" in area_names
-    assert "notifications" in area_names
-    assert "auth" in area_names
-    assert "upload" in area_names
-    assert "pipeline" in area_names
-    assert "activity" in area_names
-    assert len(area_names) >= 15
+    assert "apihealth" in area_names
+    assert len(area_names) == 15
 
 
 def test_test_areas_have_required_keys():
@@ -89,17 +87,17 @@ def test_record_issue_basic():
 def test_record_issue_with_all_fields():
     tester = SiteTester(base_url="http://localhost:8000", session_cookie="test")
     tester.record_issue(
-        area="crm_companies",
+        area="customers",
         title="Network failure",
         description="Failed to fetch companies",
-        url="http://localhost:8000/#view-companies",
+        url="http://localhost:8000/#customers",
         screenshot_b64="abc123",
         network_errors=[{"url": "/api/companies", "method": "GET", "failure": "net::ERR_FAILED"}],
         console_errors=["TypeError: Cannot read property 'map' of undefined"],
         performance_ms=4500.0,
     )
     issue = tester.issues[0]
-    assert issue["url"] == "http://localhost:8000/#view-companies"
+    assert issue["url"] == "http://localhost:8000/#customers"
     assert issue["screenshot_b64"] == "abc123"
     assert len(issue["network_errors"]) == 1
     assert len(issue["console_errors"]) == 1
@@ -136,7 +134,7 @@ async def test_create_tickets_from_issues():
             "area": "search",
             "title": "Console error on search",
             "description": "TypeError on load",
-            "url": "http://localhost:8000/#view-sourcing",
+            "url": "http://localhost:8000/#rfqs",
             "console_errors": ["TypeError: x is not defined"],
             "network_errors": [],
         },
@@ -144,7 +142,7 @@ async def test_create_tickets_from_issues():
             "area": "rfq",
             "title": "Slow load on RFQ",
             "description": "Took 5000ms",
-            "url": "http://localhost:8000/#view-rfq",
+            "url": "http://localhost:8000/#rfqs",
             "console_errors": [],
             "network_errors": [],
         },

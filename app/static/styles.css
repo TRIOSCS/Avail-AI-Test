@@ -1081,6 +1081,12 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .vendor-card-row{flex-wrap:wrap}
     .act-summary{flex-wrap:wrap}
 }
+/* Sourcing table — hide less-important columns on medium screens */
+@media(min-width:769px) and (max-width:1399px){
+    .dd-panel .dtbl th:nth-child(7),.dd-panel .dtbl td:nth-child(7),
+    .dd-panel .dtbl th:nth-child(9),.dd-panel .dtbl td:nth-child(9){display:none}
+}
+
 /* Utility classes */
 .flex{display:flex}.flex-center{display:flex;align-items:center}
 .gap-sm{gap:6px}.gap-md{gap:8px}.gap-lg{gap:10px}
@@ -1597,7 +1603,7 @@ table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
   background: var(--bg2, #1e1e2e); color: var(--text, #cdd6f4); border: 1px solid var(--border, #45475a);
   border-radius: 8px; padding: 10px 12px; min-width: 220px; max-width: 280px;
   font-size: 11px; line-height: 1.5; box-shadow: 0 4px 16px rgba(0,0,0,.25); pointer-events: none; white-space: normal; }
-.effort-wrap:hover .effort-tip { display: block; }
+.effort-wrap:hover .effort-tip, .effort-wrap.pinned .effort-tip { display: block; pointer-events: auto; }
 .effort-tip::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
   border: 6px solid transparent; border-top-color: var(--border, #45475a); }
 .effort-sig { display: flex; align-items: center; justify-content: space-between; padding: 2px 0; }

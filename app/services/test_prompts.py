@@ -10,7 +10,7 @@ Depends on: nothing
 
 AREA_PROMPTS: dict[str, dict] = {
     "search": {
-        "url_hash": "#view-sourcing",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Enter a known MPN (e.g. LM358) in the search bar and click Search.\n"
@@ -30,7 +30,7 @@ AREA_PROMPTS: dict[str, dict] = {
         ),
     },
     "requisitions": {
-        "url_hash": "#view-requisitions",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Navigate to the requisitions view and verify the list loads.\n"
@@ -50,7 +50,7 @@ AREA_PROMPTS: dict[str, dict] = {
         ),
     },
     "rfq": {
-        "url_hash": "#view-rfq",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Open the RFQ view and verify pending/sent/responded tabs load.\n"
@@ -69,8 +69,8 @@ AREA_PROMPTS: dict[str, dict] = {
             '{"source": "agent", "tested_area": "rfq", "title": "...", "description": "..."}.'
         ),
     },
-    "crm_companies": {
-        "url_hash": "#view-companies",
+    "customers": {
+        "url_hash": "#customers",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Load the companies list and verify pagination works (Load More button).\n"
@@ -86,11 +86,11 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "crm_companies", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "customers", "title": "...", "description": "..."}.'
         ),
     },
-    "crm_contacts": {
-        "url_hash": "#view-contacts",
+    "contacts": {
+        "url_hash": "#contacts",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Load the contacts list and verify bulk loading works.\n"
@@ -106,11 +106,11 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "crm_contacts", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "contacts", "title": "...", "description": "..."}.'
         ),
     },
     "crm_quotes": {
-        "url_hash": "#view-quotes",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Load the quotes list and verify it displays.\n"
@@ -130,7 +130,7 @@ AREA_PROMPTS: dict[str, dict] = {
         ),
     },
     "prospecting": {
-        "url_hash": "#view-suggested",
+        "url_hash": "#suggested",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Navigate to the prospecting discovery pool.\n"
@@ -150,7 +150,7 @@ AREA_PROMPTS: dict[str, dict] = {
         ),
     },
     "vendors": {
-        "url_hash": "#view-vendors",
+        "url_hash": "#vendors",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Load the vendors list and verify it populates.\n"
@@ -169,8 +169,8 @@ AREA_PROMPTS: dict[str, dict] = {
             '{"source": "agent", "tested_area": "vendors", "title": "...", "description": "..."}.'
         ),
     },
-    "tagging": {
-        "url_hash": "#view-tagging",
+    "materials": {
+        "url_hash": "#materials",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Open the tagging view and verify tag statistics load.\n"
@@ -186,11 +186,11 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "tagging", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "materials", "title": "...", "description": "..."}.'
         ),
     },
     "tickets": {
-        "url_hash": "#view-tickets",
+        "url_hash": "#tickets",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Open the trouble tickets view and verify the list loads.\n"
@@ -209,8 +209,8 @@ AREA_PROMPTS: dict[str, dict] = {
             '{"source": "agent", "tested_area": "tickets", "title": "...", "description": "..."}.'
         ),
     },
-    "admin_api_health": {
-        "url_hash": "#view-api-health",
+    "apihealth": {
+        "url_hash": "#apihealth",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Navigate to the API Health admin view.\n"
@@ -226,11 +226,11 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "admin_api_health", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "apihealth", "title": "...", "description": "..."}.'
         ),
     },
-    "admin_settings": {
-        "url_hash": "#view-settings",
+    "settings": {
+        "url_hash": "#settings",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Open the admin settings view.\n"
@@ -246,7 +246,7 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "admin_settings", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "settings", "title": "...", "description": "..."}.'
         ),
     },
     "notifications": {
@@ -290,7 +290,7 @@ AREA_PROMPTS: dict[str, dict] = {
         ),
     },
     "upload": {
-        "url_hash": "#view-upload",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Navigate to the upload view.\n"
@@ -309,8 +309,8 @@ AREA_PROMPTS: dict[str, dict] = {
             '{"source": "agent", "tested_area": "upload", "title": "...", "description": "..."}.'
         ),
     },
-    "pipeline": {
-        "url_hash": "#view-pipeline",
+    "dashboard": {
+        "url_hash": "#dashboard",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Open the pipeline view and verify columns/stages render.\n"
@@ -326,11 +326,11 @@ AREA_PROMPTS: dict[str, dict] = {
             "SUBMITTING FINDINGS:\n"
             "Before creating a ticket, POST to /api/trouble-tickets/similar with your description "
             "to check for duplicates. Then POST to /api/trouble-tickets with "
-            '{"source": "agent", "tested_area": "pipeline", "title": "...", "description": "..."}.'
+            '{"source": "agent", "tested_area": "dashboard", "title": "...", "description": "..."}.'
         ),
     },
     "activity": {
-        "url_hash": "#view-activity",
+        "url_hash": "#rfqs",
         "prompt": (
             "WHAT TO TEST:\n"
             "1. Navigate to the activity feed view.\n"

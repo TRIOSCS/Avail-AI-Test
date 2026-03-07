@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, BuyPlan
 from app.services.buyplan_service import (
-    _post_teams_channel,
+    _post_teams_card,
     _send_teams_dm,
     auto_complete_stock_sales,
     log_buyplan_activity,
@@ -47,7 +47,7 @@ from app.services.buyplan_service import (
 # so we patch at the source module, not in buyplan_service namespace.
 _PATCH_TOKEN = "app.scheduler.get_valid_token"
 _PATCH_GC = "app.utils.graph_client.GraphClient"
-_PATCH_TEAMS_CH = "app.services.buyplan_notifications._post_teams_channel"
+_PATCH_TEAMS_CH = "app.services.buyplan_notifications._post_teams_card"
 _PATCH_TEAMS_DM = "app.services.buyplan_notifications._send_teams_dm"
 _PATCH_SETTINGS = "app.services.buyplan_notifications.settings"
 
@@ -258,9 +258,9 @@ class TestNotifyBuyplanSubmitted:
             await notify_buyplan_submitted(plan, db_session)
 
         mock_teams_channel.assert_awaited_once()
-        channel_msg = mock_teams_channel.call_args[0][0]
-        assert "Approval Required" in channel_msg
-        assert str(plan.id) in channel_msg
+        call_args = mock_teams_channel.call_args
+        assert call_args[0][0] == plan  # plan object passed as first arg
+        assert call_args[0][1] == "buyplan_submitted"  # event name
 
         mock_teams_dm.assert_awaited_once()
 
@@ -551,8 +551,8 @@ class TestNotifyBuyplanApproved:
             await notify_buyplan_approved(plan, db_session)
 
         mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Approved" in msg
+        assert mock_teams.call_args[0][0] == plan
+        assert mock_teams.call_args[0][1] == "buyplan_approved"
 
     @pytest.mark.asyncio
     async def test_manager_notes_in_email(
@@ -910,9 +910,8 @@ class TestNotifyStockSaleApproved:
             await notify_stock_sale_approved(plan, db_session)
 
         mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Stock Sale" in msg
-        assert "No PO required" in msg
+        assert mock_teams.call_args[0][0] == plan
+        assert mock_teams.call_args[0][1] == "buyplan_completed"
 
     @pytest.mark.asyncio
     async def test_missing_submitter_still_works(
@@ -1036,9 +1035,8 @@ class TestNotifyBuyplanCompleted:
             await notify_buyplan_completed(plan, db_session, "Admin User")
 
         mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Complete" in msg
-        assert "Admin User" in msg
+        assert mock_teams.call_args[0][0] == plan
+        assert mock_teams.call_args[0][1] == "buyplan_completed"
 
     @pytest.mark.asyncio
     async def test_missing_submitter_returns_early(
@@ -1186,9 +1184,8 @@ class TestNotifyBuyplanCancelled:
             await notify_buyplan_cancelled(plan, db_session)
 
         mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Cancelled" in msg
-        assert "Order cancelled by customer" in msg
+        assert mock_teams.call_args[0][0] == plan
+        assert mock_teams.call_args[0][1] == "buyplan_cancelled"
 
 
 # ── 8. verify_po_sent ────────────────────────────────────────────────
@@ -1703,55 +1700,54 @@ class TestRunBuyplanBg:
             mock_asyncio.create_task.assert_called_once()
 
 
-# ── 11. _post_teams_channel ──────────────────────────────────────────
+# ── 11. _post_teams_card ──────────────────────────────────────────
 
 
-class TestPostTeamsChannel:
-    @pytest.mark.asyncio
-    async def test_skips_when_no_webhook(self):
-        with patch("app.services.teams_notifications.get_credential_cached", return_value=None):
-            await _post_teams_channel("Test message")
+class TestPostTeamsCard:
+    _P_APPROVAL = "app.services.teams.send_buyplan_approval_card"
+    _P_CARD = "app.services.teams.send_buyplan_card"
 
-    @pytest.mark.asyncio
-    async def test_posts_when_configured(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-
-        with (
-            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.teams_notifications.http") as mock_http,
-        ):
-            mock_http.post = AsyncMock(return_value=mock_resp)
-            await _post_teams_channel("Buy plan notification")
-
-        mock_http.post.assert_awaited_once()
-        call_args = mock_http.post.call_args
-        assert call_args[0][0] == "https://webhook.test"
-        payload = call_args[1]["json"]
-        assert payload["type"] == "message"
-        assert "Buy plan notification" in payload["attachments"][0]["content"]["body"][0]["text"]
+    def _make_plan(self):
+        plan = MagicMock()
+        plan.id = 1
+        plan.requisition_id = 10
+        plan.line_items = [{"plan_qty": 100, "cost_price": 5.0}]
+        return plan
 
     @pytest.mark.asyncio
-    async def test_handles_webhook_error(self):
-        with (
-            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.teams_notifications.http") as mock_http,
-        ):
-            mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
-            await _post_teams_channel("Test message")
+    async def test_submitted_calls_approval_card(self):
+        plan = self._make_plan()
+        with patch(self._P_APPROVAL, new_callable=AsyncMock) as m:
+            await _post_teams_card(plan, "buyplan_submitted", "John", [])
+        m.assert_awaited_once()
+        assert m.call_args.kwargs["plan_id"] == 1
+        assert m.call_args.kwargs["total_cost"] == 500.0
 
     @pytest.mark.asyncio
-    async def test_handles_non_200_response(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        mock_resp.text = "Forbidden"
+    async def test_non_submitted_calls_generic_card(self):
+        plan = self._make_plan()
+        with patch(self._P_CARD, new_callable=AsyncMock) as m:
+            await _post_teams_card(plan, "buyplan_approved", "Jane", [{"key": "Status", "value": "Approved"}])
+        m.assert_awaited_once()
+        assert m.call_args.kwargs["event"] == "buyplan_approved"
 
-        with (
-            patch("app.services.teams_notifications.get_credential_cached", return_value="https://webhook.test"),
-            patch("app.services.teams_notifications.http") as mock_http,
-        ):
-            mock_http.post = AsyncMock(return_value=mock_resp)
-            await _post_teams_channel("Test message")
+    @pytest.mark.asyncio
+    async def test_submitted_empty_line_items(self):
+        plan = MagicMock()
+        plan.id = 2
+        plan.requisition_id = 20
+        plan.line_items = []
+        with patch(self._P_APPROVAL, new_callable=AsyncMock) as m:
+            await _post_teams_card(plan, "buyplan_submitted", "Bob", [])
+        assert m.call_args.kwargs["total_cost"] == 0
+
+    @pytest.mark.asyncio
+    async def test_admin_mentions_forwarded(self):
+        plan = self._make_plan()
+        mentions = [("admin@test.com", "Admin")]
+        with patch(self._P_CARD, new_callable=AsyncMock) as m:
+            await _post_teams_card(plan, "buyplan_completed", "Sue", [], admin_mentions=mentions)
+        assert m.call_args.kwargs["mention_emails"] == mentions
 
 
 # ── 12. _send_teams_dm ──────────────────────────────────────────────
@@ -1856,10 +1852,8 @@ class TestEdgeCases:
         ):
             await notify_buyplan_submitted(plan, db_session)
 
-        msg = mock_teams.call_args[0][0]
-        # Total = 100*1.00 + 200*2.00 = $500.00
-        assert "$500.00" in msg
-        assert "2 line items" in msg
+        assert mock_teams.call_args[0][0] == plan
+        assert mock_teams.call_args[0][1] == "buyplan_submitted"
 
 
 # ── 14. _send_teams_dm with direct token (no DB) ───────────────────

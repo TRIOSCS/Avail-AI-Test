@@ -19,7 +19,7 @@ from app.services.teams import (
     send_competitive_quote_alert,
     send_ownership_warning,
     send_stock_match_alert,
-)
+)  # _get_teams_config still tested directly in TestGetTeamsConfigDB
 
 
 @pytest.fixture(autouse=True)
@@ -119,7 +119,7 @@ class TestGetTeamsConfigDB:
 class TestCompetitiveQuoteAlertCoverage:
     @pytest.mark.asyncio
     async def test_disabled_returns_false(self):
-        with patch("app.services.teams._get_teams_config", return_value=("", "", False)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
             result = await send_competitive_quote_alert(
                 offer_id=1,
                 mpn="LM317T",
@@ -133,7 +133,7 @@ class TestCompetitiveQuoteAlertCoverage:
     @pytest.mark.asyncio
     async def test_rate_limited_returns_false(self):
         _mark_posted("competitive_quote", 99)
-        with patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)):
             result = await send_competitive_quote_alert(
                 offer_id=99,
                 mpn="LM317T",
@@ -147,7 +147,7 @@ class TestCompetitiveQuoteAlertCoverage:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
         ):
             result = await send_competitive_quote_alert(
@@ -163,7 +163,7 @@ class TestCompetitiveQuoteAlertCoverage:
     @pytest.mark.asyncio
     async def test_zero_best_price(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):
@@ -186,7 +186,7 @@ class TestCompetitiveQuoteAlertCoverage:
 class TestOwnershipWarningCoverage:
     @pytest.mark.asyncio
     async def test_disabled_returns_false(self):
-        with patch("app.services.teams._get_teams_config", return_value=("", "", False)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
             result = await send_ownership_warning(
                 company_id=1,
                 company_name="Acme",
@@ -198,7 +198,7 @@ class TestOwnershipWarningCoverage:
     @pytest.mark.asyncio
     async def test_rate_limited_returns_false(self):
         _mark_posted("ownership_expiring", 88)
-        with patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)):
             result = await send_ownership_warning(
                 company_id=88,
                 company_name="Acme",
@@ -210,7 +210,7 @@ class TestOwnershipWarningCoverage:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
         ):
             result = await send_ownership_warning(
@@ -230,7 +230,7 @@ class TestOwnershipWarningCoverage:
 class TestStockMatchAlertCoverage:
     @pytest.mark.asyncio
     async def test_disabled_returns_false(self):
-        with patch("app.services.teams._get_teams_config", return_value=("", "", False)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
             result = await send_stock_match_alert(
                 matches=[{"mpn": "X", "requirement_id": 1, "requisition_id": 1}],
                 filename="stock.xlsx",
@@ -241,7 +241,7 @@ class TestStockMatchAlertCoverage:
     @pytest.mark.asyncio
     async def test_no_token_returns_false(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
         ):
             result = await send_stock_match_alert(
@@ -254,7 +254,7 @@ class TestStockMatchAlertCoverage:
     @pytest.mark.asyncio
     async def test_empty_matches(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch", "team", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):

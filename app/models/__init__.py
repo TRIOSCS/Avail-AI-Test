@@ -105,6 +105,9 @@ from .sync import SyncLog  # noqa: F401
 # Tagging (AI classification + entity propagation)
 from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
 
+# Teams notification audit log
+from .teams_notification_log import TeamsNotificationLog  # noqa: F401
+
 # Unified Score (cross-role leaderboard)
 from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 

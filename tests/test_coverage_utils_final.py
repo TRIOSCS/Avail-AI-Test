@@ -258,7 +258,7 @@ async def test_stock_sale_email_inner_exception(db_session, test_user):
             return_value=gc_mock,
         ),
         patch(
-            "app.services.buyplan_notifications._post_teams_channel",
+            "app.services.buyplan_notifications._post_teams_card",
             new_callable=AsyncMock,
         ),
         patch("app.services.buyplan_notifications.settings") as ms,

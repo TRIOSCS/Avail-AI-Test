@@ -90,6 +90,10 @@ def test_activity_to_dict_includes_all_keys():
         "notes",
         "duration_seconds",
         "requisition_id",
+        "direction",
+        "event_type",
+        "summary",
+        "source_url",
         "dismissed_at",
         "created_at",
     }

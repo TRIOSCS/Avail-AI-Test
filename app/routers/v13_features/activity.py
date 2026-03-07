@@ -97,6 +97,10 @@ def _activity_to_dict(a) -> dict:
         "notes": getattr(a, "notes", None),
         "duration_seconds": a.duration_seconds,
         "requisition_id": getattr(a, "requisition_id", None),
+        "direction": getattr(a, "direction", None),
+        "event_type": getattr(a, "event_type", None),
+        "summary": getattr(a, "summary", None),
+        "source_url": getattr(a, "source_url", None),
         "dismissed_at": a.dismissed_at.isoformat() if getattr(a, "dismissed_at", None) else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }

@@ -14,9 +14,11 @@ import pytest
 
 from app.services.teams import (
     _build_deep_link,
+    _get_channel_for_event,
     _get_teams_config,
     _is_rate_limited,
     _make_card,
+    _make_card_with_actions,
     _mark_posted,
     clear_rate_limits,
     post_to_channel,
@@ -158,7 +160,7 @@ class TestHotRequirementAlert:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):
@@ -174,7 +176,7 @@ class TestHotRequirementAlert:
 
     @pytest.mark.asyncio
     async def test_skips_when_disabled(self):
-        with patch("app.services.teams._get_teams_config", return_value=("", "", False)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
             result = await send_hot_requirement_alert(
                 requirement_id=1,
                 mpn="LM317T",
@@ -188,7 +190,7 @@ class TestHotRequirementAlert:
     @pytest.mark.asyncio
     async def test_rate_limited(self):
         _mark_posted("hot_requirement", 1)
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)):
             result = await send_hot_requirement_alert(
                 requirement_id=1,
                 mpn="LM317T",
@@ -202,7 +204,7 @@ class TestHotRequirementAlert:
     @pytest.mark.asyncio
     async def test_no_token(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
         ):
             result = await send_hot_requirement_alert(
@@ -223,7 +225,7 @@ class TestCompetitiveQuoteAlert:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):
@@ -242,12 +244,12 @@ class TestCompetitiveQuoteAlert:
         """Verify the card contains correct savings percentage."""
         captured_card = {}
 
-        async def _capture_post(team_id, channel_id, card, token):
+        async def _capture_post(team_id, channel_id, card, token, **kwargs):
             captured_card.update(card)
             return True
 
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", side_effect=_capture_post),
         ):
@@ -272,7 +274,7 @@ class TestOwnershipWarning:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):
@@ -292,7 +294,7 @@ class TestStockMatchAlert:
     @pytest.mark.asyncio
     async def test_sends_with_matches(self):
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
         ):
@@ -309,7 +311,7 @@ class TestStockMatchAlert:
     @pytest.mark.asyncio
     async def test_rate_limited_by_filename(self):
         _mark_posted("stock_match", "Arrow:stock.xlsx")
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)):
+        with patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)):
             result = await send_stock_match_alert(
                 matches=[{"mpn": "X", "requirement_id": 1, "requisition_id": 1}],
                 filename="stock.xlsx",
@@ -322,12 +324,12 @@ class TestStockMatchAlert:
         """When >5 matches, card shows first 5 + count."""
         captured_card = {}
 
-        async def _capture_post(team_id, channel_id, card, token):
+        async def _capture_post(team_id, channel_id, card, token, **kwargs):
             captured_card.update(card)
             return True
 
         with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.services.teams.post_to_channel", side_effect=_capture_post),
         ):

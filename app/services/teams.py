@@ -1,32 +1,88 @@
-"""Teams notification service — surgical channel posting via Graph API.
+"""Teams notification service — channel posting via Graph API with Redis rate limiting.
 
-Posts Adaptive Cards to a configured Teams channel for critical AVAIL events:
+Posts Adaptive Cards to configured Teams channels for critical AVAIL events:
 1. HOT REQUIREMENT — target value > configurable threshold ($10k default)
 2. COMPETITIVE QUOTE — vendor quotes >20% below current best price
 3. OWNERSHIP EXPIRING — customer ownership expires in 7 days (day-23/83)
 4. STOCK LIST GOLD — auto-imported stock list matches open requirements
+5. BUY PLAN lifecycle (submit/approve/reject/complete/cancel)
+6. TROUBLE TICKET opened/resolved
+7. CONNECTOR DOWN — health monitor detects API failure
+8. PRICE DROP — sighting price drops >15% from last known
+9. PIPELINE MILESTONE — requisition won/lost
+10. BUY PLAN ESCALATION — approval pending >8h
+11. WEEKLY DIGEST — Monday 8am summary
 
 Business Rules:
-- Rate limited: max 1 post per event type per entity per hour
+- Rate limited via Redis (1h TTL, fallback to in-memory if Redis unavailable)
+- Per-event-type channel routing (falls back to default channel)
 - Fire-and-forget: errors logged, never raised
 - Graceful degradation: if Teams not configured or API fails, returns False
+- All posts logged to teams_notification_log table
 
-Called by: scheduler.py, ownership_service.py, requisitions.py, crm.py
-Depends on: utils/graph_client.py, config.py
+Called by: scheduler.py, ownership_service.py, requisitions.py, crm.py, health_monitor.py,
+          buyplan_notifications.py, buyplan_v3_notifications.py, trouble_ticket_service.py
+Depends on: utils/graph_client.py, config.py, cache/intel_cache.py (Redis pattern)
 """
 
 from datetime import datetime, timezone
 
 from loguru import logger
 
-# Rate limit: { "event_type:entity_id" → last_posted_at }
+# In-memory fallback for rate limiting when Redis is unavailable
 _rate_limits: dict[str, datetime] = {}
 _RATE_LIMIT_SECONDS = 3600  # 1 hour
+_REDIS_PREFIX = "teams_rl:"
+
+# Event type → channel config key mapping
+EVENT_CHANNEL_MAP = {
+    "hot_requirement": "teams_channel_hot",
+    "competitive_quote": "teams_channel_quotes",
+    "stock_match": "teams_channel_inventory",
+    "ownership_expiring": "teams_channel_ownership",
+    "buyplan_submitted": "teams_channel_buyplan",
+    "buyplan_approved": "teams_channel_buyplan",
+    "buyplan_rejected": "teams_channel_buyplan",
+    "buyplan_completed": "teams_channel_buyplan",
+    "buyplan_cancelled": "teams_channel_buyplan",
+    "buyplan_escalation": "teams_channel_buyplan",
+    "trouble_ticket_opened": "teams_channel_ops",
+    "trouble_ticket_resolved": "teams_channel_ops",
+    "connector_down": "teams_channel_ops",
+    "price_drop": "teams_channel_inventory",
+    "pipeline_milestone": "teams_channel_hot",
+    "weekly_digest": "teams_channel_hot",
+}
+
+
+def _get_redis():
+    """Get Redis client for rate limiting. Returns None if unavailable."""
+    import os
+
+    if os.environ.get("TESTING"):
+        return None
+    try:
+        from app.cache.intel_cache import _get_redis as _cache_get_redis
+
+        return _cache_get_redis()
+    except Exception:
+        return None
 
 
 def _is_rate_limited(event_type: str, entity_id: int | str) -> bool:
-    """Check if this event+entity combo was posted within the last hour."""
+    """Check if this event+entity combo was posted within the last hour.
+
+    Uses Redis SETEX with 1h TTL (survives app restarts).
+    Falls back to in-memory dict if Redis is unavailable.
+    """
     key = f"{event_type}:{entity_id}"
+    r = _get_redis()
+    if r:
+        try:
+            return r.exists(f"{_REDIS_PREFIX}{key}") > 0
+        except Exception:
+            pass
+    # Fallback to in-memory
     last = _rate_limits.get(key)
     if last and (datetime.now(timezone.utc) - last).total_seconds() < _RATE_LIMIT_SECONDS:
         return True
@@ -34,9 +90,25 @@ def _is_rate_limited(event_type: str, entity_id: int | str) -> bool:
 
 
 def _mark_posted(event_type: str, entity_id: int | str):
-    """Record that we posted this event for rate limiting."""
+    """Record that we posted this event for rate limiting.
+
+    Sets a Redis key with 1h TTL. Falls back to in-memory dict only when Redis is unavailable.
+    """
     key = f"{event_type}:{entity_id}"
-    _rate_limits[key] = datetime.now(timezone.utc)
+    r = _get_redis()
+    if r:
+        try:
+            r.setex(f"{_REDIS_PREFIX}{key}", _RATE_LIMIT_SECONDS, "1")
+            return
+        except Exception:
+            pass
+    # In-memory fallback — prune stale entries periodically to prevent unbounded growth
+    now = datetime.now(timezone.utc)
+    if len(_rate_limits) > 1000:
+        stale = [k for k, v in _rate_limits.items() if (now - v).total_seconds() >= _RATE_LIMIT_SECONDS]
+        for k in stale:
+            del _rate_limits[k]
+    _rate_limits[key] = now
 
 
 def _get_teams_config() -> tuple[str, str, bool]:
@@ -73,11 +145,71 @@ def _get_teams_config() -> tuple[str, str, bool]:
     return channel_id, team_id, enabled
 
 
-async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str) -> bool:
+def _get_channel_for_event(event_type: str) -> tuple[str, str, bool]:
+    """Get the channel for a specific event type, falling back to default.
+
+    Fetches default config AND per-event routing in a single DB session.
+    Returns (channel_id, team_id, enabled).
+    """
+    from app.config import settings
+
+    channel_id = settings.teams_channel_id
+    team_id = settings.teams_team_id
+    enabled = bool(channel_id and team_id)
+
+    config_key = EVENT_CHANNEL_MAP.get(event_type)
+    # Fetch all needed keys in one DB session
+    keys_to_fetch = ["teams_channel_id", "teams_team_id", "teams_enabled"]
+    if config_key:
+        keys_to_fetch.extend([config_key, f"{config_key}_team"])
+
+    try:
+        from app.database import SessionLocal
+        from app.services.admin_service import get_config_values
+
+        db = SessionLocal()
+        try:
+            cfg = get_config_values(db, keys_to_fetch)
+        finally:
+            db.close()
+
+        # Apply default config
+        if cfg.get("teams_channel_id"):
+            channel_id = cfg["teams_channel_id"]
+        if cfg.get("teams_team_id"):
+            team_id = cfg["teams_team_id"]
+        if "teams_enabled" in cfg:
+            enabled = cfg["teams_enabled"].lower() == "true"
+
+        if not enabled:
+            return channel_id, team_id, enabled
+
+        # Apply per-event routing override
+        if config_key:
+            if cfg.get(config_key):
+                channel_id = cfg[config_key]
+            if cfg.get(f"{config_key}_team"):
+                team_id = cfg[f"{config_key}_team"]
+    except Exception as e:
+        logger.debug("Teams config: DB lookup failed, using env vars: %s", e)
+
+    return channel_id, team_id, enabled
+
+
+async def post_to_channel(
+    team_id: str,
+    channel_id: str,
+    card: dict,
+    token: str,
+    event_type: str = "",
+    entity_id: int | str = 0,
+    entity_name: str = "",
+) -> bool:
     """Post an Adaptive Card to a Teams channel via Graph API.
 
     Uses the chatMessage endpoint: POST /teams/{id}/channels/{id}/messages
     The card is wrapped in an attachment with contentType "application/vnd.microsoft.card.adaptive".
+    Logs the result to teams_notification_log table.
 
     Returns True on success, False on any failure.
     """
@@ -96,16 +228,25 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
         ],
     }
 
+    success = False
+    error_msg = None
     try:
         gc = GraphClient(token)
         result = await gc.post_json(f"/teams/{team_id}/channels/{channel_id}/messages", payload)
         if "error" in result:
-            logger.warning(f"Teams post failed: {result.get('detail', result.get('error'))}")
-            return False
-        return True
+            error_msg = str(result.get("detail", result.get("error")))
+            logger.warning(f"Teams post failed: {error_msg}")
+        else:
+            success = True
     except Exception as e:
+        error_msg = str(e)[:500]
         logger.warning(f"Teams post error: {e}")
-        return False
+
+    # Log to audit table (fire-and-forget)
+    if event_type:
+        _log_notification(event_type, entity_id, entity_name, channel_id, success, error_msg)
+
+    return success
 
 
 def _build_deep_link(path: str) -> str:
@@ -116,25 +257,25 @@ def _build_deep_link(path: str) -> str:
     return f"{base}/{path.lstrip('/')}"
 
 
-def _make_card(
+# ═══════════════════════════════════════════════════════════════════════
+#  CARD BUILDERS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _make_card_with_actions(
     title: str,
     subtitle: str,
     facts: list[dict],
-    action_url: str,
-    action_title: str = "View in AVAIL",
+    actions: list[dict],
     accent_color: str = "attention",
+    mentions: list[dict] | None = None,
 ) -> dict:
-    """Build a standard Adaptive Card for Teams notifications.
+    """Build an Adaptive Card with custom actions (buttons) and optional @mentions.
 
-    Args:
-        title: Header text (e.g., "HOT REQUIREMENT")
-        subtitle: Description line
-        facts: List of {"title": "...", "value": "..."} pairs
-        action_url: Deep link URL
-        action_title: Button text
-        accent_color: "attention" (red), "good" (green), "warning" (yellow), "accent" (blue)
+    Actions can be Action.OpenUrl or Action.Submit (for interactive cards).
+    Mentions list: [{"text": "<at>John</at>", "mentioned": {"id": "john@co.com", "name": "John"}}]
     """
-    return {
+    card = {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
         "version": "1.4",
@@ -158,18 +299,50 @@ def _make_card(
                 "spacing": "Medium",
             },
         ],
-        "actions": [
-            {
-                "type": "Action.OpenUrl",
-                "title": action_title,
-                "url": action_url,
-            }
-        ],
+        "actions": actions,
     }
+    if mentions:
+        card["msteams"] = {"entities": mentions}
+    return card
+
+
+def _make_card(
+    title: str,
+    subtitle: str,
+    facts: list[dict],
+    action_url: str,
+    action_title: str = "View in AVAIL",
+    accent_color: str = "attention",
+) -> dict:
+    """Build a standard Adaptive Card with a single OpenUrl action.
+
+    Delegates to _make_card_with_actions to avoid duplicating card structure.
+    """
+    return _make_card_with_actions(
+        title=title,
+        subtitle=subtitle,
+        facts=facts,
+        actions=[{"type": "Action.OpenUrl", "title": action_title, "url": action_url}],
+        accent_color=accent_color,
+    )
+
+
+def _build_mention(email: str, name: str) -> tuple[str, dict]:
+    """Build a Teams @mention text and entity for an Adaptive Card.
+
+    Returns (mention_text, mention_entity) to insert into card subtitle and msteams.entities.
+    """
+    mention_text = f"<at>{name}</at>"
+    mention_entity = {
+        "type": "mention",
+        "text": mention_text,
+        "mentioned": {"id": email, "name": name},
+    }
+    return mention_text, mention_entity
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  EVENT SENDERS
+#  ORIGINAL 4 EVENT SENDERS (upgraded with channel routing + audit log)
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -181,12 +354,15 @@ async def send_hot_requirement_alert(
     customer_name: str,
     requisition_id: int,
     token: str | None = None,
+    owner_email: str = "",
+    owner_name: str = "",
 ) -> bool:
     """Post alert for a high-value new requirement.
 
     Triggered when target_qty * target_price > threshold (default $10,000).
+    Optionally @mentions the buyer who owns the customer.
     """
-    channel_id, team_id, enabled = _get_teams_config()
+    channel_id, team_id, enabled = _get_channel_for_event("hot_requirement")
     if not enabled:
         return False
     if _is_rate_limited("hot_requirement", requirement_id):
@@ -198,9 +374,16 @@ async def send_hot_requirement_alert(
             return False
 
     total_value = target_qty * target_price
+    mentions = []
+    subtitle = f"High-value requirement: {mpn} (${total_value:,.0f})"
+    if owner_email and owner_name:
+        mention_text, mention_entity = _build_mention(owner_email, owner_name)
+        subtitle = f"{mention_text} — {subtitle}"
+        mentions.append(mention_entity)
+
     card = _make_card(
         title="HOT REQUIREMENT",
-        subtitle=f"High-value requirement: {mpn} (${total_value:,.0f})",
+        subtitle=subtitle,
         facts=[
             {"title": "MPN", "value": mpn},
             {"title": "Quantity", "value": f"{target_qty:,}"},
@@ -212,8 +395,13 @@ async def send_hot_requirement_alert(
         action_title="View Requirement",
         accent_color="attention",
     )
+    if mentions:
+        card["msteams"] = {"entities": mentions}
 
-    ok = await post_to_channel(team_id, channel_id, card, token)
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="hot_requirement", entity_id=requirement_id, entity_name=mpn,
+    )
     if ok:
         _mark_posted("hot_requirement", requirement_id)
     return ok
@@ -227,9 +415,16 @@ async def send_competitive_quote_alert(
     best_price: float,
     requisition_id: int,
     token: str | None = None,
+    top_vendors: list[dict] | None = None,
+    creator_email: str = "",
+    creator_name: str = "",
 ) -> bool:
-    """Post alert when a vendor quotes >20% below current best price."""
-    channel_id, team_id, enabled = _get_teams_config()
+    """Post alert when a vendor quotes >20% below current best price.
+
+    If top_vendors is provided, shows top 3 side-by-side comparison.
+    Optionally @mentions the requisition creator.
+    """
+    channel_id, team_id, enabled = _get_channel_for_event("competitive_quote")
     if not enabled:
         return False
     if _is_rate_limited("competitive_quote", offer_id):
@@ -241,22 +436,40 @@ async def send_competitive_quote_alert(
             return False
 
     savings_pct = ((best_price - offer_price) / best_price) * 100 if best_price else 0
+    mentions = []
+    subtitle = f"{vendor_name} undercuts best price by {savings_pct:.0f}%"
+    if creator_email and creator_name:
+        mention_text, mention_entity = _build_mention(creator_email, creator_name)
+        subtitle = f"{mention_text} — {subtitle}"
+        mentions.append(mention_entity)
+
+    # Richer facts: show top 3 vendors side-by-side if available
+    facts = [
+        {"title": "MPN", "value": mpn},
+        {"title": "Vendor", "value": vendor_name},
+        {"title": "Offer Price", "value": f"${offer_price:,.4f}"},
+        {"title": "Previous Best", "value": f"${best_price:,.4f}"},
+        {"title": "Savings", "value": f"{savings_pct:.1f}%"},
+    ]
+    if top_vendors:
+        for i, tv in enumerate(top_vendors[:3], 1):
+            facts.append({"title": f"#{i} {tv.get('vendor', '')}", "value": f"${tv.get('price', 0):,.4f}"})
+
     card = _make_card(
         title="COMPETITIVE QUOTE",
-        subtitle=f"{vendor_name} undercuts best price by {savings_pct:.0f}%",
-        facts=[
-            {"title": "MPN", "value": mpn},
-            {"title": "Vendor", "value": vendor_name},
-            {"title": "Offer Price", "value": f"${offer_price:,.4f}"},
-            {"title": "Previous Best", "value": f"${best_price:,.4f}"},
-            {"title": "Savings", "value": f"{savings_pct:.1f}%"},
-        ],
+        subtitle=subtitle,
+        facts=facts,
         action_url=_build_deep_link(f"#requisition/{requisition_id}"),
         action_title="View Offers",
         accent_color="good",
     )
+    if mentions:
+        card["msteams"] = {"entities": mentions}
 
-    ok = await post_to_channel(team_id, channel_id, card, token)
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="competitive_quote", entity_id=offer_id, entity_name=mpn,
+    )
     if ok:
         _mark_posted("competitive_quote", offer_id)
     return ok
@@ -268,9 +481,13 @@ async def send_ownership_warning(
     owner_name: str,
     days_remaining: int,
     token: str | None = None,
+    owner_email: str = "",
 ) -> bool:
-    """Post alert when customer ownership is about to expire."""
-    channel_id, team_id, enabled = _get_teams_config()
+    """Post alert when customer ownership is about to expire.
+
+    Optionally @mentions the current owner.
+    """
+    channel_id, team_id, enabled = _get_channel_for_event("ownership_expiring")
     if not enabled:
         return False
     if _is_rate_limited("ownership_expiring", company_id):
@@ -281,9 +498,16 @@ async def send_ownership_warning(
         if not token:
             return False
 
+    mentions = []
+    subtitle = f"{company_name} ownership expires in {days_remaining} days"
+    if owner_email:
+        mention_text, mention_entity = _build_mention(owner_email, owner_name)
+        subtitle = f"{mention_text} — {subtitle}"
+        mentions.append(mention_entity)
+
     card = _make_card(
         title="OWNERSHIP EXPIRING",
-        subtitle=f"{company_name} ownership expires in {days_remaining} days",
+        subtitle=subtitle,
         facts=[
             {"title": "Company", "value": company_name},
             {"title": "Owner", "value": owner_name},
@@ -294,8 +518,13 @@ async def send_ownership_warning(
         action_title="View Company",
         accent_color="warning",
     )
+    if mentions:
+        card["msteams"] = {"entities": mentions}
 
-    ok = await post_to_channel(team_id, channel_id, card, token)
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="ownership_expiring", entity_id=company_id, entity_name=company_name,
+    )
     if ok:
         _mark_posted("ownership_expiring", company_id)
     return ok
@@ -311,11 +540,10 @@ async def send_stock_match_alert(
 
     matches: list of {"mpn": str, "requirement_id": int, "requisition_id": int}
     """
-    channel_id, team_id, enabled = _get_teams_config()
+    channel_id, team_id, enabled = _get_channel_for_event("stock_match")
     if not enabled:
         return False
 
-    # Rate limit by filename hash to avoid repeat alerts for same file
     rate_key = f"{vendor_name}:{filename}"
     if _is_rate_limited("stock_match", rate_key):
         return False
@@ -329,7 +557,6 @@ async def send_stock_match_alert(
     if len(matches) > 5:
         mpn_list += f" (+{len(matches) - 5} more)"
 
-    # Link to first matching requisition
     first_req = matches[0].get("requisition_id", 0) if matches else 0
 
     card = _make_card(
@@ -346,15 +573,424 @@ async def send_stock_match_alert(
         accent_color="accent",
     )
 
-    ok = await post_to_channel(team_id, channel_id, card, token)
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="stock_match", entity_id=rate_key, entity_name=filename,
+    )
     if ok:
         _mark_posted("stock_match", rate_key)
     return ok
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  BUY PLAN EVENT SENDERS (unified Graph API Adaptive Cards)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def send_buyplan_card(
+    plan_id: int,
+    event: str,
+    subtitle: str,
+    facts: list[dict],
+    accent_color: str = "accent",
+    action_buttons: list[dict] | None = None,
+    mention_emails: list[tuple[str, str]] | None = None,
+    token: str | None = None,
+) -> bool:
+    """Unified buy plan card sender.
+
+    event: buyplan_submitted, buyplan_approved, buyplan_rejected, buyplan_completed, buyplan_cancelled
+    action_buttons: optional list of Action.Submit dicts for interactive cards
+    mention_emails: list of (email, name) tuples for @mentions
+    """
+    event_type = event if event.startswith("buyplan_") else f"buyplan_{event}"
+    channel_id, team_id, enabled = _get_channel_for_event(event_type)
+    if not enabled:
+        return False
+    if _is_rate_limited(event_type, plan_id):
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    title_map = {
+        "buyplan_submitted": "BUY PLAN — APPROVAL REQUIRED",
+        "buyplan_approved": "BUY PLAN — APPROVED",
+        "buyplan_rejected": "BUY PLAN — REJECTED",
+        "buyplan_completed": "BUY PLAN — COMPLETE",
+        "buyplan_cancelled": "BUY PLAN — CANCELLED",
+        "buyplan_escalation": "BUY PLAN — ESCALATION",
+    }
+    color_map = {
+        "buyplan_submitted": "warning",
+        "buyplan_approved": "good",
+        "buyplan_rejected": "attention",
+        "buyplan_completed": "good",
+        "buyplan_cancelled": "attention",
+        "buyplan_escalation": "attention",
+    }
+
+    mentions = []
+    if mention_emails:
+        for email, name in mention_emails:
+            mt, me = _build_mention(email, name)
+            subtitle = f"{mt} {subtitle}"
+            mentions.append(me)
+
+    actions = action_buttons or [
+        {"type": "Action.OpenUrl", "title": "View in AVAIL", "url": _build_deep_link(f"#buyplan/{plan_id}")},
+    ]
+
+    card = _make_card_with_actions(
+        title=title_map.get(event_type, event_type.upper()),
+        subtitle=subtitle,
+        facts=facts,
+        actions=actions,
+        accent_color=color_map.get(event_type, accent_color),
+        mentions=mentions or None,
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type=event_type, entity_id=plan_id, entity_name=f"Buy Plan #{plan_id}",
+    )
+    if ok:
+        _mark_posted(event_type, plan_id)
+    return ok
+
+
+async def send_buyplan_approval_card(
+    plan_id: int,
+    submitter_name: str,
+    total_cost: float,
+    line_count: int,
+    requisition_id: int,
+    admin_emails: list[tuple[str, str]] | None = None,
+    token: str | None = None,
+) -> bool:
+    """Interactive buy plan approval card with Approve/Reject buttons."""
+    from app.config import settings
+
+    actions = [
+        {
+            "type": "Action.Submit",
+            "title": "Approve",
+            "style": "positive",
+            "data": {"action": "buyplan_approve", "plan_id": plan_id},
+        },
+        {
+            "type": "Action.Submit",
+            "title": "Reject",
+            "style": "destructive",
+            "data": {"action": "buyplan_reject", "plan_id": plan_id},
+        },
+        {
+            "type": "Action.OpenUrl",
+            "title": "View Details",
+            "url": _build_deep_link(f"#buyplan/{plan_id}"),
+        },
+    ]
+
+    return await send_buyplan_card(
+        plan_id=plan_id,
+        event="buyplan_submitted",
+        subtitle=f"Submitted by {submitter_name} — ${total_cost:,.2f}",
+        facts=[
+            {"title": "Submitter", "value": submitter_name},
+            {"title": "Total Cost", "value": f"${total_cost:,.2f}"},
+            {"title": "Line Items", "value": str(line_count)},
+            {"title": "Requisition", "value": f"#{requisition_id}"},
+        ],
+        action_buttons=actions,
+        mention_emails=admin_emails,
+        token=token,
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  NEW EVENT SENDERS (Phase 5)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def send_trouble_ticket_alert(
+    ticket_id: int,
+    ticket_number: str,
+    category: str,
+    severity: str,
+    description: str,
+    resolved: bool = False,
+    token: str | None = None,
+) -> bool:
+    """Post alert when a trouble ticket is opened or resolved."""
+    event_type = "trouble_ticket_resolved" if resolved else "trouble_ticket_opened"
+    channel_id, team_id, enabled = _get_channel_for_event(event_type)
+    if not enabled:
+        return False
+    if _is_rate_limited(event_type, ticket_id):
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    title = "TICKET RESOLVED" if resolved else "TROUBLE TICKET OPENED"
+    accent = "good" if resolved else "warning"
+
+    card = _make_card(
+        title=title,
+        subtitle=f"{ticket_number}: {description[:100]}",
+        facts=[
+            {"title": "Ticket", "value": ticket_number},
+            {"title": "Category", "value": category},
+            {"title": "Severity", "value": severity},
+            {"title": "Status", "value": "Resolved" if resolved else "Open"},
+        ],
+        action_url=_build_deep_link(f"#tickets/{ticket_id}"),
+        action_title="View Ticket",
+        accent_color=accent,
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type=event_type, entity_id=ticket_id, entity_name=ticket_number,
+    )
+    if ok:
+        _mark_posted(event_type, ticket_id)
+    return ok
+
+
+async def send_connector_down_alert(
+    source_name: str,
+    error_msg: str,
+    token: str | None = None,
+) -> bool:
+    """Post alert when health monitor detects a connector API failure."""
+    channel_id, team_id, enabled = _get_channel_for_event("connector_down")
+    if not enabled:
+        return False
+    if _is_rate_limited("connector_down", source_name):
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    card = _make_card(
+        title="CONNECTOR DOWN",
+        subtitle=f"{source_name} API is not responding",
+        facts=[
+            {"title": "Connector", "value": source_name},
+            {"title": "Error", "value": error_msg[:200]},
+            {"title": "Action", "value": "Check API credentials and status"},
+        ],
+        action_url=_build_deep_link("#admin/api-health"),
+        action_title="View API Health",
+        accent_color="attention",
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="connector_down", entity_id=source_name, entity_name=source_name,
+    )
+    if ok:
+        _mark_posted("connector_down", source_name)
+    return ok
+
+
+async def send_price_drop_alert(
+    mpn: str,
+    vendor_name: str,
+    old_price: float,
+    new_price: float,
+    drop_pct: float,
+    requisition_id: int = 0,
+    token: str | None = None,
+) -> bool:
+    """Post alert when a sighting price drops >15% from last known."""
+    channel_id, team_id, enabled = _get_channel_for_event("price_drop")
+    if not enabled:
+        return False
+    rate_key = f"{mpn}:{vendor_name}"
+    if _is_rate_limited("price_drop", rate_key):
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    card = _make_card(
+        title="PRICE DROP ALERT",
+        subtitle=f"{mpn} dropped {drop_pct:.0f}% at {vendor_name}",
+        facts=[
+            {"title": "MPN", "value": mpn},
+            {"title": "Vendor", "value": vendor_name},
+            {"title": "Old Price", "value": f"${old_price:,.4f}"},
+            {"title": "New Price", "value": f"${new_price:,.4f}"},
+            {"title": "Drop", "value": f"{drop_pct:.1f}%"},
+        ],
+        action_url=_build_deep_link(f"#requisition/{requisition_id}") if requisition_id else _build_deep_link("#"),
+        action_title="View Details",
+        accent_color="good",
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="price_drop", entity_id=rate_key, entity_name=mpn,
+    )
+    if ok:
+        _mark_posted("price_drop", rate_key)
+    return ok
+
+
+async def send_pipeline_milestone_alert(
+    requisition_id: int,
+    status: str,
+    customer_name: str,
+    total_value: float,
+    token: str | None = None,
+) -> bool:
+    """Post alert when a requisition moves to won or lost."""
+    channel_id, team_id, enabled = _get_channel_for_event("pipeline_milestone")
+    if not enabled:
+        return False
+    if _is_rate_limited("pipeline_milestone", requisition_id):
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    is_won = status.lower() == "won"
+    card = _make_card(
+        title=f"DEAL {'WON' if is_won else 'LOST'}",
+        subtitle=f"Requisition #{requisition_id} — {customer_name}",
+        facts=[
+            {"title": "Requisition", "value": f"#{requisition_id}"},
+            {"title": "Customer", "value": customer_name or "—"},
+            {"title": "Status", "value": status.upper()},
+            {"title": "Value", "value": f"${total_value:,.0f}"},
+        ],
+        action_url=_build_deep_link(f"#requisition/{requisition_id}"),
+        action_title="View Requisition",
+        accent_color="good" if is_won else "attention",
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="pipeline_milestone", entity_id=requisition_id, entity_name=customer_name,
+    )
+    if ok:
+        _mark_posted("pipeline_milestone", requisition_id)
+    return ok
+
+
+async def send_buyplan_escalation_alert(
+    plan_id: int,
+    submitter_name: str,
+    hours_pending: float,
+    total_cost: float,
+    admin_emails: list[tuple[str, str]] | None = None,
+    token: str | None = None,
+) -> bool:
+    """Post alert when a buy plan approval has been pending >8h."""
+    return await send_buyplan_card(
+        plan_id=plan_id,
+        event="buyplan_escalation",
+        subtitle=f"Approval pending {hours_pending:.0f}h — submitted by {submitter_name}",
+        facts=[
+            {"title": "Submitter", "value": submitter_name},
+            {"title": "Total Cost", "value": f"${total_cost:,.2f}"},
+            {"title": "Hours Pending", "value": f"{hours_pending:.1f}h"},
+            {"title": "Action Needed", "value": "Approve or reject to unblock deal"},
+        ],
+        mention_emails=admin_emails,
+        token=token,
+    )
+
+
+async def send_weekly_digest(
+    stats: dict,
+    token: str | None = None,
+) -> bool:
+    """Post Monday 8am summary card with key KPIs.
+
+    stats: {reqs_created, reqs_won, reqs_lost, total_value_won, quotes_sent,
+            offers_received, tickets_opened, tickets_resolved, connectors_up, connectors_total}
+    """
+    channel_id, team_id, enabled = _get_channel_for_event("weekly_digest")
+    if not enabled:
+        return False
+
+    if not token:
+        token = await _get_system_token()
+        if not token:
+            return False
+
+    card = _make_card(
+        title="WEEKLY DIGEST",
+        subtitle="Last 7 days at a glance",
+        facts=[
+            {"title": "Reqs Created", "value": str(stats.get("reqs_created", 0))},
+            {"title": "Deals Won", "value": str(stats.get("reqs_won", 0))},
+            {"title": "Deals Lost", "value": str(stats.get("reqs_lost", 0))},
+            {"title": "Value Won", "value": f"${stats.get('total_value_won', 0):,.0f}"},
+            {"title": "Quotes Sent", "value": str(stats.get("quotes_sent", 0))},
+            {"title": "Offers Received", "value": str(stats.get("offers_received", 0))},
+            {"title": "Tickets Opened", "value": str(stats.get("tickets_opened", 0))},
+            {"title": "Tickets Resolved", "value": str(stats.get("tickets_resolved", 0))},
+            {"title": "Connectors Up", "value": f"{stats.get('connectors_up', 0)}/{stats.get('connectors_total', 0)}"},
+        ],
+        action_url=_build_deep_link("#"),
+        action_title="Open AVAIL",
+        accent_color="accent",
+    )
+
+    ok = await post_to_channel(
+        team_id, channel_id, card, token,
+        event_type="weekly_digest", entity_id="weekly", entity_name="Weekly Digest",
+    )
+    return ok
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _log_notification(
+    event_type: str,
+    entity_id: int | str,
+    entity_name: str,
+    channel_id: str,
+    success: bool,
+    error_msg: str | None,
+):
+    """Log a notification to the teams_notification_log table (fire-and-forget)."""
+    try:
+        from app.database import SessionLocal
+        from app.models.teams_notification_log import TeamsNotificationLog
+
+        db = SessionLocal()
+        try:
+            db.add(TeamsNotificationLog(
+                event_type=event_type,
+                entity_id=str(entity_id),
+                entity_name=str(entity_name)[:200],
+                channel_id=channel_id,
+                success=success,
+                error_msg=error_msg[:500] if error_msg else None,
+            ))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.debug("Failed to log Teams notification: %s", e)
 
 
 async def _get_system_token() -> str | None:
@@ -383,3 +1019,37 @@ async def _get_system_token() -> str | None:
 def clear_rate_limits():
     """Clear rate limit cache (for testing)."""
     _rate_limits.clear()
+
+
+def get_notification_log(limit: int = 50) -> list[dict]:
+    """Get recent Teams notification log entries for admin dashboard."""
+    try:
+        from app.database import SessionLocal
+        from app.models.teams_notification_log import TeamsNotificationLog
+
+        db = SessionLocal()
+        try:
+            rows = (
+                db.query(TeamsNotificationLog)
+                .order_by(TeamsNotificationLog.created_at.desc())
+                .limit(limit)
+                .all()
+            )
+            return [
+                {
+                    "id": r.id,
+                    "event_type": r.event_type,
+                    "entity_id": r.entity_id,
+                    "entity_name": r.entity_name,
+                    "channel_id": r.channel_id,
+                    "success": r.success,
+                    "error_msg": r.error_msg,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("Failed to read notification log: %s", e)
+        return []

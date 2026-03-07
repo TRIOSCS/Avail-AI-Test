@@ -12,7 +12,7 @@ from app.config import settings  # noqa: F401
 
 # ── Notifications & Lifecycle ─────────────────────────────────────────
 from app.services.buyplan_notifications import (  # noqa: F401
-    _post_teams_channel,
+    _post_teams_card,
     _send_teams_dm,
     log_buyplan_activity,
     notify_buyplan_approved,

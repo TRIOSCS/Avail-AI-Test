@@ -582,10 +582,71 @@ async def api_test_teams_post(
         accent_color="accent",
     )
 
-    ok = await post_to_channel(team_id, channel_id, card, token)
+    ok = await post_to_channel(team_id, channel_id, card, token, event_type="test", entity_name="test")
     if not ok:
         raise HTTPException(502, "Failed to post to Teams channel. Check permissions.")
     return {"status": "sent", "message": "Test card posted to Teams channel."}
+
+
+@router.get("/api/admin/teams/notifications")
+@limiter.limit("30/minute")
+def api_get_teams_notifications(
+    request: Request,
+    limit: int = 50,
+    user: User = Depends(require_admin),
+):
+    """Get recent Teams notification log entries for troubleshooting."""
+    from ...services.teams import get_notification_log
+
+    return {"notifications": get_notification_log(limit=min(limit, 200))}
+
+
+@router.post("/api/admin/teams/channel-routing")
+@limiter.limit("10/minute")
+def api_set_teams_channel_routing(
+    request: Request,
+    body: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Save per-event-type channel routing configuration.
+
+    Body: {"teams_channel_hot": "channel-id", "teams_channel_hot_team": "team-id", ...}
+    Valid keys: teams_channel_hot, teams_channel_quotes, teams_channel_inventory,
+                teams_channel_ownership, teams_channel_buyplan, teams_channel_ops
+    """
+    from ...services.teams import EVENT_CHANNEL_MAP
+
+    valid_prefixes = sorted(set(EVENT_CHANNEL_MAP.values()))
+    valid_keys = valid_prefixes + [f"{p}_team" for p in valid_prefixes]
+    saved = 0
+    for key, value in body.items():
+        if key in valid_keys and isinstance(value, str):
+            _upsert_config(db, key, value, user.email)
+            saved += 1
+    db.commit()
+    logger.info(f"Teams channel routing updated by {user.email}: {saved} keys")
+    return {"status": "saved", "keys_updated": saved}
+
+
+@router.get("/api/admin/teams/channel-routing")
+@limiter.limit("30/minute")
+def api_get_teams_channel_routing(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Get per-event-type channel routing configuration."""
+    from ...services.teams import EVENT_CHANNEL_MAP
+
+    prefixes = sorted(set(EVENT_CHANNEL_MAP.values()))
+    routing_keys = []
+    for p in prefixes:
+        routing_keys.extend([p, f"{p}_team"])
+    routing = {}
+    for row in db.query(SystemConfig).filter(SystemConfig.key.in_(routing_keys)).all():
+        routing[row.key] = row.value
+    return {"routing": routing}
 
 
 # -- Mass Account Transfer (admin only) ------------------------------------

@@ -6371,8 +6371,8 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
             const hQty = ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014';
             const hoJson = esc(JSON.stringify(ho));
             const safeHVName = (ho.vendor_name||'').replace(/'/g, "\\'");
-            html += `<tr style="background:var(--blue-light,#f0f9ff)">
-                <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:var(--blue,#0284c7);color:#fff;font-weight:700">HIST</span></td>
+            html += `<tr style="background:var(--hist-bg,#faf5ff)">
+                <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:#7c3aed;color:#fff;font-weight:700">HIST</span></td>
                 <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a> <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
                 ${showContact !== false ? '<td style="font-size:10px;color:var(--muted)">\u2014</td>' : ''}
                 <td class="mono">${hSub}${esc(ho.mpn || '\u2014')}</td>
@@ -6486,7 +6486,11 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         ${hasFilters ? `<a onclick="event.stopPropagation();_ddClearFilters(${reqId})" style="font-size:10px;color:var(--blue);cursor:pointer">\u2715 Clear</a>` : ''}
-        <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;margin-left:auto;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
+        <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();ddExportSightingsCsv(${reqId})" title="Export sourcing results to CSV">&#x2B07; CSV</button>
+            <span id="ddBulkHint-${reqId}" style="font-size:10px;color:var(--muted)">Select vendors to send RFQ</span>
+            <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
+        </span>
     </div>`;
 
     for (const [rId, group] of groups) {
@@ -6541,7 +6545,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         let effortBadge = '';
         if (rs) {
             const dotColor = rs.color === 'green' ? 'var(--green)' : rs.color === 'yellow' ? 'var(--amber)' : 'var(--red)';
-            effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
+            effortBadge = ` <span class="effort-wrap" onclick="event.stopPropagation();this.classList.toggle('pinned')"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
         // Look up target price from requirement cache
         const groupTargetPrice = _req?.target_price ?? null;
@@ -6639,6 +6643,8 @@ function _updateDdBulkButton(reqId) {
         b.style.display = count > 0 ? '' : 'none';
         b.textContent = label;
     }
+    const hint = document.getElementById('ddBulkHint-' + reqId);
+    if (hint) hint.style.display = count > 0 ? 'none' : '';
 }
 
 function ddPromptVendorEmail(reqId, sightingId, vendorName) {
@@ -6707,6 +6713,34 @@ function ddSendBulkRfq(reqId) {
     if (!vendorGroups.length) { showToast('No valid vendors selected', 'error'); return; }
     currentReqId = reqId;
     openBatchRfqModal(vendorGroups);
+}
+
+function ddExportSightingsCsv(reqId) {
+    const data = _ddSightingsCache[reqId] || {};
+    const rows = [['MPN','Vendor','Qty','Price','Source','Condition','Lead Time','Date']];
+    for (const [, group] of Object.entries(data)) {
+        for (const s of (group.sightings || [])) {
+            rows.push([
+                s.mpn_matched || '',
+                s.vendor_name || '',
+                s.qty_available != null ? String(s.qty_available) : '',
+                s.unit_price != null ? String(s.unit_price) : '',
+                s.source_type || '',
+                s.condition || '',
+                s.lead_time || '',
+                s.created_at ? new Date(s.created_at).toLocaleDateString() : '',
+            ]);
+        }
+    }
+    const csv = rows.map(r => r.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'sourcing-RFQ-' + reqId + '.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('CSV exported', 'success');
 }
 
 // ── Re-search parts from sourcing drill-down ────────────────────────────
@@ -12847,7 +12881,7 @@ Object.assign(window, {
     ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
     ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
     ddSubmitBuyPlan, ddUpdateBpTotals, ddUpdateQuoteField,
-    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
+    ddExportSightingsCsv, ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleHistory, ddToggleHistorySightings,
     ddToggleOffer, ddToggleSighting, ddToggleGroupSightings, ddQuickRfq,
     _ddCopyContact, _ddFilterSightings, _ddClearFilters, _ddSetTypeFilter,

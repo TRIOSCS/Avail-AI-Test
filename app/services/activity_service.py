@@ -175,6 +175,9 @@ def log_email_activity(
         contact_name=contact_name,
         subject=subject,
         external_id=external_id,
+        direction="outbound" if direction == "sent" else "inbound",
+        event_type="email",
+        summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
     )
     db.add(record)
     db.flush()
@@ -229,6 +232,9 @@ def log_call_activity(
         duration_seconds=duration_seconds,
         external_id=external_id,
         subject=subject,
+        direction=direction,
+        event_type="call",
+        summary=subject,
     )
     db.add(record)
     db.flush()
@@ -278,6 +284,79 @@ def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[Acti
         .order_by(ActivityLog.created_at.desc())
         .limit(limit)
         .all()
+    )
+
+
+def get_account_timeline(
+    db: Session,
+    company_id: int,
+    channel: list[str] | None = None,
+    direction: str | None = None,
+    event_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[ActivityLog], int]:
+    """Get filtered, paginated activity timeline for a company."""
+    q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
+    if channel:
+        q = q.filter(ActivityLog.channel.in_(channel))
+    if direction:
+        q = q.filter(ActivityLog.direction == direction)
+    if event_type:
+        q = q.filter(ActivityLog.event_type == event_type)
+    if date_from:
+        q = q.filter(ActivityLog.created_at >= date_from)
+    if date_to:
+        q = q.filter(ActivityLog.created_at <= date_to)
+    total = q.count()
+    items = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(limit).all()
+    return items, total
+
+
+def get_contact_timeline(
+    db: Session,
+    site_contact_id: int,
+    channel: list[str] | None = None,
+    direction: str | None = None,
+    event_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[ActivityLog], int]:
+    """Get filtered, paginated activity timeline for a site contact."""
+    q = db.query(ActivityLog).filter(ActivityLog.site_contact_id == site_contact_id)
+    if channel:
+        q = q.filter(ActivityLog.channel.in_(channel))
+    if direction:
+        q = q.filter(ActivityLog.direction == direction)
+    if event_type:
+        q = q.filter(ActivityLog.event_type == event_type)
+    if date_from:
+        q = q.filter(ActivityLog.created_at >= date_from)
+    if date_to:
+        q = q.filter(ActivityLog.created_at <= date_to)
+    total = q.count()
+    items = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(limit).all()
+    return items, total
+
+
+def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | None:
+    """Get the most recent outbound activity for a company.
+
+    Checks both new direction column and legacy activity_type values.
+    """
+    legacy_outbound = ["email_sent", "call_outbound", "phone_call"]
+    return (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.company_id == company_id,
+            (ActivityLog.direction == "outbound") | (ActivityLog.activity_type.in_(legacy_outbound)),
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .first()
     )
 
 

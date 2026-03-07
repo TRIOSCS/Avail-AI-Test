@@ -157,7 +157,6 @@ class Settings(BaseSettings):
     admin_emails: str = ""
 
     # --- Microsoft Teams ---
-    teams_webhook_url: str = ""
     teams_team_id: str = ""
     teams_channel_id: str = ""
     teams_hot_threshold: float = 10000

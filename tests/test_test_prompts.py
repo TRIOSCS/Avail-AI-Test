@@ -8,10 +8,10 @@ from app.services.test_prompts import AREA_PROMPTS, generate_all_prompts, genera
 
 
 ALL_AREAS = [
-    "search", "requisitions", "rfq", "crm_companies", "crm_contacts",
-    "crm_quotes", "prospecting", "vendors", "tagging", "tickets",
-    "admin_api_health", "admin_settings", "notifications", "auth",
-    "upload", "pipeline", "activity",
+    "search", "requisitions", "rfq", "customers", "contacts",
+    "crm_quotes", "prospecting", "vendors", "materials", "tickets",
+    "apihealth", "settings", "notifications", "auth",
+    "upload", "dashboard", "activity",
 ]
 
 
@@ -20,7 +20,7 @@ def test_generate_all_prompts_covers_every_area():
     assert len(prompts) >= 15
     names = [p["area"] for p in prompts]
     assert "search" in names
-    assert "crm_companies" in names
+    assert "customers" in names
     assert "rfq" in names
 
 
