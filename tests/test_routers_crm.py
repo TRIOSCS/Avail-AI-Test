@@ -43,7 +43,7 @@ def _make_quote(**overrides):
     q.id = overrides.get("id", 1)
     q.requisition_id = overrides.get("requisition_id", 10)
     q.customer_site_id = overrides.get("customer_site_id", 5)
-    q.quote_number = overrides.get("quote_number", "Q-2026-0001")
+    q.quote_number = overrides.get("quote_number", "TEST-Q-2026-0001")
     q.revision = overrides.get("revision", 1)
     q.line_items = overrides.get("line_items", [])
     q.subtotal = overrides.get("subtotal", 100.0)
@@ -86,7 +86,7 @@ def test_quote_to_dict_basic():
     q = _make_quote()
     d = quote_to_dict(q)
     assert d["id"] == 1
-    assert d["quote_number"] == "Q-2026-0001"
+    assert d["quote_number"] == "TEST-Q-2026-0001"
     assert d["customer_name"] == "Acme Corp — HQ"
     assert d["contact_name"] == "John"
     assert d["contact_email"] == "john@acme.com"
@@ -764,7 +764,7 @@ def test_preload_last_quoted_prices_empty_mpn():
         {"mpn": "", "sell_price": 1.00, "margin_pct": 5.0},
         {"mpn": None, "sell_price": 2.00, "margin_pct": 10.0},
     ]
-    q.quote_number = "Q-2026-0001"
+    q.quote_number = "TEST-Q-2026-0001"
     q.sent_at = None
     q.created_at = None
     q.result = "sent"
@@ -1626,7 +1626,7 @@ class TestQuotesAdditional:
         resp = client.get(f"/api/requisitions/{test_requisition.id}/quote")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["quote_number"] == "Q-2026-0001"
+        assert data["quote_number"] == "TEST-Q-2026-0001"
 
     def test_list_quotes_not_found_req(self, client):
         resp = client.get("/api/requisitions/99999/quotes")
@@ -1920,7 +1920,7 @@ class TestQuotesAdditional:
         assert resp.status_code == 200
         data = resp.json()
         assert data["revision"] == 2
-        assert data["quote_number"] == "Q-2026-0001"
+        assert data["quote_number"] == "TEST-Q-2026-0001"
 
     def test_revise_quote_not_found(self, client):
         resp = client.post("/api/quotes/99999/revise")

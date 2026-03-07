@@ -37,6 +37,13 @@ def register_maintenance_jobs(scheduler, settings):
         _job_integrity_check, IntervalTrigger(hours=6), id="integrity_check", name="Material card integrity check"
     )
 
+    scheduler.add_job(
+        _job_contact_dedup,
+        CronTrigger(hour=3, minute=30),
+        id="contact_dedup",
+        name="Deduplicate site contacts",
+    )
+
 
 @_traced_job
 async def _job_cache_cleanup():
@@ -110,6 +117,57 @@ async def _job_reset_connector_errors():
         db.commit()
     except Exception:
         logger.exception("Reset connector error counts failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_contact_dedup():
+    """Daily dedup of site contacts sharing (customer_site_id, lower(email))."""
+    from ..database import SessionLocal
+    from ..models import SiteContact
+
+    db = SessionLocal()
+    try:
+        from sqlalchemy import func, text
+
+        dupes = (
+            db.query(
+                SiteContact.customer_site_id,
+                func.lower(SiteContact.email).label("em"),
+                func.count().label("cnt"),
+            )
+            .filter(SiteContact.email.isnot(None))
+            .group_by(SiteContact.customer_site_id, func.lower(SiteContact.email))
+            .having(func.count() > 1)
+            .all()
+        )
+        merged = 0
+        for dupe in dupes:
+            contacts = (
+                db.query(SiteContact)
+                .filter(
+                    SiteContact.customer_site_id == dupe.customer_site_id,
+                    func.lower(SiteContact.email) == dupe.em,
+                )
+                .order_by(SiteContact.id)
+                .all()
+            )
+            best = max(contacts, key=lambda c: sum(1 for col in ['full_name', 'title', 'phone', 'notes', 'linkedin_url'] if getattr(c, col, None)))
+            for other in contacts:
+                if other.id == best.id:
+                    continue
+                for col in ['full_name', 'title', 'phone', 'notes', 'linkedin_url']:
+                    if getattr(best, col, None) is None and getattr(other, col, None) is not None:
+                        setattr(best, col, getattr(other, col))
+                db.delete(other)
+                merged += 1
+        db.commit()
+        if merged:
+            logger.info(f"Contact dedup: merged {merged} duplicate contacts")
+    except Exception:
+        logger.exception("Contact dedup job failed")
         db.rollback()
     finally:
         db.close()

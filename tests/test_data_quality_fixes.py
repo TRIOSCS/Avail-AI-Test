@@ -127,7 +127,8 @@ class TestQuotesAwaitingConsistency:
     @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
     def test_ai_prompt_matches_stats(self, mock_claude, client, db_session, test_user):
         """AI prompt's quotes count should match the returned stats.quotes_awaiting."""
-        from app.models.quotes import Quote, Requisition
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
 
         mock_claude.return_value = {"text": "Brief."}
 
@@ -209,7 +210,7 @@ class TestCallActivitySubject:
         s = CustomerSite(
             company_id=company_id,
             site_name="HQ",
-            phone=phone,
+            contact_phone=phone,
             created_at=datetime.now(timezone.utc),
         )
         db.add(s)

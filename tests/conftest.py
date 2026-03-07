@@ -354,7 +354,7 @@ def test_quote(
     q = Quote(
         requisition_id=test_requisition.id,
         customer_site_id=test_customer_site.id,
-        quote_number="Q-2026-0001",
+        quote_number="TEST-Q-2026-0001",
         status="sent",
         line_items=[],
         subtotal=1000.00,

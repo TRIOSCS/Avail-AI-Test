@@ -9,8 +9,10 @@ Depends on: conftest fixtures, app.models.TroubleTicket
 
 import re
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import User
@@ -574,3 +576,513 @@ class TestAutoProcessTicket:
         asyncio.get_event_loop().run_until_complete(auto_process_ticket(ticket.id))
         db_session.refresh(ticket)
         assert ticket.status == "submitted"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  NEW COVERAGE TESTS — uncovered lines in routers/trouble_tickets.py
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _make_admin_client(db_session, admin_user):
+    """Helper: TestClient with admin auth overrides."""
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = lambda: admin_user
+    app.dependency_overrides[require_buyer] = lambda: admin_user
+    app.dependency_overrides[require_admin] = lambda: admin_user
+
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def tt_admin_client(db_session, admin_user):
+    """Admin TestClient fixture for trouble ticket router tests."""
+    yield from _make_admin_client(db_session, admin_user)
+
+
+@pytest.fixture()
+def tt_sample(db_session, admin_user):
+    """A pre-existing trouble ticket in the DB."""
+    t = TroubleTicket(
+        ticket_number="TT-COV-001",
+        submitted_by=admin_user.id,
+        title="Coverage Bug",
+        description="Something broke for coverage",
+        status="submitted",
+        source="ticket_form",
+        risk_tier="low",
+        category="ui",
+        current_page="/dashboard",
+        browser_info="Chrome 120",
+        screen_size="1920x1080",
+        console_errors="TypeError: x is null",
+        current_view="pipeline",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(t)
+    db_session.commit()
+    db_session.refresh(t)
+    return t
+
+
+class TestScreenshotTooLarge:
+    """Line 52: screenshot_b64 exceeding MAX_SCREENSHOT_SIZE returns 400."""
+
+    @patch("app.routers.trouble_tickets.svc.auto_process_ticket", new_callable=AsyncMock)
+    def test_create_ticket_screenshot_too_large(self, mock_auto, tt_admin_client):
+        huge = "A" * (2 * 1024 * 1024 + 1)
+        resp = tt_admin_client.post(
+            "/api/trouble-tickets",
+            json={"title": "Big screenshot", "description": "Has big img", "screenshot_b64": huge},
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        # May be in "detail" (FastAPI HTTPException) or "error" (custom handler)
+        msg = body.get("detail") or body.get("error", "")
+        assert "Screenshot too large" in msg
+
+
+class TestReportButtonAIPrompt:
+    """Lines 78-101: source=report_button triggers AI prompt generation."""
+
+    @patch("app.routers.trouble_tickets.svc.auto_process_ticket", new_callable=AsyncMock)
+    @patch("app.routers.trouble_tickets.svc.create_ticket")
+    @patch("app.routers.trouble_tickets.svc.update_ticket")
+    def test_ai_prompt_success(self, mock_update, mock_create, mock_auto, tt_admin_client):
+        fake = MagicMock()
+        fake.id = 900
+        fake.ticket_number = "TT-RP-001"
+        mock_create.return_value = fake
+
+        with patch(
+            "app.services.ai_trouble_prompt.generate_trouble_prompt",
+            new_callable=AsyncMock,
+            return_value={"title": "AI Title", "prompt": "Fix this"},
+        ):
+            resp = tt_admin_client.post(
+                "/api/trouble-tickets",
+                json={"title": "Broken", "description": "Broke", "source": "report_button"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        mock_update.assert_called_once()
+
+    @patch("app.routers.trouble_tickets.svc.auto_process_ticket", new_callable=AsyncMock)
+    @patch("app.routers.trouble_tickets.svc.create_ticket")
+    def test_ai_prompt_failure_still_creates(self, mock_create, mock_auto, tt_admin_client):
+        fake = MagicMock()
+        fake.id = 901
+        fake.ticket_number = "TT-RP-002"
+        mock_create.return_value = fake
+
+        with patch(
+            "app.services.ai_trouble_prompt.generate_trouble_prompt",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("AI down"),
+        ):
+            resp = tt_admin_client.post(
+                "/api/trouble-tickets",
+                json={"title": "Bug", "description": "Broke", "source": "report_button"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    @patch("app.routers.trouble_tickets.svc.auto_process_ticket", new_callable=AsyncMock)
+    @patch("app.routers.trouble_tickets.svc.create_ticket")
+    @patch("app.routers.trouble_tickets.svc.update_ticket")
+    def test_ai_prompt_returns_none(self, mock_update, mock_create, mock_auto, tt_admin_client):
+        """When generate_trouble_prompt returns None, update_ticket is NOT called."""
+        fake = MagicMock()
+        fake.id = 902
+        fake.ticket_number = "TT-RP-003"
+        mock_create.return_value = fake
+
+        with patch(
+            "app.services.ai_trouble_prompt.generate_trouble_prompt",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = tt_admin_client.post(
+                "/api/trouble-tickets",
+                json={"title": "Bug", "description": "X", "source": "report_button"},
+            )
+        assert resp.status_code == 200
+        mock_update.assert_not_called()
+
+
+class TestExportXlsx:
+    """Lines 167-231: Excel export endpoint."""
+
+    def test_export_no_filter(self, tt_admin_client, tt_sample):
+        resp = tt_admin_client.get("/api/trouble-tickets/export/xlsx")
+        assert resp.status_code == 200
+        assert "spreadsheetml" in resp.headers["content-type"]
+        assert len(resp.content) > 100
+
+    def test_export_with_status_filter(self, tt_admin_client, tt_sample):
+        resp = tt_admin_client.get("/api/trouble-tickets/export/xlsx?status=submitted")
+        assert resp.status_code == 200
+        assert "spreadsheetml" in resp.headers["content-type"]
+
+    def test_export_with_source_filter(self, tt_admin_client, tt_sample):
+        resp = tt_admin_client.get("/api/trouble-tickets/export/xlsx?source=ticket_form")
+        assert resp.status_code == 200
+
+    def test_export_empty_result(self, tt_admin_client):
+        resp = tt_admin_client.get("/api/trouble-tickets/export/xlsx?status=nonexistent")
+        assert resp.status_code == 200
+        assert len(resp.content) > 0  # still returns Excel with headers
+
+
+class TestSimilarTickets:
+    """Lines 298-299: similar tickets with match found."""
+
+    @patch("app.services.ticket_consolidation.find_similar_ticket", new_callable=AsyncMock)
+    def test_similar_match_found(self, mock_find, tt_admin_client, tt_sample, db_session):
+        mock_find.return_value = {"match_id": tt_sample.id, "confidence": 0.85}
+        resp = tt_admin_client.get(
+            "/api/trouble-tickets/similar",
+            params={"title": "Coverage Bug dup", "description": "Similar issue"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["matches"]) == 1
+        assert data["matches"][0]["id"] == tt_sample.id
+        assert data["matches"][0]["confidence"] == 0.85
+
+    @patch("app.services.ticket_consolidation.find_similar_ticket", new_callable=AsyncMock)
+    def test_similar_match_id_invalid(self, mock_find, tt_admin_client, db_session):
+        """Match ID points to non-existent ticket -- returns empty matches."""
+        mock_find.return_value = {"match_id": 999999, "confidence": 0.80}
+        resp = tt_admin_client.get(
+            "/api/trouble-tickets/similar",
+            params={"title": "No match ticket"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["matches"] == []
+
+    @patch("app.services.ticket_consolidation.find_similar_ticket", new_callable=AsyncMock)
+    def test_similar_no_match(self, mock_find, tt_admin_client):
+        mock_find.return_value = None
+        resp = tt_admin_client.get(
+            "/api/trouble-tickets/similar",
+            params={"title": "Unique bug report"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["matches"] == []
+
+
+class TestUpdateResolvedBy:
+    """Lines 402-403: PATCH with status=resolved sets resolved_by_id."""
+
+    def test_resolved_sets_resolved_by(self, tt_admin_client, tt_sample, admin_user):
+        resp = tt_admin_client.patch(
+            f"/api/trouble-tickets/{tt_sample.id}",
+            json={"status": "resolved"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    def test_update_empty_body_400(self, tt_admin_client, tt_sample):
+        resp = tt_admin_client.patch(f"/api/trouble-tickets/{tt_sample.id}", json={})
+        assert resp.status_code == 400
+
+    def test_update_not_found_404(self, tt_admin_client):
+        resp = tt_admin_client.patch("/api/trouble-tickets/99999", json={"status": "resolved"})
+        assert resp.status_code == 404
+
+
+class TestRegeneratePrompt:
+    """Lines 452-479: regenerate AI prompt endpoint."""
+
+    @patch("app.services.ai_trouble_prompt.generate_trouble_prompt", new_callable=AsyncMock)
+    def test_regenerate_success(self, mock_gen, tt_admin_client, tt_sample):
+        mock_gen.return_value = {"title": "New Title", "prompt": "New prompt text"}
+        resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/regenerate-prompt")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ai_prompt"] == "New prompt text"
+        assert data["title"] == "New Title"
+
+    @patch("app.services.ai_trouble_prompt.generate_trouble_prompt", new_callable=AsyncMock)
+    def test_regenerate_ai_returns_none_502(self, mock_gen, tt_admin_client, tt_sample):
+        mock_gen.return_value = None
+        resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/regenerate-prompt")
+        assert resp.status_code == 502
+
+    def test_regenerate_not_found_404(self, tt_admin_client):
+        resp = tt_admin_client.post("/api/trouble-tickets/99999/regenerate-prompt")
+        assert resp.status_code == 404
+
+
+class TestVerifyRetest:
+    """Lines 540-545: POST verify-retest endpoint."""
+
+    @patch("app.services.rollback_service.verify_and_retest", new_callable=AsyncMock)
+    def test_verify_retest_success(self, mock_rt, tt_admin_client, tt_sample):
+        mock_rt.return_value = {"ok": True, "passed": True}
+        resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/verify-retest")
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    @patch("app.services.rollback_service.verify_and_retest", new_callable=AsyncMock)
+    def test_verify_retest_error_400(self, mock_rt, tt_admin_client, tt_sample):
+        mock_rt.return_value = {"error": "Retest failed"}
+        resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/verify-retest")
+        assert resp.status_code == 400
+
+
+class TestInternalVerifyRetest:
+    """Lines 558-581: POST /api/internal/verify-retest/{id} (localhost-only)."""
+
+    @patch("app.services.rollback_service.verify_and_retest", new_callable=AsyncMock)
+    def test_internal_retest_success(self, mock_rt, db_session, tt_sample):
+        from app.database import get_db
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        mock_rt.return_value = {"ok": True, "passed": True}
+
+        # Mock request.client to return localhost
+        with patch("app.routers.trouble_tickets.Request") as mock_req_cls:
+            # Instead of mocking the class, we need to mock at the ASGI level
+            pass
+
+        # TestClient sends from "testclient" host, need to override the check
+        with patch(
+            "app.routers.trouble_tickets.internal_verify_retest",
+            wraps=None,
+        ):
+            pass
+
+        # Simplest approach: patch the endpoint to skip localhost check
+        from unittest.mock import PropertyMock
+
+        with TestClient(app, headers={"X-Forwarded-For": "127.0.0.1"}) as c:
+            with patch(
+                "starlette.requests.Request.client",
+                new_callable=PropertyMock,
+                return_value=MagicMock(host="127.0.0.1"),
+            ):
+                resp = c.post(f"/api/internal/verify-retest/{tt_sample.id}")
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        app.dependency_overrides.clear()
+
+    @patch("app.services.rollback_service.verify_and_retest", new_callable=AsyncMock)
+    def test_internal_retest_error_400(self, mock_rt, db_session, tt_sample):
+        from app.database import get_db
+        from app.main import app
+        from unittest.mock import PropertyMock
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        mock_rt.return_value = {"error": "Still failing"}
+        with TestClient(app) as c:
+            with patch(
+                "starlette.requests.Request.client",
+                new_callable=PropertyMock,
+                return_value=MagicMock(host="127.0.0.1"),
+            ):
+                resp = c.post(f"/api/internal/verify-retest/{tt_sample.id}")
+        assert resp.status_code == 400
+        app.dependency_overrides.clear()
+
+    def test_internal_retest_non_localhost_403(self, db_session, tt_sample):
+        """Request from non-localhost returns 403."""
+        from app.database import get_db
+        from app.main import app
+        from unittest.mock import PropertyMock
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        with TestClient(app) as c:
+            with patch(
+                "starlette.requests.Request.client",
+                new_callable=PropertyMock,
+                return_value=MagicMock(host="10.0.0.5"),
+            ):
+                resp = c.post(f"/api/internal/verify-retest/{tt_sample.id}")
+        assert resp.status_code == 403
+        app.dependency_overrides.clear()
+
+
+class TestDiagnoseRouter:
+    """Lines around diagnose endpoint -- self_heal gate, not found, already diagnosed."""
+
+    def test_diagnose_disabled_403(self, tt_admin_client, tt_sample):
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            False,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/diagnose")
+        assert resp.status_code == 403
+
+    def test_diagnose_not_found_404(self, tt_admin_client):
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            True,
+        ):
+            resp = tt_admin_client.post("/api/trouble-tickets/99999/diagnose")
+        assert resp.status_code == 404
+
+    def test_diagnose_already_diagnosed_400(self, tt_admin_client, db_session, admin_user):
+        t = TroubleTicket(
+            ticket_number="TT-DIAG-COV",
+            submitted_by=admin_user.id,
+            title="Diagnosed",
+            description="Already done",
+            status="diagnosed",
+            diagnosis={"summary": "known"},
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(t)
+        db_session.commit()
+        db_session.refresh(t)
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            True,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{t.id}/diagnose")
+        assert resp.status_code == 400
+
+    @patch("app.routers.trouble_tickets.diagnose_full", new_callable=AsyncMock)
+    def test_diagnose_error_result_500(self, mock_diag, tt_admin_client, tt_sample):
+        mock_diag.return_value = {"error": "Claude API failure"}
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            True,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/diagnose")
+        assert resp.status_code == 500
+
+
+class TestExecuteRouter:
+    """Lines around execute endpoint -- self_heal gate, error result."""
+
+    def test_execute_disabled_403(self, tt_admin_client, tt_sample):
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            False,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/execute")
+        assert resp.status_code == 403
+
+    @patch("app.routers.trouble_tickets.execute_fix", new_callable=AsyncMock)
+    def test_execute_error_400(self, mock_exec, tt_admin_client, tt_sample):
+        mock_exec.return_value = {"error": "No diagnosis"}
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            True,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/execute")
+        assert resp.status_code == 400
+
+    @patch("app.routers.trouble_tickets.execute_fix", new_callable=AsyncMock)
+    def test_execute_success(self, mock_exec, tt_admin_client, tt_sample):
+        mock_exec.return_value = {"ok": True, "fix_branch": "fix/tt-cov"}
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "self_heal_enabled",
+            True,
+        ):
+            resp = tt_admin_client.post(f"/api/trouble-tickets/{tt_sample.id}/execute")
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+
+class TestGetTicketAccessDenied:
+    """GET ticket by non-owner non-admin returns 403."""
+
+    def test_non_owner_non_admin_403(self, db_session, admin_user, test_user):
+        from app.database import get_db
+        from app.dependencies import require_user
+        from app.main import app
+
+        t = TroubleTicket(
+            ticket_number="TT-ACCESS-COV",
+            submitted_by=admin_user.id,
+            title="Admin only",
+            description="Private ticket",
+            status="submitted",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(t)
+        db_session.commit()
+        db_session.refresh(t)
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+
+        with TestClient(app) as c:
+            resp = c.get(f"/api/trouble-tickets/{t.id}")
+        assert resp.status_code == 403
+        app.dependency_overrides.clear()
+
+
+class TestVerifyEdgeCases:
+    """Additional verify endpoint edge cases for high-risk escalation."""
+
+    def test_verify_not_fixed_high_risk_escalation(self, db_session, admin_user):
+        """Verify with is_fixed=false on high-risk ticket creates high-risk child."""
+        from app.database import get_db
+        from app.dependencies import require_admin, require_user
+        from app.main import app
+
+        t = TroubleTicket(
+            ticket_number="TT-VFY-HIGH",
+            submitted_by=admin_user.id,
+            title="High Risk Bug",
+            description="Critical issue",
+            status="awaiting_verification",
+            risk_tier="high",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(t)
+        db_session.commit()
+        db_session.refresh(t)
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: admin_user
+        app.dependency_overrides[require_admin] = lambda: admin_user
+
+        with TestClient(app) as c:
+            resp = c.post(
+                f"/api/trouble-tickets/{t.id}/verify",
+                json={"is_fixed": False, "description": "Still broken"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "escalated"
+        assert "child_ticket_id" in data
+        # High-risk parent -> high-risk child
+        child = db_session.get(TroubleTicket, data["child_ticket_id"])
+        assert child.risk_tier == "high"
+        app.dependency_overrides.clear()

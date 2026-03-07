@@ -84,3 +84,44 @@ class TestTransition:
 
         with pytest.raises(ValueError):
             transition(test_requisition, "active", test_user, db_session)
+
+    def test_none_actor(self, db_session, test_requisition):
+        """Transition with actor=None: ActivityLog creation may fail (NOT NULL FK),
+        but the status transition still succeeds because the exception is caught."""
+        test_requisition.status = "active"
+        db_session.commit()
+
+        transition(test_requisition, "sourcing", None, db_session)
+        # Transition still succeeds even if the log creation fails
+        assert test_requisition.status == "sourcing"
+
+    def test_none_initial_status_defaults_to_active(self, db_session, test_requisition, test_user):
+        """When req.status is None, it defaults to 'active' for transition logic."""
+        test_requisition.status = None
+
+        transition(test_requisition, "sourcing", test_user, db_session)
+        assert test_requisition.status == "sourcing"
+
+    def test_activity_log_exception_suppressed(self, db_session, test_requisition, test_user):
+        """Exception during activity log creation is suppressed (logged)."""
+        from unittest.mock import patch
+
+        test_requisition.status = "active"
+        db_session.commit()
+
+        # Mock db.add to raise on the ActivityLog
+        original_add = db_session.add
+        call_count = 0
+
+        def flaky_add(obj):
+            nonlocal call_count
+            call_count += 1
+            if isinstance(obj, ActivityLog):
+                raise RuntimeError("DB add failed")
+            return original_add(obj)
+
+        with patch.object(db_session, "add", side_effect=flaky_add):
+            transition(test_requisition, "sourcing", test_user, db_session)
+
+        # Transition succeeded despite log failure
+        assert test_requisition.status == "sourcing"

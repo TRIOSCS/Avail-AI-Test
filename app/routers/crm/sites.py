@@ -13,6 +13,7 @@ from ...dependencies import require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
 from ...schemas.crm import SiteContactCreate, SiteContactUpdate, SiteCreate, SiteUpdate
 from ...schemas.v13_features import SiteContactNoteLog
+from ...utils.phone_utils import format_phone_e164
 
 router = APIRouter()
 
@@ -288,7 +289,10 @@ async def create_site_contact(
             SiteContact.customer_site_id == site_id,
             SiteContact.is_primary == True,  # noqa: E712
         ).update({"is_primary": False})
-    contact = SiteContact(customer_site_id=site_id, **payload.model_dump())
+    data = payload.model_dump()
+    if data.get("phone"):
+        data["phone"] = format_phone_e164(data["phone"]) or data["phone"]
+    contact = SiteContact(customer_site_id=site_id, **data)
     db.add(contact)
     db.commit()
     return {"id": contact.id, "full_name": contact.full_name}
@@ -306,6 +310,8 @@ async def update_site_contact(
     if not contact or contact.customer_site_id != site_id:
         raise HTTPException(404, "Contact not found")
     updates = payload.model_dump(exclude_unset=True)
+    if updates.get("phone"):
+        updates["phone"] = format_phone_e164(updates["phone"]) or updates["phone"]
     if updates.get("is_primary"):
         db.query(SiteContact).filter(
             SiteContact.customer_site_id == site_id,

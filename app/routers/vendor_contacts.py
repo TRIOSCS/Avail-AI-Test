@@ -33,6 +33,7 @@ from ..utils.vendor_helpers import (
     scrape_website_contacts,
 )
 from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
+from ..utils.phone_utils import format_phone_e164
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
@@ -401,13 +402,14 @@ async def add_vendor_contact(
             "duplicate": True,
         }
 
+    phone = format_phone_e164(payload.phone) or payload.phone if payload.phone else None
     vc = VendorContact(
         vendor_card_id=card_id,
         email=email,
         full_name=payload.full_name,
         title=payload.title,
         label=payload.label,
-        phone=payload.phone,
+        phone=phone,
         contact_type="individual" if payload.full_name else "company",
         source="manual",
         is_verified=True,
@@ -451,7 +453,7 @@ async def update_vendor_contact(
     if payload.label is not None:
         vc.label = payload.label
     if payload.phone is not None:
-        vc.phone = payload.phone
+        vc.phone = format_phone_e164(payload.phone) or payload.phone
 
     vc.last_seen_at = datetime.now(timezone.utc)
 

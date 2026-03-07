@@ -978,8 +978,6 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .ac-vendor{background:var(--teal-light,#e0f5f0);color:var(--teal,#0f766e)}
 .ac-customer{background:#f0e6ff;color:#6b3fa0}
 
-/* @media(max-width:768px) rules consolidated into single block near end of file */
-
 /* Suggested Contacts */
 .sc-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;transition:background .15s}
 .sc-row:hover{background:var(--surface)}
@@ -1713,7 +1711,6 @@ table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
 #mobileUserFilterSelect{font-size:10px;max-width:90px}
 #ecCurrency{width:80px}
 
-/* ── Mobile deep fixes — consolidated into @media(max-width:768px) above ── */
 
 /* Bug Report Link — inline next to pills */
 .bug-link{font-size:11px;font-weight:600;color:var(--red);cursor:pointer;text-decoration:none;padding:4px 10px;border-radius:var(--radius-sm);border:1px solid var(--red);transition:all var(--speed);white-space:nowrap;line-height:1.4}
@@ -1833,7 +1830,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .cc-bar-track{height:4px;background:var(--surface);border-radius:2px;margin-top:2px}
 .cc-bar-fill{height:100%;background:var(--sourcing-color);border-radius:2px;transition:width .3s ease}
 @media(max-width:1100px){.cc-cards-grid{grid-template-columns:repeat(2,1fr)}}
-/* cc-stat responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Status Bar (Zone 1) ─────────────────────────────────── */
 .status-bar{display:flex;align-items:center;gap:8px;padding:10px 16px;margin-bottom:12px;background:var(--surface);border-radius:var(--radius);font-size:13px;color:var(--text2);font-family:'JetBrains Mono',monospace}
@@ -1849,7 +1845,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 
 /* ── Work Queue (Zone 3) ─────────────────────────────────── */
 .work-queue{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-/* work-queue/status-bar responsive rules moved to consolidated @media(max-width:768px) block at line ~976 */
 
 /* ── Trader Badge ────────────────────────────────────────── */
 .trader-badge{font-size:9px;font-weight:700;color:var(--purple,#7c3aed);background:var(--purple-lt,#f3e8ff);padding:1px 5px;border-radius:6px;margin-left:4px;vertical-align:middle}
@@ -1904,7 +1899,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .as-bar-behavior{background:var(--blue)}
 .as-bar-outcome{background:var(--green)}
 .as-metric-raw{font-size:10px;color:var(--text-muted);font-style:italic}
-/* as-metrics responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Team Leaderboard ───────────────────────────────── */
 .lb-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
@@ -1985,7 +1979,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .si-metric-item{font-size:11px;color:var(--text-muted);padding:2px 0;display:flex;align-items:center;gap:6px}
 .si-metric-num{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--blue);font-weight:600;min-width:20px}
 @media(max-width:600px){.si-two-col{grid-template-columns:1fr}}
-/* lb responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Scorecard Page ──────────────────────────────────────── */
 .sc-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:16px 0 8px}
@@ -2005,7 +1998,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .sc-bar-fill{height:100%;border-radius:3px;transition:width .3s ease}
 .sc-bar-val{font-size:10px;font-weight:600;color:var(--text-muted);width:24px;text-align:right;font-family:'JetBrains Mono',monospace}
 .sc-outcomes-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;padding:0 16px}
-/* sc-personal responsive rules moved to consolidated @media(max-width:768px) block at line ~976 */
 
 /* ── Engagement Ring (SVG) ───────────────────────────────── */
 .eng-ring{width:44px;height:44px;flex-shrink:0}
@@ -2039,7 +2031,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 /* ── Stat Grid ───────────────────────────────────────────── */
 .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
 
-/* v2 responsive rules moved to consolidated CRM v3 @media(max-width:768px) block below */
 @media (max-width:480px){
     .stat-grid{grid-template-columns:1fr}
     .chip-row{gap:4px}
@@ -2435,12 +2426,10 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .cust-mini-list-health.green{background:var(--green-bg,#e6f4ea);color:var(--green,#1e8e3e)}
 .cust-mini-list-health.amber{background:var(--amber-bg,#fef7e0);color:var(--amber,#e37400)}
 .cust-mini-list-health.red{background:var(--red-bg,#fce8e6);color:var(--red,#d93025)}
-/* cust-mini-list responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* Adjust drawer when split-pane is active */
 .cust-split-active .drawer{min-width:0;width:calc(100vw - 280px);max-width:none;left:280px;right:0;top:88px}
 .cust-split-active .drawer-backdrop,.cust-split-active .drawer-backdrop.open{display:none}
-/* cust-split responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Top breadcrumb (account detail) ─────────────────────── */
 .top-breadcrumb{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);white-space:nowrap}
@@ -2484,7 +2473,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .prospect-mini-list-sub{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .prospect-split-active .drawer{min-width:0;width:calc(100vw - 280px);max-width:none;left:280px;right:0;top:88px}
 .prospect-split-active .drawer-backdrop,.prospect-split-active .drawer-backdrop.open{display:none}
-/* prospect responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Contact card location ───────────────────────────────── */
 .contact-card-location{font-size:10px;color:var(--muted);margin-top:1px}
@@ -2587,7 +2575,6 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .suggested-card-actions .btn-dismiss{background:transparent;border:1px solid var(--border);padding:3px 8px;border-radius:var(--radius-sm);font-size:10px;color:var(--muted);cursor:pointer;transition:all var(--speed-fast)}
 .suggested-card-actions .btn-dismiss:hover{border-color:var(--red);color:var(--red)}
 .suggested-card-actions select.dismiss-select{font-size:10px;padding:3px 5px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);background:var(--white);cursor:pointer}
-/* suggested-grid responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* Score bars */
 .suggested-scores{display:flex;gap:10px;margin:5px 0 4px}
