@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.utils.normalization import (
     normalize_condition,
@@ -74,7 +74,10 @@ class CompanyCreate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
 
 class CompanyUpdate(BaseModel):
@@ -118,7 +121,10 @@ class CompanyUpdate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
 
 class CompanyOut(BaseModel):
@@ -172,12 +178,34 @@ class SiteCreate(BaseModel):
             return v
         return normalize_us_state(v) or v
 
+    @model_validator(mode="after")
+    def extract_phone_from_name(self) -> "SiteCreate":
+        import re
+        phone_re = re.compile(r'[\(+]?\d[\d\s\-\(\)\.]{8,}\d')
+        match = phone_re.search(self.site_name)
+        if not match:
+            return self
+        from app.utils.normalization_helpers import normalize_phone_e164
+        raw = match.group(0).strip()
+        e164 = normalize_phone_e164(raw)
+        if not e164:
+            return self
+        self.site_name = re.sub(r'\s+', ' ', self.site_name[:match.start()] + self.site_name[match.end():]).strip(' -,')
+        if not self.contact_phone:
+            self.contact_phone = e164
+        elif not self.contact_phone_2:
+            self.contact_phone_2 = e164
+        return self
+
     @field_validator("contact_phone")
     @classmethod
     def normalize_contact_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
 
 class SiteUpdate(BaseModel):
@@ -223,7 +251,10 @@ class SiteUpdate(BaseModel):
     def normalize_contact_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
 
 class SiteOut(BaseModel):
@@ -255,7 +286,10 @@ class SiteContactCreate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
     @field_validator("email")
     @classmethod
@@ -279,7 +313,10 @@ class SiteContactUpdate(BaseModel):
     def normalize_phone(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_phone_e164(v) or v
+        result = normalize_phone_e164(v)
+        if result is None:
+            raise ValueError(f"Could not parse phone number: {v}")
+        return result
 
     @field_validator("email")
     @classmethod
