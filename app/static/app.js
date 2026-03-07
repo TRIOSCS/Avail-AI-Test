@@ -8037,6 +8037,15 @@ async function createRequisition() {
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
+function _clearNrValidation() {
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
+    _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
+    const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
+    const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+    ['nrNameError', 'nrSiteError'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.textContent = ''; } });
+}
+
 function clearNrSite() {
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrSiteId', 'value', ''); _s('nrSiteSearch', 'value', '');
@@ -12682,7 +12691,7 @@ Object.assign(window, {
     _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
     _updateBulkFollowUpBtn, _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
-    clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
+    _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
     createRequisition, debouncedFilterSites, debouncedFilterVendors,
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
     doStockImport, filterVendorList, openNewReqModal, openTroubleChat,
