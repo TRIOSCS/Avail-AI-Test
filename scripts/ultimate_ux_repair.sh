@@ -580,9 +580,8 @@ for p in patches:
             # ---------------------------------------------------------------
             clog "${BLUE}" "    Running pytest gate..."
             local test_exit=0
-            docker compose -f "${PROJ_DIR}/docker-compose.yml" exec -T \
-                -e TESTING=1 -e PYTHONPATH=/app app \
-                python3 -m pytest tests/ -x -q --tb=line 2>&1 | tail -5 || test_exit=$?
+            cd "${PROJ_DIR}"
+            TESTING=1 PYTHONPATH="${PROJ_DIR}" python3 -m pytest tests/ -x -q --tb=line 2>&1 | tail -5 || test_exit=$?
 
             if [[ "${test_exit}" -ne 0 ]]; then
                 clog "${RED}" "    Pytest failed for ticket #${tid} — reverting"
