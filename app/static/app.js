@@ -2287,6 +2287,121 @@ function _renderTeamSummaryCard(teamLb) {
     return html;
 }
 
+/**
+ * Render the morning briefing card using safe DOM methods only.
+ * Called from loadDashboard() when the /api/dashboard/briefing response is available.
+ * Depends on: createElement, textContent, appendChild — NO innerHTML.
+ */
+function _renderBriefingCard(briefing, container) {
+    if (!briefing || !container) return;
+
+    var totalItems = briefing.total_items || 0;
+    var sections = briefing.sections || [];
+
+    // Card wrapper
+    var card = document.createElement('div');
+    card.classList.add('card', 'mb-3', 'border-primary');
+
+    // Header
+    var header = document.createElement('div');
+    header.classList.add('card-header', 'bg-primary', 'text-white');
+    var headerText = document.createElement('span');
+    headerText.textContent = 'Morning Briefing';
+    header.appendChild(headerText);
+    var headerBadge = document.createElement('span');
+    headerBadge.classList.add('badge', 'bg-light', 'text-primary', 'ms-2');
+    headerBadge.textContent = String(totalItems);
+    header.appendChild(headerBadge);
+    card.appendChild(header);
+
+    // Body
+    var body = document.createElement('div');
+    body.classList.add('card-body', 'p-0');
+
+    if (totalItems === 0) {
+        var emptyMsg = document.createElement('div');
+        emptyMsg.classList.add('p-3', 'text-muted');
+        emptyMsg.textContent = 'Nothing needs attention right now';
+        body.appendChild(emptyMsg);
+    } else {
+        for (var si = 0; si < sections.length; si++) {
+            var section = sections[si];
+            var sectionCount = section.count || (section.items ? section.items.length : 0);
+            if (sectionCount <= 0) continue;
+
+            var sectionWrap = document.createElement('div');
+            sectionWrap.classList.add('border-bottom', 'p-2');
+
+            // Clickable header row
+            var sectionHeader = document.createElement('div');
+            sectionHeader.classList.add('d-flex', 'justify-content-between', 'cursor-pointer');
+            var sectionLabel = document.createElement('span');
+            sectionLabel.classList.add('fw-bold');
+            sectionLabel.textContent = section.label || section.name || 'Section';
+            sectionHeader.appendChild(sectionLabel);
+            var sectionBadge = document.createElement('span');
+            sectionBadge.classList.add('badge', 'bg-secondary');
+            sectionBadge.textContent = String(sectionCount);
+            sectionHeader.appendChild(sectionBadge);
+
+            // Collapsible body (starts hidden)
+            var sectionBody = document.createElement('div');
+            sectionBody.classList.add('d-none', 'mt-2');
+
+            // Toggle on header click
+            (function(sb) {
+                sectionHeader.addEventListener('click', function() {
+                    sb.classList.toggle('d-none');
+                });
+            })(sectionBody);
+
+            // Render items
+            var items = section.items || [];
+            for (var ii = 0; ii < items.length; ii++) {
+                var item = items[ii];
+                var itemRow = document.createElement('div');
+                itemRow.classList.add('d-flex', 'align-items-start', 'mb-1');
+
+                // Priority badge
+                var pBadge = document.createElement('span');
+                var priority = item.priority || 'low';
+                var badgeClass = priority === 'high' ? 'bg-danger' : priority === 'medium' ? 'bg-warning' : 'bg-info';
+                pBadge.classList.add('badge', badgeClass, 'me-2');
+                pBadge.textContent = priority;
+                itemRow.appendChild(pBadge);
+
+                // Title
+                var titleSpan = document.createElement('span');
+                titleSpan.textContent = item.title || '';
+                itemRow.appendChild(titleSpan);
+
+                sectionBody.appendChild(itemRow);
+
+                // Optional detail
+                if (item.detail) {
+                    var detailDiv = document.createElement('div');
+                    detailDiv.classList.add('text-muted', 'small', 'ms-5');
+                    detailDiv.textContent = item.detail;
+                    sectionBody.appendChild(detailDiv);
+                }
+            }
+
+            sectionWrap.appendChild(sectionHeader);
+            sectionWrap.appendChild(sectionBody);
+            body.appendChild(sectionWrap);
+        }
+    }
+
+    card.appendChild(body);
+
+    // Prepend card to container
+    if (container.firstChild) {
+        container.insertBefore(card, container.firstChild);
+    } else {
+        container.appendChild(card);
+    }
+}
+
 async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
@@ -2301,13 +2416,14 @@ async function loadDashboard() {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const haveReqs = _reqListData && _reqListData.length > 0;
 
-        const [brief, needsAttn, freshReqs, quotes, scorecard, teamLb] = await Promise.all([
+        const [brief, needsAttn, freshReqs, quotes, scorecard, teamLb, briefing] = await Promise.all([
             apiFetch('/api/dashboard/morning-brief').catch(() => null),
             apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
             haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
             apiFetch('/api/quotes').catch(() => []),
             apiFetch('/api/proactive/scorecard').catch(() => null),
             apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
+            apiFetch('/api/dashboard/briefing').catch(() => null),
         ]);
 
         const reqs = haveReqs ? _reqListData : freshReqs;
@@ -2492,6 +2608,9 @@ async function loadDashboard() {
 
         html += '</div>'; // close cc-cards-grid
         el.innerHTML = html;
+
+        // Morning Briefing card (safe DOM — prepended)
+        if (briefing) _renderBriefingCard(briefing, el);
 
         // Pipeline Health AI insights card
         var pipelineWrap = document.createElement('div');
@@ -13606,7 +13725,7 @@ Object.assign(window, {
     // Dashboard / Command Center
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
-    showDashboard, loadDashboard, loadBuyerDashboard, goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
+    showDashboard, loadDashboard, loadBuyerDashboard, _renderBriefingCard, goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
     // Scorecard
     showScorecard, setScPeriod,
     // Unified state helpers
