@@ -10,7 +10,6 @@ Depends on: buyplan_scoring, buyplan_builder, models, config
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
@@ -19,7 +18,6 @@ from ..models import (
     Quote,
     Requirement,
     User,
-    VendorCard,
 )
 from ..models.buy_plan import (
     BuyPlanLine,

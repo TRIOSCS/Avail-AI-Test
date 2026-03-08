@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ...config import settings
 from ...database import get_db
 from ...dependencies import require_admin, require_user
-from ...models import ActivityLog, Company, CustomerSite, User, VendorCard
+from ...models import Company, User, VendorCard
 from ...rate_limit import limiter
 from ...schemas.v13_features import (
     ActivityAttributeRequest,

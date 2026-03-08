@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text as sqltext
 from sqlalchemy.orm import Session
 
-from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_buyer, require_user
 from ..models import MaterialCard, MaterialVendorHistory, Offer, User, VendorCard

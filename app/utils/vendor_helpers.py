@@ -18,7 +18,7 @@ import socket
 
 from loguru import logger
 from sqlalchemy import text as sqltext
-from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from ..http_client import http_redirect

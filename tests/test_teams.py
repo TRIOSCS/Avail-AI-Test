@@ -23,8 +23,6 @@ from app.services.teams import (
     clear_rate_limits,
     post_to_channel,
     send_competitive_quote_alert,
-    send_hot_requirement_alert,
-    send_ownership_warning,
     send_stock_match_alert,
 )
 
@@ -153,70 +151,6 @@ class TestPostToChannel:
             assert result is False
 
 
-# ── Hot requirement alert ──────────────────────────────────────────────
-
-
-class TestHotRequirementAlert:
-    @pytest.mark.asyncio
-    async def test_sends_when_enabled(self):
-        with (
-            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
-            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
-            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
-        ):
-            result = await send_hot_requirement_alert(
-                requirement_id=1,
-                mpn="LM317T",
-                target_qty=500,
-                target_price=25.0,
-                customer_name="Acme",
-                requisition_id=10,
-            )
-            assert result is True
-
-    @pytest.mark.asyncio
-    async def test_skips_when_disabled(self):
-        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
-            result = await send_hot_requirement_alert(
-                requirement_id=1,
-                mpn="LM317T",
-                target_qty=500,
-                target_price=25.0,
-                customer_name="Acme",
-                requisition_id=10,
-            )
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_rate_limited(self):
-        _mark_posted("hot_requirement", 1)
-        with patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)):
-            result = await send_hot_requirement_alert(
-                requirement_id=1,
-                mpn="LM317T",
-                target_qty=500,
-                target_price=25.0,
-                customer_name="Acme",
-                requisition_id=10,
-            )
-            assert result is False
-
-    @pytest.mark.asyncio
-    async def test_no_token(self):
-        with (
-            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
-            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
-        ):
-            result = await send_hot_requirement_alert(
-                requirement_id=2,
-                mpn="LM317T",
-                target_qty=500,
-                target_price=25.0,
-                customer_name="Acme",
-                requisition_id=10,
-            )
-            assert result is False
-
 
 # ── Competitive quote alert ────────────────────────────────────────────
 
@@ -266,25 +200,6 @@ class TestCompetitiveQuoteAlert:
             savings_fact = next(f for f in facts if f["title"] == "Savings")
             assert "60" in savings_fact["value"]
 
-
-# ── Ownership warning alert ────────────────────────────────────────────
-
-
-class TestOwnershipWarning:
-    @pytest.mark.asyncio
-    async def test_sends_when_enabled(self):
-        with (
-            patch("app.services.teams._get_channel_for_event", return_value=("ch-1", "team-1", True)),
-            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
-            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
-        ):
-            result = await send_ownership_warning(
-                company_id=1,
-                company_name="Acme",
-                owner_name="John",
-                days_remaining=7,
-            )
-            assert result is True
 
 
 # ── Stock match alert ──────────────────────────────────────────────────

@@ -172,19 +172,17 @@ def run_8x8_poll_dry_run(ext_map: dict | None = None):
     from ..config import settings
     from ..services.eight_by_eight_service import get_access_token, get_cdrs, normalize_cdr
 
-    print("=" * 60)
-    print("8x8 CDR Poll — DRY RUN (no database writes)")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("8x8 CDR Poll — DRY RUN (no database writes)")
+    logger.info("=" * 60)
 
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     until = datetime.now(timezone.utc)
-    print(f"Window: {since:%Y-%m-%d %H:%M} → {until:%Y-%m-%d %H:%M} UTC")
-    print()
+    logger.info("Window: {} → {} UTC", since.strftime("%Y-%m-%d %H:%M"), until.strftime("%Y-%m-%d %H:%M"))
 
     token = get_access_token(settings)
     cdrs = get_cdrs(token, settings, since, until)
-    print(f"CDRs fetched: {len(cdrs)}")
-    print()
+    logger.info("CDRs fetched: {}", len(cdrs))
 
     if ext_map is None:
         ext_map = {
@@ -194,8 +192,7 @@ def run_8x8_poll_dry_run(ext_map: dict | None = None):
             "1032": SimpleNamespace(id=11, name="Sally Garcia"),
         }
 
-    print(f"Extension map: {', '.join(f'{k}={v.name}' for k, v in ext_map.items())}")
-    print()
+    logger.info("Extension map: {}", ", ".join(f"{k}={v.name}" for k, v in ext_map.items()))
 
     processed = 0
     skipped = 0
@@ -229,8 +226,7 @@ def run_8x8_poll_dry_run(ext_map: dict | None = None):
 
         caller = norm["caller_name"] or norm["caller_phone"]
         callee = norm["callee_name"] or norm["callee_phone"]
-        print(f"  CDR {norm['external_id']}: {norm['direction']:8s} {caller:25s} → {callee:30s} | {status}")
+        logger.info("  CDR {}: {:8s} {:25s} → {:30s} | {}", norm['external_id'], norm['direction'], caller, callee, status)
 
-    print()
-    print(f"Summary: {processed} would write, {skipped} skipped")
-    print("Dry run complete. No data written.")
+    logger.info("Summary: {} would write, {} skipped", processed, skipped)
+    logger.info("Dry run complete. No data written.")

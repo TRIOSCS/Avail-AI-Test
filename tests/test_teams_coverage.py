@@ -17,7 +17,6 @@ from app.services.teams import (
     _mark_posted,
     clear_rate_limits,
     send_competitive_quote_alert,
-    send_ownership_warning,
     send_stock_match_alert,
 )  # _get_teams_config still tested directly in TestGetTeamsConfigDB
 
@@ -176,55 +175,6 @@ class TestCompetitiveQuoteAlertCoverage:
                 requisition_id=10,
             )
         assert result is True
-
-
-# =====================================================================
-#  send_ownership_warning -- Lines 268, 270, 275
-# =====================================================================
-
-
-class TestOwnershipWarningCoverage:
-    @pytest.mark.asyncio
-    async def test_disabled_returns_false(self):
-        with patch("app.services.teams._get_channel_for_event", return_value=("", "", False)):
-            result = await send_ownership_warning(
-                company_id=1,
-                company_name="Acme",
-                owner_name="John",
-                days_remaining=7,
-            )
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_rate_limited_returns_false(self):
-        _mark_posted("ownership_expiring", 88)
-        with patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)):
-            result = await send_ownership_warning(
-                company_id=88,
-                company_name="Acme",
-                owner_name="John",
-                days_remaining=7,
-            )
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_no_token_returns_false(self):
-        with (
-            patch("app.services.teams._get_channel_for_event", return_value=("ch", "team", True)),
-            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
-        ):
-            result = await send_ownership_warning(
-                company_id=77,
-                company_name="Acme",
-                owner_name="John",
-                days_remaining=7,
-            )
-        assert result is False
-
-
-# =====================================================================
-#  send_stock_match_alert -- Lines 309, 319
-# =====================================================================
 
 
 class TestStockMatchAlertCoverage:

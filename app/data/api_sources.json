@@ -1,0 +1,352 @@
+[
+    {
+        "name": "nexar",
+        "display_name": "Octopart (Nexar)",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "GraphQL API — searches across authorized distributors and brokers via Octopart data. Returns seller, price, qty, authorized status.",
+        "signup_url": "https://nexar.com/api",
+        "env_vars": ["NEXAR_CLIENT_ID", "NEXAR_CLIENT_SECRET"],
+        "setup_notes": "Create app at nexar.com → get client_id + client_secret. Free tier: 1000 queries/month."
+    },
+    {
+        "name": "brokerbin",
+        "display_name": "BrokerBin",
+        "category": "api",
+        "source_type": "broker",
+        "description": "REST API v2 — searches independent broker/distributor inventories. Returns company, MPN, qty, price.",
+        "signup_url": "https://www.brokerbin.com",
+        "env_vars": ["BROKERBIN_API_KEY", "BROKERBIN_API_SECRET"],
+        "setup_notes": "Contact BrokerBin sales for API access. Need API key (token) + username."
+    },
+    {
+        "name": "ebay",
+        "display_name": "eBay",
+        "category": "api",
+        "source_type": "marketplace",
+        "description": "Browse API — searches eBay listings for electronic components. Returns seller, price, condition, qty. Good for surplus/used parts.",
+        "signup_url": "https://developer.ebay.com",
+        "env_vars": ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"],
+        "setup_notes": "Create app at developer.ebay.com → get client_id + secret. OAuth client credentials. Need production access approval."
+    },
+    {
+        "name": "digikey",
+        "display_name": "DigiKey",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Product Search v4 — real-time pricing and inventory from DigiKey's catalog. Authorized distributor.",
+        "signup_url": "https://developer.digikey.com",
+        "env_vars": ["DIGIKEY_CLIENT_ID", "DIGIKEY_CLIENT_SECRET"],
+        "setup_notes": "Register at developer.digikey.com → create organization → create app → get OAuth2 credentials. Free tier available."
+    },
+    {
+        "name": "mouser",
+        "display_name": "Mouser",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Search API v2 — real-time pricing and stock from Mouser's catalog. Authorized distributor.",
+        "signup_url": "https://www.mouser.com/api-hub/",
+        "env_vars": ["MOUSER_API_KEY"],
+        "setup_notes": "Register at mouser.com → go to API Hub → request Search API key. Choose country/language/currency at signup."
+    },
+    {
+        "name": "oemsecrets",
+        "display_name": "OEMSecrets",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "Meta-aggregator — ONE API call returns pricing from 140+ distributors (DigiKey, Mouser, Arrow, Avnet, Farnell, RS, Future, TME, etc).",
+        "signup_url": "https://www.oemsecrets.com/api",
+        "env_vars": ["OEMSECRETS_API_KEY"],
+        "setup_notes": "Request API access at oemsecrets.com/api. Provides JSON + JavaScript APIs. Covers 40M+ parts."
+    },
+    {
+        "name": "sourcengine",
+        "display_name": "Sourcengine",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "B2B marketplace API — search MPN across global supplier network with real-time offers.",
+        "signup_url": "https://dev.sourcengine.com",
+        "env_vars": ["SOURCENGINE_API_KEY"],
+        "setup_notes": "Register at dev.sourcengine.com for API access. Bearer token auth."
+    },
+    {
+        "name": "email_mining",
+        "display_name": "Email Intelligence (M365)",
+        "category": "email",
+        "source_type": "internal",
+        "description": "Scans team Outlook/M365 inbox for vendor offers, stock lists, and contact info. Extracts emails, phones, and part numbers from correspondence.",
+        "signup_url": "",
+        "env_vars": ["EMAIL_MINING_ENABLED"],
+        "setup_notes": "Already authenticated via Azure OAuth. Set EMAIL_MINING_ENABLED=true to activate. Uses existing Graph API token."
+    },
+    {
+        "name": "azure_oauth",
+        "display_name": "Azure OAuth (M365)",
+        "category": "platform",
+        "source_type": "auth",
+        "description": "Azure AD OAuth2 — handles Microsoft 365 login, Graph API tokens for email mining, calendar, and Teams integration.",
+        "signup_url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps",
+        "env_vars": ["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"],
+        "setup_notes": "Azure Portal → App registrations → New registration. Set redirect URI to your app URL + /auth/callback. Grant Mail.Read, User.Read, Calendars.Read permissions."
+    },
+    {
+        "name": "anthropic_ai",
+        "display_name": "Anthropic AI (Claude)",
+        "category": "platform",
+        "source_type": "ai",
+        "description": "Claude API — powers RFQ response parsing, attachment column mapping, AI chat, and intelligent data extraction.",
+        "signup_url": "https://console.anthropic.com",
+        "env_vars": ["ANTHROPIC_API_KEY"],
+        "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-6 (configurable via ANTHROPIC_MODEL)."
+    },
+    {
+        "name": "teams_notifications",
+        "display_name": "Teams Notifications",
+        "category": "platform",
+        "source_type": "notification",
+        "description": "Microsoft Teams — sends RFQ alerts, vendor response notifications, and system alerts to a Teams channel.",
+        "signup_url": "https://teams.microsoft.com",
+        "env_vars": ["TEAMS_WEBHOOK_URL", "TEAMS_TEAM_ID", "TEAMS_CHANNEL_ID"],
+        "setup_notes": "Teams → Channel → Connectors → Incoming Webhook → copy URL. Team/Channel IDs from Teams admin or Graph API."
+    },
+    {
+        "name": "apollo_enrichment",
+        "display_name": "Apollo.io",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Contact and company enrichment — finds decision-maker emails, phone numbers, titles, and company firmographics for vendor outreach.",
+        "signup_url": "https://www.apollo.io",
+        "env_vars": ["APOLLO_API_KEY"],
+        "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts."
+    },
+    {
+        "name": "explorium_enrichment",
+        "display_name": "Explorium",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "B2B data enrichment — company technographics, intent signals, and contact data for supplier intelligence and lead scoring.",
+        "signup_url": "https://www.explorium.ai",
+        "env_vars": ["EXPLORIUM_API_KEY"],
+        "setup_notes": "Contact Explorium for API access. Enterprise-grade enrichment with intent data and predictive signals."
+    },
+    {
+        "name": "lusha_enrichment",
+        "display_name": "Lusha",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Contact enrichment — direct dial phone numbers, verified emails, and contact discovery. Primary enrichment source for high-value phone data.",
+        "signup_url": "https://www.lusha.com",
+        "env_vars": ["LUSHA_API_KEY"],
+        "setup_notes": "Sign up at lusha.com → API → Get API key. 6,400 credits/month. Phone pool (70%): 4,480 credits. Discovery pool (30%): 1,920 credits."
+    },
+    {
+        "name": "hunter_enrichment",
+        "display_name": "Hunter.io",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Email verification and domain contact discovery — finds verified email addresses and contacts at any company domain.",
+        "signup_url": "https://hunter.io",
+        "env_vars": ["HUNTER_API_KEY"],
+        "setup_notes": "Sign up at hunter.io → API → Get API key. Free tier: 25 searches + 50 verifications/month."
+    },
+    {
+        "name": "rocketreach_enrichment",
+        "display_name": "RocketReach",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Contact lookup and search — finds emails, phone numbers, and social profiles for decision-makers at target companies.",
+        "signup_url": "https://rocketreach.co",
+        "env_vars": ["ROCKETREACH_API_KEY"],
+        "setup_notes": "Sign up at rocketreach.co → API → Generate Key. Credits-based pricing with free trial."
+    },
+    {
+        "name": "clearbit_enrichment",
+        "display_name": "Clearbit (HubSpot)",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Company and person enrichment — firmographic data (industry, size, revenue, tech stack) and person data (name, title, social profiles).",
+        "signup_url": "https://clearbit.com",
+        "env_vars": ["CLEARBIT_API_KEY"],
+        "setup_notes": "Sign up at clearbit.com (now part of HubSpot) → API → Get key. Free tier available for basic enrichment."
+    },
+    {
+        "name": "netcomponents",
+        "display_name": "NetComponents",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "60M+ line items from hundreds of suppliers. Non-anonymous — shows vendor name and contact info. No public API.",
+        "signup_url": "https://www.netcomponents.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Need browser automation (Perplexity/Playwright) to search with your membership credentials. High-value target — shows vendor contacts directly."
+    },
+    {
+        "name": "icsource",
+        "display_name": "IC Source",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "Broker marketplace with 65M+ inventory listings and vendor contacts. Browser-automated search.",
+        "signup_url": "https://www.icsource.com",
+        "env_vars": ["ICS_USERNAME", "ICS_PASSWORD"],
+        "setup_notes": "Browser automation with membership login. Run ICS worker as systemd service alongside NC worker."
+    },
+    {
+        "name": "thebrokersite",
+        "display_name": "The Broker Forum (TBF)",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "60M+ line items from broker/distributor network. Has XML Search service (possible API). Escrow services available.",
+        "signup_url": "https://www.brokerforum.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Investigate XML Search — may have API. Otherwise browser automation. 100K+ parts searched daily by members."
+    },
+    {
+        "name": "findchips",
+        "display_name": "FindChips (Supplyframe)",
+        "category": "scraper",
+        "source_type": "aggregator",
+        "description": "Aggregates authorized distributor pricing and inventory. Parametric search, part alerts, and trend data.",
+        "signup_url": "https://www.findchips.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: No public API. Owned by Supplyframe (Siemens). Well-structured pages for scraping."
+    },
+    {
+        "name": "arrow",
+        "display_name": "Arrow Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Major authorized distributor ($28B revenue). Has API program for pricing and inventory.",
+        "signup_url": "https://developers.arrow.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Register at developers.arrow.com for API access. OAuth2 flow. Need to apply for production access."
+    },
+    {
+        "name": "avnet",
+        "display_name": "Avnet",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Global authorized distributor with API program. Design support and logistics services.",
+        "signup_url": "https://www.avnet.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Contact Avnet for API partnership. May require business relationship."
+    },
+    {
+        "name": "lcsc",
+        "display_name": "LCSC Electronics",
+        "category": "scraper",
+        "source_type": "authorized",
+        "description": "Chinese distributor with internal JSON API (unofficial). Low prices, wide SMD selection.",
+        "signup_url": "https://www.lcsc.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: No official API. Internal JSON API can be reverse-engineered. No auth required. Use at own risk."
+    },
+    {
+        "name": "partfuse",
+        "display_name": "PartFuse (Unified API)",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "Unified API on RapidAPI — DigiKey + Mouser + TME in one JSON shape. Simple integration.",
+        "signup_url": "https://rapidapi.com/partfuse/api/partfuse",
+        "env_vars": [],
+        "setup_notes": "PENDING: Sign up on RapidAPI → subscribe to PartFuse. Header-based auth. Good as backup/redundancy for DigiKey+Mouser."
+    },
+    {
+        "name": "stock_list_import",
+        "display_name": "Vendor Stock List Import",
+        "category": "manual",
+        "source_type": "internal",
+        "description": "Buyers upload Excel/CSV stock lists from vendors. Auto-parsed and imported as sightings + vendor card enrichment.",
+        "signup_url": "",
+        "env_vars": [],
+        "setup_notes": "PENDING: Build upload UI. Parse common stock list formats (MPN, Qty, Price, Manufacturer). Dedupe against existing data."
+    },
+    {
+        "name": "element14",
+        "display_name": "Newark / element14 / Farnell",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Major authorized distributor (part of Avnet). element14 API covers Newark (Americas), Farnell (Europe), element14 (APAC).",
+        "signup_url": "https://partner.element14.com/docs",
+        "env_vars": ["ELEMENT14_API_KEY"],
+        "setup_notes": "PENDING: Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands."
+    },
+    {
+        "name": "rs_components",
+        "display_name": "RS Components",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Global authorized distributor with Product Search API. 700K+ products across electronics, industrial, and maintenance.",
+        "signup_url": "https://developerportal.rs-online.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Register at RS Developer Portal. REST API with OAuth2. Covers pricing, stock, and product specs."
+    },
+    {
+        "name": "future",
+        "display_name": "Future Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Top 3 global authorized distributor. Has developer API program for inventory and pricing.",
+        "signup_url": "https://www.futureelectronics.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Contact Future Electronics for API partnership. May require established business account."
+    },
+    {
+        "name": "rochester",
+        "display_name": "Rochester Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Specialist in EOL/obsolete and hard-to-find semiconductors. Licensed manufacturer of discontinued ICs. Critical for legacy parts.",
+        "signup_url": "https://www.rocelec.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Contact Rochester for API access. Essential for obsolete/EOL part sourcing. Also manufactures discontinued parts under license."
+    },
+    {
+        "name": "verical",
+        "display_name": "Verical (Arrow Marketplace)",
+        "category": "api",
+        "source_type": "marketplace",
+        "description": "Arrow Electronics' open marketplace. Connects buyers with verified suppliers beyond Arrow's own stock.",
+        "signup_url": "https://www.verical.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Check if Verical offers API access through Arrow's developer program. Marketplace model with supplier verification."
+    },
+    {
+        "name": "heilind",
+        "display_name": "Heilind Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized distributor specializing in connectors, relays, sensors, switches, and thermal management.",
+        "signup_url": "https://www.heilind.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: Contact Heilind for API or EDI integration. Strong in interconnect and electromechanical components."
+    },
+    {
+        "name": "winsource",
+        "display_name": "WIN SOURCE",
+        "category": "api",
+        "source_type": "broker",
+        "description": "Global electronic component distributor with 1M+ SKUs. Strong in China-sourced components and hard-to-find parts.",
+        "signup_url": "https://www.win-source.net",
+        "env_vars": [],
+        "setup_notes": "PENDING: Check WIN SOURCE for API access. Large inventory, competitive pricing on Asian-sourced components."
+    },
+    {
+        "name": "siliconexpert",
+        "display_name": "SiliconExpert / Z2Data",
+        "category": "api",
+        "source_type": "intelligence",
+        "description": "Component lifecycle intelligence — EOL risk, cross-references, compliance (RoHS/REACH), market availability trends. Not a seller, but critical for material card enrichment.",
+        "signup_url": "https://www.siliconexpert.com/api",
+        "env_vars": [],
+        "setup_notes": "PENDING: API available for component lifecycle data, cross-refs, and compliance. Enriches material cards with lifecycle risk and alternates."
+    },
+    {
+        "name": "aliexpress",
+        "display_name": "AliExpress",
+        "category": "scraper",
+        "source_type": "marketplace",
+        "description": "Chinese marketplace with electronic components at reference pricing. Useful for cost benchmarking and identifying Chinese suppliers.",
+        "signup_url": "https://developers.aliexpress.com",
+        "env_vars": [],
+        "setup_notes": "PENDING: AliExpress has affiliate API. Useful for reference pricing and Chinese supplier discovery. Not for mission-critical procurement."
+    }
+]

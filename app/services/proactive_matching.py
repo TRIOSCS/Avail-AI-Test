@@ -117,7 +117,6 @@ def find_matches_for_sighting(sighting_id: int, db: Session) -> list[ProactiveMa
         material_card_id=sighting.material_card_id,
         mpn=sighting.mpn_matched or "",
         our_cost=float(sighting.unit_price) if sighting.unit_price else None,
-        source_sighting=sighting,
     )
 
 
@@ -128,7 +127,6 @@ def _find_matches(
     mpn: str,
     our_cost: float | None,
     source_offer: Offer | None = None,
-    source_sighting: Sighting | None = None,
 ) -> list[ProactiveMatch]:
     """Core matching logic — query CPH, score, create ProactiveMatch records."""
     throttle_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_throttle_days)

@@ -5,7 +5,6 @@ Depends on: app.database, app.models, app.services.enrichment, app.services.tagg
             app.services.tagging_ai, app.services.gradient_service
 """
 
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 

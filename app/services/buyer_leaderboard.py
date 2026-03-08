@@ -7,7 +7,6 @@ Depends on: models, database
 import hashlib
 from datetime import date, datetime, timedelta, timezone
 
-from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 

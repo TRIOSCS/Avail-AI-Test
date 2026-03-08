@@ -626,7 +626,6 @@ async def ai_draft_rfq(
         parts=parts,
         vendor_history=vendor_history,
         user_name=user.name or "",
-        user_signature=user.email_signature or "",
     )
 
     if not draft:

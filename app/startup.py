@@ -9,10 +9,21 @@ Called by: main.py lifespan
 Depends on: database.py (engine), models.py (Base)
 """
 
+import re as _re
+
 from loguru import logger
 from sqlalchemy import text as sqltext
 
 from .database import SessionLocal, engine
+
+_NONALNUM = _re.compile(r"[^a-z0-9]")
+
+
+def _norm_key(raw):
+    """Normalize a string for dedup comparison: lowercase, strip non-alphanumeric."""
+    if not raw:
+        return ""
+    return _NONALNUM.sub("", str(raw).strip().lower())
 
 
 def run_startup_migrations() -> None:
@@ -44,7 +55,6 @@ def run_startup_migrations() -> None:
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
-    _backfill_null_ticket_fields()
     _seed_vinod_user()
     logger.info("Startup migrations complete")
 
@@ -229,8 +239,6 @@ def _seed_system_config(conn) -> None:
         ("email_mining_enabled", "false", "Enable email mining background job"),
         ("proactive_matching_enabled", "true", "Enable proactive offer matching"),
         ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
-        ("notification_intelligence_enabled", "true", "Enable AI notification intelligence (smart suppression, batching, priority)"),
-        ("teams_bot_enabled", "false", "Enable Teams conversational bot (requires HMAC secret)"),
     ]
     for key, value, desc in seeds:
         _exec(
@@ -268,15 +276,6 @@ def _seed_site_contacts(conn) -> None:
 
 def _backfill_normalized_mpn() -> None:
     """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
-    import re
-
-    _nonalnum = re.compile(r"[^a-z0-9]")
-
-    def _key(raw):
-        if not raw:
-            return ""
-        return _nonalnum.sub("", str(raw).strip().lower())
-
     with engine.connect() as conn:
         # 1. Backfill requirements.normalized_mpn where NULL
         try:
@@ -287,7 +286,7 @@ def _backfill_normalized_mpn() -> None:
             ).fetchall()
             if rows:
                 for r in rows:
-                    nk = _key(r[1])
+                    nk = _norm_key(r[1])
                     if nk:
                         conn.execute(
                             sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
@@ -308,7 +307,7 @@ def _backfill_normalized_mpn() -> None:
             ).fetchall()
             updated = 0
             for c in cards:
-                new_norm = _key(c[1])
+                new_norm = _norm_key(c[1])
                 if new_norm:
                     existing = conn.execute(
                         sqltext("SELECT id FROM material_cards WHERE normalized_mpn = :n AND id != :id"),
@@ -333,15 +332,6 @@ def _backfill_normalized_mpn() -> None:
 
 def _backfill_sighting_offer_normalized_mpn() -> None:
     """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
-    import re
-
-    _nonalnum = re.compile(r"[^a-z0-9]")
-
-    def _key(raw):
-        if not raw:
-            return ""
-        return _nonalnum.sub("", str(raw).strip().lower())
-
     with engine.connect() as conn:
         # Sightings: compute from mpn_matched
         try:
@@ -352,7 +342,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
             ).fetchall()
             if rows:
                 for r in rows:
-                    nk = _key(r[1])
+                    nk = _norm_key(r[1])
                     if nk:
                         conn.execute(
                             sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
@@ -371,7 +361,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
             ).fetchall()
             if rows:
                 for r in rows:
-                    nk = _key(r[1])
+                    nk = _norm_key(r[1])
                     if nk:
                         conn.execute(
                             sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
@@ -636,7 +626,6 @@ def _backfill_proactive_offer_qty() -> None:
             conn.rollback()
 
 
-def _backfill_null_ticket_fields() -> None:
     """Backfill tickets with null risk_tier/category (report_button source).
 
     Sets default values so they appear in stats breakdowns.

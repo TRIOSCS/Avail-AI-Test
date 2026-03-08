@@ -12,7 +12,6 @@ Depends on: app.services.teams_notifications, app.http_client, app.models
 import asyncio
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -88,9 +87,6 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
     ai_priority = ""
     ai_decision = "sent"
     try:
-        from app.services.notify_intelligence import (
-            evaluate_dm_alert, is_intelligence_enabled, queue_batch_alert, record_engagement,
-        )
         if is_intelligence_enabled():
             decision = evaluate_dm_alert(user_id, event_type, entity_id, message, db=db)
             ai_priority = decision.priority
@@ -120,7 +116,6 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
         _mark_sent(user_id)
         _log_alert(db, event_type, entity_id, True, user_id=user_id)
         try:
-            from app.services.notify_intelligence import is_intelligence_enabled, record_engagement
             if is_intelligence_enabled():
                 record_engagement(user_id, event_type, entity_id, "delivered", ai_priority=ai_priority, db=db)
         except Exception:
@@ -134,7 +129,6 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
             _mark_sent(user_id)
             _log_alert(db, event_type, entity_id, True, user_id=user_id)
             try:
-                from app.services.notify_intelligence import is_intelligence_enabled, record_engagement
                 if is_intelligence_enabled():
                     record_engagement(user_id, event_type, entity_id, "delivered", delivery_method="webhook", ai_priority=ai_priority, db=db)
             except Exception:

@@ -5,9 +5,7 @@ Covers the functions that test_startup.py and test_startup_full.py miss:
 - _create_default_user_if_env_set (lines 52-89)
 - _seed_vinod_user (lines 92-117)
 - _backfill_proactive_offer_qty (lines 552-634)
-- _backfill_null_ticket_fields (lines 637-664)
 - _create_count_triggers / _backfill_company_counts / _analyze_hot_tables (PG stubs)
-- run_startup_migrations non-TESTING with _backfill_null_ticket_fields call
 
 Called by: pytest
 Depends on: app/startup.py, conftest.py
@@ -407,62 +405,6 @@ class TestBackfillProactiveOfferQty:
             assert row[0] == 1000  # unchanged
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# _backfill_null_ticket_fields
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestBackfillNullTicketFields:
-    def test_backfills_null_risk_and_category(self):
-        """Tickets with null risk_tier and category get defaults."""
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_ticket_1 = MagicMock()
-        mock_ticket_1.risk_tier = None
-        mock_ticket_1.category = None
-        mock_ticket_2 = MagicMock()
-        mock_ticket_2.risk_tier = None
-        mock_ticket_2.category = None
-
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter.return_value.all.return_value = [mock_ticket_1, mock_ticket_2]
-
-        with patch("app.startup.SessionLocal", return_value=mock_session):
-            _backfill_null_ticket_fields()
-
-        assert mock_ticket_1.risk_tier == "low"
-        assert mock_ticket_1.category == "other"
-        assert mock_ticket_2.risk_tier == "low"
-        assert mock_ticket_2.category == "other"
-        mock_session.commit.assert_called_once()
-        mock_session.close.assert_called_once()
-
-    def test_no_null_tickets_does_nothing(self):
-        """When no tickets have null fields, no commit needed."""
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_session = MagicMock()
-        mock_session.query.return_value.filter.return_value.all.return_value = []
-
-        with patch("app.startup.SessionLocal", return_value=mock_session):
-            _backfill_null_ticket_fields()
-
-        mock_session.commit.assert_not_called()
-        mock_session.close.assert_called_once()
-
-    def test_exception_during_backfill(self):
-        """Exception is caught, rolled back, and session closed."""
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_session = MagicMock()
-        mock_session.query.side_effect = RuntimeError("DB error")
-
-        with patch("app.startup.SessionLocal", return_value=mock_session):
-            _backfill_null_ticket_fields()
-
-        mock_session.rollback.assert_called_once()
-        mock_session.close.assert_called_once()
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # _create_count_triggers, _backfill_company_counts, _analyze_hot_tables
@@ -495,43 +437,3 @@ class TestCountTriggersAndAnalyze:
             _analyze_hot_tables(conn)
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# run_startup_migrations with _backfill_null_ticket_fields in the chain
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestRunStartupMigrationsWithTicketBackfill:
-    def test_non_testing_calls_backfill_null_ticket_fields(self):
-        """run_startup_migrations calls _backfill_null_ticket_fields when not TESTING."""
-        from app.startup import run_startup_migrations
-
-        eng = _make_sqlite_engine()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.startup.engine", eng),
-                patch("app.startup._create_fts_triggers"),
-                patch("app.startup._backfill_fts"),
-                patch("app.startup._seed_system_config"),
-                patch("app.startup._seed_site_contacts"),
-                patch("app.startup._create_count_triggers"),
-                patch("app.startup._backfill_company_counts"),
-                patch("app.startup._analyze_hot_tables"),
-                patch("app.startup._backfill_normalized_mpn"),
-                patch("app.startup._backfill_sighting_offer_normalized_mpn"),
-                patch("app.startup._backfill_sighting_vendor_normalized"),
-                patch("app.startup._backfill_proactive_offer_qty") as m_pq,
-                patch("app.startup._backfill_null_ticket_fields") as m_bt,
-                patch("app.startup._exec"),
-                patch("app.startup._seed_vinod_user") as m_vinod,
-                patch("app.startup._create_default_user_if_env_set"),
-            ):
-                run_startup_migrations()
-                m_pq.assert_called_once()
-                m_bt.assert_called_once()
-                m_vinod.assert_called_once()
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"

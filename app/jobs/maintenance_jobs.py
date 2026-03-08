@@ -130,7 +130,7 @@ async def _job_contact_dedup():
 
     db = SessionLocal()
     try:
-        from sqlalchemy import func, text
+        from sqlalchemy import func
 
         dupes = (
             db.query(

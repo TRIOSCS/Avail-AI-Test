@@ -217,7 +217,6 @@ async def draft_rfq(
     parts: list[dict],
     vendor_history: dict | None = None,
     user_name: str = "",
-    user_signature: str = "",
 ) -> str | None:
     """Generate personalized RFQ email body.
 
@@ -226,7 +225,6 @@ async def draft_rfq(
         parts: List of {mpn, qty, target_price} dicts
         vendor_history: From AVAIL DB — past offers, response rate, last interaction
         user_name: Salesperson name
-        user_signature: Email signature to append
 
     Returns:
         Email body string, or None on failure

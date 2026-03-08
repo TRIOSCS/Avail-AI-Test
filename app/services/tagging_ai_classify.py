@@ -12,7 +12,6 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
-from app.models.tags import Tag
 from app.services.tagging import (
     get_or_create_brand_tag,
     get_or_create_commodity_tag,

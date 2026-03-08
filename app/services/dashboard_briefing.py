@@ -474,63 +474,13 @@ def _new_answers(db: Session, user_id: int, now: datetime) -> dict:
 
 
 def _quiet_customers(db: Session, user_id: int, now: datetime) -> dict:
-    """Delegates to activity_insights._detect_gone_quiet."""
-    try:
-        from app.services.activity_insights import _detect_gone_quiet
-
-        insights = _detect_gone_quiet(user_id, db)
-        items = []
-        for ins in insights:
-            items.append({
-                "title": ins.get("title", "Quiet customer"),
-                "detail": ins.get("detail", ""),
-                "entity_type": "company",
-                "entity_id": ins.get("entity_id", 0),
-                "priority": ins.get("priority", "medium"),
-                "age_hours": 0.0,
-            })
-        return _section("quiet_customers", "Quiet Customers", items)
-    except Exception:
-        logger.debug("quiet_customers section failed", exc_info=True)
-        return _section("quiet_customers", "Quiet Customers", [])
+    """Placeholder — activity insights removed for simplification."""
+    return _section("quiet_customers", "Quiet Customers", [])
 
 
 def _deals_at_risk(db: Session, user_id: int, now: datetime) -> dict:
-    """Requisitions owned by user where deal_risk returns risk_level=red."""
-    try:
-        from app.models.sourcing import Requisition
-        from app.services.deal_risk import assess_risk
-
-        reqs = (
-            db.query(Requisition)
-            .filter(
-                Requisition.created_by == user_id,
-                Requisition.status.in_(["open", "in_progress", "quoting", "active"]),
-            )
-            .all()
-        )
-        items = []
-        for req in reqs:
-            try:
-                risk = assess_risk(req.id, db)
-            except Exception:
-                continue
-            if risk.get("risk_level") != "red":
-                continue
-            age = (now - (req.created_at or now)).total_seconds() / 3600.0
-            items.append({
-                "title": req.name,
-                "detail": risk.get("explanation", "High risk"),
-                "entity_type": "requisition",
-                "entity_id": req.id,
-                "priority": "high",
-                "age_hours": round(age, 1),
-            })
-        return _section("deals_at_risk", "Deals at Risk", items)
-    except Exception:
-        logger.debug("deals_at_risk section failed", exc_info=True)
-        return _section("deals_at_risk", "Deals at Risk", [])
-
+    """Placeholder — deal risk assessment removed for simplification."""
+    return _section("deals_at_risk", "Deals at Risk", [])
 
 def _quotes_ready(db: Session, user_id: int, now: datetime) -> dict:
     """Requisitions with more offers than quotes — ready to quote."""

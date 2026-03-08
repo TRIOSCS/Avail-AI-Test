@@ -11,10 +11,8 @@ Depends on: models, schemas, cache, dependencies, sourcing_score service
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from loguru import logger
 from sqlalchemy import and_, case, exists, func as sqlfunc, literal, or_, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -24,7 +22,6 @@ from ...models import (
     ActivityLog,
     Contact,
     CustomerSite,
-    MaterialCard,
     Offer,
     ProactiveMatch,
     Quote,
@@ -34,7 +31,6 @@ from ...models import (
     User,
     VendorResponse,
 )
-from ...rate_limit import limiter
 from ...schemas.requisitions import (
     RequisitionCreate,
     RequisitionOut,
@@ -85,7 +81,6 @@ async def list_requisitions(
     db: Session = Depends(get_db),
 ):
     """List requisitions with filtering, search, and sourcing scores."""
-    from . import invalidate_prefix
     from ...cache.decorators import cached_endpoint
 
     @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "limit", "offset"])
@@ -395,18 +390,6 @@ def _build_requisition_list(q, status, limit, offset, user, db):
         "limit": limit,
         "offset": offset,
     }
-
-
-@router.get("/api/requisitions/{req_id}/risk-assessment")
-async def requisition_risk_assessment(
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Get AI-powered risk assessment for a requisition."""
-    from app.services.deal_risk import assess_risk
-
-    return assess_risk(req_id, db)
 
 
 @router.get("/api/requisitions/{req_id}/sourcing-score")

@@ -314,9 +314,6 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     connectors = []
     source_stats_map: dict[str, dict] = {}  # track per-connector status
 
-    # All known connector source names
-    _ALL_SOURCES = list(_CONNECTOR_SOURCE_MAP.values())  # noqa: F841
-
     # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
     from .services.credential_service import get_credential
 

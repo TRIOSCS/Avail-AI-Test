@@ -6,12 +6,10 @@ Called by: app/static/app.js (loadDashboard)
 Depends on: models/crm.py, models/intelligence.py, models/quotes.py, models/sourcing.py
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from loguru import logger
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from ...cache.decorators import cached_endpoint

@@ -82,7 +82,6 @@ async def record_clicked(
 ):
     """Record that a user clicked on a notification."""
     from app.models.notification import Notification
-    from app.services.notify_intelligence import record_engagement
 
     notif = db.get(Notification, notification_id)
     if not notif or notif.user_id != user.id:
@@ -106,7 +105,6 @@ async def record_dismissed(
 ):
     """Record that a user dismissed a notification."""
     from app.models.notification import Notification
-    from app.services.notify_intelligence import record_engagement
 
     notif = db.get(Notification, notification_id)
     if not notif or notif.user_id != user.id:

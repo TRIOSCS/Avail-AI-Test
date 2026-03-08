@@ -16,7 +16,6 @@ from sqlalchemy import func, text as sa_text
 from sqlalchemy.orm import Session
 
 from app.models.knowledge import KnowledgeConfig, KnowledgeEntry
-from app.models.teams_alert_config import TeamsAlertConfig
 
 
 # ═══════════════════════════════════════════════════════════════════════

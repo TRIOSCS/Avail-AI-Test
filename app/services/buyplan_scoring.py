@@ -9,7 +9,6 @@ Depends on: models (Offer, Requirement, VendorCard, User, VerificationGroupMembe
 import json
 from pathlib import Path
 
-from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
@@ -19,7 +18,6 @@ from ..models import (
     User,
     VendorCard,
 )
-from ..models.buy_plan import VerificationGroupMember
 
 # ── Routing maps (loaded once) ──────────────────────────────────────
 

@@ -5,7 +5,6 @@ Depends on: app.models.tags, app.schemas.tags
 """
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db

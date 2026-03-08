@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Offer, Quote, BuyPlan, Contact, StockListHash, etc.)
 """
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc

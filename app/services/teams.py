@@ -333,26 +333,8 @@ def _build_mention(email: str, name: str) -> tuple[str, dict]:
 
 
 def _intelligence_gate(event_type: str, entity_id, context: dict | None = None) -> bool:
-    """Check notification intelligence — returns False if alert should be suppressed.
-
-    Replaces _is_rate_limited() with smarter evaluation.
-    Falls through to True (allow) on any error.
-    """
-    try:
-        from app.services.notify_intelligence import evaluate_channel_alert, is_intelligence_enabled
-
-        if not is_intelligence_enabled():
-            return not _is_rate_limited(event_type, entity_id)
-
-        decision = evaluate_channel_alert(event_type, str(entity_id), context)
-        if decision.action == "SUPPRESS":
-            logger.debug("Intelligence suppressed %s:%s — %s", event_type, entity_id, decision.reason)
-            return False
-        return True
-    except Exception:
-        # Fire-and-forget: fall through to legacy rate limiting
-        return not _is_rate_limited(event_type, entity_id)
-
+    """Check rate limiting — returns False if alert should be suppressed."""
+    return not _is_rate_limited(event_type, entity_id)
 
 async def send_competitive_quote_alert(
     offer_id: int,

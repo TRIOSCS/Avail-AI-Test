@@ -9,7 +9,6 @@ Depends on: models/auth.py, models/performance.py, services/unified_score_servic
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from ...cache.decorators import cached_endpoint

@@ -11,7 +11,7 @@ Depends on: models/knowledge.py, utils/claude_client.py, services/notification_s
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.knowledge import KnowledgeEntry

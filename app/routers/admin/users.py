@@ -10,10 +10,8 @@ Called by: app/routers/admin/__init__.py (included via router)
 Depends on: app/services/admin_service.py, app/models, app/dependencies
 """
 
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 

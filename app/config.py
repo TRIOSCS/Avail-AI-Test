@@ -177,11 +177,6 @@ class Settings(BaseSettings):
     collision_lookback_days: int = 7
 
     # --- Self-heal pipeline ---
-    self_heal_enabled: bool = False
-    self_heal_auto_diagnose: bool = False
-    self_heal_auto_execute_low: bool = False
-    self_heal_ticket_budget: float = 2.00
-    self_heal_weekly_budget: float = 50.00
     self_heal_max_iterations_low: int = 5
     self_heal_max_iterations_medium: int = 10
 

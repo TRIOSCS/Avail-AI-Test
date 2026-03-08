@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from ...database import get_db
 from ...dependencies import require_admin, require_settings_access
-from ...models import ApiSource, SystemConfig, User
+from ...models import ApiSource, User
 from ...models.config import ApiUsageLog
 from ...rate_limit import limiter
 from ...services.admin_service import get_all_config, get_system_health, set_config_value

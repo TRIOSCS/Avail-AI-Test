@@ -8,7 +8,6 @@ Depends on: buyplan_scoring, models
 
 from datetime import datetime, timezone
 
-from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings

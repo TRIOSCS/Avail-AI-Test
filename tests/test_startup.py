@@ -2,7 +2,7 @@
 test_startup.py -- Tests for app/startup.py
 
 Covers: TESTING guard, _exec error handling, _create_default_user_if_env_set,
-_seed_vinod_user, _backfill_null_ticket_fields, _create_count_triggers,
+_seed_vinod_user, _create_count_triggers,
 _backfill_company_counts, _analyze_hot_tables, _backfill_proactive_offer_qty.
 
 Called by: pytest
@@ -182,78 +182,6 @@ class TestSeedVinodUser:
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
-
-class TestBackfillNullTicketFields:
-    """Lines 654-659: _backfill_null_ticket_fields."""
-
-    @patch("app.startup.SessionLocal")
-    def test_backfills_null_risk_and_category(self, mock_sl, db_session):
-        """Sets risk_tier='low' and category='other' on tickets missing both."""
-        from app.models.trouble_ticket import TroubleTicket
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_sl.return_value = db_session
-
-        t = TroubleTicket(
-            ticket_number="TT-BF-001",
-            submitted_by=None,
-            title="Null fields",
-            description="Missing risk+category",
-            status="submitted",
-            risk_tier=None,
-            category=None,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(t)
-        db_session.commit()
-        tid = t.id
-
-        _backfill_null_ticket_fields()
-        # Re-query since the function commits through its own session reference
-        updated = db_session.get(TroubleTicket, tid)
-        assert updated.risk_tier == "low"
-        assert updated.category == "other"
-
-    @patch("app.startup.SessionLocal")
-    def test_skips_tickets_with_values(self, mock_sl, db_session):
-        """Tickets that already have risk_tier or category are left alone."""
-        from app.models.trouble_ticket import TroubleTicket
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_sl.return_value = db_session
-
-        t = TroubleTicket(
-            ticket_number="TT-BF-002",
-            submitted_by=None,
-            title="Has values",
-            description="Already set",
-            status="submitted",
-            risk_tier="high",
-            category="api",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(t)
-        db_session.commit()
-        tid = t.id
-
-        _backfill_null_ticket_fields()
-        updated = db_session.get(TroubleTicket, tid)
-        assert updated.risk_tier == "high"
-        assert updated.category == "api"
-
-    @patch("app.startup.SessionLocal")
-    def test_handles_error_gracefully(self, mock_sl):
-        """Handles DB error during backfill."""
-        from app.startup import _backfill_null_ticket_fields
-
-        mock_db = MagicMock()
-        mock_db.query.side_effect = RuntimeError("DB error")
-        mock_db.rollback = MagicMock()
-        mock_db.close = MagicMock()
-        mock_sl.return_value = mock_db
-
-        _backfill_null_ticket_fields()
-        mock_db.close.assert_called_once()
 
 
 class TestCreateCountTriggers:
