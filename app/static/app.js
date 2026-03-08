@@ -6516,7 +6516,6 @@ function _openMobileDrillDown(reqId) {
                     </div>
                 </div>
             </div>
-            ${_renderDdSummary(reqId)}
             <div class="m-tabs-scroll" id="mobileDdTabs">${pillsHtml}</div>
             <div id="mobileDdPanel" style="padding:8px 12px">
                 <span style="font-size:12px;color:var(--muted)">Loading\u2026</span>
@@ -8724,7 +8723,6 @@ function _renderReqRow(r) {
         ${actions}
     </tr>
     <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
-        ${_renderDdSummary(r.id)}
         ${ddHeader}
         <div class="dd-tabs">${_renderDdTabPills(r.id)}</div>
         <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} part${total !== 1 ? 's' : ''} \u2014 click row or arrow to expand</span></div>
