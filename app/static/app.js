@@ -8724,13 +8724,13 @@ function renderReqList() {
         // Sales view: Customer-focused columns — Quote status, Value, Deadline prominent
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
-            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status and value">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')} title="Vendor offers received">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
-            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')} style="min-width:80px">Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
     } else {
@@ -9032,6 +9032,8 @@ function _renderReqRow(r) {
     // Status badge mapping
     const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',closed:'b-comp',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
     const bc = badgeMap[r.status] || 'b-draft';
+    const chipMap = {draft:'draft',active:'sourcing',sourcing:'sourcing',offers:'offers',quoted:'quoted',quoting:'quoted',won:'won',lost:'lost',closed:'draft',archived:'draft'};
+    const chipCls = chipMap[r.status] || 'draft';
 
     // Age — days since created
     let age = '';
@@ -9076,8 +9078,9 @@ function _renderReqRow(r) {
     }
 
     // Name cell — editable on active view, read-only on archive
+    const statusChip = `<span class="status-chip status-chip-${chipCls}" style="margin-left:6px;font-size:9px;vertical-align:middle">${_statusLabels[r.status] || r.status}</span>`;
     const nameCell = v !== 'archive'
-        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span></td>`
+        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span>${statusChip}</td>`
         : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})" title="Click to expand details">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp with absolute tooltip
@@ -9108,7 +9111,7 @@ function _renderReqRow(r) {
         dataCells = `
             <td class="mono">${total}</td>
             <td class="mono">${offers}</td>
-            <td style="white-space:nowrap"><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span>${wonVal}</td>
+            <td style="white-space:nowrap"><span class="status-chip status-chip-${chipCls}">${_statusLabels[r.status] || r.status}</span>${wonVal}</td>
             <td class="mono" style="font-size:11px">${matchBadge}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
@@ -9134,12 +9137,12 @@ function _renderReqRow(r) {
         }
 
         dataCells = `
-            <td class="mono">${total}</td>
+            <td class="mono" style="text-align:right">${total}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             <td>${esc(r.created_by_name || '')}</td>
-            <td class="mono" style="font-size:11px">${age}</td>`;
+            <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
 
         // Sales actions: context-aware primary action
         let salesBtn;
@@ -9217,12 +9220,12 @@ function _renderReqRow(r) {
         const lastSearch = r.last_searched_at ? _timeAgo(r.last_searched_at) : 'never';
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
-            <div style="display:flex;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Sourcing</button>
+            <div style="display:flex;gap:4px;align-items:center">
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">Sourcing</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
-                <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
-                <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
+                <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1;</button>
+                <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
                 <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
         </div>`;
