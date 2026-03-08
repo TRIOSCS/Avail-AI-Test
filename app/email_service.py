@@ -968,6 +968,14 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 except Exception:
                     logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)
 
+                # Reset strategic vendor 39-day clock
+                if offer.vendor_card_id:
+                    try:
+                        from app.services.strategic_vendor_service import record_offer as sv_record
+                        sv_record(db, offer.vendor_card_id)
+                    except Exception:
+                        logger.debug("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
+
                 # Deduplicated notification — update existing if unread, else create new
                 if owner_id:
                     existing_notif = (

@@ -407,6 +407,14 @@ async def create_offer(
     except Exception as e:
         logger.warning("Knowledge auto-capture (offer) failed: {}", e)
 
+    # Reset strategic vendor 39-day clock if this vendor is claimed
+    if offer.vendor_card_id:
+        try:
+            from app.services.strategic_vendor_service import record_offer
+            record_offer(db, offer.vendor_card_id)
+        except Exception as e:
+            logger.debug("Strategic vendor clock reset failed: {}", e)
+
     # Background vendor enrichment — fire after commit so card is persisted
     if _enrich_new_card:
         from ...utils.vendor_helpers import _background_enrich_vendor

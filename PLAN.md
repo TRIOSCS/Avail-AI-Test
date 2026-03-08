@@ -1,158 +1,203 @@
-# Task Board Feature Plan (Replacing Q&A Sub-Tab)
+# Strategic Vendors Feature Plan
 
-## Overview
-Replace the Q&A sub-tab with a **pipeline-style task board** per requisition, plus a
-**"My Tasks" sidebar widget** showing the logged-in buyer's tasks across all reqs.
-AI provides priority scoring and risk alerts.
+## What It Does
+Each buyer can claim up to **10 strategic vendors** — their personal vendor relationships. Only strategic vendor responses get tracked for follow-ups and alerts. If a strategic vendor doesn't enter an offer within **39 days**, they lose strategic status and return to the open pool. Hard cap of 10 — to add one, you must drop one.
 
-## Pipeline Stages
-Requisitions progress through 4 stages:
-1. **New** — just received, no sourcing activity yet
-2. **Sourcing** — actively searching, sending RFQs, collecting offers
-3. **Quoted** — quote built and sent to customer, awaiting response
-4. **Won/Lost** — terminal: customer placed PO (Won) or declined (Lost)
+## Why
+Most vendors don't respond to RFQs. Tracking all of them creates overwhelming follow-up noise. Strategic vendors focus buyer attention on the relationships that actually matter.
 
-Tasks are generated per stage. The board shows tasks grouped by the req's current
-pipeline stage.
+---
 
-## Data Model: `RequisitionTask`
+## Existing Code Context
 
-New table `requisition_tasks`:
-- `id` (PK)
-- `requisition_id` (FK → requisitions, required)
-- `title` (String 255, required) — short task description
-- `description` (Text, nullable) — detail/notes
-- `task_type` (String 20) — `sourcing`, `sales`, `general`
-- `status` (String 20, default `todo`) — `todo`, `in_progress`, `done`
-- `priority` (Integer, default 2) — 1=low, 2=medium, 3=high
-- `ai_priority_score` (Float, nullable) — AI-computed urgency 0.0-1.0
-- `ai_risk_flag` (String 255, nullable) — AI risk alert text
-- `assigned_to_id` (FK → users, nullable)
-- `created_by` (FK → users, nullable)
-- `source` (String 20, default `manual`) — `manual` | `system` | `ai`
-- `source_ref` (String 100, nullable) — e.g. `offer:123`, `rfq:456`
-- `due_at` (DateTime, nullable)
-- `completed_at` (DateTime, nullable)
-- `created_at`, `updated_at` (timestamps)
+- **VendorCard** already tracks `total_outreach`, `total_responses`, `ghost_rate`, `last_contact_at`, `engagement_score`
+- **BuyerVendorStats** tracks per-buyer-vendor metrics but has NO assignment concept
+- **Company** has `is_strategic` flag + `account_owner_id` — same pattern we'll follow
+- **Offer** links to `vendor_card_id` + `entered_by_id` — we hook offer creation
+- **Contact** model tracks outbound RFQs per vendor per req
+- Current migration head: **065**
+- Scheduler uses APScheduler with CronTrigger pattern in `app/jobs/`
 
-Indexes: `(requisition_id, status)`, `(assigned_to_id, status)`, `(status, due_at)`
+---
 
-## API Endpoints
+## Step 1: Database Model + Migration (066)
 
-### Per-requisition tasks: `/api/requisitions/{req_id}/tasks`
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/tasks` | List tasks (filter: status, type, assignee) |
-| POST | `/tasks` | Create task |
-| PUT | `/tasks/{id}` | Update task fields |
-| PATCH | `/tasks/{id}/status` | Quick status change (drag-drop / auto-close) |
-| DELETE | `/tasks/{id}` | Delete task |
+**New file:** `app/models/strategic.py`
 
-### Cross-req "My Tasks": `/api/tasks/mine`
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/mine` | All tasks assigned to current user, sorted by AI priority + due date |
-| GET | `/mine/summary` | Counts by status + overdue count (for sidebar badge) |
-
-## Auto-Generated Tasks (source='system')
-
-Triggered from existing service functions:
-1. **New requirement added** → "Source {mpn} — find vendors" (sourcing, priority 2)
-2. **New offer received** → "Review offer from {vendor} for {mpn}" (sourcing, priority 2)
-3. **RFQ sent** → "Awaiting response from {vendor}" (sourcing, priority 1, due +3 days)
-4. **No RFQ response after 3 days** → "Follow up RFQ to {vendor}" (sourcing, priority 3)
-5. **Quote created** → "Send quote to {customer}" (sales, priority 3)
-6. **Quote expiring in 2 days** → "Quote expires soon — follow up" (sales, priority 3)
-
-## Auto-Close Logic
-
-System marks tasks `done` + sets `completed_at` when:
-- "Review offer" → offer status changes from `pending_review`
-- "Source {mpn}" → at least one offer exists for that MPN
-- "Awaiting response" → vendor reply parsed
-- "Send quote" → quote status = `sent`
-- "Follow up RFQ" → vendor responds OR task manually closed
-
-## AI Features
-
-### Priority Scoring (runs on task list load or periodic refresh)
-- Computes `ai_priority_score` (0.0-1.0) based on:
-  - Due date proximity (higher = more urgent)
-  - Customer importance / deal size
-  - Time since last activity on the req
-  - Number of stale/unreviewed offers
-- Tasks sorted by this score in "My Tasks" sidebar
-
-### Risk Alerts (runs as background job)
-- Sets `ai_risk_flag` text on tasks when:
-  - "No activity in 3+ days" on active req
-  - "Quote expires tomorrow"
-  - "Offer price increasing vs last quote"
-  - "All RFQs unanswered — try different vendors"
-- Shown as warning badge on task card
-
-## Frontend
-
-### 1. Pipeline Board (replaces Q&A sub-tab)
-Sub-tab renamed: `qa` → `tasks`
-
-Layout: 4 pipeline columns matching req stages:
 ```
-[New]          [Sourcing]       [Quoted]        [Won/Lost]
-│ Source MPN   │ Review offer   │ Follow up     │ ✓ PO received
-│ Find vendor  │ Follow up RFQ  │ Quote expires │
-│ + Add task   │ + Add task     │ + Add task    │
+strategic_vendors table:
+  id              INT PK
+  user_id         INT FK(users) NOT NULL        — the buyer
+  vendor_card_id  INT FK(vendor_cards) NOT NULL  — the vendor
+  claimed_at      DATETIME NOT NULL              — when buyer claimed
+  last_offer_at   DATETIME NULL                  — last offer from this vendor (any req)
+  expires_at      DATETIME NOT NULL              — resets to now+39 days on each offer
+  released_at     DATETIME NULL                  — NULL = active, set when released
+  release_reason  VARCHAR(20) NULL               — 'expired' | 'dropped' | 'replaced'
+
+  UNIQUE(user_id, vendor_card_id)
+  INDEX(user_id, released_at)      — "my active strategic vendors"
+  INDEX(expires_at, released_at)   — scheduler expiry scan
+  INDEX(vendor_card_id, released_at) — "who owns this vendor?"
 ```
 
-- Cards show: title, type badge (teal=sourcing, blue=sales, gray=general),
-  assignee initials, due date, priority dot (red/yellow/green), risk flag icon
-- System-generated cards have subtle "auto" label
-- Drag-and-drop between columns (HTML5 drag API)
-- "+" inline form at bottom of each column (no modal)
-- Click card → expand inline for editing
-- Filter bar: All | Sourcing | Sales | General
+**Migration:** `alembic/versions/066_strategic_vendors.py`
 
-### 2. My Tasks Sidebar Widget
-Collapsible sidebar on the left side of the main view:
-- Toggle button visible at all times (with badge count of pending tasks)
-- When expanded (250px wide): task list grouped by urgency
-  - Overdue (red header)
-  - Due Today (amber header)
-  - Upcoming (default)
-  - No due date
-- Each task card links to its requisition (click → drill-down opens)
-- Compact card: title + req name + due date + priority dot
+---
 
-## Files to Create/Modify
+## Step 2: Service Layer
 
-### New files:
-- `app/models/task.py` — RequisitionTask model
-- `app/schemas/task.py` — Pydantic request/response schemas
-- `app/services/task_service.py` — CRUD, auto-gen, auto-close, AI scoring
-- `app/routers/task.py` — API endpoints
-- `alembic/versions/065_requisition_tasks.py` — migration
-- `tests/test_task_service.py` — service tests
-- `tests/test_routers_task.py` — API endpoint tests
+**New file:** `app/services/strategic_vendor_service.py`
 
-### Modified files:
-- `app/models/__init__.py` — export RequisitionTask
-- `app/main.py` — register task router
-- `app/static/app.js` — pipeline board + My Tasks sidebar
-- `app/static/styles.css` — pipeline board + sidebar CSS
-- `app/templates/index.html` — sidebar HTML container + sub-tab label
+| Function | What |
+|----------|------|
+| `get_my_strategic(db, user_id)` | Active vendors for this buyer (released_at IS NULL) |
+| `claim_vendor(db, user_id, vendor_card_id)` | Claim vendor. Fail if buyer at 10 or vendor already claimed. |
+| `drop_vendor(db, user_id, vendor_card_id)` | Release with reason='dropped' |
+| `replace_vendor(db, user_id, drop_id, claim_id)` | Atomic: drop old + claim new in one transaction |
+| `record_offer(db, vendor_card_id)` | Update last_offer_at, reset expires_at to now+39d |
+| `expire_stale(db)` | Set released_at+reason on expired rows. Returns count. |
+| `get_expiring_soon(db, days=7)` | Vendors expiring within N days (for warnings) |
+| `get_vendor_status(db, vendor_card_id)` | Who has this vendor, days left. None if open pool. |
+| `get_open_pool(db, limit, offset)` | Vendors not claimed by anyone |
 
-### Untouched:
-- Knowledge system (facts, AI insights, auto-capture) stays intact
-- Q&A JS functions remain in code but sub-tab no longer links to them
-- Knowledge API endpoints unchanged
+**Business rules:**
+- Hard cap: 10 per buyer (COUNT WHERE user_id=X AND released_at IS NULL)
+- One buyer per vendor (UNIQUE constraint)
+- 39-day TTL resets on every offer entry for that vendor
+- Expired vendors go to open pool (released_at set, release_reason='expired')
+
+---
+
+## Step 3: API Endpoints
+
+**New file:** `app/routers/strategic.py` — prefix `/api/strategic-vendors`
+
+| Method | Path | Auth | What |
+|--------|------|------|------|
+| GET | `/mine` | require_user | My strategic vendors with days remaining, last offer date |
+| POST | `/claim/{vendor_card_id}` | require_buyer | Claim. 409 if at cap or taken. |
+| DELETE | `/drop/{vendor_card_id}` | require_buyer | Drop to open pool |
+| POST | `/replace` | require_buyer | Body: `{drop_id, claim_id}` — atomic swap |
+| GET | `/open-pool` | require_user | Unclaimed vendors (paginated, searchable) |
+| GET | `/status/{vendor_card_id}` | require_user | Who owns this vendor + days left |
+
+---
+
+## Step 4: Hook Into Offer Creation
+
+**Edit:** `app/routers/crm/offers.py`
+
+After successful offer creation, add:
+```python
+from app.services import strategic_vendor_service
+strategic_vendor_service.record_offer(db, offer.vendor_card_id)
+```
+
+**Edit:** `app/email_service.py` — in `_apply_parsed_result()`
+
+Same hook when AI-parsed offer is auto-created from vendor email.
+
+Both reset the 39-day clock for whichever buyer has that vendor as strategic.
+
+---
+
+## Step 5: Scheduler Jobs
+
+**Edit:** `app/jobs/offers_jobs.py`
+
+**Job 1 — Daily expiry (6 AM):**
+```
+_job_expire_strategic_vendors:
+  - Find WHERE expires_at < now AND released_at IS NULL
+  - Set released_at = now, release_reason = 'expired'
+  - Create in-app notification for affected buyer
+  - Log count
+```
+
+**Job 2 — Warning alerts (8 AM):**
+```
+_job_warn_strategic_expiring:
+  - Find WHERE expires_at < now + 7 days AND released_at IS NULL
+  - Send notification: "Vendor X expires in N days — get an offer or lose them"
+  - Only send once per vendor per warning cycle (check if notification already exists)
+```
+
+---
+
+## Step 6: Frontend
+
+### 6a. Vendor Detail — Strategic Badge
+When viewing any vendor (vendor drawer/detail), show:
+- **Your vendor:** "Strategic (You) — 23 days left" + "Drop" button
+- **Someone else's:** "Strategic (John)" — no action
+- **Open pool:** "Claim as Strategic" button (disabled if you're at 10)
+
+### 6b. Left Sidebar Nav — "My Vendors" Button
+New nav button below existing nav items.
+
+Click shows "view-strategic" panel:
+- List of your strategic vendors (up to 10)
+- Each row: vendor name, days remaining (red <7), last offer date
+- Progress bar showing 10-slot usage (e.g., "7/10 slots used")
+- "Drop" action per vendor
+- "Claim Vendor" button → opens vendor search typeahead
+- Search disabled at 10/10 with message "Drop a vendor first"
+
+### 6c. Response Tracking Filter
+Modify follow-up/response alerts to only fire for strategic vendors:
+- RFQ follow-up notifications
+- "No response" warnings
+- Ghost rate alerts
+- Morning briefing vendor items
+
+Non-strategic vendors still get searched and contacted, just no follow-up noise.
+
+---
+
+## Step 7: Tests
+
+**New file:** `tests/test_strategic_vendors.py`
+
+- `test_claim_vendor_success` — claim works, record created
+- `test_claim_at_10_fails` — 10 cap enforced, returns 409
+- `test_claim_already_taken` — vendor owned by another buyer, returns 409
+- `test_drop_vendor` — released_at set, reason='dropped'
+- `test_replace_vendor` — atomic drop+claim in one call
+- `test_offer_resets_clock` — record_offer updates expires_at to now+39d
+- `test_expire_stale` — expired vendor released, reason='expired'
+- `test_expiring_soon_query` — warning query returns correct vendors
+- `test_open_pool` — unclaimed vendors returned
+- `test_api_mine_endpoint` — GET /mine returns buyer's vendors
+- `test_api_claim_endpoint` — POST /claim creates record
+- `test_api_requires_auth` — unauthenticated returns 401
+
+---
+
+## File Summary
+
+| File | Action |
+|------|--------|
+| `app/models/strategic.py` | **NEW** — StrategicVendor model |
+| `app/models/__init__.py` | EDIT — import |
+| `alembic/versions/066_strategic_vendors.py` | **NEW** — migration |
+| `app/services/strategic_vendor_service.py` | **NEW** — all business logic |
+| `app/routers/strategic.py` | **NEW** — API endpoints |
+| `app/main.py` | EDIT — register router |
+| `app/routers/crm/offers.py` | EDIT — hook record_offer |
+| `app/email_service.py` | EDIT — hook record_offer on AI-parsed offers |
+| `app/jobs/offers_jobs.py` | EDIT — expiry + warning jobs |
+| `app/static/crm.js` | EDIT — My Vendors panel + vendor badge |
+| `app/templates/index.html` | EDIT — nav button + view panel |
+| `app/static/styles.css` | EDIT — strategic vendor styles |
+| `tests/test_strategic_vendors.py` | **NEW** — tests |
 
 ## Implementation Order
-1. Model + migration
-2. Schemas
-3. Service layer (CRUD + auto-gen + auto-close)
-4. API router + register
-5. Tests
-6. Frontend: pipeline board CSS + JS
-7. Frontend: My Tasks sidebar
-8. AI priority scoring + risk alerts
-9. Commit + push + deploy
+
+1. Model + migration (foundation)
+2. Service layer (business logic)
+3. Tests for service + API
+4. API endpoints + register router
+5. Hook into offer creation (both manual + AI-parsed)
+6. Scheduler jobs (expiry + warnings)
+7. Frontend (nav, panel, vendor badges)

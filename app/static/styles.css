@@ -2803,3 +2803,18 @@ body.rfq-drawer-open .main { margin-right: 520px; transition: margin-right .25s 
     background: var(--white);
 }
 
+/* Strategic Vendors Panel */
+.strategic-vendor-list { display: flex; flex-direction: column; gap: 8px; }
+.strategic-card { background: var(--white); border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); padding: 14px 16px; transition: box-shadow .15s; }
+.strategic-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.strategic-card-main { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.strategic-card-name { font-size: 14px; font-weight: 600; }
+.strategic-card-meta { display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.strategic-days-ok { color: var(--blue); font-weight: 600; }
+.strategic-days-urgent { color: var(--red); font-weight: 700; }
+.strategic-drop-btn { font-size: 11px !important; color: var(--muted) !important; }
+.strategic-drop-btn:hover { color: var(--red) !important; }
+.strategic-progress { height: 3px; background: var(--line); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+.strategic-progress-bar { height: 100%; border-radius: 2px; transition: width .3s; }
+.sb-badge { display: inline-flex; align-items: center; justify-content: center; background: var(--blue); color: #fff; font-size: 9px; font-weight: 700; min-width: 14px; height: 14px; border-radius: 7px; padding: 0 3px; margin-left: 4px; }
+

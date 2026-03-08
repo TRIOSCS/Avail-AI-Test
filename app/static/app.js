@@ -1185,7 +1185,7 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
 const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
@@ -4591,6 +4591,142 @@ function _renderMyTaskItem(task) {
         }
     }, 500);
 })();
+
+// ---------------------------------------------------------------------------
+// Strategic Vendors Panel
+// ---------------------------------------------------------------------------
+
+function showStrategicVendors() {
+    showView('view-strategic');
+    loadStrategicVendors();
+}
+
+async function loadStrategicVendors() {
+    var list = document.getElementById('strategicVendorList');
+    if (!list) return;
+    list.innerHTML = '<span style="font-size:12px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>';
+    try {
+        var data = await apiFetch('/api/strategic-vendors/mine');
+        var slots = document.getElementById('strategicSlots');
+        var badge = document.getElementById('strategicBadge');
+        var claimBtn = document.getElementById('strategicClaimBtn');
+        if (slots) slots.textContent = data.count + '/' + data.max + ' slots';
+        if (badge) {
+            badge.textContent = data.count;
+            badge.style.display = data.count > 0 ? 'inline-flex' : 'none';
+        }
+        if (claimBtn) claimBtn.disabled = data.slots_remaining <= 0;
+
+        if (!data.vendors.length) {
+            list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)"><p style="font-size:14px;margin-bottom:8px">No strategic vendors claimed yet</p><p style="font-size:12px">Claim up to 10 vendors to track their response activity</p></div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        for (var i = 0; i < data.vendors.length; i++) {
+            list.appendChild(_renderStrategicCard(data.vendors[i]));
+        }
+    } catch (e) {
+        list.innerHTML = '<span style="font-size:12px;color:var(--red);padding:20px;text-align:center;display:block">Failed to load strategic vendors</span>';
+    }
+}
+
+function _renderStrategicCard(sv) {
+    var card = document.createElement('div');
+    card.className = 'strategic-card';
+    var isUrgent = sv.days_remaining <= 7;
+    var daysClass = isUrgent ? 'strategic-days-urgent' : 'strategic-days-ok';
+
+    card.innerHTML =
+        '<div class="strategic-card-main">' +
+            '<div class="strategic-card-name" onclick="openVendorDrawer(' + sv.vendor_card_id + ')" style="cursor:pointer;color:var(--blue)">' + esc(sv.vendor_name || 'Unknown') + '</div>' +
+            '<div class="strategic-card-meta">' +
+                '<span class="' + daysClass + '">' + sv.days_remaining + 'd left</span>' +
+                (sv.vendor_score != null ? ' <span style="color:var(--muted);font-size:11px">Score: ' + Math.round(sv.vendor_score) + '</span>' : '') +
+                (sv.last_offer_at ? ' <span style="color:var(--muted);font-size:11px">Last offer: ' + _shortDate(sv.last_offer_at) + '</span>' : ' <span style="color:var(--muted);font-size:11px">No offers yet</span>') +
+            '</div>' +
+        '</div>' +
+        '<button class="btn btn-ghost btn-sm strategic-drop-btn" onclick="dropStrategicVendor(' + sv.vendor_card_id + ',\'' + esc(sv.vendor_name || '') + '\')">Drop</button>';
+
+    // Progress bar for TTL
+    var progress = document.createElement('div');
+    progress.className = 'strategic-progress';
+    var pct = Math.min(100, Math.max(0, (sv.days_remaining / 39) * 100));
+    progress.innerHTML = '<div class="strategic-progress-bar" style="width:' + pct + '%;background:' + (isUrgent ? 'var(--red)' : 'var(--blue)') + '"></div>';
+    card.appendChild(progress);
+
+    return card;
+}
+
+function dropStrategicVendor(vendorCardId, vendorName) {
+    confirmAction('Drop Vendor', 'Drop ' + vendorName + ' from your strategic list? They\u2019ll return to the open pool.', async function() {
+        try {
+            await apiFetch('/api/strategic-vendors/drop/' + vendorCardId, { method: 'DELETE' });
+            showToast(vendorName + ' dropped', 'success');
+            loadStrategicVendors();
+        } catch (e) {
+            showToast('Failed to drop vendor', 'error');
+        }
+    });
+}
+
+function openStrategicClaimModal() {
+    var modal = document.getElementById('strategicClaimModal');
+    if (modal) modal.style.display = 'flex';
+    var input = document.getElementById('strategicClaimSearch');
+    if (input) { input.value = ''; input.focus(); }
+    searchOpenPoolVendors();
+}
+
+function closeStrategicClaimModal() {
+    var modal = document.getElementById('strategicClaimModal');
+    if (modal) modal.style.display = 'none';
+}
+
+var _strategicSearchDebounce = null;
+function searchOpenPoolVendors() {
+    clearTimeout(_strategicSearchDebounce);
+    _strategicSearchDebounce = setTimeout(async function() {
+        var input = document.getElementById('strategicClaimSearch');
+        var results = document.getElementById('strategicClaimResults');
+        if (!results) return;
+        var q = input ? input.value.trim() : '';
+        results.innerHTML = '<span style="font-size:12px;color:var(--muted);display:block;padding:12px">Searching...</span>';
+        try {
+            var params = '?limit=20';
+            if (q) params += '&search=' + encodeURIComponent(q);
+            var data = await apiFetch('/api/strategic-vendors/open-pool' + params);
+            if (!data.vendors.length) {
+                results.innerHTML = '<span style="font-size:12px;color:var(--muted);display:block;padding:12px">No vendors found</span>';
+                return;
+            }
+            results.innerHTML = '';
+            for (var i = 0; i < data.vendors.length; i++) {
+                var v = data.vendors[i];
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);cursor:pointer';
+                row.innerHTML = '<span style="font-size:13px">' + esc(v.display_name) + (v.vendor_score != null ? ' <small style="color:var(--muted)">(score: ' + Math.round(v.vendor_score) + ')</small>' : '') + '</span>' +
+                    '<button class="btn btn-primary btn-sm" onclick="claimStrategicVendor(' + v.id + ',\'' + esc(v.display_name).replace(/'/g, "\\'") + '\')">Claim</button>';
+                results.appendChild(row);
+            }
+        } catch (e) {
+            results.innerHTML = '<span style="font-size:12px;color:var(--red);display:block;padding:12px">Search failed</span>';
+        }
+    }, 300);
+}
+
+async function claimStrategicVendor(vendorCardId, vendorName) {
+    try {
+        await apiFetch('/api/strategic-vendors/claim/' + vendorCardId, { method: 'POST' });
+        showToast(vendorName + ' claimed as strategic vendor', 'success');
+        closeStrategicClaimModal();
+        loadStrategicVendors();
+    } catch (e) {
+        var msg = 'Failed to claim vendor';
+        try { msg = (await e.json ? e.json() : e).detail || msg; } catch(ex) {}
+        showToast(msg, 'error');
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Knowledge Ledger: Q&A Tab (legacy — kept for backward compat)
@@ -9689,6 +9825,7 @@ export function sidebarNav(page, el) {
         reqs: () => { showList(); setMainPill('active'); },
         customers: () => window.showCustomers(),
         vendors: () => showVendors(),
+        strategic: () => showStrategicVendors(),
         materials: () => showMaterials(),
         buyplans: () => window.showBuyPlans(),
         proactive: () => window.showProactiveOffers(),
@@ -12607,6 +12744,31 @@ function _renderVendorDrawerOverview(vendorId) {
     </div>`;
 
     body.innerHTML = html;
+
+    // Async: fetch strategic vendor status badge
+    apiFetch('/api/strategic-vendors/status/' + vendorId).then(function(st) {
+        if (!st) return;
+        var section = body.querySelector('.drawer-section');
+        if (!section) return;
+        var badge = document.createElement('div');
+        badge.style.cssText = 'margin-bottom:12px;padding:8px 12px;border-radius:6px;font-size:12px;display:flex;align-items:center;justify-content:space-between';
+        if (st.status === 'open_pool') {
+            badge.style.background = 'var(--card)';
+            badge.style.border = '1px solid var(--line)';
+            badge.innerHTML = '<span style="color:var(--muted)">Open Pool</span>' +
+                '<button class="btn btn-primary btn-sm" onclick="claimStrategicVendor(' + vendorId + ',\'' + esc(v.display_name).replace(/'/g, "\\'") + '\')">Claim as Strategic</button>';
+        } else if (st.owner_user_id === (window.userId || 0)) {
+            badge.style.background = 'rgba(59,130,246,0.08)';
+            badge.style.border = '1px solid rgba(59,130,246,0.2)';
+            badge.innerHTML = '<span><strong>Strategic (You)</strong> — ' + st.days_remaining + ' days left</span>' +
+                '<button class="btn btn-ghost btn-sm" onclick="dropStrategicVendor(' + vendorId + ',\'' + esc(v.display_name).replace(/'/g, "\\'") + '\')">Drop</button>';
+        } else {
+            badge.style.background = 'rgba(234,179,8,0.08)';
+            badge.style.border = '1px solid rgba(234,179,8,0.2)';
+            badge.innerHTML = '<span>Strategic (' + esc(st.owner_name || 'Another buyer') + ')</span>';
+        }
+        section.insertBefore(badge, section.firstChild);
+    }).catch(function() {});
 
     // Async: fetch last-call indicator
     apiFetch('/api/activity/vendors/' + vendorId + '/last-call').then(function(data) {

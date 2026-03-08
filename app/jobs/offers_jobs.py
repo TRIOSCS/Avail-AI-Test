@@ -40,6 +40,20 @@ def register_offers_jobs(scheduler, settings):
         _job_flag_stale_offers, CronTrigger(hour=5, minute=0), id="flag_stale_offers", name="Flag stale offers (14d+)"
     )
 
+    scheduler.add_job(
+        _job_expire_strategic_vendors,
+        CronTrigger(hour=6, minute=0),
+        id="expire_strategic_vendors",
+        name="Expire strategic vendors (39d TTL)",
+    )
+
+    scheduler.add_job(
+        _job_warn_strategic_expiring,
+        CronTrigger(hour=8, minute=0),
+        id="warn_strategic_expiring",
+        name="Warn strategic vendors expiring soon",
+    )
+
 
 @_traced_job
 async def _job_proactive_matching():
@@ -236,6 +250,78 @@ async def _job_flag_stale_offers():
             logger.info(f"Flagged {flagged} offer(s) as stale (14d+)")
     except Exception as e:
         logger.error(f"Offer stale flagging error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_expire_strategic_vendors():
+    """Daily 6 AM — expire strategic vendors past their 39-day TTL."""
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from ..services.strategic_vendor_service import expire_stale
+
+        count = expire_stale(db)
+        if count:
+            logger.info(f"Expired {count} strategic vendor assignment(s)")
+    except Exception as e:
+        logger.error(f"Strategic vendor expiry error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_warn_strategic_expiring():
+    """Daily 8 AM — notify buyers whose strategic vendors expire within 7 days."""
+    from ..database import SessionLocal
+    from ..models.intelligence import ActivityLog
+
+    db = SessionLocal()
+    try:
+        from ..services.strategic_vendor_service import get_expiring_soon
+
+        expiring = get_expiring_soon(db, days=7)
+        for sv in expiring:
+            now = datetime.now(timezone.utc)
+            expires = sv.expires_at
+            if expires and expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            days_left = max(0, (expires - now).days)
+            vendor_name = sv.vendor_card.display_name if sv.vendor_card else "Unknown"
+
+            # Dedup: only one warning per strategic vendor assignment
+            existing = (
+                db.query(ActivityLog.id)
+                .filter(
+                    ActivityLog.user_id == sv.user_id,
+                    ActivityLog.activity_type == "strategic_vendor_expiring",
+                    ActivityLog.external_id == str(sv.id),
+                    ActivityLog.dismissed_at.is_(None),
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            db.add(
+                ActivityLog(
+                    user_id=sv.user_id,
+                    activity_type="strategic_vendor_expiring",
+                    channel="system",
+                    contact_name=vendor_name,
+                    subject=f"Strategic vendor {vendor_name} expires in {days_left} days — get an offer to keep them",
+                    external_id=str(sv.id),
+                )
+            )
+        db.commit()
+        if expiring:
+            logger.info(f"Warned about {len(expiring)} strategic vendor(s) expiring soon")
+    except Exception as e:
+        logger.error(f"Strategic vendor warning error: {e}")
         db.rollback()
     finally:
         db.close()
