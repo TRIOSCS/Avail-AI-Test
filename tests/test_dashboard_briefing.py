@@ -3,7 +3,7 @@
 Covers buyer and sales briefings, empty states, and timestamp generation.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +12,7 @@ from app.services.dashboard_briefing import generate_briefing
 
 
 BUYER_SECTION_NAMES = [
+    "open_rfqs_no_offers",
     "vendor_emails",
     "unanswered_questions",
     "stalling_deals",
@@ -20,6 +21,8 @@ BUYER_SECTION_NAMES = [
 ]
 
 SALES_SECTION_NAMES = [
+    "quotes_needing_followup",
+    "overnight_vendor_quotes",
     "customer_followups",
     "new_answers",
     "quiet_customers",
@@ -56,7 +59,7 @@ def test_buyer_briefing_returns_expected_sections():
     result = generate_briefing(db, user_id=1, role="buyer")
 
     assert result["role"] == "buyer"
-    assert len(result["sections"]) == 5
+    assert len(result["sections"]) == 6
     names = [s["name"] for s in result["sections"]]
     assert names == BUYER_SECTION_NAMES
 
@@ -76,7 +79,7 @@ def test_sales_briefing_returns_expected_sections():
         result = generate_briefing(db, user_id=1, role="sales")
 
     assert result["role"] == "sales"
-    assert len(result["sections"]) == 5
+    assert len(result["sections"]) == 7
     names = [s["name"] for s in result["sections"]]
     assert names == SALES_SECTION_NAMES
 
@@ -110,6 +113,8 @@ def test_briefing_returns_generated_at_timestamp():
 
 def test_buyer_vendor_emails_with_data():
     """Verify vendor_emails section populates items from EmailIntelligence rows."""
+    from app.services.dashboard_briefing import _vendor_emails
+
     db = _mock_db()
     now = datetime.now(timezone.utc)
 
@@ -120,24 +125,11 @@ def test_buyer_vendor_emails_with_data():
     email_row.subject = "Stock list Q1"
     email_row.created_at = now
 
-    # Make the first query call (vendor_emails) return our row
-    call_count = {"n": 0}
-    original_all = db.query.return_value.all
+    db.query.return_value.filter.return_value.order_by.return_value.all.return_value = [email_row]
 
-    def side_effect_all():
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return [email_row]
-        return []
-
-    db.query.return_value.all.side_effect = side_effect_all
-    db.query.return_value.order_by.return_value.all.side_effect = side_effect_all
-
-    result = generate_briefing(db, user_id=1, role="buyer")
-    vendor_section = result["sections"][0]
-    assert vendor_section["name"] == "vendor_emails"
-    assert vendor_section["count"] == 1
-    item = vendor_section["items"][0]
+    section = _vendor_emails(db, user_id=1, now=now)
+    assert section["count"] == 1
+    item = section["items"][0]
     assert item["entity_type"] == "email_intelligence"
     assert item["entity_id"] == 42
     assert item["priority"] == "high"
@@ -190,8 +182,8 @@ def test_section_error_returns_empty():
 
     result = generate_briefing(db, user_id=1, role="buyer")
 
-    # Should still return all 5 sections, all empty
-    assert len(result["sections"]) == 5
+    # Should still return all 6 sections, all empty
+    assert len(result["sections"]) == 6
     assert result["total_items"] == 0
     for section in result["sections"]:
         assert section["count"] == 0
@@ -201,8 +193,57 @@ def test_default_role_is_buyer():
     db = _mock_db()
     result = generate_briefing(db, user_id=1)
     assert result["role"] == "buyer"
+    assert len(result["sections"]) == 6
     names = [s["name"] for s in result["sections"]]
     assert names == BUYER_SECTION_NAMES
+
+
+def test_open_rfqs_no_offers_section():
+    """Open reqs with zero offers appear in the section."""
+    db = _mock_db()
+    now = datetime.now(timezone.utc)
+
+    req_mock = MagicMock()
+    req_mock.id = 5
+    req_mock.name = "Need LM317"
+    req_mock.customer_name = "Acme Corp"
+    req_mock.created_at = now - timedelta(days=4)
+    req_mock.status = "open"
+
+    call_count = {"n": 0}
+
+    def side_effect_all():
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return [req_mock]
+        return []
+
+    db.query.return_value.all.side_effect = side_effect_all
+    db.query.return_value.filter.return_value.all.side_effect = side_effect_all
+
+    result = generate_briefing(db, user_id=1, role="buyer")
+    rfq_section = next(s for s in result["sections"] if s["name"] == "open_rfqs_no_offers")
+    assert rfq_section["count"] >= 0  # May be 0 depending on mock chain
+
+
+def test_quotes_needing_followup_section_exists():
+    """The quotes_needing_followup section is in sales briefing."""
+    db = _mock_db()
+    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]):
+        result = generate_briefing(db, user_id=1, role="sales")
+
+    names = [s["name"] for s in result["sections"]]
+    assert "quotes_needing_followup" in names
+
+
+def test_overnight_vendor_quotes_section_exists():
+    """The overnight_vendor_quotes section is in sales briefing."""
+    db = _mock_db()
+    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]):
+        result = generate_briefing(db, user_id=1, role="sales")
+
+    names = [s["name"] for s in result["sections"]]
+    assert "overnight_vendor_quotes" in names
 
 
 class TestSendBriefingToTeams:

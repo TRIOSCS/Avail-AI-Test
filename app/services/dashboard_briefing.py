@@ -47,12 +47,55 @@ def generate_briefing(db: Session, user_id: int, role: str = "buyer") -> dict:
 
 def _build_buyer_sections(db: Session, user_id: int, now: datetime) -> list:
     return [
+        _open_rfqs_no_offers(db, user_id, now),
         _vendor_emails(db, user_id, now),
         _unanswered_questions(db, user_id, now),
         _stalling_deals(db, user_id, now),
         _resurfaced_parts(db, user_id, now),
         _price_movement(db, user_id, now),
     ]
+
+
+def _open_rfqs_no_offers(db: Session, user_id: int, now: datetime) -> dict:
+    """Open requisitions with zero confirmed offers — awaiting sourcing."""
+    try:
+        from app.models.offers import Offer
+        from app.models.sourcing import Requisition
+
+        reqs = (
+            db.query(Requisition)
+            .filter(
+                Requisition.created_by == user_id,
+                Requisition.status.in_(["open", "in_progress", "active"]),
+            )
+            .all()
+        )
+        items = []
+        for req in reqs:
+            offer_count = (
+                db.query(func.count(Offer.id))
+                .filter(Offer.requisition_id == req.id)
+                .scalar()
+            ) or 0
+            if offer_count > 0:
+                continue
+            age = (now - (req.created_at or now)).total_seconds() / 3600.0
+            days = age / 24.0
+            items.append({
+                "title": "{} — {}".format(
+                    req.name or "Req #{}".format(req.id),
+                    req.customer_name or "unknown customer",
+                ),
+                "detail": "No offers yet — entered {:.0f}d ago".format(days),
+                "entity_type": "requisition",
+                "entity_id": req.id,
+                "priority": "high" if days > 3 else "medium",
+                "age_hours": round(age, 1),
+            })
+        return _section("open_rfqs_no_offers", "Open RFQs Awaiting Sourcing", items)
+    except Exception:
+        logger.debug("open_rfqs_no_offers section failed", exc_info=True)
+        return _section("open_rfqs_no_offers", "Open RFQs Awaiting Sourcing", [])
 
 
 def _vendor_emails(db: Session, user_id: int, now: datetime) -> dict:
@@ -270,12 +313,99 @@ def _price_movement(db: Session, user_id: int, now: datetime) -> dict:
 
 def _build_sales_sections(db: Session, user_id: int, now: datetime) -> list:
     return [
+        _quotes_needing_followup(db, user_id, now),
+        _overnight_vendor_quotes(db, user_id, now),
         _customer_followups(db, user_id, now),
         _new_answers(db, user_id, now),
         _quiet_customers(db, user_id, now),
         _deals_at_risk(db, user_id, now),
         _quotes_ready(db, user_id, now),
     ]
+
+
+def _quotes_needing_followup(db: Session, user_id: int, now: datetime) -> dict:
+    """Quotes sent >48h ago with no customer response — needs follow-up."""
+    try:
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        cutoff_48h = now - timedelta(hours=48)
+        quotes = (
+            db.query(Quote)
+            .join(Requisition, Quote.requisition_id == Requisition.id)
+            .filter(
+                Requisition.created_by == user_id,
+                Quote.sent_at.isnot(None),
+                Quote.sent_at < cutoff_48h,
+                Quote.followup_alert_sent_at.is_(None),
+                Requisition.status.in_(["open", "in_progress", "quoting", "active"]),
+            )
+            .all()
+        )
+        items = []
+        for q in quotes:
+            age = (now - (q.sent_at or now)).total_seconds() / 3600.0
+            req = db.get(Requisition, q.requisition_id)
+            customer = req.customer_name if req else "unknown"
+            items.append({
+                "title": "{} — quoted {:.0f}h ago".format(customer, age),
+                "detail": "No response since quote sent",
+                "entity_type": "quote",
+                "entity_id": q.id,
+                "priority": "high" if age > 96 else "medium",
+                "age_hours": round(age, 1),
+            })
+            # Mark followup sent so we only alert once
+            q.followup_alert_sent_at = now
+
+        if items:
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+
+        return _section("quotes_needing_followup", "Quotes Needing Follow-up", items)
+    except Exception:
+        logger.debug("quotes_needing_followup section failed", exc_info=True)
+        return _section("quotes_needing_followup", "Quotes Needing Follow-up", [])
+
+
+def _overnight_vendor_quotes(db: Session, user_id: int, now: datetime) -> dict:
+    """Vendor offers received since yesterday on this AM's requisitions."""
+    try:
+        from app.models.offers import Offer
+        from app.models.sourcing import Requisition
+
+        cutoff = now - timedelta(hours=24)
+        offers = (
+            db.query(Offer)
+            .join(Requisition, Offer.requisition_id == Requisition.id)
+            .filter(
+                Requisition.created_by == user_id,
+                Offer.created_at >= cutoff,
+                Requisition.status.in_(["open", "in_progress", "quoting", "active"]),
+            )
+            .order_by(Offer.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        items = []
+        for o in offers:
+            price_str = "${:.2f}".format(float(o.unit_price)) if o.unit_price else "no price"
+            items.append({
+                "title": "{} quoted {} on {}".format(
+                    o.vendor_name or "Unknown vendor", price_str, o.mpn or "unknown MPN"
+                ),
+                "detail": "Req #{}".format(o.requisition_id),
+                "entity_type": "offer",
+                "entity_id": o.id,
+                "priority": "medium",
+                "age_hours": round((now - (o.created_at or now)).total_seconds() / 3600.0, 1),
+            })
+        return _section("overnight_vendor_quotes", "Overnight Vendor Quotes", items)
+    except Exception:
+        logger.debug("overnight_vendor_quotes section failed", exc_info=True)
+        return _section("overnight_vendor_quotes", "Overnight Vendor Quotes", [])
 
 
 def _customer_followups(db: Session, user_id: int, now: datetime) -> dict:
