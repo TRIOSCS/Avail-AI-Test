@@ -67,9 +67,12 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
     cookie = _get_session_cookie()
     tester = SiteTester(base_url=BASE_URL, session_cookie=cookie)
 
-    # Filter areas if provided
-    if areas_json:
+    # Filter areas if provided (bash passes "null" when no filter)
+    requested = None
+    if areas_json and areas_json != "null":
         requested = json.loads(areas_json)
+
+    if requested:
         original_areas = list(TEST_AREAS)
         TEST_AREAS.clear()
         for area in original_areas:
@@ -83,7 +86,7 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
         return
     finally:
         # Restore TEST_AREAS if we modified it
-        if areas_json:
+        if requested:
             from app.services.site_tester import TEST_AREAS as ta
             ta.clear()
             ta.extend(original_areas)
@@ -111,32 +114,36 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
 # ---------------------------------------------------------------------------
 
 async def cmd_smoke_test() -> None:
-    """Hit key API endpoints with health probes."""
-    import httpx
+    """Hit key API endpoints with health probes.
 
-    cookie = _get_session_cookie()
+    Uses agent API key for authenticated endpoints (x-agent-key header).
+    """
+    import httpx
+    from app.config import settings
+
+    headers = {}
+    if settings.agent_api_key:
+        headers["x-agent-key"] = settings.agent_api_key
+
     endpoints = [
-        ("GET", "/health", None),
-        ("GET", "/api/system/alerts", None),
-        ("GET", "/api/requisitions?limit=1", None),
-        ("GET", "/api/companies?limit=1", None),
-        ("GET", "/api/vendor-contacts?limit=1", None),
-        ("GET", "/api/dashboard/briefing", None),
+        ("GET", "/health"),
+        ("GET", "/api/system/alerts"),
+        ("GET", "/api/requisitions?limit=1"),
+        ("GET", "/api/companies?limit=1"),
+        ("GET", "/api/vendor-contacts/bulk?limit=1"),
+        ("GET", "/api/dashboard/briefing"),
     ]
 
     results = []
     async with httpx.AsyncClient(
         base_url=BASE_URL,
-        cookies={"session": cookie},
+        headers=headers,
         timeout=15.0,
     ) as client:
-        for method, path, body in endpoints:
+        for method, path in endpoints:
             start = time.monotonic()
             try:
-                if method == "GET":
-                    resp = await client.get(path)
-                else:
-                    resp = await client.post(path, json=body)
+                resp = await client.request(method, path)
                 elapsed_ms = (time.monotonic() - start) * 1000
                 results.append({
                     "endpoint": path,

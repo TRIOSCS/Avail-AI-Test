@@ -82,6 +82,7 @@ services:
       - static_files:/srv/static
       - applogs:/var/log/avail
       - ./fix_queue:/app/fix_queue
+      - ./scripts:/app/scripts:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
