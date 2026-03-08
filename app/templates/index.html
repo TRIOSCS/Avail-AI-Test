@@ -1239,23 +1239,15 @@
             <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button type="button" class="tab on" onclick="switchSettingsTab('profile',this)">My Profile</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
+            <button type="button" class="tab on" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('tickets',this)">Tickets</button>
             <button type="button" class="tab" onclick="switchSettingsTab('apihealth',this)">API Health</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
-        <div id="settings-profile" class="settings-panel">
-            <p class="empty">Loading profile...</p>
-        </div>
-
-        <div id="settings-users" class="settings-panel hidden">
+        <div id="settings-users" class="settings-panel">
             <div id="adminUsersList"><p class="empty">Loading...</p></div>
             <div class="card s-card" style="margin-top:16px">
                 <h3>Create New User</h3>
@@ -1274,10 +1266,6 @@
             </div>
         </div>
 
-        <div id="settings-health" class="settings-panel hidden">
-            <div id="settingsHealthContent"><p class="empty">Loading...</p></div>
-        </div>
-
         <div id="settings-config" class="settings-panel hidden">
             <div id="settingsConfigContent"><p class="empty">Loading...</p></div>
         </div>
@@ -1286,135 +1274,29 @@
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-teams" class="settings-panel hidden">
-            <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
-            <div id="teamsRoutingContent" style="margin-top:12px"></div>
-            <div id="teamsLogContent" style="margin-top:12px"></div>
-        </div>
-
-        <div id="settings-enrichment" class="settings-panel hidden">
-            <div class="tabs" id="enrichTabs">
-                <button type="button" class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('m365',this)">Inbox Mining</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('credits',this)">Credits</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('gaps',this)">Customer Gaps</button>
-            </div>
-
-            <!-- Review Queue Tab -->
-            <div id="enrichQueuePanel">
-                <div class="s-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
-                    <select id="eqStatusFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
-                        <option value="pending">Pending</option>
-                        <option value="auto_applied">Auto-Applied</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="all">All</option>
-                    </select>
-                    <select id="eqEntityFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
-                        <option value="">All Entities</option>
-                        <option value="vendor">Vendors</option>
-                        <option value="company">Companies</option>
-                    </select>
-                    <button type="button" class="btn btn-sm hidden" onclick="bulkApproveSelected()" id="eqBulkApproveBtn">Approve Selected</button>
-                    <span id="eqCount" class="s-hint u-ml-auto"></span>
-                </div>
-                <div id="enrichQueueList"><p class="empty">Loading...</p></div>
-            </div>
-
-            <!-- Backfill Tab -->
-            <div id="enrichBackfillPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Start Deep Enrichment</h3>
-                    <div class="s-form">
-                        <label><input type="checkbox" id="bfVendors" checked> Vendors</label>
-                        <label><input type="checkbox" id="bfCompanies" checked> Companies</label>
-                        <label><input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining</label>
-                        <label class="s-row">Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button type="button" class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
-                    </div>
-                </div>
-                <div id="bfProgressBox" class="s-card hidden">
-                    <h4 style="margin:0 0 12px">Running Job</h4>
-                    <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px">
-                        <div id="bfProgressBar" style="height:100%;background:var(--teal);transition:width 0.3s;width:0%"></div>
-                    </div>
-                    <span id="bfProgressLabel" class="s-hint"></span>
-                </div>
-
-                <div class="card s-card">
-                    <h3>Backfill from Existing Data</h3>
-                    <p class="s-desc">Recover vendor emails already in the system — activity logs, vendor card imports, and BrokerBin sightings.</p>
-                    <div class="s-row"><button type="button" class="btn" onclick="startEmailBackfill()">Backfill Emails</button> <span id="emailBfStatus" class="s-hint"></span></div>
-                </div>
-
-                <div class="card s-card">
-                    <h3>Scrape Vendor Websites</h3>
-                    <p class="s-desc">Scrape contact pages of vendors with websites but few email contacts.</p>
-                    <div class="s-form">
-                        <label class="s-row">Max vendors: <input type="number" id="scrapeMaxVendors" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button type="button" class="btn" onclick="startWebsiteScrape()">Scrape Websites</button> <span id="scrapeStatus" class="s-hint"></span></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Job History Tab -->
-            <div id="enrichJobsPanel" class="hidden">
-                <div id="enrichJobsList"><p class="empty">Loading...</p></div>
-            </div>
-
-            <!-- M365 Connection Status -->
-            <div id="enrichM365Panel" class="hidden">
-                <div class="card s-card">
-                    <h3>M365 Inbox Mining</h3>
-                    <p class="s-desc">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
-                    <div id="m365UserList"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Credits Tab -->
-            <div id="enrichCreditsPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Monthly Credit Usage</h3>
-                    <p class="s-desc">API credit consumption across enrichment providers. Resets monthly.</p>
-                    <div id="creditUsagePanel"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Customer Gaps Tab -->
-            <div id="enrichGapsPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Customer Enrichment Gaps</h3>
-                    <p class="s-desc">Accounts needing contact enrichment. Assigned accounts are prioritized.</p>
-                    <div class="s-row" style="margin-bottom:12px">
-                        <button type="button" class="btn" onclick="loadCustomerGaps()">Refresh</button>
-                        <button type="button" class="btn btn-outline" onclick="startCustomerBackfill()">Run Backfill</button>
-                        <span id="gapStatus" class="s-hint"></span>
-                    </div>
-                    <div id="customerGapsList"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Stats Summary -->
-            <div id="enrichStatsPanel" style="margin-top:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap">
-                <div><strong id="esVendors">-</strong><br><small class="s-hint">Vendors Enriched</small></div>
-                <div><strong id="esCompanies">-</strong><br><small class="s-hint">Companies Enriched</small></div>
-                <div><strong id="esPending">-</strong><br><small class="s-hint">Pending Review</small></div>
-                <div><strong id="esAutoApplied">-</strong><br><small class="s-hint">Auto-Applied</small></div>
-                <div><strong id="esActiveJobs">-</strong><br><small class="s-hint">Active Jobs</small></div>
-                <div><strong id="esVendorEmails">-</strong><br><small class="s-hint">Vendor Emails</small></div>
-            </div>
-        </div>
-
         <div id="settings-tickets" class="settings-panel hidden"></div>
 
         <div id="settings-apihealth" class="settings-panel hidden">
-            <div class="vendor-header" style="margin-bottom:12px">
-                <h3 style="margin:0">API Health Monitor</h3>
-                <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+            <div class="tabs" id="apiHealthTabs">
+                <button type="button" class="tab on" onclick="switchApiHealthTab('dashboard',this)">API Health</button>
+                <button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>
             </div>
-            <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+
+            <!-- API Health Dashboard -->
+            <div id="apih-dashboard">
+                <div class="vendor-header" style="margin-bottom:12px">
+                    <h3 style="margin:0">API Health Monitor</h3>
+                    <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+                </div>
+                <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+            </div>
+
+            <!-- Teams Integration (consolidated from separate tab) -->
+            <div id="apih-teams" style="display:none">
+                <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
+                <div id="teamsRoutingContent" style="margin-top:12px"></div>
+                <div id="teamsLogContent" style="margin-top:12px"></div>
+            </div>
         </div>
 
         <div id="settings-transfer" class="settings-panel hidden">

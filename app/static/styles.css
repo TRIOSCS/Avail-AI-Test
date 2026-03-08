@@ -1662,11 +1662,11 @@ table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
 }
 
 /* My Tasks Sidebar Widget — right-side panel, open by default, page reacts */
-.my-tasks-sidebar { position: fixed; top: 0; right: 0; bottom: 0; z-index: 200; }
-.my-tasks-toggle { position: fixed; right: 0; top: 50%; transform: translateY(-50%); background: #e8eaed; border: 1px solid var(--blue); border-right: none; border-radius: 6px 0 0 6px; padding: 10px 8px; cursor: pointer; z-index: 201; box-shadow: -2px 0 8px rgba(0,0,0,.05); transition: right .2s cubic-bezier(.4,0,.2,1), background .15s; }
+.my-tasks-sidebar { position: fixed; top: 80px; right: 0; bottom: 0; z-index: 250; }
+.my-tasks-toggle { position: fixed; right: 0; top: 50%; transform: translateY(-50%); background: #e8eaed; border: 1px solid var(--blue); border-right: none; border-radius: 6px 0 0 6px; padding: 10px 8px; cursor: pointer; z-index: 251; box-shadow: -2px 0 8px rgba(0,0,0,.05); transition: right .2s cubic-bezier(.4,0,.2,1), background .15s; }
 .my-tasks-toggle:hover { background: rgba(59,110,168,.06); }
 .my-tasks-badge { position: absolute; top: 2px; left: 2px; background: var(--red, #ef4444); color: #fff; font-size: 9px; font-weight: 700; min-width: 14px; height: 14px; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0 3px; }
-.my-tasks-panel { position: fixed; top: 0; right: 0; bottom: 0; width: 280px; background: #e8eaed; border-left: 1px solid var(--blue); box-shadow: -2px 0 12px rgba(0,0,0,.06); transform: translateX(100%); transition: transform .2s cubic-bezier(.4,0,.2,1); display: flex; flex-direction: column; }
+.my-tasks-panel { position: fixed; top: 80px; right: 0; bottom: 0; width: 280px; background: #e8eaed; border-left: 1px solid var(--blue); box-shadow: -2px 0 12px rgba(0,0,0,.06); transform: translateX(100%); transition: transform .2s cubic-bezier(.4,0,.2,1); display: flex; flex-direction: column; }
 /* Open state — panel slides in, page content reacts */
 .my-tasks-sidebar.open .my-tasks-panel { transform: translateX(0); }
 .my-tasks-sidebar.open .my-tasks-toggle { right: 280px; }

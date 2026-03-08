@@ -5899,7 +5899,7 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || safeGet('settings_active_tab', 'profile'));
+    switchSettingsTab(panel || safeGet('settings_active_tab', 'users'));
 }
 
 function switchSettingsTab(name, btn) {
@@ -5914,13 +5914,9 @@ function switchSettingsTab(name, btn) {
         if (tabBtn) tabBtn.classList.add('on');
     }
     // Lazy-load data
-    if (name === 'profile') loadSettingsProfile();
-    else if (name === 'users') loadAdminUsers();
-    else if (name === 'health') loadSettingsHealth();
+    if (name === 'users') loadAdminUsers();
     else if (name === 'config') loadSettingsConfig();
     else if (name === 'sources') loadSettingsSources();
-    else if (name === 'teams') loadTeamsConfig();
-    else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); loadCreditUsage(); }
     else if (name === 'tickets') { if (typeof window.showTickets === 'function') window.showTickets(); }
     else if (name === 'apihealth') loadApiHealthDashboard();
     else if (name === 'transfer') loadTransferPanel();
@@ -5928,53 +5924,6 @@ function switchSettingsTab(name, btn) {
 
 // Keep backward compat for dropdown links
 function showSettings(panel) { openSettingsTab(panel); }
-
-// ── My Profile tab ──────────────────────────────────────────────────
-function loadSettingsProfile() {
-    const container = document.getElementById('settings-profile');
-    if (!container) return;
-    container.textContent = '';
-
-    const card = document.createElement('div');
-    card.className = 'card s-card';
-    card.style.maxWidth = '500px';
-    card.style.padding = '24px';
-
-    const heading = document.createElement('h3');
-    heading.textContent = 'My Profile';
-    heading.style.marginBottom = '16px';
-    card.appendChild(heading);
-
-    const fields = [
-        { label: 'Name', value: window.__userName || window.userName || '—' },
-        { label: 'Email', value: window.__userEmail || window.userEmail || '—' },
-        { label: 'Role', value: (window.userRole || '—').charAt(0).toUpperCase() + (window.userRole || '—').slice(1) },
-    ];
-
-    fields.forEach(f => {
-        const row = document.createElement('div');
-        row.style.cssText = 'margin-bottom:12px;';
-
-        const lbl = document.createElement('label');
-        lbl.style.cssText = 'display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;';
-        lbl.textContent = f.label;
-        row.appendChild(lbl);
-
-        const val = document.createElement('div');
-        val.style.cssText = 'padding:8px 12px;background:var(--bg-alt);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--fg);pointer-events:none;opacity:0.7;user-select:text;cursor:default;';
-        val.textContent = f.value;
-        row.appendChild(val);
-
-        card.appendChild(row);
-    });
-
-    const note = document.createElement('p');
-    note.style.cssText = 'font-size:11px;color:var(--muted);margin-top:16px;';
-    note.textContent = 'Profile is managed via Azure AD.';
-    card.appendChild(note);
-
-    container.appendChild(card);
-}
 
 let _sourcesData = [];
 let _sourcesFilter = 'all';
@@ -6344,54 +6293,6 @@ async function toggleSourceActive(sourceId) {
     }
 }
 
-// ── System Health ──
-
-async function loadSettingsHealth() {
-    const el = document.getElementById('settingsHealthContent');
-    if (!el) return;
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const data = await apiFetch('/api/admin/health');
-        let html = '';
-
-        // Version
-        html += `<div class="card s-card"><strong>Version:</strong> ${data.version}</div>`;
-
-        // DB stats
-        html += '<div class="card s-card" style="max-width:none"><h3>Database Statistics</h3>';
-        html += '<table class="tbl"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>';
-        for (const [k, v] of Object.entries(data.db_stats || {})) {
-            html += `<tr><td>${k}</td><td>${v.toLocaleString()}</td></tr>`;
-        }
-        html += '</tbody></table></div>';
-
-        // Scheduler status
-        html += '<div class="card s-card" style="max-width:none"><h3>M365 Scheduler Status</h3>';
-        html += '<table class="tbl"><thead><tr><th>User</th><th>M365</th><th>Token</th><th>Last Inbox Scan</th></tr></thead><tbody>';
-        for (const u of data.scheduler || []) {
-            const dot = u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">Disconnected</span>';
-            const scan = u.last_inbox_scan ? new Date(u.last_inbox_scan).toLocaleString() : '—';
-            html += `<tr><td>${u.email}</td><td>${dot}</td><td>${u.has_refresh_token ? 'Yes' : 'No'}</td><td>${scan}</td></tr>`;
-        }
-        html += '</tbody></table></div>';
-
-        // Connector health
-        html += '<div class="card s-card" style="max-width:none"><h3>Connector Health</h3>';
-        html += '<table class="tbl"><thead><tr><th>Name</th><th>Status</th><th>Searches</th><th>Results</th><th>Last Success</th></tr></thead><tbody>';
-        for (const c of data.connectors || []) {
-            const dot = c.status === 'live' ? '🟢' : c.status === 'error' ? '🔴' : '🟡';
-            const last = c.last_success ? new Date(c.last_success).toLocaleString() : '—';
-            html += `<tr><td>${c.display_name}</td><td>${dot} ${c.status}</td><td>${c.total_searches}</td><td>${c.total_results}</td><td>${last}</td></tr>`;
-        }
-        html += '</tbody></table></div>';
-
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="empty">Error loading health data</p>';
-    }
-}
-
-
 // ── Scoring Weights ──
 
 
@@ -6540,9 +6441,6 @@ async function createUser() {
 
 
 
-// ═══════════════════════════════════════════════════════════════════════
-//  TEAMS INTEGRATION CONFIG
-// ═══════════════════════════════════════════════════════════════════════
 
 async function loadTeamsConfig() {
     const el = document.getElementById('teamsConfigContent');
@@ -6841,367 +6739,6 @@ async function loadTeamsNotificationLog() {
 }
 
 
-// ═══════════════════════════════════════════════════════════════════════
-//  Deep Enrichment UI
-// ═══════════════════════════════════════════════════════════════════════
-
-let _eqSelectedIds = new Set();
-let _bfPollInterval = null;
-
-window.addEventListener('beforeunload', () => {
-    if (_bfPollInterval) { clearInterval(_bfPollInterval); _bfPollInterval = null; }
-});
-
-function switchEnrichTab(tab, btn) {
-    document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));
-    btn.classList.add('on');
-    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
-    _p('enrichQueuePanel', tab === 'queue' ? '' : 'none');
-    _p('enrichBackfillPanel', tab === 'backfill' ? '' : 'none');
-    _p('enrichJobsPanel', tab === 'jobs' ? '' : 'none');
-    const m365Panel = document.getElementById('enrichM365Panel');
-    if (m365Panel) m365Panel.style.display = tab === 'm365' ? '' : 'none';
-    _p('enrichCreditsPanel', tab === 'credits' ? '' : 'none');
-    _p('enrichGapsPanel', tab === 'gaps' ? '' : 'none');
-
-    if (tab === 'queue') loadEnrichmentQueue();
-    if (tab === 'backfill') loadEnrichmentJobs();
-    if (tab === 'jobs') loadEnrichmentJobs();
-    if (tab === 'm365') loadM365Status();
-    if (tab === 'credits') loadCreditUsage();
-    if (tab === 'gaps') loadCustomerGaps();
-}
-
-async function loadEnrichmentQueue() {
-    const list = document.getElementById('enrichQueueList');
-    const statusFilter = document.getElementById('eqStatusFilter')?.value || 'pending';
-    const entityFilter = document.getElementById('eqEntityFilter')?.value || '';
-    _eqSelectedIds.clear();
-    updateBulkApproveBtn();
-
-    try {
-        let url = `/api/enrichment/queue?status=${statusFilter}&limit=100`;
-        if (entityFilter) url += `&entity_type=${entityFilter}`;
-        const data = await apiFetch(url);
-        const items = data.items || [];
-        const countEl = document.getElementById('eqCount');
-        if (countEl) countEl.textContent = `${data.total || items.length} items`;
-
-        if (!items.length) {
-            list.innerHTML = '<p class="empty">No enrichment items found.</p>';
-            return;
-        }
-
-        let html = '<table class="tbl"><thead><tr>';
-        if (statusFilter === 'pending') html += '<th><input type="checkbox" onchange="eqToggleAll(this)"></th>';
-        html += '<th>Entity</th><th>Field</th><th>Current</th><th>Proposed</th><th>Confidence</th><th>Source</th><th>Status</th>';
-        if (statusFilter === 'pending') html += '<th>Actions</th>';
-        html += '</tr></thead><tbody>';
-
-        for (const item of items) {
-            const confPct = Math.round(item.confidence * 100);
-            const confClass = confPct >= 80 ? 'color:var(--green)' : confPct >= 50 ? 'color:var(--yellow,#e6a817)' : 'color:var(--red)';
-            const currentDisp = item.current_value ? esc(String(item.current_value).substring(0, 40)) : '<span style="color:var(--muted)">—</span>';
-            const proposedDisp = esc(String(item.proposed_value).substring(0, 60));
-
-            html += '<tr>';
-            if (statusFilter === 'pending') {
-                html += `<td><input type="checkbox" data-eqid="${item.id}" onchange="eqToggleItem(${item.id}, this.checked)"></td>`;
-            }
-            html += `<td><strong>${esc(item.entity_name || '?')}</strong><br><small style="color:var(--muted)">${esc(item.entity_type || '')}</small></td>`;
-            html += `<td>${esc(item.field_name)}</td>`;
-            html += `<td>${currentDisp}</td>`;
-            html += `<td style="font-weight:500">${proposedDisp}</td>`;
-            html += `<td><span style="${confClass};font-weight:600">${confPct}%</span></td>`;
-            html += `<td><span class="badge badge-${item.source}">${esc(item.source)}</span></td>`;
-            html += `<td><span class="status-${item.status}">${esc(item.status)}</span></td>`;
-            if (statusFilter === 'pending') {
-                html += `<td>
-                    <button class="btn btn-sm" onclick="approveEnrichItem(${item.id})" title="Approve">✓</button>
-                    <button class="btn btn-sm btn-outline" onclick="rejectEnrichItem(${item.id})" title="Reject">✗</button>
-                </td>`;
-            }
-            html += '</tr>';
-        }
-        html += '</tbody></table>';
-        list.innerHTML = html;
-    } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load enrichment queue'))}</p>`;
-    }
-}
-
-function eqToggleAll(checkbox) {
-    document.querySelectorAll('[data-eqid]').forEach(cb => {
-        cb.checked = checkbox.checked;
-        eqToggleItem(parseInt(cb.dataset.eqid), cb.checked);
-    });
-}
-
-function eqToggleItem(id, checked) {
-    if (checked) _eqSelectedIds.add(id);
-    else _eqSelectedIds.delete(id);
-    updateBulkApproveBtn();
-}
-
-function updateBulkApproveBtn() {
-    const btn = document.getElementById('eqBulkApproveBtn');
-    if (btn) {
-        btn.style.display = _eqSelectedIds.size > 0 ? '' : 'none';
-        btn.textContent = `Approve Selected (${_eqSelectedIds.size})`;
-    }
-}
-
-async function approveEnrichItem(id) {
-    try {
-        await apiFetch(`/api/enrichment/queue/${id}/approve`, {method: 'POST'});
-        showToast('Approved');
-        loadEnrichmentQueue();
-        loadEnrichmentStats();
-    } catch (e) {
-        showToast('Couldn\'t approve item — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-async function rejectEnrichItem(id) {
-    try {
-        await apiFetch(`/api/enrichment/queue/${id}/reject`, {method: 'POST'});
-        showToast('Rejected');
-        loadEnrichmentQueue();
-    } catch (e) {
-        showToast('Couldn\'t reject — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-async function bulkApproveSelected() {
-    if (!_eqSelectedIds.size) return;
-    try {
-        const res = await apiFetch('/api/enrichment/queue/bulk-approve', {
-            method: 'POST',
-            body: {ids: Array.from(_eqSelectedIds)},
-        });
-        showToast(`Approved ${res.approved} items`);
-        _eqSelectedIds.clear();
-        loadEnrichmentQueue();
-        loadEnrichmentStats();
-    } catch (e) {
-        showToast('Couldn\'t bulk approve — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-async function startBackfill() {
-    const statusEl = document.getElementById('bfStatus');
-    const types = [];
-    if (document.getElementById('bfVendors')?.checked) types.push('vendor');
-    if (document.getElementById('bfCompanies')?.checked) types.push('company');
-    if (!types.length) {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Select at least one entity type</span>';
-        return;
-    }
-    const maxItems = parseInt(document.getElementById('bfMaxItems')?.value) || 500;
-    const includeEmail = document.getElementById('bfDeepEmail')?.checked || false;
-
-    try {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Starting...</span>';
-        const res = await apiFetch('/api/enrichment/backfill', {
-            method: 'POST',
-            body: {entity_types: types, max_items: maxItems, include_deep_email: includeEmail},
-        });
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">Job #${res.job_id} started</span>`;
-        pollBackfillProgress(res.job_id);
-    } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t start backfill'))}</span>`;
-    }
-}
-
-function pollBackfillProgress(jobId) {
-    const box = document.getElementById('bfProgressBox');
-    const bar = document.getElementById('bfProgressBar');
-    const label = document.getElementById('bfProgressLabel');
-    if (box) box.style.display = '';
-
-    if (_bfPollInterval) clearInterval(_bfPollInterval);
-    _bfPollInterval = setInterval(async () => {
-        try {
-            const job = await apiFetch(`/api/enrichment/jobs/${jobId}`);
-            if (bar) bar.style.width = job.progress_pct + '%';
-            if (label) label.textContent = `${job.processed_items}/${job.total_items} processed, ${job.enriched_items} enriched, ${job.error_count} errors (${job.progress_pct}%)`;
-
-            if (['completed','failed','cancelled'].includes(job.status)) {
-                clearInterval(_bfPollInterval);
-                _bfPollInterval = null;
-                if (label) label.textContent += ` — ${job.status}`;
-                loadEnrichmentStats();
-            }
-        } catch (e) {
-            clearInterval(_bfPollInterval);
-            _bfPollInterval = null;
-        }
-    }, 5000);
-}
-
-async function loadEnrichmentJobs() {
-    const list = document.getElementById('enrichJobsList');
-    try {
-        const data = await apiFetch('/api/enrichment/jobs?limit=20');
-        const jobs = data.jobs || [];
-        if (!jobs.length) {
-            list.innerHTML = '<p class="empty">No enrichment jobs yet.</p>';
-            return;
-        }
-
-        let html = '<table class="tbl"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Enriched</th><th>Errors</th><th>Started By</th><th>Started</th><th>Completed</th><th>Actions</th></tr></thead><tbody>';
-        for (const job of jobs) {
-            const statusClass = job.status === 'completed' ? 'color:var(--green)' :
-                                job.status === 'running' ? 'color:var(--teal)' :
-                                job.status === 'failed' ? 'color:var(--red)' : '';
-            html += `<tr>
-                <td>#${job.id}</td>
-                <td>${esc(job.job_type)}</td>
-                <td style="${statusClass};font-weight:600">${esc(job.status)}</td>
-                <td>${job.progress_pct}% (${job.processed_items}/${job.total_items})</td>
-                <td>${job.enriched_items}</td>
-                <td>${job.error_count}</td>
-                <td>${esc(job.started_by || '—')}</td>
-                <td>${job.started_at ? fmtDateTime(job.started_at) : '—'}</td>
-                <td>${job.completed_at ? fmtDateTime(job.completed_at) : '—'}</td>
-                <td>${job.status === 'running' ? `<button class="btn btn-sm btn-outline" onclick="cancelEnrichJob(${job.id})">Cancel</button>` : ''}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        list.innerHTML = html;
-    } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load enrichment jobs'))}</p>`;
-    }
-}
-
-async function cancelEnrichJob(jobId) {
-    try {
-        await apiFetch(`/api/enrichment/jobs/${jobId}/cancel`, {method: 'POST'});
-        showToast('Job cancelled');
-        loadEnrichmentJobs();
-    } catch (e) {
-        showToast('Couldn\'t cancel — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-async function loadEnrichmentStats() {
-    try {
-        const s = await apiFetch('/api/enrichment/stats');
-        const ve = document.getElementById('esVendors');
-        const ce = document.getElementById('esCompanies');
-        const pe = document.getElementById('esPending');
-        const aa = document.getElementById('esAutoApplied');
-        const aj = document.getElementById('esActiveJobs');
-        if (ve) ve.textContent = `${s.vendors_enriched}/${s.vendors_total}`;
-        if (ce) ce.textContent = `${s.companies_enriched}/${s.companies_total}`;
-        if (pe) pe.textContent = s.queue_pending;
-        if (aa) aa.textContent = s.queue_auto_applied;
-        if (aj) aj.textContent = s.active_jobs;
-        const em = document.getElementById('esVendorEmails');
-        if (em) em.textContent = s.vendor_emails || 0;
-    } catch (e) {
-        console.error('enrichment stats error:', e);
-    }
-}
-
-async function refreshEnrichmentBadge() {
-    try {
-        const s = await apiFetch('/api/enrichment/stats');
-        const badge = document.getElementById('enrichmentBadge');
-        if (badge && s.queue_pending > 0) {
-            badge.textContent = s.queue_pending;
-            badge.style.display = '';
-        } else if (badge) {
-            badge.style.display = 'none';
-        }
-    } catch (e) { logCatchError('backfillPoll', e); }
-}
-
-// deepEnrichVendor and deepEnrichCompany replaced by unifiedEnrichVendor/unifiedEnrichCompany above
-
-// ═══════════════════════════════════════════════════════════════════════
-//  Email Backfill & Website Scraping
-// ═══════════════════════════════════════════════════════════════════════
-
-async function startEmailBackfill() {
-    const statusEl = document.getElementById('emailBfStatus');
-    try {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Running...</span>';
-        const res = await apiFetch('/api/enrichment/backfill-emails', {method: 'POST'});
-        const parts = [];
-        if (res.activity_log_created) parts.push(`${res.activity_log_created} from activity log`);
-        if (res.vendor_card_created) parts.push(`${res.vendor_card_created} from vendor cards`);
-        if (res.brokerbin_created) parts.push(`${res.brokerbin_created} from BrokerBin`);
-        const msg = parts.length ? parts.join(', ') : 'No new emails found';
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
-        loadEnrichmentStats();
-    } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t run email backfill'))}</span>`;
-    }
-}
-
-async function startWebsiteScrape() {
-    const statusEl = document.getElementById('scrapeStatus');
-    const maxVendors = parseInt(document.getElementById('scrapeMaxVendors')?.value) || 500;
-    try {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Scraping... this may take a few minutes.</span>';
-        const res = await apiFetch('/api/enrichment/scrape-websites', {
-            method: 'POST',
-            body: {max_vendors: maxVendors},
-        });
-        const msg = `Scraped ${res.vendors_scraped || 0} vendors, found ${res.emails_found || 0} emails`;
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
-        loadEnrichmentStats();
-    } catch (e) {
-        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t start website scrape'))}</span>`;
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-//  M365 Inbox Mining Status
-// ═══════════════════════════════════════════════════════════════════════
-
-async function loadM365Status() {
-    const list = document.getElementById('m365UserList');
-    if (!list) return;
-    try {
-        const data = await apiFetch('/api/enrichment/m365-status');
-        const users = data.users || [];
-        if (!users.length) {
-            list.innerHTML = '<p class="empty">No users found.</p>';
-            return;
-        }
-        let html = '<table class="tbl"><thead><tr><th>User</th><th>M365 Status</th><th>Last Inbox Scan</th><th>Last Deep Scan</th><th>Actions</th></tr></thead><tbody>';
-        for (const u of users) {
-            const connected = u.m365_connected;
-            const statusHtml = connected
-                ? '<span style="color:var(--green);font-weight:600">Connected</span>'
-                : `<span style="color:var(--red)">Not Connected</span>${u.error_reason ? `<br><small style="color:var(--muted)">${esc(u.error_reason)}</small>` : ''}`;
-            const lastScan = u.last_inbox_scan ? fmtDateTime(u.last_inbox_scan) : '—';
-            const lastDeep = u.last_deep_scan ? fmtDateTime(u.last_deep_scan) : '—';
-            const actions = connected
-                ? `<button class="btn btn-sm" onclick="triggerDeepScan(${u.id})">Deep Scan</button>`
-                : '<small style="color:var(--muted)">Must log in via Azure AD</small>';
-            html += `<tr><td><strong>${esc(u.name)}</strong><br><small style="color:var(--muted)">${esc(u.email)}</small></td><td>${statusHtml}</td><td>${lastScan}</td><td>${lastDeep}</td><td>${actions}</td></tr>`;
-        }
-        html += '</tbody></table>';
-        list.innerHTML = html;
-    } catch (e) {
-        list.innerHTML = `<p class="empty" style="color:var(--red)">${esc(friendlyError(e, 'Couldn\'t load M365 status'))}</p>`;
-    }
-}
-
-async function triggerDeepScan(userId) {
-    try {
-        showToast('Starting deep inbox scan...');
-        const res = await apiFetch(`/api/enrichment/deep-email-scan/${userId}`, {method: 'POST'});
-        showToast(`Deep scan complete: ${res.contacts_created || 0} new contacts found`);
-        loadM365Status();
-        loadEnrichmentStats();
-    } catch (e) {
-        showToast('Deep scan failed — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
 
 // ── Trouble Tickets (Settings Tab) — REMOVED ───────────────────────
 // All ticket management is now in the unified tickets.js sidebar view.
@@ -7844,6 +7381,19 @@ function _timeAgo(iso) {
 
 function showApiHealth() {
     openSettingsTab('apihealth');
+}
+
+// ── API Health sub-tab switcher (dashboard / teams) ──
+function switchApiHealthTab(tab, btn) {
+    document.querySelectorAll('#apiHealthTabs .tab').forEach(t => t.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    const panels = ['dashboard', 'teams'];
+    panels.forEach(p => {
+        const el = document.getElementById('apih-' + p);
+        if (el) el.style.display = (p === tab) ? '' : 'none';
+    });
+    if (tab === 'dashboard') loadApiHealthDashboard();
+    else if (tab === 'teams') loadTeamsConfig();
 }
 
 async function loadApiHealthDashboard() {
@@ -8942,14 +8492,14 @@ Object.assign(window, {
     verifyBuyPlanPOs, verifyPOV3, verifySOV3,
     openSuggestedContacts,
     // HTML template inline handlers
-    addSelectedSuggestedContacts, addSite, bulkApproveSelected,
+    addSelectedSuggestedContacts, addSite,
     confirmSendQuote, createCompany, createUser,
     filterSiteTypeahead,
     loadCustomers, loadEnrichmentQueue, onSqContactChange,
     debouncedCheckDupCompany, openNewCompanyModal, openNewVendorModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
-    sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
-    startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchEnrichTab,
+    sendProactiveOffer, setBpFilter,
+    submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchApiHealthTab,
     switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
     selectCustomer, renderCustomerDetail, saveCustNotes,
@@ -8968,7 +8518,7 @@ Object.assign(window, {
     toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
-    showProactiveOffers, showSettings, loadSettingsProfile,
+    showProactiveOffers, showSettings,
     // Proactive UI functions called from HTML onclick
     switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
     dismissSingleMatch, toggleProactiveGroup, refreshProactiveMatches,
