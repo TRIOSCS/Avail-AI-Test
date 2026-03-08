@@ -15,7 +15,7 @@ Depends on: gradient_service, ai_email_parser, models/email_intelligence
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -229,6 +229,20 @@ async def process_email_intelligence(
     parsed_quotes = None
     if classification.get("classification") in ("offer", "quote_reply") and classification.get("has_pricing"):
         parsed_quotes = await extract_pricing_intelligence(subject, body, sender_email, sender_name)
+
+    # Extract durable facts (non-fatal)
+    try:
+        await extract_durable_facts(
+            db,
+            body=body,
+            sender_email=sender_email,
+            sender_name=sender_name,
+            classification=classification.get("classification", ""),
+            parsed_quotes=parsed_quotes,
+            user_id=user_id,
+        )
+    except Exception as e:
+        logger.warning("Fact extraction failed (non-fatal): %s", e)
 
     # Store result
     try:
@@ -462,3 +476,186 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
         db.flush()
 
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Email Fact Extraction — durable facts from vendor emails
+# ═══════════════════════════════════════════════════════════════════════
+
+ALLOWED_CLASSIFICATIONS = {"offer", "quote_reply", "stock_list"}
+
+# Default expiry in days per fact type (None = never expires)
+FACT_EXPIRY_DEFAULTS: dict[str, int | None] = {
+    "lead_time": 180,
+    "moq": 90,
+    "moq_flexibility": 90,
+    "eol_notice": None,
+    "availability": 30,
+    "pricing_note": 90,
+    "vendor_policy": 365,
+    "warehouse_location": 365,
+    "date_code": 180,
+    "condition_note": 180,
+}
+
+FACT_EXTRACTION_PROMPT = """\
+You are an expert at extracting durable facts from electronic component \
+vendor emails. Extract concrete, reusable facts — NOT pricing data \
+(that is handled separately).
+
+Fact types to extract:
+- lead_time: delivery lead time (e.g., "12-14 weeks ARO")
+- moq: minimum order quantity (e.g., "MOQ 1000 pcs")
+- moq_flexibility: willingness to negotiate MOQ (e.g., "can split into 500 pc lots")
+- eol_notice: end-of-life or last-time-buy notice
+- availability: stock status or availability note (e.g., "in stock", "allocated")
+- pricing_note: pricing conditions, NOT actual prices (e.g., "volume discount above 10K")
+- vendor_policy: shipping, payment, or return policies
+- warehouse_location: where parts ship from (e.g., "ships from Hong Kong warehouse")
+- date_code: date code information (e.g., "DC 2024+")
+- condition_note: part condition (e.g., "factory sealed", "refurbished")
+
+For each fact found, provide:
+- fact_type: one of the types above
+- value: the extracted fact text (concise, 1-2 sentences max)
+- mpn: the MPN it applies to (if specific to a part), or null
+- confidence: 0.0-1.0
+
+Only extract facts you are confident about. Skip vague or ambiguous statements."""
+
+FACT_EXTRACTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "facts": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "fact_type": {"type": "string"},
+                    "value": {"type": "string"},
+                    "mpn": {"type": ["string", "null"]},
+                    "confidence": {"type": "number"},
+                },
+                "required": ["fact_type", "value", "confidence"],
+            },
+        },
+    },
+    "required": ["facts"],
+}
+
+
+async def extract_durable_facts(
+    db: Session,
+    *,
+    body: str,
+    sender_email: str,
+    sender_name: str,
+    classification: str,
+    parsed_quotes: dict | None,
+    user_id: int,
+) -> list:
+    """Extract durable facts from vendor emails using AI and store in knowledge ledger.
+
+    Cost control: only runs on offer/quote_reply/stock_list emails with body >= 50 chars.
+    Dedup guard: skips facts that already exist within the last 7 days.
+
+    Args:
+        db: Database session.
+        body: Email body text.
+        sender_email: Sender email address.
+        sender_name: Sender display name.
+        classification: Email classification string.
+        parsed_quotes: Parsed pricing data (if any).
+        user_id: User who owns the mailbox.
+
+    Returns:
+        List of created KnowledgeEntry records, empty on failure or skip.
+    """
+    try:
+        # Cost control gates
+        if classification not in ALLOWED_CLASSIFICATIONS:
+            return []
+        if len(body) < 50:
+            return []
+
+        from app.utils.claude_client import claude_structured
+
+        prompt = (
+            f"From: {sender_name} <{sender_email}>\n\n"
+            f"Body:\n{body[:3000]}"
+        )
+
+        result = await claude_structured(
+            prompt,
+            FACT_EXTRACTION_SCHEMA,
+            system=FACT_EXTRACTION_PROMPT,
+            model_tier="fast",
+            max_tokens=1024,
+            timeout=20,
+        )
+
+        if not result or not isinstance(result, dict) or "facts" not in result:
+            return []
+
+        # Resolve vendor_card_id from sender email domain
+        vendor_card_id = None
+        if "@" in sender_email:
+            domain = sender_email.split("@")[-1].lower()
+            from app.models.vendors import VendorCard
+
+            vendor = db.query(VendorCard).filter(VendorCard.domain == domain).first()
+            if vendor:
+                vendor_card_id = vendor.id
+
+        from app.models.knowledge import KnowledgeEntry
+        from app.services.knowledge_service import create_entry
+
+        created = []
+        now = datetime.now(timezone.utc)
+        seven_days_ago = now - timedelta(days=7)
+
+        for fact in result["facts"]:
+            fact_type = fact.get("fact_type", "")
+            if fact_type not in FACT_EXPIRY_DEFAULTS:
+                continue
+
+            value = fact.get("value", "")
+            mpn = fact.get("mpn")
+            confidence = max(0.0, min(1.0, float(fact.get("confidence", 0.7))))
+
+            # Dedup guard: check for recent duplicate
+            dedup_q = db.query(KnowledgeEntry).filter(
+                KnowledgeEntry.entry_type == "fact",
+                KnowledgeEntry.created_at >= seven_days_ago,
+            )
+            if mpn:
+                dedup_q = dedup_q.filter(KnowledgeEntry.mpn == mpn)
+            if vendor_card_id:
+                dedup_q = dedup_q.filter(KnowledgeEntry.vendor_card_id == vendor_card_id)
+
+            if dedup_q.count() > 0:
+                continue
+
+            # Calculate expiry
+            expiry_days = FACT_EXPIRY_DEFAULTS[fact_type]
+            expires_at = (now + timedelta(days=expiry_days)) if expiry_days else None
+
+            entry = create_entry(
+                db,
+                user_id=user_id,
+                entry_type="fact",
+                content=f"[{fact_type}] {value}",
+                source="email_parsed",
+                confidence=confidence,
+                expires_at=expires_at,
+                mpn=mpn,
+                vendor_card_id=vendor_card_id,
+            )
+            created.append(entry)
+
+        logger.info("Extracted {} durable facts from email by {}", len(created), sender_email)
+        return created
+
+    except Exception as e:
+        logger.warning("Failed to extract durable facts: {}", e)
+        return []
