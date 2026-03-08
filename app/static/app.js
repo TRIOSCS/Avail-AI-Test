@@ -4466,21 +4466,23 @@ function toggleMyTasksSidebar() {
     var sidebar = document.getElementById('myTasksSidebar');
     if (!sidebar) return;
     var isOpen = sidebar.classList.toggle('open');
+    document.body.classList.toggle('tasks-open', isOpen);
     if (isOpen) loadMyTasks();
+    // Remember preference
+    try { localStorage.setItem('myTasksOpen', isOpen ? '1' : '0'); } catch(e) {}
 }
 
 async function loadMyTasks() {
     var list = document.getElementById('myTasksList');
     if (!list) return;
-    list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>';
+    list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading tasks...</span>';
     try {
         var [tasksRes, summaryRes] = await Promise.allSettled([
             apiFetch('/api/tasks/mine'),
             apiFetch('/api/tasks/mine/summary')
         ]);
-        var tasks = tasksRes.status === 'fulfilled' ? tasksRes.value : [];
-        var summary = summaryRes.status === 'fulfilled' ? summaryRes.value : {};
-        if (Array.isArray(tasks) === false) tasks = [];
+        var tasks = (tasksRes.status === 'fulfilled' && Array.isArray(tasksRes.value)) ? tasksRes.value : [];
+        var summary = (summaryRes.status === 'fulfilled' && summaryRes.value && typeof summaryRes.value === 'object') ? summaryRes.value : {};
 
         // Update badge
         var badge = document.getElementById('myTasksBadge');
@@ -4561,19 +4563,33 @@ function _renderMyTaskItem(task) {
     return item;
 }
 
-// Load badge count on page load
+// Open Tasks sidebar by default on page load (user can close, preference saved)
 (function() {
-    setTimeout(async function() {
-        try {
-            var summary = await apiFetch('/api/tasks/mine/summary');
-            var badge = document.getElementById('myTasksBadge');
-            var pending = (summary.todo || 0) + (summary.in_progress || 0);
-            if (badge) {
-                badge.textContent = pending;
-                badge.style.display = pending > 0 ? 'flex' : 'none';
-            }
-        } catch(e) { /* silently fail */ }
-    }, 2000);
+    setTimeout(function() {
+        var sidebar = document.getElementById('myTasksSidebar');
+        if (!sidebar) return;
+        var pref = '1';
+        try { pref = localStorage.getItem('myTasksOpen'); } catch(e) {}
+        // Default open (pref is null on first visit, or '1')
+        if (pref !== '0') {
+            sidebar.classList.add('open');
+            document.body.classList.add('tasks-open');
+            loadMyTasks();
+        } else {
+            // Still load badge count even when closed
+            (async function() {
+                try {
+                    var summary = await apiFetch('/api/tasks/mine/summary');
+                    var badge = document.getElementById('myTasksBadge');
+                    var pending = (summary.todo || 0) + (summary.in_progress || 0);
+                    if (badge) {
+                        badge.textContent = pending;
+                        badge.style.display = pending > 0 ? 'flex' : 'none';
+                    }
+                } catch(e) { /* silently fail */ }
+            })();
+        }
+    }, 500);
 })();
 
 // ---------------------------------------------------------------------------
