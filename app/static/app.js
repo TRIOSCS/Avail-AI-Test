@@ -3105,9 +3105,8 @@ function _applyColVisCSS() {
     const v = _currentMainView;
     // Map column keys to 1-based nth-child positions per view
     let colMap;
-    if (v === 'sourcing') colMap = {score:3,deadline:4,offers:5,reqs:6,sourced:7,sent:8,resp:9,searched:10,age:11};
-    else if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else colMap = {reqs:3,quote:4,sourced:5,offers:6,sales:7,age:8,deadline:9};
+    if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
+    else colMap = {reqs:3,quote:4,sourced:5,offers:6,sent:7,sales:8,age:9,deadline:10};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
         if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
@@ -3118,9 +3117,8 @@ function _applyColVisCSS() {
 function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
-    if (v === 'sourcing') cols = [{k:'score',l:'Sourcing Score'},{k:'deadline',l:'Bid Due'},{k:'offers',l:'Offers'},{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Resp %'},{k:'searched',l:'Searched'},{k:'age',l:'Age'}];
-    else if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'sourced',l:'Sourcing'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'},{k:'deadline',l:'Bid Due'}];
+    if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'sourced',l:'Sourced'},{k:'offers',l:'Offers'},{k:'sent',l:'RFQs Sent'},{k:'sales',l:'Sales'},{k:'age',l:'Age'},{k:'deadline',l:'Bid Due'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
     for (const c of cols) {
@@ -3153,15 +3151,14 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'qa', 'files'];
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'qa', 'files'];
-    // Mobile: include buy plans and activity tabs for full drill-down
-    if (window.__isMobile) return ['parts', 'offers', 'quotes', 'buyplans', 'activity', 'qa'];
-    return ['parts', 'offers', 'quotes', 'qa', 'files']; // rfq tab
+    // Active view: unified tabs combining former Open + Sourcing
+    if (window.__isMobile) return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'buyplans', 'qa'];
+    return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'qa', 'files'];
 }
 
 function _ddDefaultTab(mainView) {
-    return mainView === 'sourcing' ? 'sightings' : 'parts';
+    return 'parts';
 }
 
 function _ddTabLabel(tab) {
@@ -3212,12 +3209,12 @@ function _renderDdSummary(reqId) {
     else if (qs === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
 
     return `<div class="dd-summary">
-        <div class="dd-stat"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
-        <div class="dd-stat"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
-        <div class="dd-stat"><span class="dd-stat-val">${offers}</span><span class="dd-stat-label">Offers</span></div>
-        <div class="dd-stat"><span class="dd-stat-val">${sent}</span><span class="dd-stat-label">RFQs Sent</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'parts')"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sightings')"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'offers')"><span class="dd-stat-val">${offers}</span><span class="dd-stat-label">Offers</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'activity')"><span class="dd-stat-val">${sent}</span><span class="dd-stat-label">RFQs Sent</span></div>
         <div class="dd-stat"><span class="dd-stat-val">${respPct}%</span><span class="dd-stat-label">Response</span></div>
-        <div class="dd-stat"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'quotes')"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
     </div>`;
 }
 
@@ -3351,7 +3348,14 @@ function _renderDdTab(reqId, tabName, data, panel) {
     }
     switch (tabName) {
         case 'details': _renderDdDetails(reqId, panel); break;
-        case 'parts': _renderDrillDownTable(reqId, panel); break;
+        case 'parts':
+            // Split-pane: parts on left, offers on right (active view only)
+            if (_currentMainView !== 'archive') {
+                _renderSplitPartsOffers(reqId, data, panel);
+            } else {
+                _renderDrillDownTable(reqId, panel);
+            }
+            break;
         case 'sightings':
             if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
             _renderSourcingDrillDown(reqId, panel);
@@ -6545,6 +6549,34 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     if (ddMpns.length) _fetchMpnHints(ddMpns, rfqId).then(function(hints) { _renderMpnHints(dd, hints); });
 }
 
+// ── Split-pane: Parts on left, Offers on right ──────────────────────────
+// Renders a side-by-side layout when the "parts" sub-tab is active.
+// Uses existing .split-panel CSS classes. Loads offers data in parallel.
+async function _renderSplitPartsOffers(reqId, partsData, panel) {
+    // Create split layout container
+    panel.innerHTML = `<div class="split-panel" style="max-height:500px">
+        <div class="split-panel-left" id="splitParts-${reqId}"></div>
+        <div class="split-panel-right" id="splitOffers-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading offers\u2026</span></div>
+    </div>`;
+    // Render parts into the left pane
+    const partsPane = document.getElementById('splitParts-' + reqId);
+    if (partsPane) _renderDrillDownTable(reqId, partsPane);
+    // Load and render offers into the right pane
+    const offersPane = document.getElementById('splitOffers-' + reqId);
+    if (!offersPane) return;
+    try {
+        if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+        let offersData = _ddTabCache[reqId].offers;
+        if (!offersData) {
+            offersData = await apiFetch(`/api/requisitions/${reqId}/offers`);
+            _ddTabCache[reqId].offers = offersData;
+        }
+        _renderDdOffers(reqId, offersData, offersPane);
+    } catch(e) {
+        offersPane.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:12px;display:block">No offers yet</span>';
+    }
+}
+
 function editDrillCell(td, rfqId, reqId, field) {
     if (td.querySelector('input, select, textarea')) return;
     const reqs = _ddReqCache[rfqId] || [];
@@ -7275,7 +7307,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         const ctrl = new AbortController();
         _ddScoreAborts[reqId] = ctrl;
         apiFetch(`/api/requisitions/${reqId}/sourcing-score`, { signal: ctrl.signal }).then(scores => {
-            if (_currentMainView !== 'sourcing') return; // stale — user left tab
+            if (_currentMainView === 'archive') return; // stale — user left tab
             _ddScoreCache[reqId] = {};
             for (const rs of (scores.requirements || [])) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
@@ -7813,7 +7845,6 @@ function renderReqList() {
     if (!_serverSearchActive) {
         if (_reqStatusFilter === 'all') {
             const hide = ['archived', 'won', 'lost', 'closed'];
-            if (_currentMainView === 'sourcing') hide.push('draft');
             data = data.filter(r => !hide.includes(r.status));
         } else if (_reqStatusFilter === 'archive') {
             // Backend already returned only archived/won/lost
@@ -7876,13 +7907,6 @@ function renderReqList() {
     // Show shared count hint for sourcing view
     const hintEl = document.getElementById('viewHint');
     if (hintEl) hintEl.remove();
-    if (v === 'sourcing' && data.length > 0) {
-        const hint = document.createElement('div');
-        hint.id = 'viewHint';
-        hint.style.cssText = 'font-size:10px;color:var(--muted);text-align:center;padding:2px 0';
-        hint.textContent = data.length + ' active req' + (data.length !== 1 ? 's' : '') + ' \u2014 same as Open tab, sourcing-focused columns';
-        el.parentElement?.insertBefore(hint, el);
-    }
 
     if (!data.length) {
         if (_currentMainView === 'archive') {
@@ -7899,22 +7923,7 @@ function renderReqList() {
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const _thIcons = `<th style="width:140px;text-align:right"><select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select> <span style="position:relative;display:inline-block"><button class="btn-icon" onclick="event.stopPropagation();_toggleColGear()" title="Show/hide columns" style="font-size:14px;cursor:pointer;background:none;border:none;color:var(--muted);padding:0 2px">&#x2699;</button><span id="colGearWrap"></span></span></th>`;
     let thead;
-    if (v === 'sourcing') {
-        thead = `<thead><tr>
-            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
-            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score (0-100). Green = strong, Yellow = needs attention, Red = weak. Hover over any score for a detailed breakdown.">Sourcing ${sa('score')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
-            <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
-            <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
-            <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
-            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            ${_thIcons}
-        </tr></thead>`;
-    } else if (v === 'archive') {
+    if (v === 'archive') {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
@@ -7927,13 +7936,15 @@ function renderReqList() {
             ${_thIcons}
         </tr></thead>`;
     } else {
+        // Active view: unified columns combining Open + Sourcing
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress — parts sourced / total">Sourcing ${sa('sourced')}</th>
+            <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Vendor offers received">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
@@ -8108,8 +8119,8 @@ function _renderReqRow(r) {
         else if (rh < 24) dot = ' <span class="new-offers-dot amber" title="Vendor reply ' + _timeAgo(r.latest_reply_at) + '"></span>';
     }
 
-    // Name cell — editable on RFQ tab only, read-only on sourcing/archive
-    const nameCell = v === 'rfq'
+    // Name cell — editable on active view, read-only on archive
+    const nameCell = v !== 'archive'
         ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span></td>`
         : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})" title="Click to expand details">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
@@ -8129,38 +8140,7 @@ function _renderReqRow(r) {
     // Per-tab data cells and actions
     let dataCells, actions, colspan;
 
-    if (v === 'sourcing') {
-        // Sourcing: Score, Bid Due, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
-        const sent = r.rfq_sent_count || 0;
-        const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
-
-        // Sourcing score indicator with tooltip
-        const scVal = r.sourcing_score != null ? r.sourcing_score : 0;
-        const scColor = r.sourcing_color || 'red';
-        const scDotColor = scColor === 'green' ? 'var(--green)' : scColor === 'yellow' ? 'var(--amber)' : 'var(--red)';
-        const effortCell = `<td style="text-align:center"><span class="effort-wrap"><span class="effort-dot" style="background:${scDotColor}"></span><span style="font-size:10px;color:var(--muted);margin-left:3px">${Math.round(scVal)}</span>${_buildEffortTip(scVal, scColor, r.sourcing_signals)}</span></td>`;
-
-        // Offers cell — clickable to expand offers sub-tab
-        let offersCell;
-        if (offers > 0) {
-            offersCell = `<td class="mono"><b class="cust-link" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View offers">${offers}</b></td>`;
-        } else {
-            offersCell = `<td class="mono">${offers}</td>`;
-        }
-
-        dataCells = `
-            ${effortCell}
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-            ${offersCell}
-            <td class="mono">${total}</td>
-            <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
-            <td class="mono">${sent}</td>
-            <td class="mono">${respPct}</td>
-            <td style="font-size:11px">${searched}</td>
-            <td class="mono" style="font-size:11px">${age}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed offer">+ Log Offer</button></td>`;
-        colspan = 12;
-    } else if (v === 'archive') {
+    if (v === 'archive') {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
         const wonVal = r.quote_won_value ? ` <span style="font-size:10px;color:var(--green)">\u00b7 ${fmtDollars(r.quote_won_value)}</span>` : '';
         const pmCnt = r.proactive_match_count || 0;
@@ -8206,11 +8186,15 @@ function _renderReqRow(r) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
 
+        // RFQs sent count
+        const sent = r.rfq_sent_count || 0;
+
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
             <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td class="mono" style="font-size:11px">${sent}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
@@ -8230,33 +8214,24 @@ function _renderReqRow(r) {
             rfqBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sourcing in progress — click to view sightings">Sourcing</button>`;
         }
         actions = `<td style="white-space:nowrap">${rfqBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
-        colspan = 10;
+        colspan = 11;
     }
 
     // Build drill-down header: action buttons vary by tab
     let ddHeader;
-    if (v === 'sourcing') {
+    if (v === 'archive') {
+        ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
+    } else {
         const lastSearch = r.last_searched_at ? _timeAgo(r.last_searched_at) : 'never';
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
-            <div style="display:flex;gap:6px">
-                <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
-                <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs">&#x1f50d; Search All</button>
-                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
-            </div>
-        </div>`;
-    } else if (v === 'archive') {
-        ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
-    } else {
-        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px">
                 <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">&#x1f50d; Sourcing</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
+                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
         </div>`;
     }
@@ -8675,17 +8650,20 @@ function setMainView(view, btn) {
     if (maBtn) maBtn.classList.remove('on');
     const maMobBtn = document.getElementById('mobileMyAccountsBtn');
     if (maMobBtn) maMobBtn.classList.remove('on');
-    // Hide status toggle — tabs are now locked to their status
-    const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = 'none';
-    // Follow-ups panel: only visible on sourcing tab
+    // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    if (view === 'rfq') {
+    // Show status filter pills on active view, hide on archive
+    const stEl = document.getElementById('statusToggle');
+    if (stEl) stEl.style.display = (view === 'active') ? '' : 'none';
+    if (view === 'active') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
-    } else if (view === 'sourcing') {
+        loadFollowUpsPanel();
+    } else if (view === 'rfq' || view === 'sourcing') {
+        // Legacy: redirect old view names to active
+        _currentMainView = 'active';
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -8911,12 +8889,12 @@ async function sendFollowUp(contactId, vendorName) {
 async function loadFollowUpsPanel() {
     const panel = document.getElementById('followUpsPanel');
     if (!panel) return;
-    if (_currentMainView !== 'sourcing') { panel.style.display = 'none'; return; }
+    if (_currentMainView === 'archive') { panel.style.display = 'none'; return; }
     if (_followUpsAbort) try { _followUpsAbort.abort(); } catch(e){}
     _followUpsAbort = new AbortController();
     try {
         const data = await apiFetch('/api/follow-ups', { signal: _followUpsAbort.signal });
-        if (_currentMainView !== 'sourcing') return; // stale — user switched tabs
+        if (_currentMainView === 'archive') return; // stale — user switched tabs
         const followUps = data.follow_ups || [];
         if (!followUps.length) { panel.style.display = 'none'; return; }
         // Group by requisition
@@ -9899,6 +9877,23 @@ function getSelectedByVendor() {
     return Object.values(groups);
 }
 
+// ── RFQ Drawer (push-style side panel) ──────────────────────────────────
+// Opens/closes the RFQ side panel and pushes main content left.
+function openRfqDrawer() {
+    const drawer = document.getElementById('rfqDrawer');
+    if (drawer) drawer.classList.add('open');
+    document.body.classList.add('rfq-drawer-open');
+}
+
+function closeRfqDrawer() {
+    const drawer = document.getElementById('rfqDrawer');
+    if (drawer) {
+        drawer.classList.remove('open');
+        delete drawer.dataset.loading;
+    }
+    document.body.classList.remove('rfq-drawer-open');
+}
+
 // ── RFQ Flow ────────────────────────────────────────────────────────────
 let rfqAllParts = []; // All MPNs on this requisition
 let rfqSubsMap = {}; // { primary_mpn: [sub1, sub2, ...] }
@@ -9907,7 +9902,7 @@ async function openBatchRfqModal(prebuiltGroups) {
     const groups = prebuiltGroups || getSelectedByVendor();
     if (!groups.length) { showToast('Select sightings first to send RFQs', 'warn'); return; }
 
-    const modal = document.getElementById('rfqModal');
+    const modal = document.getElementById('rfqDrawer');
     const rfqPrep = document.getElementById('rfqPrepare'); if (rfqPrep) rfqPrep.style.display = '';
     const rfqRdy = document.getElementById('rfqReady'); if (rfqRdy) rfqRdy.style.display = 'none';
     const rfqPrv = document.getElementById('rfqPreview'); if (rfqPrv) { rfqPrv.classList.add('hidden'); rfqPrv.style.display = 'none'; }
@@ -9918,14 +9913,14 @@ async function openBatchRfqModal(prebuiltGroups) {
     document.querySelectorAll('.rfq-cond-btn').forEach((b,i) => {
         b.classList.toggle('active', i === 0);
     });
-    modal.classList.add('open');
+    openRfqDrawer();
 
     const prepareAbort = new AbortController();
     const prepareTimeout = setTimeout(() => prepareAbort.abort(), 30000);
     // Wire cancel button to abort the prepare call
     const prepCancelBtn = document.querySelector('#rfqPrepare .btn-danger, #rfqPrepare [data-dismiss]');
     const _origCancel = prepCancelBtn?.onclick;
-    if (prepCancelBtn) prepCancelBtn.onclick = () => { prepareAbort.abort(); closeModal('rfqModal'); };
+    if (prepCancelBtn) prepCancelBtn.onclick = () => { prepareAbort.abort(); closeRfqDrawer(); };
     try {
         const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
             method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) },
@@ -9970,7 +9965,7 @@ async function openBatchRfqModal(prebuiltGroups) {
         if (prepCancelBtn) prepCancelBtn.onclick = _origCancel;
         const msg = e.name === 'AbortError' ? 'RFQ preparation timed out or was cancelled' : e.message;
         showToast('Failed to prepare RFQ: ' + msg, 'error');
-        closeModal('rfqModal');
+        closeRfqDrawer();
         return;
     }
     clearTimeout(prepareTimeout);
@@ -10515,7 +10510,7 @@ function rfqManualEmail(idx, value) {
 
 function rfqRemoveVendor(idx) {
     rfqVendorData.splice(idx, 1);
-    if (!rfqVendorData.length) { closeModal('rfqModal'); return; }
+    if (!rfqVendorData.length) { closeRfqDrawer(); return; }
     renderRfqVendors();
     renderRfqMessage();
 }
@@ -10618,7 +10613,7 @@ async function rfqConfirmSend() {
                 _rfqShowResults(results);
             } else {
                 showToast(`Sent ${sent} of ${results.length} RFQs`, 'success');
-                closeModal('rfqModal');
+                closeRfqDrawer();
             }
             safeRemove(`rfq_draft_${currentReqId}`);
             selectedSightings.clear();
@@ -13778,6 +13773,7 @@ Object.assign(window, {
     createRequisition, debouncedFilterSites, debouncedFilterVendors,
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
     doStockImport, filterVendorList, openNewReqModal, openTicketDetail, openTroubleChat,
+    openRfqDrawer, closeRfqDrawer,
     rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact, sendBulkFollowUp,
     saveVendorLogCall, saveVendorLogNote, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
