@@ -10,11 +10,7 @@ Depends on: app/startup.py, conftest fixtures
 """
 
 import os
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
-
-import pytest
-from sqlalchemy.orm import Session
 
 from app.startup import _exec, run_startup_migrations
 
@@ -183,7 +179,6 @@ class TestSeedVinodUser:
         mock_db.close.assert_called_once()
 
 
-
 class TestCreateCountTriggers:
     """Lines 436-509: _create_count_triggers (PG-specific, test error path on SQLite)."""
 
@@ -250,9 +245,7 @@ class TestBackfillProactiveOfferQty:
         mock_engine.connect.return_value = mock_conn
 
         match_rows = [(10, 50)]
-        line_items = json.dumps([
-            {"match_id": 10, "qty": 100, "sell_price": 1.0, "unit_price": 0.5}
-        ])
+        line_items = json.dumps([{"match_id": 10, "qty": 100, "sell_price": 1.0, "unit_price": 0.5}])
         offers = [(1, line_items)]
 
         mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
@@ -273,9 +266,7 @@ class TestBackfillProactiveOfferQty:
         mock_engine.connect.return_value = mock_conn
 
         match_rows = [(10, 100)]
-        line_items = json.dumps([
-            {"match_id": 10, "qty": 50, "sell_price": 1.0, "unit_price": 0.5}
-        ])
+        line_items = json.dumps([{"match_id": 10, "qty": 50, "sell_price": 1.0, "unit_price": 0.5}])
         offers = [(1, line_items)]
 
         mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]

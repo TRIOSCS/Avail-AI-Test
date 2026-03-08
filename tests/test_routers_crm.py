@@ -850,7 +850,9 @@ class TestCompaniesAdditional:
         assert "open_req_count" in item
         assert "sites" not in item
 
-    def test_list_companies_revenue_90d_with_won_quote(self, client, db_session, test_company, test_customer_site, test_user):
+    def test_list_companies_revenue_90d_with_won_quote(
+        self, client, db_session, test_company, test_customer_site, test_user
+    ):
         """revenue_90d reflects sum of Quote.subtotal for won requisitions in last 90 days."""
         req = Requisition(
             name="REQ-WON-1",
@@ -887,7 +889,9 @@ class TestCompaniesAdditional:
         assert len(match) == 1
         assert match[0]["revenue_90d"] == 0
 
-    def test_list_companies_revenue_90d_excludes_old(self, client, db_session, test_company, test_customer_site, test_user):
+    def test_list_companies_revenue_90d_excludes_old(
+        self, client, db_session, test_company, test_customer_site, test_user
+    ):
         """Quotes older than 90 days should not count toward revenue_90d."""
         req = Requisition(
             name="REQ-OLD-1",

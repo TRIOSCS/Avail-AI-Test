@@ -7,19 +7,15 @@ for the pipeline task board.
 Depends on: conftest.py fixtures, app/services/task_service.py, app/routers/task.py
 """
 
-from datetime import datetime, timedelta, timezone
-
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requisition, User
-from app.models.task import RequisitionTask
 from app.services import task_service
-
 
 # ---------------------------------------------------------------------------
 # Service layer tests
 # ---------------------------------------------------------------------------
+
 
 class TestTaskCRUD:
     def test_create_task(self, db_session: Session, test_user: User, test_requisition: Requisition):
@@ -63,7 +59,9 @@ class TestTaskCRUD:
         assert updated.status == "done"
         assert updated.completed_at is not None
 
-    def test_update_task_status_back_from_done_clears_completed(self, db_session: Session, test_requisition: Requisition):
+    def test_update_task_status_back_from_done_clears_completed(
+        self, db_session: Session, test_requisition: Requisition
+    ):
         task = task_service.create_task(db_session, requisition_id=test_requisition.id, title="Test")
         task_service.update_task_status(db_session, task.id, "done")
         updated = task_service.update_task_status(db_session, task.id, "todo")
@@ -92,19 +90,28 @@ class TestAutoGeneration:
 
     def test_auto_create_skips_duplicate(self, db_session: Session, test_requisition: Requisition):
         task_service.auto_create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Review offer", task_type="sourcing", source_ref="offer:1",
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Review offer",
+            task_type="sourcing",
+            source_ref="offer:1",
         )
         dup = task_service.auto_create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Review offer again", task_type="sourcing", source_ref="offer:1",
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Review offer again",
+            task_type="sourcing",
+            source_ref="offer:1",
         )
         assert dup is None
 
     def test_auto_close_task(self, db_session: Session, test_requisition: Requisition):
         task_service.auto_create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Awaiting response", task_type="sourcing", source_ref="rfq:5",
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Awaiting response",
+            task_type="sourcing",
+            source_ref="rfq:5",
         )
         closed = task_service.auto_close_task(db_session, test_requisition.id, "rfq:5")
         assert closed is not None
@@ -133,16 +140,20 @@ class TestAutoGeneration:
 class TestMyTasks:
     def test_get_my_tasks(self, db_session: Session, test_user: User, test_requisition: Requisition):
         task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="My task", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="My task",
+            assigned_to_id=test_user.id,
         )
         tasks = task_service.get_my_tasks(db_session, test_user.id)
         assert len(tasks) == 1
 
     def test_get_my_tasks_excludes_done(self, db_session: Session, test_user: User, test_requisition: Requisition):
         task = task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Done task", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Done task",
+            assigned_to_id=test_user.id,
         )
         task_service.update_task_status(db_session, task.id, "done")
         tasks = task_service.get_my_tasks(db_session, test_user.id)
@@ -150,12 +161,16 @@ class TestMyTasks:
 
     def test_get_my_tasks_summary(self, db_session: Session, test_user: User, test_requisition: Requisition):
         task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Todo", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Todo",
+            assigned_to_id=test_user.id,
         )
         t2 = task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="In prog", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="In prog",
+            assigned_to_id=test_user.id,
         )
         task_service.update_task_status(db_session, t2.id, "in_progress")
         summary = task_service.get_my_tasks_summary(db_session, test_user.id)
@@ -167,8 +182,10 @@ class TestMyTasks:
 class TestTaskResponse:
     def test_task_to_response(self, db_session: Session, test_user: User, test_requisition: Requisition):
         task = task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Test response", created_by=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Test response",
+            created_by=test_user.id,
         )
         resp = task_service.task_to_response(task)
         assert resp["id"] == task.id
@@ -180,6 +197,7 @@ class TestTaskResponse:
 # ---------------------------------------------------------------------------
 # API endpoint tests
 # ---------------------------------------------------------------------------
+
 
 class TestTaskAPI:
     def test_list_tasks(self, client, test_requisition: Requisition, db_session: Session):
@@ -225,8 +243,10 @@ class TestTaskAPI:
 
     def test_my_tasks_api(self, client, test_requisition: Requisition, test_user: User, db_session: Session):
         task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="My assigned", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="My assigned",
+            assigned_to_id=test_user.id,
         )
         resp = client.get("/api/tasks/mine")
         assert resp.status_code == 200
@@ -234,8 +254,10 @@ class TestTaskAPI:
 
     def test_my_tasks_summary_api(self, client, test_requisition: Requisition, test_user: User, db_session: Session):
         task_service.create_task(
-            db_session, requisition_id=test_requisition.id,
-            title="Summary test", assigned_to_id=test_user.id,
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Summary test",
+            assigned_to_id=test_user.id,
         )
         resp = client.get("/api/tasks/mine/summary")
         assert resp.status_code == 200

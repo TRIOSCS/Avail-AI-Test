@@ -107,10 +107,7 @@ def check_enrichment_credentials(source_names: list[str]) -> dict[str, bool]:
         if not cred_keys:
             result[name] = False
             continue
-        result[name] = all(
-            bool(get_credential_cached(src, env_var))
-            for src, env_var in cred_keys
-        )
+        result[name] = all(bool(get_credential_cached(src, env_var)) for src, env_var in cred_keys)
     return result
 
 

@@ -23,6 +23,7 @@ my_tasks_router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 # Per-requisition task endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/{req_id}/tasks")
 def list_tasks(
     req_id: int,
@@ -120,6 +121,7 @@ def delete_task(
 # ---------------------------------------------------------------------------
 # Cross-req "My Tasks" endpoints (sidebar widget)
 # ---------------------------------------------------------------------------
+
 
 @my_tasks_router.get("/mine")
 def get_my_tasks(

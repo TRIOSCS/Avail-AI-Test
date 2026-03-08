@@ -286,9 +286,7 @@ def buyer_brief(
         o_stats = (
             db.query(
                 func.count(Offer.id).label("total"),
-                func.count(
-                    case((Offer.attribution_status == "converted", Offer.id))
-                ).label("quoted"),
+                func.count(case((Offer.attribution_status == "converted", Offer.id))).label("quoted"),
             )
             .filter(Offer.created_at >= month_start, filter_fn(Offer.entered_by_id))
             .first()

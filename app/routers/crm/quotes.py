@@ -196,6 +196,7 @@ async def create_quote(
     # Auto-capture quote facts into Knowledge Ledger
     try:
         from app.services.knowledge_service import capture_quote_fact
+
         capture_quote_fact(db, quote=quote, user_id=user.id)
     except Exception as e:
         logger.warning("Knowledge auto-capture (quote) failed: {}", e)

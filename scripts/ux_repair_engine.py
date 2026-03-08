@@ -37,6 +37,7 @@ FIX_QUEUE_DIR = Path(os.environ.get("FIX_QUEUE_DIR", "/app/fix_queue"))
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _output(data: dict | list) -> None:
     """Print JSON to stdout (the only allowed output channel)."""
     print(json.dumps(data, default=str))
@@ -45,6 +46,7 @@ def _output(data: dict | list) -> None:
 def _get_session_cookie() -> str:
     """Create a signed session cookie for admin user."""
     from itsdangerous import URLSafeTimedSerializer
+
     from app.config import settings
 
     signer = URLSafeTimedSerializer(settings.secret_key)
@@ -53,6 +55,7 @@ def _get_session_cookie() -> str:
 
 def _get_db():
     from app.database import SessionLocal
+
     return SessionLocal()
 
 
@@ -60,9 +63,10 @@ def _get_db():
 # Command: sweep
 # ---------------------------------------------------------------------------
 
+
 async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = None) -> None:
     """Run SiteTester sweep, optionally filtered by areas and diffed against baseline."""
-    from app.services.site_tester import SiteTester, TEST_AREAS
+    from app.services.site_tester import TEST_AREAS, SiteTester
 
     cookie = _get_session_cookie()
     tester = SiteTester(base_url=BASE_URL, session_cookie=cookie)
@@ -88,6 +92,7 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
         # Restore TEST_AREAS if we modified it
         if requested:
             from app.services.site_tester import TEST_AREAS as ta
+
             ta.clear()
             ta.extend(original_areas)
 
@@ -100,18 +105,21 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
         baseline_keys = {(b.get("area", ""), b.get("title", "")[:80]) for b in known}
         new_issues = [i for i in issues if (i.get("area", ""), i.get("title", "")[:80]) not in baseline_keys]
 
-    _output({
-        "ok": True,
-        "total_issues": len(issues),
-        "new_issues": len(new_issues),
-        "areas_tested": len(tester.progress),
-        "issues": new_issues,
-    })
+    _output(
+        {
+            "ok": True,
+            "total_issues": len(issues),
+            "new_issues": len(new_issues),
+            "areas_tested": len(tester.progress),
+            "issues": new_issues,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Command: smoke-test
 # ---------------------------------------------------------------------------
+
 
 async def cmd_smoke_test() -> None:
     """Hit key API endpoints with health probes.
@@ -119,6 +127,7 @@ async def cmd_smoke_test() -> None:
     Uses agent API key for authenticated endpoints (x-agent-key header).
     """
     import httpx
+
     from app.config import settings
 
     headers = {}
@@ -145,21 +154,25 @@ async def cmd_smoke_test() -> None:
             try:
                 resp = await client.request(method, path)
                 elapsed_ms = (time.monotonic() - start) * 1000
-                results.append({
-                    "endpoint": path,
-                    "status": resp.status_code,
-                    "ok": 200 <= resp.status_code < 400,
-                    "ms": round(elapsed_ms, 1),
-                })
+                results.append(
+                    {
+                        "endpoint": path,
+                        "status": resp.status_code,
+                        "ok": 200 <= resp.status_code < 400,
+                        "ms": round(elapsed_ms, 1),
+                    }
+                )
             except Exception as e:
                 elapsed_ms = (time.monotonic() - start) * 1000
-                results.append({
-                    "endpoint": path,
-                    "status": 0,
-                    "ok": False,
-                    "ms": round(elapsed_ms, 1),
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "endpoint": path,
+                        "status": 0,
+                        "ok": False,
+                        "ms": round(elapsed_ms, 1),
+                        "error": str(e),
+                    }
+                )
 
     all_ok = all(r["ok"] for r in results)
     _output({"ok": all_ok, "results": results})
@@ -169,11 +182,12 @@ async def cmd_smoke_test() -> None:
 # Command: create-tickets
 # ---------------------------------------------------------------------------
 
+
 async def cmd_create_tickets(issues_json: str) -> None:
     """Create trouble tickets from sweep issues and auto-process them."""
+    from app.models.trouble_ticket import TroubleTicket
     from app.services.site_tester import create_tickets_from_issues
     from app.services.trouble_ticket_service import auto_process_ticket
-    from app.models.trouble_ticket import TroubleTicket
 
     issues = json.loads(issues_json)
     if not issues:
@@ -204,12 +218,14 @@ async def cmd_create_tickets(issues_json: str) -> None:
             except Exception as e:
                 logger.warning("Auto-process failed for ticket #{}: {}", tid, e)
 
-        _output({
-            "ok": True,
-            "created": count,
-            "processed": processed,
-            "ticket_ids": ticket_ids,
-        })
+        _output(
+            {
+                "ok": True,
+                "created": count,
+                "processed": processed,
+                "ticket_ids": ticket_ids,
+            }
+        )
     finally:
         db.close()
 
@@ -217,6 +233,7 @@ async def cmd_create_tickets(issues_json: str) -> None:
 # ---------------------------------------------------------------------------
 # Command: poll-queue
 # ---------------------------------------------------------------------------
+
 
 async def cmd_poll_queue(ticket_ids_json: str, timeout_secs: int = 120) -> None:
     """Poll fix_queue/ until patches appear for given tickets or timeout."""
@@ -246,32 +263,32 @@ async def cmd_poll_queue(ticket_ids_json: str, timeout_secs: int = 120) -> None:
 
         await asyncio.sleep(3)
 
-    _output({
-        "ok": len(skipped) == 0,
-        "found": [{"ticket_id": tid, "file": path} for tid, path in found.items()],
-        "missing": skipped,
-        "timeout_reached": time.monotonic() >= deadline,
-    })
+    _output(
+        {
+            "ok": len(skipped) == 0,
+            "found": [{"ticket_id": tid, "file": path} for tid, path in found.items()],
+            "missing": skipped,
+            "timeout_reached": time.monotonic() >= deadline,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Command: ticket-summary
 # ---------------------------------------------------------------------------
 
+
 async def cmd_ticket_summary() -> None:
     """Get ticket status counts and total AI cost."""
     from sqlalchemy import func
-    from app.models.trouble_ticket import TroubleTicket
+
     from app.models.self_heal_log import SelfHealLog
+    from app.models.trouble_ticket import TroubleTicket
 
     db = _get_db()
     try:
         # Status counts
-        status_rows = (
-            db.query(TroubleTicket.status, func.count())
-            .group_by(TroubleTicket.status)
-            .all()
-        )
+        status_rows = db.query(TroubleTicket.status, func.count()).group_by(TroubleTicket.status).all()
         statuses = {status: count for status, count in status_rows}
 
         # Total AI cost from self_heal_log
@@ -280,12 +297,14 @@ async def cmd_ticket_summary() -> None:
         # Total ticket count
         total = sum(statuses.values())
 
-        _output({
-            "ok": True,
-            "total": total,
-            "statuses": statuses,
-            "total_ai_cost_usd": round(float(total_cost), 4),
-        })
+        _output(
+            {
+                "ok": True,
+                "total": total,
+                "statuses": statuses,
+                "total_ai_cost_usd": round(float(total_cost), 4),
+            }
+        )
     finally:
         db.close()
 
@@ -293,6 +312,7 @@ async def cmd_ticket_summary() -> None:
 # ---------------------------------------------------------------------------
 # Command: fix-confidence
 # ---------------------------------------------------------------------------
+
 
 async def cmd_fix_confidence(fix_file: str) -> None:
     """Score a patch file by search-string match quality.
@@ -358,17 +378,20 @@ async def cmd_fix_confidence(fix_file: str) -> None:
 
     avg_score = sum(scores) / len(scores) if scores else 0.0
 
-    _output({
-        "ok": True,
-        "score": round(avg_score, 2),
-        "patch_count": len(patches),
-        "details": details,
-    })
+    _output(
+        {
+            "ok": True,
+            "score": round(avg_score, 2),
+            "patch_count": len(patches),
+            "details": details,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Command: teams-notify
 # ---------------------------------------------------------------------------
+
 
 async def cmd_teams_notify(message: str) -> None:
     """Send a Teams channel notification."""
@@ -384,6 +407,7 @@ async def cmd_teams_notify(message: str) -> None:
 # ---------------------------------------------------------------------------
 # CLI dispatcher
 # ---------------------------------------------------------------------------
+
 
 async def main() -> None:
     if len(sys.argv) < 2:

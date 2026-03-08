@@ -153,8 +153,7 @@ async def prospecting_assign_owner(
         if current_count >= SITE_CAP_PER_USER and not force:
             raise HTTPException(
                 409,
-                f"User already owns {current_count} sites (cap is {SITE_CAP_PER_USER}). "
-                "Pass force=true to override.",
+                f"User already owns {current_count} sites (cap is {SITE_CAP_PER_USER}). Pass force=true to override.",
             )
         if current_count >= SITE_CAP_PER_USER:
             cap_warning = f"User now has {current_count + 1} sites (cap is {SITE_CAP_PER_USER})"

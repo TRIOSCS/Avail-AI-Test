@@ -94,8 +94,13 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
 
             if decision.action == "SUPPRESS":
                 record_engagement(
-                    user_id, event_type, entity_id, "suppressed",
-                    ai_priority=decision.priority, suppression_reason=decision.reason, db=db,
+                    user_id,
+                    event_type,
+                    entity_id,
+                    "suppressed",
+                    ai_priority=decision.priority,
+                    suppression_reason=decision.reason,
+                    db=db,
                 )
                 _log_alert(db, event_type, entity_id, True, user_id=user_id)
                 return False
@@ -103,8 +108,12 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
             if decision.action == "BATCH":
                 queue_batch_alert(user_id, event_type, entity_id, message, decision.priority)
                 record_engagement(
-                    user_id, event_type, entity_id, "batched",
-                    ai_priority=decision.priority, db=db,
+                    user_id,
+                    event_type,
+                    entity_id,
+                    "batched",
+                    ai_priority=decision.priority,
+                    db=db,
                 )
                 return False
     except Exception:
@@ -130,7 +139,15 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
             _log_alert(db, event_type, entity_id, True, user_id=user_id)
             try:
                 if is_intelligence_enabled():
-                    record_engagement(user_id, event_type, entity_id, "delivered", delivery_method="webhook", ai_priority=ai_priority, db=db)
+                    record_engagement(
+                        user_id,
+                        event_type,
+                        entity_id,
+                        "delivered",
+                        delivery_method="webhook",
+                        ai_priority=ai_priority,
+                        db=db,
+                    )
             except Exception:
                 pass
             return True

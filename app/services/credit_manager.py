@@ -86,11 +86,13 @@ def get_all_budgets(db: Session) -> list[dict]:
     # Add aggregate "lusha" entry summing both split pools
     phone = next(b for b in budgets if b["provider"] == "lusha_phone")
     discovery = next(b for b in budgets if b["provider"] == "lusha_discovery")
-    budgets.append({
-        "provider": "lusha",
-        "month": phone["month"],
-        "used": phone["used"] + discovery["used"],
-        "limit": phone["limit"] + discovery["limit"],
-        "remaining": phone["remaining"] + discovery["remaining"],
-    })
+    budgets.append(
+        {
+            "provider": "lusha",
+            "month": phone["month"],
+            "used": phone["used"] + discovery["used"],
+            "limit": phone["limit"] + discovery["limit"],
+            "remaining": phone["remaining"] + discovery["remaining"],
+        }
+    )
     return budgets

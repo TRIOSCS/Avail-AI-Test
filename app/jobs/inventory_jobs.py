@@ -131,8 +131,8 @@ async def _download_and_import_stock_list(
 ):
     """Download an attachment via Graph API and import as material cards + sightings."""
     from ..models import MaterialCard, MaterialVendorHistory
-    from ..utils.token_manager import get_valid_token
     from ..utils.normalization import normalize_mpn, normalize_mpn_key
+    from ..utils.token_manager import get_valid_token
     from ..vendor_utils import normalize_vendor_name
 
     # Extract vendor domain from email for column mapping cache
@@ -303,7 +303,9 @@ async def _download_and_import_stock_list(
         from app.models import Requirement, Requisition
         from app.services.teams import send_stock_match_alert
 
-        imported_mpns = [normalize_mpn(r.get("mpn", "")) or r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")]
+        imported_mpns = [
+            normalize_mpn(r.get("mpn", "")) or r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")
+        ]
         if imported_mpns:
             matches = (
                 db.query(Requirement.id, Requirement.primary_mpn, Requirement.requisition_id)

@@ -33,8 +33,7 @@ async def list_tags(
 
     return {
         "items": [
-            TagResponse(id=t.id, name=t.name, tag_type=t.tag_type, parent_id=t.parent_id).model_dump()
-            for t in tags
+            TagResponse(id=t.id, name=t.name, tag_type=t.tag_type, parent_id=t.parent_id).model_dump() for t in tags
         ],
         "total": total,
         "limit": limit,

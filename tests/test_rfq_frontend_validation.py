@@ -14,8 +14,8 @@ import subprocess
 
 import pytest
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="module")
 def index_html():
@@ -40,36 +40,34 @@ def styles_css():
 
 # ── JS Syntax Validation ─────────────────────────────────────────────────
 
+
 class TestJSSyntax:
     def test_app_js_parses(self):
         """app.js passes Node.js syntax check."""
-        result = subprocess.run(
-            ["node", "-c", "app/static/app.js"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["node", "-c", "app/static/app.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
     def test_crm_js_parses(self):
         """crm.js passes Node.js syntax check."""
-        result = subprocess.run(
-            ["node", "-c", "app/static/crm.js"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["node", "-c", "app/static/crm.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
 
 # ── Jinja2 Template Validation ───────────────────────────────────────────
 
+
 class TestTemplateParsing:
     def test_index_template_parses(self):
         """index.html is valid Jinja2."""
         from jinja2 import Environment, FileSystemLoader
+
         env = Environment(loader=FileSystemLoader("app/templates"))
         t = env.get_template("index.html")
         assert t is not None
 
 
 # ── View Mode Toggle (Sales / Sourcing / Archive) ────────────────────────
+
 
 class TestViewModeToggle:
     def test_sales_view_pill(self, index_html):
@@ -92,6 +90,7 @@ class TestViewModeToggle:
 
 
 # ── Priority Lanes ───────────────────────────────────────────────────────
+
 
 class TestPriorityLanes:
     def test_classifyIntoLanes_exists(self, app_js):
@@ -130,6 +129,7 @@ class TestPriorityLanes:
 
 # ── Sub-Tab Consolidation (7 → 4) ────────────────────────────────────────
 
+
 class TestSubTabConsolidation:
     def test_sourcing_tab_exists(self, app_js):
         """Consolidated 'sourcing' tab (was Parts + Sightings)."""
@@ -155,6 +155,7 @@ class TestSubTabConsolidation:
 
 # ── Inline RFQ Bar ────────────────────────────────────────────────────────
 
+
 class TestInlineRfqBar:
     def test_rfq_inline_bar_css_in_template(self, index_html):
         assert "rfq-inline-bar" in index_html
@@ -168,6 +169,7 @@ class TestInlineRfqBar:
 
 # ── Notification Bar ─────────────────────────────────────────────────────
 
+
 class TestNotificationBar:
     def test_notifActionBar_element(self, index_html):
         assert "notifActionBar" in index_html
@@ -180,6 +182,7 @@ class TestNotificationBar:
 
 
 # ── Req Row Rendering ────────────────────────────────────────────────────
+
 
 class TestReqRowRendering:
     def test_renderReqRow_exists(self, app_js):
@@ -200,6 +203,7 @@ class TestReqRowRendering:
 
 
 # ── My Tasks Sidebar ─────────────────────────────────────────────────────
+
 
 class TestMyTasksSidebar:
     def test_sidebar_element_exists(self, index_html):
@@ -230,6 +234,7 @@ class TestMyTasksSidebar:
 
 # ── CSS Validation ────────────────────────────────────────────────────────
 
+
 class TestCSSIntegrity:
     def test_styles_css_not_empty(self, styles_css):
         assert len(styles_css) > 100
@@ -244,6 +249,7 @@ class TestCSSIntegrity:
 
 
 # ── Data Flow / Integration Points ───────────────────────────────────────
+
 
 class TestDataFlowIntegration:
     def test_expandToSubTab_uses_new_tabs(self, app_js):
@@ -265,6 +271,7 @@ class TestDataFlowIntegration:
 
 # ── Mobile Support ────────────────────────────────────────────────────────
 
+
 class TestMobileSupport:
     def test_mobile_css_exists(self):
         with open("app/static/mobile.css", "r") as f:
@@ -277,6 +284,7 @@ class TestMobileSupport:
 
 
 # ── Function Cross-Reference ─────────────────────────────────────────────
+
 
 class TestFunctionCrossRefs:
     """Verify key functions reference each other correctly."""
@@ -296,6 +304,7 @@ class TestFunctionCrossRefs:
 
 
 # ── Tasks Sidebar Right-Side Widget ─────────────────────────────────────
+
 
 class TestTasksSidebarRight:
     """Verify Tasks sidebar is positioned on the right with correct behavior."""

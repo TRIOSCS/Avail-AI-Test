@@ -9,20 +9,6 @@ All public names re-exported here for backward compatibility.
 """
 
 # ── Vendor Scorecard ──────────────────────────────────────────────────
-from app.services.vendor_scorecard import (  # noqa: F401
-    COLD_START_THRESHOLD,
-    VENDOR_WINDOW_DAYS,
-    W_PO_CONVERSION,
-    W_QUOTE_CONVERSION,
-    W_RESPONSE_RATE,
-    W_REVIEW_RATING,
-    _compute_composite,
-    compute_all_vendor_scorecards,
-    compute_vendor_scorecard,
-    get_vendor_scorecard_detail,
-    get_vendor_scorecard_list,
-)
-
 # ── Buyer Leaderboard ────────────────────────────────────────────────
 from app.services.buyer_leaderboard import (  # noqa: F401
     GRACE_DAYS,
@@ -43,4 +29,17 @@ from app.services.salesperson_scorecard import (  # noqa: F401
     _salesperson_metrics,
     _salesperson_metrics_batch,
     get_salesperson_scorecard,
+)
+from app.services.vendor_scorecard import (  # noqa: F401
+    COLD_START_THRESHOLD,
+    VENDOR_WINDOW_DAYS,
+    W_PO_CONVERSION,
+    W_QUOTE_CONVERSION,
+    W_RESPONSE_RATE,
+    W_REVIEW_RATING,
+    _compute_composite,
+    compute_all_vendor_scorecards,
+    compute_vendor_scorecard,
+    get_vendor_scorecard_detail,
+    get_vendor_scorecard_list,
 )

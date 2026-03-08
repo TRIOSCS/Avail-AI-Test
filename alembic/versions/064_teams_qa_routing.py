@@ -11,8 +11,9 @@ Create Date: 2026-03-07
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "064"
 down_revision: Union[str, None] = "063"
@@ -27,7 +28,9 @@ def upgrade() -> None:
     op.add_column("knowledge_entries", sa.Column("answered_via", sa.String(10), nullable=True))
 
     # Add digest hour to teams_alert_config
-    op.add_column("teams_alert_config", sa.Column("knowledge_digest_hour", sa.Integer(), nullable=False, server_default="14"))
+    op.add_column(
+        "teams_alert_config", sa.Column("knowledge_digest_hour", sa.Integer(), nullable=False, server_default="14")
+    )
 
     # Create knowledge_config table
     op.create_table(

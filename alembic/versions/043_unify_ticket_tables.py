@@ -9,6 +9,7 @@ Revises: 042_add_tagging_tables
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "043_unify_ticket_tables"

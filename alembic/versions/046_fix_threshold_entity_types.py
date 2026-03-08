@@ -7,8 +7,9 @@ Revision ID: 046_fix_threshold_entity_types
 Revises: 045
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "046_fix_threshold_entity_types"
 down_revision = "045"

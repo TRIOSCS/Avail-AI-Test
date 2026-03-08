@@ -1562,8 +1562,20 @@ class TestVendorSortBugFix:
 
     def test_sort_score_desc(self, client, db_session):
         """sort=score&order=desc puts highest-score vendor first."""
-        vc_low = VendorCard(normalized_name="low score", display_name="Low Score", vendor_score=10.0, is_new_vendor=False, sighting_count=1)
-        vc_high = VendorCard(normalized_name="high score", display_name="High Score", vendor_score=90.0, is_new_vendor=False, sighting_count=1)
+        vc_low = VendorCard(
+            normalized_name="low score",
+            display_name="Low Score",
+            vendor_score=10.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc_high = VendorCard(
+            normalized_name="high score",
+            display_name="High Score",
+            vendor_score=90.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
         db_session.add_all([vc_low, vc_high])
         db_session.commit()
 
@@ -1579,9 +1591,27 @@ class TestVendorTierFilterBugFix:
 
     def test_tier_proven_filters(self, client, db_session):
         """tier=proven returns only vendors with score >= 66."""
-        vc_proven = VendorCard(normalized_name="proven vendor", display_name="Proven Vendor", vendor_score=80.0, is_new_vendor=False, sighting_count=1)
-        vc_new = VendorCard(normalized_name="new vendor", display_name="New Vendor", vendor_score=None, is_new_vendor=True, sighting_count=1)
-        vc_caution = VendorCard(normalized_name="caution vendor", display_name="Caution Vendor", vendor_score=10.0, is_new_vendor=False, sighting_count=1)
+        vc_proven = VendorCard(
+            normalized_name="proven vendor",
+            display_name="Proven Vendor",
+            vendor_score=80.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc_new = VendorCard(
+            normalized_name="new vendor",
+            display_name="New Vendor",
+            vendor_score=None,
+            is_new_vendor=True,
+            sighting_count=1,
+        )
+        vc_caution = VendorCard(
+            normalized_name="caution vendor",
+            display_name="Caution Vendor",
+            vendor_score=10.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
         db_session.add_all([vc_proven, vc_new, vc_caution])
         db_session.commit()
 
@@ -1595,8 +1625,20 @@ class TestVendorTierFilterBugFix:
 
     def test_tier_new_filters(self, client, db_session):
         """tier=new returns only vendors with no score or is_new_vendor=True."""
-        vc_proven = VendorCard(normalized_name="proven vendor2", display_name="Proven Vendor2", vendor_score=80.0, is_new_vendor=False, sighting_count=1)
-        vc_new = VendorCard(normalized_name="new vendor2", display_name="New Vendor2", vendor_score=None, is_new_vendor=True, sighting_count=1)
+        vc_proven = VendorCard(
+            normalized_name="proven vendor2",
+            display_name="Proven Vendor2",
+            vendor_score=80.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc_new = VendorCard(
+            normalized_name="new vendor2",
+            display_name="New Vendor2",
+            vendor_score=None,
+            is_new_vendor=True,
+            sighting_count=1,
+        )
         db_session.add_all([vc_proven, vc_new])
         db_session.commit()
 
@@ -1609,8 +1651,20 @@ class TestVendorTierFilterBugFix:
 
     def test_tier_caution_filters(self, client, db_session):
         """tier=caution returns only vendors with score < 33."""
-        vc_caution = VendorCard(normalized_name="caution vendor3", display_name="Caution Vendor3", vendor_score=15.0, is_new_vendor=False, sighting_count=1)
-        vc_proven = VendorCard(normalized_name="proven vendor3", display_name="Proven Vendor3", vendor_score=80.0, is_new_vendor=False, sighting_count=1)
+        vc_caution = VendorCard(
+            normalized_name="caution vendor3",
+            display_name="Caution Vendor3",
+            vendor_score=15.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc_proven = VendorCard(
+            normalized_name="proven vendor3",
+            display_name="Proven Vendor3",
+            vendor_score=80.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
         db_session.add_all([vc_caution, vc_proven])
         db_session.commit()
 
@@ -1623,8 +1677,20 @@ class TestVendorTierFilterBugFix:
 
     def test_tier_developing_filters(self, client, db_session):
         """tier=developing returns vendors with score 33-65."""
-        vc_dev = VendorCard(normalized_name="dev vendor", display_name="Dev Vendor", vendor_score=50.0, is_new_vendor=False, sighting_count=1)
-        vc_proven = VendorCard(normalized_name="proven vendor4", display_name="Proven Vendor4", vendor_score=80.0, is_new_vendor=False, sighting_count=1)
+        vc_dev = VendorCard(
+            normalized_name="dev vendor",
+            display_name="Dev Vendor",
+            vendor_score=50.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc_proven = VendorCard(
+            normalized_name="proven vendor4",
+            display_name="Proven Vendor4",
+            vendor_score=80.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
         db_session.add_all([vc_dev, vc_proven])
         db_session.commit()
 
@@ -1637,8 +1703,20 @@ class TestVendorTierFilterBugFix:
 
     def test_no_tier_returns_all(self, client, db_session):
         """No tier param returns all vendors."""
-        vc1 = VendorCard(normalized_name="all vendor1", display_name="All Vendor1", vendor_score=80.0, is_new_vendor=False, sighting_count=1)
-        vc2 = VendorCard(normalized_name="all vendor2", display_name="All Vendor2", vendor_score=None, is_new_vendor=True, sighting_count=1)
+        vc1 = VendorCard(
+            normalized_name="all vendor1",
+            display_name="All Vendor1",
+            vendor_score=80.0,
+            is_new_vendor=False,
+            sighting_count=1,
+        )
+        vc2 = VendorCard(
+            normalized_name="all vendor2",
+            display_name="All Vendor2",
+            vendor_score=None,
+            is_new_vendor=True,
+            sighting_count=1,
+        )
         db_session.add_all([vc1, vc2])
         db_session.commit()
 

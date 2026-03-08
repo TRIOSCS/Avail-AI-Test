@@ -11,16 +11,15 @@ Depends on: models/task.py, models/auth.py
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.task import RequisitionTask
-from app.models.auth import User
-
 
 # ---------------------------------------------------------------------------
 # CRUD
 # ---------------------------------------------------------------------------
+
 
 def create_task(
     db: Session,
@@ -166,6 +165,7 @@ def delete_task(db: Session, task_id: int) -> bool:
 # Auto-Generation — call these from existing service hooks
 # ---------------------------------------------------------------------------
 
+
 def auto_create_task(
     db: Session,
     *,
@@ -225,6 +225,7 @@ def auto_close_task(db: Session, requisition_id: int, source_ref: str) -> Requis
 # ---------------------------------------------------------------------------
 # Convenience auto-gen helpers for common events
 # ---------------------------------------------------------------------------
+
 
 def on_requirement_added(db: Session, requisition_id: int, mpn: str, assigned_to_id: int | None = None):
     """Auto-generate 'Source MPN' task when a new requirement is added."""
@@ -305,6 +306,7 @@ def on_quote_expiring(db: Session, requisition_id: int, quote_id: int):
 # Task-to-response helper
 # ---------------------------------------------------------------------------
 
+
 def task_to_response(task: RequisitionTask) -> dict:
     """Convert a RequisitionTask to a response dict with assignee/creator names."""
     assignee_name = None
@@ -372,19 +374,22 @@ async def score_tasks_with_ai(db: Session, tasks: list[RequisitionTask]) -> None
         days_until_due = None
         if t.due_at:
             days_until_due = (t.due_at - now).days
-        task_descriptions.append({
-            "id": t.id,
-            "title": t.title,
-            "task_type": t.task_type,
-            "priority": t.priority,
-            "status": t.status,
-            "days_open": days_open,
-            "days_until_due": days_until_due,
-            "source": t.source,
-        })
+        task_descriptions.append(
+            {
+                "id": t.id,
+                "title": t.title,
+                "task_type": t.task_type,
+                "priority": t.priority,
+                "status": t.status,
+                "days_open": days_open,
+                "days_until_due": days_until_due,
+                "source": t.source,
+            }
+        )
 
     try:
         import json
+
         prompt = f"Score these procurement tasks:\n{json.dumps(task_descriptions, indent=2)}"
         result = await claude_json(prompt, system=TASK_SCORING_PROMPT, model_tier="fast", max_tokens=512)
         if not result or not isinstance(result, list):

@@ -11,11 +11,8 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.email_service import _fire_vendor_quote_alerts
 from app.models.offers import Contact, VendorResponse
-from app.models.sourcing import Requisition
 
 
 def _make_vr(db, req_id, contact_id, classification="quoted", confidence=0.9, parsed_data=None, alert_sent=None):

@@ -6,6 +6,7 @@ Create Date: 2026-03-02
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "039_add_trouble_tickets"
@@ -17,8 +18,7 @@ def upgrade() -> None:
         "trouble_tickets",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("ticket_number", sa.String(20), unique=True, nullable=False),
-        sa.Column("submitted_by", sa.Integer(),
-                  sa.ForeignKey("users.id", ondelete="SET NULL")),
+        sa.Column("submitted_by", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL")),
         sa.Column("status", sa.String(30), nullable=False, server_default="submitted"),
         sa.Column("risk_tier", sa.String(10)),
         sa.Column("category", sa.String(20)),
@@ -37,8 +37,7 @@ def upgrade() -> None:
         sa.Column("cost_tokens", sa.Integer()),
         sa.Column("cost_usd", sa.Float()),
         sa.Column("resolution_notes", sa.Text()),
-        sa.Column("parent_ticket_id", sa.Integer(),
-                  sa.ForeignKey("trouble_tickets.id", ondelete="SET NULL")),
+        sa.Column("parent_ticket_id", sa.Integer(), sa.ForeignKey("trouble_tickets.id", ondelete="SET NULL")),
         sa.Column("created_at", sa.DateTime()),
         sa.Column("updated_at", sa.DateTime()),
         sa.Column("diagnosed_at", sa.DateTime()),

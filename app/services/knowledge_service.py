@@ -220,7 +220,9 @@ def post_answer(
                 db=db,
                 user_id=question.created_by,
                 event_type="knowledge_answer",
-                title="Your question was answered on Req #{}".format(question.requisition_id) if question.requisition_id else "Your question was answered",
+                title="Your question was answered on Req #{}".format(question.requisition_id)
+                if question.requisition_id
+                else "Your question was answered",
                 body=content[:200],
             )
         except Exception as e:
@@ -251,7 +253,11 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
             qty = item.get("qty") or item.get("quantity")
             vendor = item.get("vendor_name", "")
             if mpn and price:
-                facts.append("{}: ${:.2f}".format(mpn, float(price)) + (" x{}".format(qty) if qty else "") + (" from {}".format(vendor) if vendor else ""))
+                facts.append(
+                    "{}: ${:.2f}".format(mpn, float(price))
+                    + (" x{}".format(qty) if qty else "")
+                    + (" from {}".format(vendor) if vendor else "")
+                )
 
         if not facts:
             return None
@@ -426,11 +432,17 @@ def build_context(db: Session, *, requisition_id: int) -> str:
         lines = []
         for e in direct:
             prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-            lines.append("- {}{}: {} (source: {}, {})".format(prefix, e.entry_type, e.content, e.source, e.created_at.strftime('%Y-%m-%d')))
+            lines.append(
+                "- {}{}: {} (source: {}, {})".format(
+                    prefix, e.entry_type, e.content, e.source, e.created_at.strftime("%Y-%m-%d")
+                )
+            )
         sections.append("## Direct knowledge for this requisition\n" + "\n".join(lines))
 
     # 2. MPN knowledge from other reqs
-    mpns = [r.mpn for r in db.query(Requirement.mpn).filter(Requirement.requisition_id == requisition_id).all() if r.mpn]
+    mpns = [
+        r.mpn for r in db.query(Requirement.mpn).filter(Requirement.requisition_id == requisition_id).all() if r.mpn
+    ]
     if mpns:
         mpn_entries = (
             db.query(KnowledgeEntry)
@@ -445,11 +457,16 @@ def build_context(db: Session, *, requisition_id: int) -> str:
             lines = []
             for e in mpn_entries:
                 prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-                lines.append("- {}{}: {} (req #{}, {})".format(prefix, e.mpn, e.content, e.requisition_id, e.created_at.strftime('%Y-%m-%d')))
+                lines.append(
+                    "- {}{}: {} (req #{}, {})".format(
+                        prefix, e.mpn, e.content, e.requisition_id, e.created_at.strftime("%Y-%m-%d")
+                    )
+                )
             sections.append("## Same MPNs on other requisitions\n" + "\n".join(lines))
 
     # 3. Vendor knowledge
     from app.models.offers import Offer
+
     vendor_ids = [
         o.vendor_card_id
         for o in db.query(Offer.vendor_card_id)
@@ -470,7 +487,11 @@ def build_context(db: Session, *, requisition_id: int) -> str:
             lines = []
             for e in vendor_entries:
                 prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-                lines.append("- {}Vendor #{}: {} ({})".format(prefix, e.vendor_card_id, e.content, e.created_at.strftime('%Y-%m-%d')))
+                lines.append(
+                    "- {}Vendor #{}: {} ({})".format(
+                        prefix, e.vendor_card_id, e.content, e.created_at.strftime("%Y-%m-%d")
+                    )
+                )
             sections.append("## Vendor intelligence\n" + "\n".join(lines))
 
     # 4. Company knowledge
@@ -487,7 +508,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
             lines = []
             for e in company_entries:
                 prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-                lines.append("- {}{} ({})".format(prefix, e.content, e.created_at.strftime('%Y-%m-%d')))
+                lines.append("- {}{} ({})".format(prefix, e.content, e.created_at.strftime("%Y-%m-%d")))
             sections.append("## Customer intelligence\n" + "\n".join(lines))
 
     if not sections:
@@ -635,49 +656,57 @@ def build_mpn_context(db: Session, *, mpn: str) -> str:
         lines = []
         for e in entries:
             prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-            lines.append("- {}{}: {} (source: {}, req #{}, {})".format(
-                prefix, e.entry_type, e.content, e.source,
-                e.requisition_id or "N/A", e.created_at.strftime('%Y-%m-%d'),
-            ))
+            lines.append(
+                "- {}{}: {} (source: {}, req #{}, {})".format(
+                    prefix,
+                    e.entry_type,
+                    e.content,
+                    e.source,
+                    e.requisition_id or "N/A",
+                    e.created_at.strftime("%Y-%m-%d"),
+                )
+            )
         sections.append("## Knowledge entries for MPN {}\n{}".format(mpn, "\n".join(lines)))
 
     # 2. Offers for this MPN
-    offers = (
-        db.query(Offer)
-        .filter(Offer.mpn == mpn)
-        .order_by(Offer.created_at.desc())
-        .limit(30)
-        .all()
-    )
+    offers = db.query(Offer).filter(Offer.mpn == mpn).order_by(Offer.created_at.desc()).limit(30).all()
     if offers:
         lines = []
         for o in offers:
             price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
-            lines.append("- {} from {} — {} qty:{} lead:{} (req #{}, {})".format(
-                o.mpn, o.vendor_name, price_str,
-                o.qty_available or "?", o.lead_time or "?",
-                o.requisition_id, o.created_at.strftime('%Y-%m-%d'),
-            ))
+            lines.append(
+                "- {} from {} — {} qty:{} lead:{} (req #{}, {})".format(
+                    o.mpn,
+                    o.vendor_name,
+                    price_str,
+                    o.qty_available or "?",
+                    o.lead_time or "?",
+                    o.requisition_id,
+                    o.created_at.strftime("%Y-%m-%d"),
+                )
+            )
         sections.append("## Offer history for MPN {}\n{}".format(mpn, "\n".join(lines)))
 
     # 3. Requisitions containing this MPN
     from app.models.sourcing import Requirement, Requisition
+
     req_ids = [
-        r.requisition_id for r in
-        db.query(Requirement.requisition_id)
-        .filter(Requirement.primary_mpn == mpn)
-        .distinct()
-        .limit(20)
-        .all()
+        r.requisition_id
+        for r in db.query(Requirement.requisition_id).filter(Requirement.primary_mpn == mpn).distinct().limit(20).all()
     ]
     if req_ids:
         reqs = db.query(Requisition).filter(Requisition.id.in_(req_ids)).all()
         if reqs:
             lines = []
             for r in reqs:
-                lines.append("- Req #{} '{}' status={} ({})".format(
-                    r.id, r.name, r.status, r.created_at.strftime('%Y-%m-%d'),
-                ))
+                lines.append(
+                    "- Req #{} '{}' status={} ({})".format(
+                        r.id,
+                        r.name,
+                        r.status,
+                        r.created_at.strftime("%Y-%m-%d"),
+                    )
+                )
             sections.append("## Requisitions containing MPN {}\n{}".format(mpn, "\n".join(lines)))
 
     if not sections:
@@ -706,10 +735,13 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
     if vendor.ghost_rate is not None:
         meta.append("Ghost rate: {:.0%}".format(vendor.ghost_rate))
     if vendor.total_responses is not None and vendor.total_outreach:
-        meta.append("Response rate: {}/{} ({:.0%})".format(
-            vendor.total_responses, vendor.total_outreach,
-            vendor.total_responses / max(vendor.total_outreach, 1),
-        ))
+        meta.append(
+            "Response rate: {}/{} ({:.0%})".format(
+                vendor.total_responses,
+                vendor.total_outreach,
+                vendor.total_responses / max(vendor.total_outreach, 1),
+            )
+        )
     if vendor.cancellation_rate is not None:
         meta.append("Cancellation rate: {:.0%}".format(vendor.cancellation_rate))
     if meta:
@@ -728,26 +760,28 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
         lines = []
         for e in entries:
             prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime('%Y-%m-%d')))
+            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime("%Y-%m-%d")))
         sections.append("## Knowledge entries\n" + "\n".join(lines))
 
     # Offer history
     offers = (
-        db.query(Offer)
-        .filter(Offer.vendor_card_id == vendor_card_id)
-        .order_by(Offer.created_at.desc())
-        .limit(30)
-        .all()
+        db.query(Offer).filter(Offer.vendor_card_id == vendor_card_id).order_by(Offer.created_at.desc()).limit(30).all()
     )
     if offers:
         lines = []
         for o in offers:
             price_str = "${:.4f}".format(float(o.unit_price)) if o.unit_price else "N/A"
-            lines.append("- {} {} qty:{} lead:{} status={} (req #{}, {})".format(
-                o.mpn, price_str, o.qty_available or "?",
-                o.lead_time or "?", o.status,
-                o.requisition_id, o.created_at.strftime('%Y-%m-%d'),
-            ))
+            lines.append(
+                "- {} {} qty:{} lead:{} status={} (req #{}, {})".format(
+                    o.mpn,
+                    price_str,
+                    o.qty_available or "?",
+                    o.lead_time or "?",
+                    o.status,
+                    o.requisition_id,
+                    o.created_at.strftime("%Y-%m-%d"),
+                )
+            )
         sections.append("## Recent offers\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
@@ -776,10 +810,23 @@ def build_pipeline_context(db: Session) -> str:
     if active:
         lines = []
         for r in active[:30]:
-            age_days = (now - r.created_at.replace(tzinfo=timezone.utc) if r.created_at.tzinfo is None else now - r.created_at).days if r.created_at else 0
-            lines.append("- Req #{} '{}' — {} days old, deadline: {}".format(
-                r.id, r.name, age_days, r.deadline or "none",
-            ))
+            age_days = (
+                (
+                    now - r.created_at.replace(tzinfo=timezone.utc)
+                    if r.created_at.tzinfo is None
+                    else now - r.created_at
+                ).days
+                if r.created_at
+                else 0
+            )
+            lines.append(
+                "- Req #{} '{}' — {} days old, deadline: {}".format(
+                    r.id,
+                    r.name,
+                    age_days,
+                    r.deadline or "none",
+                )
+            )
         sections.append("## Active requisitions\n" + "\n".join(lines))
 
     # 3. Stale deals (active but no update in 14+ days)
@@ -794,10 +841,13 @@ def build_pipeline_context(db: Session) -> str:
     if stale:
         lines = []
         for r in stale[:20]:
-            lines.append("- Req #{} '{}' — last updated {}".format(
-                r.id, r.name,
-                r.updated_at.strftime('%Y-%m-%d') if r.updated_at else "never",
-            ))
+            lines.append(
+                "- Req #{} '{}' — last updated {}".format(
+                    r.id,
+                    r.name,
+                    r.updated_at.strftime("%Y-%m-%d") if r.updated_at else "never",
+                )
+            )
         sections.append("## Stale deals (no update in 14+ days)\n" + "\n".join(lines))
 
     return "\n\n".join(sections)
@@ -824,7 +874,7 @@ def build_company_context(db: Session, *, company_id: int) -> str:
     if company.is_strategic:
         meta.append("Strategic account: Yes")
     if company.last_activity_at:
-        meta.append("Last activity: {}".format(company.last_activity_at.strftime('%Y-%m-%d')))
+        meta.append("Last activity: {}".format(company.last_activity_at.strftime("%Y-%m-%d")))
     sections.append("## Company profile\n" + "\n".join("- " + m for m in meta))
 
     # Knowledge entries
@@ -840,7 +890,7 @@ def build_company_context(db: Session, *, company_id: int) -> str:
         lines = []
         for e in entries:
             prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
-            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime('%Y-%m-%d')))
+            lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime("%Y-%m-%d")))
         sections.append("## Knowledge entries\n" + "\n".join(lines))
 
     # Open requisitions via customer sites
@@ -859,9 +909,14 @@ def build_company_context(db: Session, *, company_id: int) -> str:
         if reqs:
             lines = []
             for r in reqs:
-                lines.append("- Req #{} '{}' status={} ({})".format(
-                    r.id, r.name, r.status, r.created_at.strftime('%Y-%m-%d'),
-                ))
+                lines.append(
+                    "- Req #{} '{}' status={} ({})".format(
+                        r.id,
+                        r.name,
+                        r.status,
+                        r.created_at.strftime("%Y-%m-%d"),
+                    )
+                )
             sections.append("## Open requisitions\n" + "\n".join(lines))
 
     if not sections:

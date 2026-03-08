@@ -15,12 +15,12 @@ def register_all_jobs(scheduler, settings):
     from .enrichment_jobs import register_enrichment_jobs
     from .health_jobs import register_health_jobs
     from .inventory_jobs import register_inventory_jobs
+    from .knowledge_jobs import register_knowledge_jobs
     from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
     from .prospecting_jobs import register_prospecting_jobs
     from .tagging_jobs import register_tagging_jobs
     from .teams_alert_jobs import register_teams_alert_jobs
-    from .knowledge_jobs import register_knowledge_jobs
 
     register_core_jobs(scheduler, settings)
     register_email_jobs(scheduler, settings)

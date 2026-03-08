@@ -13,6 +13,7 @@ from app.models import ActivityLog
 def _clear_rate_limit():
     """Clear in-memory rate limiter between tests."""
     from app.routers.activity import _call_log
+
     _call_log.clear()
     yield
     _call_log.clear()
@@ -20,9 +21,12 @@ def _clear_rate_limit():
 
 class TestCallInitiated:
     def test_basic_call(self, client, db_session):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+            },
+        )
         assert resp.status_code == 201
         data = resp.json()
         assert data["id"] is not None
@@ -34,10 +38,13 @@ class TestCallInitiated:
         assert "Call to" in record.subject
 
     def test_with_vendor_card(self, client, db_session, test_vendor_card):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "(415) 555-1234",
-            "vendor_card_id": test_vendor_card.id,
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "(415) 555-1234",
+                "vendor_card_id": test_vendor_card.id,
+            },
+        )
         assert resp.status_code == 201
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert record.vendor_card_id == test_vendor_card.id
@@ -45,68 +52,95 @@ class TestCallInitiated:
 
     def test_with_requirement(self, client, db_session, test_requisition):
         req_item = test_requisition.requirements[0]
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "+14155551234",
-            "requirement_id": req_item.id,
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "+14155551234",
+                "requirement_id": req_item.id,
+            },
+        )
         assert resp.status_code == 201
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert record.requisition_id == test_requisition.id
 
     def test_invalid_phone_returns_400(self, client):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "call john",
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "call john",
+            },
+        )
         assert resp.status_code == 400
 
     def test_empty_phone_returns_400(self, client):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "",
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "",
+            },
+        )
         assert resp.status_code == 400
 
     def test_unknown_vendor_id_still_succeeds(self, client):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-            "vendor_card_id": 99999,
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+                "vendor_card_id": 99999,
+            },
+        )
         assert resp.status_code == 201
 
     def test_unknown_requirement_id_still_succeeds(self, client):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-            "requirement_id": 99999,
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+                "requirement_id": 99999,
+            },
+        )
         assert resp.status_code == 201
 
     def test_rate_limit(self, client):
         # First 10 should succeed
         for _ in range(10):
-            resp = client.post("/api/activity/call-initiated", json={
-                "phone_number": "4155551234",
-            })
+            resp = client.post(
+                "/api/activity/call-initiated",
+                json={
+                    "phone_number": "4155551234",
+                },
+            )
             assert resp.status_code == 201
 
         # 11th should be rate limited
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+            },
+        )
         assert resp.status_code == 429
 
     def test_origin_recorded(self, client, db_session):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-            "origin": "vendor_detail",
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+                "origin": "vendor_detail",
+            },
+        )
         assert resp.status_code == 201
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert "origin=vendor_detail" in record.notes
 
     def test_with_company_id(self, client, db_session, test_company):
-        resp = client.post("/api/activity/call-initiated", json={
-            "phone_number": "4155551234",
-            "company_id": test_company.id,
-        })
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+                "company_id": test_company.id,
+            },
+        )
         assert resp.status_code == 201
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert record.company_id == test_company.id

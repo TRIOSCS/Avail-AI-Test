@@ -11,6 +11,18 @@ All public names re-exported here for backward compatibility.
 # Re-export settings for test patching compatibility
 from app.config import settings  # noqa: F401
 
+# ── Plan Building & AI ──────────────────────────────────────────────
+from app.services.buyplan_builder import (  # noqa: F401
+    _build_lines_for_requirement,
+    _check_better_offer,
+    _check_geo_mismatch,
+    _check_quantity_gaps,
+    _create_line,
+    build_buy_plan,
+    generate_ai_flags,
+    generate_ai_summary,
+)
+
 # ── Scoring & Routing ────────────────────────────────────────────────
 from app.services.buyplan_scoring import (  # noqa: F401
     W_GEOGRAPHY,
@@ -23,18 +35,6 @@ from app.services.buyplan_scoring import (  # noqa: F401
     _parse_lead_time_days,
     assign_buyer,
     score_offer,
-)
-
-# ── Plan Building & AI ──────────────────────────────────────────────
-from app.services.buyplan_builder import (  # noqa: F401
-    _build_lines_for_requirement,
-    _check_better_offer,
-    _check_geo_mismatch,
-    _check_quantity_gaps,
-    _create_line,
-    build_buy_plan,
-    generate_ai_flags,
-    generate_ai_summary,
 )
 
 # ── Workflow & Intelligence ─────────────────────────────────────────

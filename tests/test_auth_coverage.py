@@ -19,7 +19,6 @@ from sqlalchemy.orm import Session
 
 from app.models import User
 
-
 # ── _password_login_enabled tests ────────────────────────────────────
 
 

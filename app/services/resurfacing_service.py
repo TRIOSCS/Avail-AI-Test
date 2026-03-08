@@ -45,9 +45,7 @@ def get_mpn_hints(
         try:
             result[mpn] = _build_hint(mpn, db, exclude_req_id)
         except Exception:
-            logger.opt(exception=True).warning(
-                "Failed to build hint for MPN {}", mpn
-            )
+            logger.opt(exception=True).warning("Failed to build hint for MPN {}", mpn)
             result[mpn] = None
     return result
 
@@ -82,15 +80,9 @@ def _build_hint(
     return None
 
 
-def _offer_hint(
-    mpn: str, db: Session, exclude_req_id: int | None
-) -> str | None:
+def _offer_hint(mpn: str, db: Session, exclude_req_id: int | None) -> str | None:
     """Find latest offer with unit_price > 0 for this MPN."""
-    query = (
-        db.query(Offer)
-        .filter(Offer.mpn == mpn, Offer.unit_price > 0)
-        .order_by(Offer.created_at.desc())
-    )
+    query = db.query(Offer).filter(Offer.mpn == mpn, Offer.unit_price > 0).order_by(Offer.created_at.desc())
     if exclude_req_id is not None:
         query = query.filter(Offer.requisition_id != exclude_req_id)
 
@@ -104,9 +96,7 @@ def _offer_hint(
     return "Last quoted {} from {}, {}".format(price_str, vendor, age)
 
 
-def _cross_req_hint(
-    mpn: str, db: Session, exclude_req_id: int | None
-) -> str | None:
+def _cross_req_hint(mpn: str, db: Session, exclude_req_id: int | None) -> str | None:
     """Find other open requisitions containing this MPN."""
     open_statuses = ("active", "in_progress", "quoting")
     query = (
@@ -138,8 +128,7 @@ def _knowledge_hint(mpn: str, db: Session) -> str | None:
             KnowledgeEntry.confidence >= 0.7,
             and_(
                 # Not expired
-                (KnowledgeEntry.expires_at.is_(None))
-                | (KnowledgeEntry.expires_at > now)
+                (KnowledgeEntry.expires_at.is_(None)) | (KnowledgeEntry.expires_at > now)
             ),
         )
         .order_by(KnowledgeEntry.confidence.desc())

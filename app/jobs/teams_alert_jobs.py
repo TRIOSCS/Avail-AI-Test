@@ -78,7 +78,11 @@ async def _send_user_briefing(user, db):
     for req in open_reqs:
         offer_count = db.query(Offer).filter(Offer.requisition_id == req.id).count()
         if offer_count == 0:
-            created = req.created_at.replace(tzinfo=timezone.utc) if req.created_at and req.created_at.tzinfo is None else req.created_at
+            created = (
+                req.created_at.replace(tzinfo=timezone.utc)
+                if req.created_at and req.created_at.tzinfo is None
+                else req.created_at
+            )
             days_old = (now - created).days if created else 0
             no_offer_reqs.append(f"  {req.customer_name or 'N/A'} — {req.name} ({days_old}d)")
 
@@ -136,6 +140,7 @@ async def _send_user_briefing(user, db):
     # Block 4: AI Insights (Phase 2)
     try:
         from ..services.activity_insights import get_user_insights
+
         insights = get_user_insights(user.id, db, max_insights=3)
         if insights:
             insight_lines = []
@@ -228,7 +233,11 @@ async def _send_director_digest(user, db):
     idle_items = []
     for req in idle_reqs[:5]:
         creator = db.get(User, req.created_by) if req.created_by else None
-        updated = req.updated_at.replace(tzinfo=timezone.utc) if req.updated_at and req.updated_at.tzinfo is None else req.updated_at
+        updated = (
+            req.updated_at.replace(tzinfo=timezone.utc)
+            if req.updated_at and req.updated_at.tzinfo is None
+            else req.updated_at
+        )
         days_idle = (now - updated).days if updated else 0
         idle_items.append(f"  {req.name} — {creator.name if creator else 'N/A'} — {days_idle}d idle")
     if idle_items:
@@ -241,9 +250,7 @@ async def _send_director_digest(user, db):
     for am in ams:
         avg_hours = (
             db.query(
-                func.avg(
-                    func.extract("epoch", Contact.created_at) - func.extract("epoch", Requisition.created_at)
-                )
+                func.avg(func.extract("epoch", Contact.created_at) - func.extract("epoch", Requisition.created_at))
                 / 3600
             )
             .join(Requisition, Contact.requisition_id == Requisition.id)
@@ -265,17 +272,17 @@ async def _send_director_digest(user, db):
     week_start = now - timedelta(days=7)
     workload_lines = []
     for am in ams:
-        open_count = db.query(Requisition).filter(
-            Requisition.created_by == am.id, Requisition.status.in_(["active", "sourcing", "offers"])
-        ).count()
-        quotes_sent = db.query(Quote).filter(
-            Quote.created_by_id == am.id, Quote.sent_at > week_start
-        ).count()
-        offers_count = db.query(Offer).filter(
-            Offer.entered_by_id == am.id, Offer.created_at > week_start
-        ).count()
+        open_count = (
+            db.query(Requisition)
+            .filter(Requisition.created_by == am.id, Requisition.status.in_(["active", "sourcing", "offers"]))
+            .count()
+        )
+        quotes_sent = db.query(Quote).filter(Quote.created_by_id == am.id, Quote.sent_at > week_start).count()
+        offers_count = db.query(Offer).filter(Offer.entered_by_id == am.id, Offer.created_at > week_start).count()
         if open_count or quotes_sent or offers_count:
-            workload_lines.append(f"  {am.name or am.email}: {open_count} open / {quotes_sent} quoted / {offers_count} offers")
+            workload_lines.append(
+                f"  {am.name or am.email}: {open_count} open / {quotes_sent} quoted / {offers_count} offers"
+            )
 
     if workload_lines:
         blocks.append("WORKLOAD\n" + "\n".join(workload_lines))

@@ -111,20 +111,24 @@ async def run_nexar_backfill(db: Session, batch_size: int = 100, delay_seconds: 
 
             if result.get("brand"):
                 brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-                tags_to_apply.append({
-                    "tag_id": brand_tag.id,
-                    "source": "nexar",
-                    "confidence": 0.95,
-                })
+                tags_to_apply.append(
+                    {
+                        "tag_id": brand_tag.id,
+                        "source": "nexar",
+                        "confidence": 0.95,
+                    }
+                )
 
             if result.get("commodity"):
                 commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
                 if commodity_tag:  # pragma: no cover
-                    tags_to_apply.append({
-                        "tag_id": commodity_tag.id,
-                        "source": "nexar",
-                        "confidence": 0.9,
-                    })
+                    tags_to_apply.append(
+                        {
+                            "tag_id": commodity_tag.id,
+                            "source": "nexar",
+                            "confidence": 0.9,
+                        }
+                    )
 
             if tags_to_apply:
                 tag_material_card(card_id, tags_to_apply, db)

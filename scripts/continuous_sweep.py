@@ -23,7 +23,6 @@ from app.database import SessionLocal
 from app.services.site_tester import SiteTester, create_tickets_from_issues
 from app.services.trouble_ticket_service import auto_process_ticket
 
-
 BASE_URL = "http://localhost:8000"
 ADMIN_USER_ID = 1  # mkhoury — used for ticket creation
 MAX_ROUNDS = 20
@@ -36,6 +35,7 @@ def get_session_cookie() -> str:
     Uses the same signing mechanism as Starlette SessionMiddleware.
     """
     from itsdangerous import URLSafeTimedSerializer
+
     from app.config import settings
 
     signer = URLSafeTimedSerializer(settings.secret_key)
@@ -54,8 +54,7 @@ async def run_sweep(session_cookie: str) -> list[dict]:
         logger.error("Sweep failed: {}", e)
         return []
 
-    logger.info("Sweep complete: {} issues found, {} areas tested",
-                len(issues), len(tester.progress))
+    logger.info("Sweep complete: {} issues found, {} areas tested", len(issues), len(tester.progress))
     return issues
 
 
@@ -72,6 +71,7 @@ async def create_and_process_tickets(issues: list[dict]) -> int:
         # Auto-process each new ticket (diagnose + queue fix)
         # The tickets were just created, get the latest ones
         from app.models.trouble_ticket import TroubleTicket
+
         recent = (
             db.query(TroubleTicket)
             .filter(TroubleTicket.source == "playwright")
@@ -138,14 +138,11 @@ async def main():
     # Final summary
     db = SessionLocal()
     try:
-        from app.models.trouble_ticket import TroubleTicket
         from sqlalchemy import func
 
-        stats = dict(
-            db.query(TroubleTicket.status, func.count())
-            .group_by(TroubleTicket.status)
-            .all()
-        )
+        from app.models.trouble_ticket import TroubleTicket
+
+        stats = dict(db.query(TroubleTicket.status, func.count()).group_by(TroubleTicket.status).all())
         logger.info("\n=== Final Ticket Status ===")
         for status, count in sorted(stats.items()):
             logger.info("  {}: {}", status, count)

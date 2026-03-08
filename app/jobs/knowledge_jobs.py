@@ -243,9 +243,7 @@ async def _job_send_knowledge_digests():
                 role = getattr(user, "role", "buyer") or "buyer"
                 briefing = generate_briefing(db=db, user_id=config.user_id, role=role)
                 if briefing["total_items"] > 0:
-                    await _send_briefing_to_teams(
-                        config.teams_webhook_url, briefing, user.display_name or user.email
-                    )
+                    await _send_briefing_to_teams(config.teams_webhook_url, briefing, user.display_name or user.email)
                     briefing_count += 1
             except Exception as e:
                 logger.warning("Briefing Teams delivery failed for user {}: {}", config.user_id, e)
@@ -324,32 +322,34 @@ async def _send_briefing_to_teams(webhook_url: str, briefing: dict, user_name: s
 
     body = {
         "type": "message",
-        "attachments": [{
-            "contentType": "application/vnd.microsoft.card.adaptive",
-            "content": {
-                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                "type": "AdaptiveCard",
-                "version": "1.4",
-                "body": [
-                    {
-                        "type": "TextBlock",
-                        "text": "Morning Briefing for {}".format(user_name),
-                        "weight": "bolder",
-                        "size": "medium",
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": "{} items need attention".format(briefing["total_items"]),
-                        "isSubtle": True,
-                    },
-                    {
-                        "type": "TextBlock",
-                        "text": "\n".join(sections_text),
-                        "wrap": True,
-                    },
-                ],
-            },
-        }],
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "type": "AdaptiveCard",
+                    "version": "1.4",
+                    "body": [
+                        {
+                            "type": "TextBlock",
+                            "text": "Morning Briefing for {}".format(user_name),
+                            "weight": "bolder",
+                            "size": "medium",
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "{} items need attention".format(briefing["total_items"]),
+                            "isSubtle": True,
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "\n".join(sections_text),
+                            "wrap": True,
+                        },
+                    ],
+                },
+            }
+        ],
     }
 
     async with httpx.AsyncClient(timeout=10) as client:

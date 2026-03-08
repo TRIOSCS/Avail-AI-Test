@@ -14,8 +14,9 @@ Revises: 041_add_notifications
 
 from datetime import datetime, timezone
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "042_add_tagging_tables"
 down_revision = "041_add_notifications"
@@ -95,7 +96,9 @@ def upgrade() -> None:
     op.create_table(
         "material_tags",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("material_card_id", sa.Integer(), sa.ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "material_card_id", sa.Integer(), sa.ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False
+        ),
         sa.Column("tag_id", sa.Integer(), sa.ForeignKey("tags.id", ondelete="CASCADE"), nullable=False),
         sa.Column("confidence", sa.Float(), nullable=False, server_default="0.0"),
         sa.Column("source", sa.String(30), nullable=False),
@@ -142,10 +145,7 @@ def upgrade() -> None:
     )
     op.bulk_insert(
         tags_table,
-        [
-            {"name": name, "tag_type": "commodity", "created_at": datetime.now(timezone.utc)}
-            for name in COMMODITY_TAGS
-        ],
+        [{"name": name, "tag_type": "commodity", "created_at": datetime.now(timezone.utc)} for name in COMMODITY_TAGS],
     )
 
     # ── Seed threshold config ─────────────────────────────────────────

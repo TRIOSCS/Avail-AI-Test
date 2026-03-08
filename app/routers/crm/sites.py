@@ -121,7 +121,8 @@ async def get_site(site_id: int, user: User = Depends(require_user), db: Session
                 SiteContact.customer_site_id == site_id,
             )
             .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-            .limit(500).all()
+            .limit(500)
+            .all()
         )
 
     reqs, contacts = await asyncio.gather(
@@ -278,10 +279,14 @@ async def create_site_contact(
         raise HTTPException(404, "Site not found")
     # Dedup guard: if email provided, check for existing contact on same site
     if payload.email:
-        existing = db.query(SiteContact).filter(
-            SiteContact.customer_site_id == site_id,
-            func.lower(SiteContact.email) == payload.email.strip().lower(),
-        ).first()
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                func.lower(SiteContact.email) == payload.email.strip().lower(),
+            )
+            .first()
+        )
         if existing:
             return {"id": existing.id, "full_name": existing.full_name}
     if payload.is_primary:

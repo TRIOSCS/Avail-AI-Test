@@ -46,11 +46,7 @@ def needs_attention(
 
     # Get active companies — scope controls which ones
     if scope == "team":
-        companies = (
-            db.query(Company)
-            .filter(Company.is_active.is_(True))
-            .all()
-        )
+        companies = db.query(Company).filter(Company.is_active.is_(True)).all()
     else:
         owned_company_ids = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
         companies = (

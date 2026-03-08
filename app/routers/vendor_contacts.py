@@ -24,6 +24,7 @@ from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
 from ..schemas.responses import VendorEmailMetricsResponse
 from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorContactUpdate, VendorEmailAdd
 from ..services.credential_service import get_credential_cached
+from ..utils.phone_utils import format_phone_e164
 from ..utils.vendor_helpers import (
     _background_enrich_vendor,
     clean_emails,
@@ -33,7 +34,6 @@ from ..utils.vendor_helpers import (
     scrape_website_contacts,
 )
 from ..vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_EMAIL_DOMAINS
-from ..utils.phone_utils import format_phone_e164
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])

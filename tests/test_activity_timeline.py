@@ -21,7 +21,6 @@ from app.services.activity_service import (
 )
 from tests.conftest import engine  # noqa: F401
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -40,19 +39,19 @@ def site_contact(db_session: Session, test_customer_site: CustomerSite) -> SiteC
 
 
 @pytest.fixture()
-def company_activities(
-    db_session: Session, test_user: User, test_company: Company
-) -> list[ActivityLog]:
+def company_activities(db_session: Session, test_user: User, test_company: Company) -> list[ActivityLog]:
     """Create a mix of activities for a company."""
     now = datetime.now(timezone.utc)
     activities = []
-    for i, (atype, chan, dirn, etype) in enumerate([
-        ("email_sent", "email", "outbound", "email"),
-        ("email_received", "email", "inbound", "email"),
-        ("call_outbound", "phone", "outbound", "call"),
-        ("call_inbound", "phone", "inbound", "call"),
-        ("note", "manual", None, "note"),
-    ]):
+    for i, (atype, chan, dirn, etype) in enumerate(
+        [
+            ("email_sent", "email", "outbound", "email"),
+            ("email_received", "email", "inbound", "email"),
+            ("call_outbound", "phone", "outbound", "call"),
+            ("call_inbound", "phone", "inbound", "call"),
+            ("note", "manual", None, "note"),
+        ]
+    ):
         a = ActivityLog(
             user_id=test_user.id,
             activity_type=atype,
@@ -83,10 +82,12 @@ def contact_activities(
     """Activities linked to a specific site contact."""
     now = datetime.now(timezone.utc)
     activities = []
-    for i, (atype, chan) in enumerate([
-        ("email_sent", "email"),
-        ("call_outbound", "phone"),
-    ]):
+    for i, (atype, chan) in enumerate(
+        [
+            ("email_sent", "email"),
+            ("call_outbound", "phone"),
+        ]
+    ):
         a = ActivityLog(
             user_id=test_user.id,
             activity_type=atype,
@@ -136,7 +137,8 @@ class TestGetAccountTimeline:
     def test_filters_by_date_range(self, db_session, test_company, company_activities):
         now = datetime.now(timezone.utc)
         items, total = get_account_timeline(
-            db_session, test_company.id,
+            db_session,
+            test_company.id,
             date_from=now - timedelta(hours=1, minutes=30),
             date_to=now + timedelta(hours=1),
         )
@@ -185,9 +187,7 @@ class TestGetLastOutboundActivity:
     def test_returns_most_recent_outbound(self, db_session, test_company, company_activities):
         result = get_last_outbound_activity(db_session, test_company.id)
         assert result is not None
-        assert result.direction == "outbound" or result.activity_type in (
-            "email_sent", "call_outbound", "phone_call"
-        )
+        assert result.direction == "outbound" or result.activity_type in ("email_sent", "call_outbound", "phone_call")
 
     def test_returns_none_when_no_outbound(self, db_session, test_user, test_company):
         # Only inbound activity

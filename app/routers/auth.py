@@ -309,5 +309,3 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
             "users": users_status,
         }
     )
-
-

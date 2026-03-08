@@ -8,8 +8,6 @@ Called by: pytest
 Depends on: app/templates/index.html, routers/requisitions
 """
 
-import pytest
-
 
 # ── Template Rendering ─────────────────────────────────────────────────
 
@@ -39,21 +37,21 @@ def test_index_template_has_notification_bar(client):
     """Index page includes the smart notification bar element."""
     resp = client.get("/")
     assert resp.status_code == 200
-    assert 'notifActionBar' in resp.text
+    assert "notifActionBar" in resp.text
 
 
 def test_index_template_has_priority_lane_comment(client):
     """Index page includes priority lane reference."""
     resp = client.get("/")
     assert resp.status_code == 200
-    assert 'priority lane' in resp.text.lower()
+    assert "priority lane" in resp.text.lower()
 
 
 def test_index_template_has_inline_rfq_css(client):
     """Index page includes inline RFQ bar CSS."""
     resp = client.get("/")
     assert resp.status_code == 200
-    assert 'rfq-inline-bar' in resp.text
+    assert "rfq-inline-bar" in resp.text
 
 
 def test_index_no_old_active_view(client):

@@ -266,9 +266,9 @@ class Settings(BaseSettings):
         object.__setattr__(self, "admin_emails", _csv_to_list(self.admin_emails))
         object.__setattr__(self, "stock_sale_vendor_names", _csv_to_list(self.stock_sale_vendor_names))
         object.__setattr__(self, "stock_sale_notify_emails", _csv_to_list(self.stock_sale_notify_emails))
-        object.__setattr__(self, "own_domains", frozenset(
-            d.strip().lower() for d in self.own_domains.split(",") if d.strip()
-        ))
+        object.__setattr__(
+            self, "own_domains", frozenset(d.strip().lower() for d in self.own_domains.split(",") if d.strip())
+        )
         return self
 
 

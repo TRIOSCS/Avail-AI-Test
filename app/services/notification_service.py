@@ -44,11 +44,7 @@ def create_notification(
 
 def get_unread_count(db: Session, user_id: int) -> int:
     """Return count of unread notifications for a user."""
-    return (
-        db.query(Notification)
-        .filter(Notification.user_id == user_id, Notification.is_read.is_(False))
-        .count()
-    )
+    return db.query(Notification).filter(Notification.user_id == user_id, Notification.is_read.is_(False)).count()
 
 
 def get_unread(db: Session, user_id: int, limit: int = 50) -> list[dict]:
@@ -67,30 +63,19 @@ def get_all(db: Session, user_id: int, limit: int = 100, offset: int = 0) -> dic
     """Get all notifications for a user, paginated."""
     query = db.query(Notification).filter(Notification.user_id == user_id)
     total = query.count()
-    notifs = (
-        query.order_by(Notification.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+    notifs = query.order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
     return {
         "items": [_to_dict(n) for n in notifs],
         "total": total,
         "unread_count": (
-            db.query(Notification)
-            .filter(Notification.user_id == user_id, Notification.is_read.is_(False))
-            .count()
+            db.query(Notification).filter(Notification.user_id == user_id, Notification.is_read.is_(False)).count()
         ),
     }
 
 
 def mark_read(db: Session, notification_id: int, user_id: int) -> bool:
     """Mark a single notification as read. Returns True if found and updated."""
-    notif = (
-        db.query(Notification)
-        .filter(Notification.id == notification_id, Notification.user_id == user_id)
-        .first()
-    )
+    notif = db.query(Notification).filter(Notification.id == notification_id, Notification.user_id == user_id).first()
     if not notif:
         return False
     notif.is_read = True

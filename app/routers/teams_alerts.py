@@ -57,5 +57,3 @@ async def delete_config(user: User = Depends(require_user), db: Session = Depend
         db.delete(config)
         db.commit()
     return {"ok": True}
-
-

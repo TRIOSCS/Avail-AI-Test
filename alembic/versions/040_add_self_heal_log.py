@@ -6,6 +6,7 @@ Create Date: 2026-03-02
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "040_add_self_heal_log"
@@ -16,8 +17,7 @@ def upgrade() -> None:
     op.create_table(
         "self_heal_log",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("ticket_id", sa.Integer(),
-                  sa.ForeignKey("trouble_tickets.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("ticket_id", sa.Integer(), sa.ForeignKey("trouble_tickets.id", ondelete="CASCADE"), nullable=False),
         sa.Column("category", sa.String(20)),
         sa.Column("risk_tier", sa.String(10)),
         sa.Column("files_modified", sa.JSON()),

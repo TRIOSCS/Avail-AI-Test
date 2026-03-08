@@ -108,9 +108,7 @@ class TagThresholdConfig(Base):
     min_count = Column(Integer, nullable=False)
     min_percentage = Column(Float, nullable=False)
 
-    __table_args__ = (
-        UniqueConstraint("entity_type", "tag_type", name="uq_threshold_entity_tag"),
-    )
+    __table_args__ = (UniqueConstraint("entity_type", "tag_type", name="uq_threshold_entity_tag"),)
 
     def __repr__(self):
         return f"<TagThresholdConfig {self.entity_type}/{self.tag_type} min={self.min_count}/{self.min_percentage}>"  # pragma: no cover

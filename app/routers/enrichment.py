@@ -419,7 +419,8 @@ def api_backfill_emails(
             ActivityLog.contact_email != "",
             ActivityLog.vendor_card_id.isnot(None),
         )
-        .limit(5000).all()
+        .limit(5000)
+        .all()
     )
     for row in activity_rows:
         email = row.contact_email.strip().lower()

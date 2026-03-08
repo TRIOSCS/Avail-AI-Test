@@ -154,11 +154,16 @@ async def _job_contact_dedup():
                 .order_by(SiteContact.id)
                 .all()
             )
-            best = max(contacts, key=lambda c: sum(1 for col in ['full_name', 'title', 'phone', 'notes', 'linkedin_url'] if getattr(c, col, None)))
+            best = max(
+                contacts,
+                key=lambda c: sum(
+                    1 for col in ["full_name", "title", "phone", "notes", "linkedin_url"] if getattr(c, col, None)
+                ),
+            )
             for other in contacts:
                 if other.id == best.id:
                     continue
-                for col in ['full_name', 'title', 'phone', 'notes', 'linkedin_url']:
+                for col in ["full_name", "title", "phone", "notes", "linkedin_url"]:
                     if getattr(best, col, None) is None and getattr(other, col, None) is not None:
                         setattr(best, col, getattr(other, col))
                 db.delete(other)

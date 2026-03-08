@@ -625,7 +625,6 @@ def _backfill_proactive_offer_qty() -> None:
             logger.warning("Backfill proactive offer qty failed: %s", e)
             conn.rollback()
 
-
     """Backfill tickets with null risk_tier/category (report_button source).
 
     Sets default values so they appear in stats breakdowns.
@@ -638,10 +637,14 @@ def _backfill_proactive_offer_qty() -> None:
 
     db = SessionLocal()
     try:
-        null_tickets = db.query(TroubleTicket).filter(
-            TroubleTicket.risk_tier.is_(None),
-            TroubleTicket.category.is_(None),
-        ).all()
+        null_tickets = (
+            db.query(TroubleTicket)
+            .filter(
+                TroubleTicket.risk_tier.is_(None),
+                TroubleTicket.category.is_(None),
+            )
+            .all()
+        )
         if null_tickets:
             for t in null_tickets:
                 t.risk_tier = "low"

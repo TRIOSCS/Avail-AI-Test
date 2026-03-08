@@ -21,10 +21,9 @@ Depends on: conftest fixtures, app modules
 import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -38,8 +37,6 @@ from app.models import (
 # ══════════════════════════════════════════════════════════════════════
 #  1. TROUBLE TICKET ROUTER — admin-only endpoints + access control
 # ══════════════════════════════════════════════════════════════════════
-
-
 
 
 class TestVendorFuzzyFallback:
@@ -347,8 +344,6 @@ class TestCompanyDedupRank:
 # ══════════════════════════════════════════════════════════════════════
 #  11. FILE MAPPER — edge cases
 # ══════════════════════════════════════════════════════════════════════
-
-
 
 
 class TestProspectingAccountHealth:

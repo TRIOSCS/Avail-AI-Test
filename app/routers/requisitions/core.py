@@ -13,7 +13,8 @@ Depends on: models, schemas, cache, dependencies, sourcing_score service
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, exists, func as sqlfunc, literal, or_, select
+from sqlalchemy import and_, case, exists, literal, or_, select
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db

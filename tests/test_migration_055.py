@@ -14,9 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Load the migration module directly since alembic/versions has no __init__.py
-_MIGRATION_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "alembic", "versions", "055_data_cleanup.py"
-)
+_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "055_data_cleanup.py")
 _spec = importlib.util.spec_from_file_location("migration_055", _MIGRATION_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
@@ -30,6 +28,7 @@ _extract_phones_from_site_name = _mod._extract_phones_from_site_name
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _Row:
     """Mock DB row supporting attribute access and iteration over values
@@ -64,17 +63,32 @@ def _calls_matching(call_list, keyword):
 # _dedup_site_contacts
 # ---------------------------------------------------------------------------
 
+
 class TestDedupSiteContacts:
     """Tests for _dedup_site_contacts helper."""
 
     def test_merge_two_duplicates_fills_missing_fields(self):
         """Two contacts with same email — best keeps its fields, gets missing ones from other."""
-        c1 = _ns(id=1, customer_site_id=10, email="alice@acme.com",
-                  full_name="Alice", title=None, phone="+11234567890",
-                  notes=None, linkedin_url=None)
-        c2 = _ns(id=2, customer_site_id=10, email="ALICE@acme.com",
-                  full_name=None, title="VP Sales", phone=None,
-                  notes="Important", linkedin_url=None)
+        c1 = _ns(
+            id=1,
+            customer_site_id=10,
+            email="alice@acme.com",
+            full_name="Alice",
+            title=None,
+            phone="+11234567890",
+            notes=None,
+            linkedin_url=None,
+        )
+        c2 = _ns(
+            id=2,
+            customer_site_id=10,
+            email="ALICE@acme.com",
+            full_name=None,
+            title="VP Sales",
+            phone=None,
+            notes="Important",
+            linkedin_url=None,
+        )
 
         dupe_row = _ns(customer_site_id=10, em="alice@acme.com", ids=[1, 2])
 
@@ -104,12 +118,26 @@ class TestDedupSiteContacts:
 
     def test_best_contact_is_one_with_most_non_null_fields(self):
         """The contact with more non-None fields wins and is kept."""
-        c1 = _ns(id=1, customer_site_id=10, email="bob@test.com",
-                  full_name=None, title=None, phone=None,
-                  notes=None, linkedin_url=None)
-        c2 = _ns(id=2, customer_site_id=10, email="bob@test.com",
-                  full_name="Bob", title="CTO", phone="+11234567890",
-                  notes="Key contact", linkedin_url="linkedin.com/bob")
+        c1 = _ns(
+            id=1,
+            customer_site_id=10,
+            email="bob@test.com",
+            full_name=None,
+            title=None,
+            phone=None,
+            notes=None,
+            linkedin_url=None,
+        )
+        c2 = _ns(
+            id=2,
+            customer_site_id=10,
+            email="bob@test.com",
+            full_name="Bob",
+            title="CTO",
+            phone="+11234567890",
+            notes="Key contact",
+            linkedin_url="linkedin.com/bob",
+        )
 
         dupe_row = _ns(customer_site_id=10, em="bob@test.com", ids=[1, 2])
 
@@ -133,6 +161,7 @@ class TestDedupSiteContacts:
 # _normalize_phones
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizePhones:
     """Tests for _normalize_phones helper."""
 
@@ -144,8 +173,10 @@ class TestNormalizePhones:
         results = [[row]] + [[] for _ in range(5)]
         conn.execute.return_value.fetchall.side_effect = results
 
-        with patch("app.utils.phone_utils.format_phone_e164",
-                   side_effect=lambda raw: "+11234567890" if raw == "(123) 456-7890" else None):
+        with patch(
+            "app.utils.phone_utils.format_phone_e164",
+            side_effect=lambda raw: "+11234567890" if raw == "(123) 456-7890" else None,
+        ):
             _normalize_phones(conn)
 
         update_calls = _calls_matching(conn.execute.call_args_list, "UPDATE")
@@ -204,13 +235,13 @@ class TestNormalizePhones:
 # _extract_phones_from_site_name
 # ---------------------------------------------------------------------------
 
+
 class TestExtractPhonesFromSiteName:
     """Tests for _extract_phones_from_site_name helper."""
 
     def test_extracts_phone_into_contact_phone(self):
         """Phone in site_name extracted to contact_phone when it's empty."""
-        row = _ns(id=1, site_name="Acme Corp (123) 456-7890",
-                  contact_phone=None, contact_phone_2=None)
+        row = _ns(id=1, site_name="Acme Corp (123) 456-7890", contact_phone=None, contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]
 
@@ -227,8 +258,7 @@ class TestExtractPhonesFromSiteName:
 
     def test_extracts_phone_into_contact_phone_2_when_phone_exists(self):
         """Phone goes to contact_phone_2 when contact_phone is already populated."""
-        row = _ns(id=1, site_name="Acme Corp (123) 456-7890",
-                  contact_phone="+19876543210", contact_phone_2=None)
+        row = _ns(id=1, site_name="Acme Corp (123) 456-7890", contact_phone="+19876543210", contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]
 
@@ -242,8 +272,7 @@ class TestExtractPhonesFromSiteName:
 
     def test_no_phone_in_site_name_no_changes(self):
         """Site name without phone number produces no UPDATE."""
-        row = _ns(id=1, site_name="Acme Corporation",
-                  contact_phone=None, contact_phone_2=None)
+        row = _ns(id=1, site_name="Acme Corporation", contact_phone=None, contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]
 
@@ -254,8 +283,7 @@ class TestExtractPhonesFromSiteName:
 
     def test_cleans_site_name_after_extraction(self):
         """Site name is cleaned up after phone extraction (extra spaces, dashes removed)."""
-        row = _ns(id=1, site_name="Acme Corp - (123) 456-7890 - Dallas",
-                  contact_phone=None, contact_phone_2=None)
+        row = _ns(id=1, site_name="Acme Corp - (123) 456-7890 - Dallas", contact_phone=None, contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]
 
@@ -272,8 +300,7 @@ class TestExtractPhonesFromSiteName:
 
     def test_skips_when_e164_returns_none(self):
         """If extracted digits don't form a valid phone, no UPDATE."""
-        row = _ns(id=1, site_name="Order 123456789",
-                  contact_phone=None, contact_phone_2=None)
+        row = _ns(id=1, site_name="Order 123456789", contact_phone=None, contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]
 
@@ -288,16 +315,20 @@ class TestExtractPhonesFromSiteName:
 # PHONE_RE regex
 # ---------------------------------------------------------------------------
 
+
 class TestPhoneRegex:
     """Tests for the PHONE_RE regex used by _extract_phones_from_site_name."""
 
-    @pytest.mark.parametrize("text,expected", [
-        ("Acme (123) 456-7890", "(123) 456-7890"),
-        ("Site +1-555-123-4567 HQ", "+1-555-123-4567"),
-        ("Corp 123.456.7890 TX", "123.456.7890"),
-        ("No phone here", None),
-        ("Short 12345", None),
-    ])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("Acme (123) 456-7890", "(123) 456-7890"),
+            ("Site +1-555-123-4567 HQ", "+1-555-123-4567"),
+            ("Corp 123.456.7890 TX", "123.456.7890"),
+            ("No phone here", None),
+            ("Short 12345", None),
+        ],
+    )
     def test_phone_regex_matching(self, text, expected):
         match = PHONE_RE.search(text)
         if expected is None:

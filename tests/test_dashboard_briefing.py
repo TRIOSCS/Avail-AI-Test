@@ -10,7 +10,6 @@ import pytest
 
 from app.services.dashboard_briefing import generate_briefing
 
-
 BUYER_SECTION_NAMES = [
     "open_rfqs_no_offers",
     "vendor_emails",
@@ -167,13 +166,18 @@ def test_sales_deals_at_risk_includes_red_only():
     query_mock.all.return_value = [req_mock]
     query_mock.scalar.return_value = 0
 
-    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]), \
-         patch("app.services.deal_risk.assess_risk", return_value={
-             "risk_level": "red",
-             "score": 85,
-             "explanation": "No activity in 14 days",
-             "suggested_action": "Follow up immediately",
-         }):
+    with (
+        patch("app.services.activity_insights._detect_gone_quiet", return_value=[]),
+        patch(
+            "app.services.deal_risk.assess_risk",
+            return_value={
+                "risk_level": "red",
+                "score": 85,
+                "explanation": "No activity in 14 days",
+                "suggested_action": "Follow up immediately",
+            },
+        ),
+    ):
         result = generate_briefing(db, user_id=1, role="sales")
 
     risk_section = next(s for s in result["sections"] if s["name"] == "deals_at_risk")
@@ -386,12 +390,12 @@ class TestSendBriefingToTeams:
         briefing = {
             "total_items": 3,
             "sections": [
-                {"label": "Vendor Emails", "count": 2, "items": [
-                    {"title": "Email from Arrow"}, {"title": "Email from Avnet"}
-                ]},
-                {"label": "Stalling Deals", "count": 1, "items": [
-                    {"title": "Req #42 idle 5d"}
-                ]},
+                {
+                    "label": "Vendor Emails",
+                    "count": 2,
+                    "items": [{"title": "Email from Arrow"}, {"title": "Email from Avnet"}],
+                },
+                {"label": "Stalling Deals", "count": 1, "items": [{"title": "Req #42 idle 5d"}]},
                 {"label": "Empty Section", "count": 0, "items": []},
             ],
         }
@@ -411,9 +415,7 @@ class TestSendBriefingToTeams:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            await _send_briefing_to_teams(
-                "https://webhook.example.com/test", briefing, "Alice"
-            )
+            await _send_briefing_to_teams("https://webhook.example.com/test", briefing, "Alice")
 
         assert captured["url"] == "https://webhook.example.com/test"
         body = captured["json"]
@@ -449,9 +451,7 @@ class TestSendBriefingToTeams:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            await _send_briefing_to_teams(
-                "https://webhook.example.com/test", briefing, "Bob"
-            )
+            await _send_briefing_to_teams("https://webhook.example.com/test", briefing, "Bob")
 
         sections_text = captured["json"]["attachments"][0]["content"]["body"][2]["text"]
         assert "Active" in sections_text

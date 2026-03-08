@@ -32,8 +32,7 @@ def retry_user(db_session: Session) -> User:
     return user
 
 
-def _make_ticket(db, user, *, ticket_number, risk_tier="low", iterations_used=0,
-                 diagnosis=None, hours_ago=1):
+def _make_ticket(db, user, *, ticket_number, risk_tier="low", iterations_used=0, diagnosis=None, hours_ago=1):
     t = TroubleTicket(
         ticket_number=ticket_number,
         submitted_by=user.id,
@@ -57,8 +56,7 @@ class TestRetryStuckDiagnosed:
         """When self_heal_enabled is False, returns zeros."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-001",
-                     diagnosis={"detailed": {"root_cause": "test"}})
+        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-001", diagnosis={"detailed": {"root_cause": "test"}})
 
         with patch("app.jobs.selfheal_jobs.settings") as mock_settings:
             mock_settings.self_heal_enabled = False
@@ -71,9 +69,14 @@ class TestRetryStuckDiagnosed:
         """Tickets at max iterations are skipped."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-002",
-                     risk_tier="low", iterations_used=5,
-                     diagnosis={"detailed": {"root_cause": "test"}})
+        _make_ticket(
+            db_session,
+            retry_user,
+            ticket_number="TT-RSD-002",
+            risk_tier="low",
+            iterations_used=5,
+            diagnosis={"detailed": {"root_cause": "test"}},
+        )
 
         with patch("app.jobs.selfheal_jobs.settings") as mock_settings:
             mock_settings.self_heal_enabled = True
@@ -88,12 +91,19 @@ class TestRetryStuckDiagnosed:
         """Ticket with good diagnosis gets execute_fix retried."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-003",
-                     risk_tier="low", iterations_used=1,
-                     diagnosis={"detailed": {"root_cause": "bug", "affected_files": ["app/foo.py"]}})
+        _make_ticket(
+            db_session,
+            retry_user,
+            ticket_number="TT-RSD-003",
+            risk_tier="low",
+            iterations_used=1,
+            diagnosis={"detailed": {"root_cause": "bug", "affected_files": ["app/foo.py"]}},
+        )
 
-        with patch("app.jobs.selfheal_jobs.settings") as mock_settings, \
-             patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.jobs.selfheal_jobs.settings") as mock_settings,
+            patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.self_heal_enabled = True
             mock_settings.self_heal_max_iterations_low = 5
             mock_settings.self_heal_max_iterations_medium = 10
@@ -109,17 +119,29 @@ class TestRetryStuckDiagnosed:
         """Ticket with diagnosis but no 'detailed' key gets re-diagnosed first."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-004",
-                     risk_tier="medium", iterations_used=0,
-                     diagnosis={"classification": {"category": "ui"}})
+        _make_ticket(
+            db_session,
+            retry_user,
+            ticket_number="TT-RSD-004",
+            risk_tier="medium",
+            iterations_used=0,
+            diagnosis={"classification": {"category": "ui"}},
+        )
 
-        with patch("app.jobs.selfheal_jobs.settings") as mock_settings, \
-             patch("app.services.diagnosis_service.diagnose_full", new_callable=AsyncMock) as mock_diag, \
-             patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.jobs.selfheal_jobs.settings") as mock_settings,
+            patch("app.services.diagnosis_service.diagnose_full", new_callable=AsyncMock) as mock_diag,
+            patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.self_heal_enabled = True
             mock_settings.self_heal_max_iterations_low = 5
             mock_settings.self_heal_max_iterations_medium = 10
-            mock_diag.return_value = {"classification": {}, "diagnosis": {}, "risk_tier": "medium", "status": "diagnosed"}
+            mock_diag.return_value = {
+                "classification": {},
+                "diagnosis": {},
+                "risk_tier": "medium",
+                "status": "diagnosed",
+            }
             mock_exec.return_value = {"ok": True, "status": "fix_queued"}
             result = await retry_stuck_diagnosed(db_session)
 
@@ -132,13 +154,15 @@ class TestRetryStuckDiagnosed:
         """If re-diagnosis fails, execution is skipped and counted as failed."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-005",
-                     risk_tier="low", iterations_used=0,
-                     diagnosis={})
+        _make_ticket(
+            db_session, retry_user, ticket_number="TT-RSD-005", risk_tier="low", iterations_used=0, diagnosis={}
+        )
 
-        with patch("app.jobs.selfheal_jobs.settings") as mock_settings, \
-             patch("app.services.diagnosis_service.diagnose_full", new_callable=AsyncMock) as mock_diag, \
-             patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.jobs.selfheal_jobs.settings") as mock_settings,
+            patch("app.services.diagnosis_service.diagnose_full", new_callable=AsyncMock) as mock_diag,
+            patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.self_heal_enabled = True
             mock_settings.self_heal_max_iterations_low = 5
             mock_settings.self_heal_max_iterations_medium = 10
@@ -154,12 +178,19 @@ class TestRetryStuckDiagnosed:
         """Failed execute_fix is counted in failed."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-006",
-                     risk_tier="low", iterations_used=2,
-                     diagnosis={"detailed": {"root_cause": "bug"}})
+        _make_ticket(
+            db_session,
+            retry_user,
+            ticket_number="TT-RSD-006",
+            risk_tier="low",
+            iterations_used=2,
+            diagnosis={"detailed": {"root_cause": "bug"}},
+        )
 
-        with patch("app.jobs.selfheal_jobs.settings") as mock_settings, \
-             patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.jobs.selfheal_jobs.settings") as mock_settings,
+            patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.self_heal_enabled = True
             mock_settings.self_heal_max_iterations_low = 5
             mock_settings.self_heal_max_iterations_medium = 10
@@ -175,9 +206,14 @@ class TestRetryStuckDiagnosed:
         """High risk tickets are not retried."""
         from app.jobs.selfheal_jobs import retry_stuck_diagnosed
 
-        _make_ticket(db_session, retry_user, ticket_number="TT-RSD-007",
-                     risk_tier="high", iterations_used=0,
-                     diagnosis={"detailed": {"root_cause": "critical"}})
+        _make_ticket(
+            db_session,
+            retry_user,
+            ticket_number="TT-RSD-007",
+            risk_tier="high",
+            iterations_used=0,
+            diagnosis={"detailed": {"root_cause": "critical"}},
+        )
 
         with patch("app.jobs.selfheal_jobs.settings") as mock_settings:
             mock_settings.self_heal_enabled = True
@@ -191,13 +227,20 @@ class TestRetryStuckDiagnosed:
         from app.jobs.selfheal_jobs import MAX_RETRY_BATCH, retry_stuck_diagnosed
 
         for i in range(MAX_RETRY_BATCH + 5):
-            _make_ticket(db_session, retry_user, ticket_number=f"TT-RSD-B{i:03d}",
-                         risk_tier="low", iterations_used=0,
-                         diagnosis={"detailed": {"root_cause": "test"}},
-                         hours_ago=MAX_RETRY_BATCH + 5 - i)
+            _make_ticket(
+                db_session,
+                retry_user,
+                ticket_number=f"TT-RSD-B{i:03d}",
+                risk_tier="low",
+                iterations_used=0,
+                diagnosis={"detailed": {"root_cause": "test"}},
+                hours_ago=MAX_RETRY_BATCH + 5 - i,
+            )
 
-        with patch("app.jobs.selfheal_jobs.settings") as mock_settings, \
-             patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch("app.jobs.selfheal_jobs.settings") as mock_settings,
+            patch("app.services.execution_service.execute_fix", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_settings.self_heal_enabled = True
             mock_settings.self_heal_max_iterations_low = 5
             mock_settings.self_heal_max_iterations_medium = 10

@@ -12,8 +12,6 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.jobs.teams_alert_jobs import _send_user_briefing
 from app.models.auth import User
 from app.models.offers import Contact, VendorResponse
@@ -48,8 +46,11 @@ def test_briefing_skips_disabled_user(db_session, test_user):
 def test_block1_open_rfqs(db_session, test_user):
     """Block 1 shows open RFQs with no offers."""
     req = Requisition(
-        name="REQ-STALE", customer_name="Acme", status="active",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        name="REQ-STALE",
+        customer_name="Acme",
+        status="active",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=3),
     )
     db_session.add(req)
     db_session.commit()
@@ -72,22 +73,29 @@ def test_block2_followup_stamped(db_session, test_user):
     db_session.add(co)
     db_session.flush()
     site = CustomerSite(
-        company_id=co.id, site_name="Acme HQ", contact_name="John",
+        company_id=co.id,
+        site_name="Acme HQ",
+        contact_name="John",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(site)
     db_session.flush()
 
     req = Requisition(
-        name="REQ-Q", customer_name="Acme", status="offers",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc) - timedelta(days=5),
+        name="REQ-Q",
+        customer_name="Acme",
+        status="offers",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=5),
     )
     db_session.add(req)
     db_session.flush()
 
     q = Quote(
-        requisition_id=req.id, customer_site_id=site.id,
-        quote_number="Q-STALE-001", status="sent",
+        requisition_id=req.id,
+        customer_site_id=site.id,
+        quote_number="Q-STALE-001",
+        status="sent",
         sent_at=datetime.now(timezone.utc) - timedelta(hours=72),
         created_by_id=test_user.id,
     )
@@ -112,22 +120,29 @@ def test_block2_already_alerted_skipped(db_session, test_user):
     db_session.add(co)
     db_session.flush()
     site = CustomerSite(
-        company_id=co.id, site_name="Acme HQ", contact_name="John",
+        company_id=co.id,
+        site_name="Acme HQ",
+        contact_name="John",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(site)
     db_session.flush()
 
     req = Requisition(
-        name="REQ-Q2", customer_name="Acme", status="offers",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc) - timedelta(days=5),
+        name="REQ-Q2",
+        customer_name="Acme",
+        status="offers",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=5),
     )
     db_session.add(req)
     db_session.flush()
 
     q = Quote(
-        requisition_id=req.id, customer_site_id=site.id,
-        quote_number="Q-DONE-001", status="sent",
+        requisition_id=req.id,
+        customer_site_id=site.id,
+        quote_number="Q-DONE-001",
+        status="sent",
         sent_at=datetime.now(timezone.utc) - timedelta(hours=72),
         followup_alert_sent_at=datetime.now(timezone.utc) - timedelta(hours=24),
         created_by_id=test_user.id,
@@ -147,25 +162,34 @@ def test_block2_already_alerted_skipped(db_session, test_user):
 def test_block3_overnight_quotes(db_session, test_user):
     """Block 3: overnight vendor quotes with confidence filter."""
     req = Requisition(
-        name="REQ-OVN", customer_name="Acme", status="offers",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc) - timedelta(days=2),
+        name="REQ-OVN",
+        customer_name="Acme",
+        status="offers",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc) - timedelta(days=2),
     )
     db_session.add(req)
     db_session.flush()
 
     contact = Contact(
-        requisition_id=req.id, user_id=test_user.id,
-        contact_type="rfq", vendor_name="Arrow",
+        requisition_id=req.id,
+        user_id=test_user.id,
+        contact_type="rfq",
+        vendor_name="Arrow",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(contact)
     db_session.flush()
 
     vr = VendorResponse(
-        requisition_id=req.id, contact_id=contact.id,
-        vendor_name="Arrow", vendor_email="sales@arrow.com",
-        subject="RE: RFQ", body="We quote...",
-        classification="quoted", confidence=0.9,
+        requisition_id=req.id,
+        contact_id=contact.id,
+        vendor_name="Arrow",
+        vendor_email="sales@arrow.com",
+        subject="RE: RFQ",
+        body="We quote...",
+        classification="quoted",
+        confidence=0.9,
         parsed_data={"mpn": "LM317T"},
         created_at=datetime.now(timezone.utc) - timedelta(hours=6),
     )

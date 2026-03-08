@@ -9,7 +9,6 @@ Called by: pytest
 Depends on: app.services.enrichment, conftest fixtures
 """
 
-import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,12 +17,13 @@ from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
 
-
 # ── Helper: create tag infrastructure in SQLite ──────────────────────
+
 
 def _ensure_tag_tables(db):
     """Import tag models so they exist in the test DB."""
     from app.models.tags import MaterialTag, Tag  # noqa: F401
+
     return Tag, MaterialTag
 
 
@@ -157,6 +157,7 @@ def test_boost_confidence_sighting_confirmed(db_session: Session):
 
     # Sighting requires a requirement_id — create requisition + requirement first
     from app.models import User
+
     user = User(email="sighting_test@test.com", name="Test", role="buyer")
     db_session.add(user)
     db_session.flush()
@@ -187,6 +188,7 @@ def test_boost_confidence_sighting_confirmed(db_session: Session):
 
     # Verify the tag confidence was upgraded (may be 0.95 if multi-source also ran)
     from app.models.tags import MaterialTag
+
     updated_mt = db_session.get(MaterialTag, mt.id)
     assert updated_mt.confidence >= 0.90
 
@@ -238,13 +240,7 @@ async def test_nexar_backfill_untagged_success(db_session: Session):
     _ensure_tag_tables(db_session)
     card = _create_card(db_session, mpn="backfill_part")
 
-    nexar_response = {
-        "data": {
-            "supSearchMpn": {
-                "results": [{"part": {"manufacturer": {"name": "Murata"}}}]
-            }
-        }
-    }
+    nexar_response = {"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Murata"}}}]}}}
 
     mock_connector = MagicMock()
     mock_connector._run_query = AsyncMock(return_value=nexar_response)
@@ -252,8 +248,9 @@ async def test_nexar_backfill_untagged_success(db_session: Session):
 
     with (
         patch("app.services.enrichment.get_credential_cached", return_value="fake_cred"),
-        patch("app.services.enrichment.NexarConnector", return_value=mock_connector) if False else
-        patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
+        patch("app.services.enrichment.NexarConnector", return_value=mock_connector)
+        if False
+        else patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         patch("app.services.enrichment._apply_enrichment_to_card") as mock_apply,
     ):
         # Need to patch the import inside the function
@@ -261,6 +258,7 @@ async def test_nexar_backfill_untagged_success(db_session: Session):
             pass
         # Simpler: patch at the point of use inside nexar_backfill_untagged
         import app.connectors.sources as sources_mod
+
         original_class = getattr(sources_mod, "NexarConnector", None)
         sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -287,6 +285,7 @@ async def test_nexar_backfill_untagged_no_results(db_session: Session):
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -310,12 +309,13 @@ async def test_nexar_backfill_untagged_ignored_manufacturer(db_session: Session)
     _create_card(db_session, mpn="ignored_mfr")
 
     mock_connector = MagicMock()
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Unknown"}}}]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Unknown"}}}]}}}
+    )
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -342,6 +342,7 @@ async def test_nexar_backfill_untagged_exception(db_session: Session):
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -369,12 +370,13 @@ async def test_nexar_validate_ignored_manufacturer(db_session: Session):
     _create_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
 
     mock_connector = MagicMock()
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "unknown"}}}]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "unknown"}}}]}}}
+    )
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -402,6 +404,7 @@ async def test_nexar_validate_exception_handling(db_session: Session):
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 
@@ -419,7 +422,6 @@ async def test_nexar_validate_exception_handling(db_session: Session):
 @pytest.mark.asyncio
 async def test_nexar_validate_mt_deleted(db_session: Session):
     """If MaterialTag is deleted between query and update, skip gracefully."""
-    from app.models.tags import MaterialTag
     from app.services.enrichment import nexar_bulk_validate
 
     tag = _create_brand_tag(db_session, "Analog Devices")
@@ -428,9 +430,9 @@ async def test_nexar_validate_mt_deleted(db_session: Session):
 
     # Nexar confirms the tag
     mock_connector = MagicMock()
-    mock_connector._run_query = AsyncMock(return_value={
-        "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Analog Devices"}}}]}}
-    })
+    mock_connector._run_query = AsyncMock(
+        return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Analog Devices"}}}]}}}
+    )
     mock_connector.AGGREGATE_QUERY = "query { ... }"
 
     # Delete the MaterialTag before the validate function can update it
@@ -439,6 +441,7 @@ async def test_nexar_validate_mt_deleted(db_session: Session):
     db_session.commit()
 
     import app.connectors.sources as sources_mod
+
     original_class = getattr(sources_mod, "NexarConnector", None)
     sources_mod.NexarConnector = lambda *a: mock_connector
 

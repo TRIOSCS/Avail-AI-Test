@@ -7,11 +7,7 @@ Called by: pytest
 Depends on: app/routers/admin/users.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
-
 from fastapi.testclient import TestClient
-
-from app.models import User
 
 
 class TestCreateUserValidation:

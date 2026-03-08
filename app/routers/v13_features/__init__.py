@@ -11,11 +11,9 @@ Depends on: activity, sales, prospecting sub-modules
 """
 
 from fastapi import APIRouter
-
 from sqlalchemy.orm import Session  # noqa: F401 — test patches app.routers.v13_features.Session
 
 from ...config import settings  # noqa: F401 — test patches app.routers.v13_features.settings
-
 from .activity import _activity_to_dict  # noqa: F401 — tests import this
 from .activity import router as _activity_router
 from .prospecting import SITE_CAP_PER_USER  # noqa: F401 — tests import this

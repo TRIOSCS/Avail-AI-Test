@@ -4,8 +4,9 @@ Revision ID: 041_add_notifications
 Revises: 040_add_self_heal_log
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "041_add_notifications"
 down_revision = "040_add_self_heal_log"

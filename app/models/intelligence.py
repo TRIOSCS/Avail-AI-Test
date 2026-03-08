@@ -279,8 +279,8 @@ class ActivityLog(Base):
     occurred_at = Column(DateTime)
 
     # Communication Intelligence columns (migration 058)
-    direction = Column(String(20))       # "inbound" | "outbound"
-    event_type = Column(String(30))      # "email" | "call" | "note" | "meeting"
+    direction = Column(String(20))  # "inbound" | "outbound"
+    event_type = Column(String(30))  # "email" | "call" | "note" | "meeting"
     summary = Column(String(500))
     source_url = Column(String(500))
     details = Column(JSON)

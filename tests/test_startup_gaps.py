@@ -13,12 +13,10 @@ Depends on: app/startup.py, conftest.py
 
 import json
 import os
-from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from sqlalchemy import create_engine
 from sqlalchemy import text as sqltext
-from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from tests.conftest import engine  # noqa: F401
@@ -55,11 +53,14 @@ class TestCreateDefaultUserIfEnvSet:
         mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "newuser@example.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-                "DEFAULT_USER_ROLE": "buyer",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "newuser@example.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                    "DEFAULT_USER_ROLE": "buyer",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_session),
         ):
             _create_default_user_if_env_set()
@@ -82,10 +83,13 @@ class TestCreateDefaultUserIfEnvSet:
         mock_session.query.return_value.filter_by.return_value.first.return_value = MagicMock()
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "existing@example.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "existing@example.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_session),
         ):
             _create_default_user_if_env_set()
@@ -102,10 +106,13 @@ class TestCreateDefaultUserIfEnvSet:
         mock_session.commit.side_effect = RuntimeError("DB error")
 
         with (
-            patch.dict(os.environ, {
-                "DEFAULT_USER_EMAIL": "fail@example.com",
-                "DEFAULT_USER_PASSWORD": "secret123",
-            }),
+            patch.dict(
+                os.environ,
+                {
+                    "DEFAULT_USER_EMAIL": "fail@example.com",
+                    "DEFAULT_USER_PASSWORD": "secret123",
+                },
+            ),
             patch("app.startup.SessionLocal", return_value=mock_session),
         ):
             _create_default_user_if_env_set()
@@ -212,15 +219,9 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_offers (id INTEGER PRIMARY KEY, line_items TEXT)"
-            ))
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE proactive_offers (id INTEGER PRIMARY KEY, line_items TEXT)"))
             conn.commit()
 
         with patch("app.startup.engine", eng):
@@ -232,40 +233,43 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_offers "
-                "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-            ))
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+            conn.execute(
+                sqltext(
+                    "CREATE TABLE proactive_offers "
+                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
+                )
+            )
             # Match with target_qty=50
-            conn.execute(sqltext(
-                "INSERT INTO requirements (id, target_qty) VALUES (1, 50)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"
-            ))
+            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
+            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
             # Offer with qty=200 (should become 50)
-            items = json.dumps([{
-                "match_id": 10,
-                "qty": 200,
-                "unit_price": 5.0,
-                "sell_price": 7.0,
-            }])
-            conn.execute(sqltext(
-                "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1400, 1000)"
-            ), {"items": items})
+            items = json.dumps(
+                [
+                    {
+                        "match_id": 10,
+                        "qty": 200,
+                        "unit_price": 5.0,
+                        "sell_price": 7.0,
+                    }
+                ]
+            )
+            conn.execute(
+                sqltext(
+                    "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1400, 1000)"
+                ),
+                {"items": items},
+            )
             conn.commit()
 
         with patch("app.startup.engine", eng):
             _backfill_proactive_offer_qty()
 
         with eng.connect() as conn:
-            row = conn.execute(sqltext("SELECT line_items, total_sell, total_cost FROM proactive_offers WHERE id = 1")).fetchone()
+            row = conn.execute(
+                sqltext("SELECT line_items, total_sell, total_cost FROM proactive_offers WHERE id = 1")
+            ).fetchone()
             updated_items = json.loads(row[0])
             assert updated_items[0]["qty"] == 50
             assert row[1] == 350.0  # 50 * 7.0
@@ -277,31 +281,32 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_offers "
-                "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO requirements (id, target_qty) VALUES (1, 500)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"
-            ))
-            items = json.dumps([{
-                "match_id": 10,
-                "qty": 100,
-                "unit_price": 5.0,
-                "sell_price": 7.0,
-            }])
-            conn.execute(sqltext(
-                "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 700, 500)"
-            ), {"items": items})
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+            conn.execute(
+                sqltext(
+                    "CREATE TABLE proactive_offers "
+                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
+                )
+            )
+            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 500)"))
+            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
+            items = json.dumps(
+                [
+                    {
+                        "match_id": 10,
+                        "qty": 100,
+                        "unit_price": 5.0,
+                        "sell_price": 7.0,
+                    }
+                ]
+            )
+            conn.execute(
+                sqltext(
+                    "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 700, 500)"
+                ),
+                {"items": items},
+            )
             conn.commit()
 
         with patch("app.startup.engine", eng):
@@ -319,12 +324,8 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
             # Missing proactive_offers table will cause exception
             conn.commit()
 
@@ -338,26 +339,20 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_offers "
-                "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO requirements (id, target_qty) VALUES (1, 50)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"
-            ))
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+            conn.execute(
+                sqltext(
+                    "CREATE TABLE proactive_offers "
+                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
+                )
+            )
+            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
+            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
             # Offer with NULL line_items
-            conn.execute(sqltext(
-                "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, NULL, 0, 0)"
-            ))
+            conn.execute(
+                sqltext("INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, NULL, 0, 0)")
+            )
             conn.commit()
 
         with patch("app.startup.engine", eng):
@@ -369,31 +364,32 @@ class TestBackfillProactiveOfferQty:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"
-            ))
-            conn.execute(sqltext(
-                "CREATE TABLE proactive_offers "
-                "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO requirements (id, target_qty) VALUES (1, 50)"
-            ))
-            conn.execute(sqltext(
-                "INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"
-            ))
+            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+            conn.execute(
+                sqltext(
+                    "CREATE TABLE proactive_offers "
+                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
+                )
+            )
+            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
+            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
             # Item with match_id=999 which is NOT in target_map
-            items = json.dumps([{
-                "match_id": 999,
-                "qty": 200,
-                "unit_price": 5.0,
-            }])
-            conn.execute(sqltext(
-                "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1000, 1000)"
-            ), {"items": items})
+            items = json.dumps(
+                [
+                    {
+                        "match_id": 999,
+                        "qty": 200,
+                        "unit_price": 5.0,
+                    }
+                ]
+            )
+            conn.execute(
+                sqltext(
+                    "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1000, 1000)"
+                ),
+                {"items": items},
+            )
             conn.commit()
 
         with patch("app.startup.engine", eng):
@@ -403,7 +399,6 @@ class TestBackfillProactiveOfferQty:
         with eng.connect() as conn:
             row = conn.execute(sqltext("SELECT total_sell, total_cost FROM proactive_offers WHERE id = 1")).fetchone()
             assert row[0] == 1000  # unchanged
-
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -435,5 +430,3 @@ class TestCountTriggersAndAnalyze:
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
             _analyze_hot_tables(conn)
-
-

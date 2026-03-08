@@ -14,11 +14,9 @@ import pytest
 
 from app.services.teams import (
     _build_deep_link,
-    _get_channel_for_event,
     _get_teams_config,
     _is_rate_limited,
     _make_card,
-    _make_card_with_actions,
     _mark_posted,
     clear_rate_limits,
     post_to_channel,
@@ -151,7 +149,6 @@ class TestPostToChannel:
             assert result is False
 
 
-
 # ── Competitive quote alert ────────────────────────────────────────────
 
 
@@ -199,7 +196,6 @@ class TestCompetitiveQuoteAlert:
             facts = captured_card["body"][2]["facts"]
             savings_fact = next(f for f in facts if f["title"] == "Savings")
             assert "60" in savings_fact["value"]
-
 
 
 # ── Stock match alert ──────────────────────────────────────────────────

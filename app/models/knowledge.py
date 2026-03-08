@@ -11,7 +11,15 @@ Depends on: models/base.py, models/auth.py
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
@@ -25,7 +33,9 @@ class KnowledgeEntry(Base):
     id = Column(Integer, primary_key=True, index=True)
     entry_type = Column(String(20), nullable=False)  # question, answer, fact, note, ai_insight
     content = Column(Text, nullable=False)
-    source = Column(String(20), nullable=False, default="manual")  # manual, ai_generated, system, email_parsed, teams_bot
+    source = Column(
+        String(20), nullable=False, default="manual"
+    )  # manual, ai_generated, system, email_parsed, teams_bot
     confidence = Column(Float, nullable=True)  # 0.0-1.0 for AI-generated
     expires_at = Column(DateTime(timezone=True), nullable=True)
     is_resolved = Column(Boolean, default=False, nullable=False)  # Q&A: marks question as answered
@@ -78,6 +88,7 @@ class KnowledgeConfig(Base):
     Called by: services/teams_qa_service.py
     Depends on: models/base.py
     """
+
     __tablename__ = "knowledge_config"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

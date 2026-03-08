@@ -9,7 +9,6 @@ Revises: 050
 
 from alembic import op
 
-
 revision = "051"
 down_revision = "050"
 branch_labels = None

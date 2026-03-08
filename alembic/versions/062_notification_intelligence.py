@@ -5,8 +5,9 @@ Revises: 061
 Create Date: 2026-03-07
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "062"
 down_revision = "061"
@@ -35,8 +36,12 @@ def upgrade():
     op.create_index("ix_notif_engage_user_action", "notification_engagement", ["user_id", "action"])
 
     # Extend teams_alert_config
-    op.add_column("teams_alert_config", sa.Column("priority_threshold", sa.String(20), nullable=False, server_default="medium"))
-    op.add_column("teams_alert_config", sa.Column("batch_digest_enabled", sa.Boolean, nullable=False, server_default="true"))
+    op.add_column(
+        "teams_alert_config", sa.Column("priority_threshold", sa.String(20), nullable=False, server_default="medium")
+    )
+    op.add_column(
+        "teams_alert_config", sa.Column("batch_digest_enabled", sa.Boolean, nullable=False, server_default="true")
+    )
     op.add_column("teams_alert_config", sa.Column("quiet_hours_start", sa.Time, nullable=True))
     op.add_column("teams_alert_config", sa.Column("quiet_hours_end", sa.Time, nullable=True))
 

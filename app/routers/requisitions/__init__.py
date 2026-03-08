@@ -13,10 +13,6 @@ Depends on: .core, .requirements, .attachments sub-modules
 
 from fastapi import APIRouter
 
-from .attachments import router as attachments_router
-from .core import router as core_router
-from .requirements import router as requirements_router
-
 # Re-export names that test files patch at "app.routers.requisitions.X".
 # Sub-modules use "from . import X" at call time so patched versions are picked up.
 from ...cache.decorators import invalidate_prefix  # noqa: F401
@@ -28,6 +24,9 @@ from ...search_service import (  # noqa: F401
     sighting_to_dict,
 )
 from ..rfq import _enrich_with_vendor_cards  # noqa: F401
+from .attachments import router as attachments_router
+from .core import router as core_router
+from .requirements import router as requirements_router
 
 router = APIRouter()
 router.include_router(core_router)

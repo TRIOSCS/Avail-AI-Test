@@ -20,7 +20,6 @@ from app.services.enrichment_utils import (
     run_enrichment_batch,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════
 #  run_enrichment_batch
 # ═══════════════════════════════════════════════════════════════════════
@@ -63,9 +62,7 @@ class TestRunEnrichmentBatch:
         entities = list(range(10))
         mock_fn = AsyncMock()
 
-        result = await run_enrichment_batch(
-            entities, mock_fn, batch_size=5, label="prog_test"
-        )
+        result = await run_enrichment_batch(entities, mock_fn, batch_size=5, label="prog_test")
         assert result["processed"] == 10
 
     @pytest.mark.asyncio
@@ -74,9 +71,7 @@ class TestRunEnrichmentBatch:
         entities = [1, 2, 3]
         mock_fn = AsyncMock()
 
-        result = await run_enrichment_batch(
-            entities, mock_fn, concurrency=1, label="conc_test"
-        )
+        result = await run_enrichment_batch(entities, mock_fn, concurrency=1, label="conc_test")
         assert result["processed"] == 3
 
 
@@ -105,6 +100,7 @@ class TestCheckEnrichmentCredentials:
 
     def test_multiple_sources(self):
         """Multiple sources checked at once."""
+
         def mock_cred(source, key):
             return "key" if source == "apollo" else None
 

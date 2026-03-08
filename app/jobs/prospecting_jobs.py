@@ -26,9 +26,7 @@ def register_prospecting_jobs(scheduler, settings):
         id="discover_prospects",
         name="Prospect discovery",
     )
-    scheduler.add_job(
-        _job_enrich_pool, CronTrigger(day=2, hour=2, minute=0), id="enrich_pool", name="Pool enrichment"
-    )
+    scheduler.add_job(_job_enrich_pool, CronTrigger(day=2, hour=2, minute=0), id="enrich_pool", name="Pool enrichment")
     scheduler.add_job(
         _job_find_contacts,
         CronTrigger(day=3, hour=2, minute=0),

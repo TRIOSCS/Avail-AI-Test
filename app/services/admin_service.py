@@ -176,7 +176,9 @@ def get_system_health(db: Session) -> dict:
         ("quotes", Quote),
     ]:
         try:
-            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = db.query(sqlfunc.count(model.id)).scalar() or 0
+            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = (
+                db.query(sqlfunc.count(model.id)).scalar() or 0
+            )
         except Exception:
             counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = -1
 

@@ -12,11 +12,11 @@ Depends on: app/models/knowledge.py, app/services/knowledge_service.py,
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import func, text as sa_text
+from sqlalchemy import func
+from sqlalchemy import text as sa_text
 from sqlalchemy.orm import Session
 
 from app.models.knowledge import KnowledgeConfig, KnowledgeEntry
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  QUESTION CAP
@@ -77,13 +77,15 @@ def _build_question_card_item(question: KnowledgeEntry, is_nudge: bool = False) 
 
     # Urgency banner for nudged questions
     if is_nudge:
-        elements.append({
-            "type": "TextBlock",
-            "text": "NEEDS ATTENTION — asked over 4 hours ago",
-            "color": "Attention",
-            "weight": "Bolder",
-            "size": "Small",
-        })
+        elements.append(
+            {
+                "type": "TextBlock",
+                "text": "NEEDS ATTENTION — asked over 4 hours ago",
+                "color": "Attention",
+                "weight": "Bolder",
+                "size": "Small",
+            }
+        )
 
     # Context line: req#, MPN, asker
     context_parts = []
@@ -96,37 +98,45 @@ def _build_question_card_item(question: KnowledgeEntry, is_nudge: bool = False) 
         context_parts.append(f"Asked by: {name}")
     context_text = " | ".join(context_parts) if context_parts else "General question"
 
-    elements.append({
-        "type": "TextBlock",
-        "text": context_text,
-        "size": "Small",
-        "isSubtle": True,
-        "wrap": True,
-    })
+    elements.append(
+        {
+            "type": "TextBlock",
+            "text": context_text,
+            "size": "Small",
+            "isSubtle": True,
+            "wrap": True,
+        }
+    )
 
     # Question text
-    elements.append({
-        "type": "TextBlock",
-        "text": question.content,
-        "wrap": True,
-        "weight": "Bolder",
-    })
+    elements.append(
+        {
+            "type": "TextBlock",
+            "text": question.content,
+            "wrap": True,
+            "weight": "Bolder",
+        }
+    )
 
     # Input field for the answer
-    elements.append({
-        "type": "Input.Text",
-        "id": f"answer_{question.id}",
-        "placeholder": "Type your answer here...",
-        "isMultiline": True,
-    })
+    elements.append(
+        {
+            "type": "Input.Text",
+            "id": f"answer_{question.id}",
+            "placeholder": "Type your answer here...",
+            "isMultiline": True,
+        }
+    )
 
     # Separator
-    elements.append({
-        "type": "TextBlock",
-        "text": "---",
-        "separator": True,
-        "spacing": "Medium",
-    })
+    elements.append(
+        {
+            "type": "TextBlock",
+            "text": "---",
+            "separator": True,
+            "spacing": "Medium",
+        }
+    )
 
     return elements
 
@@ -191,41 +201,51 @@ def build_digest_card(answered_questions: list, pending_count: int) -> dict | No
     ]
 
     if pending_count > 0:
-        body.append({
-            "type": "TextBlock",
-            "text": f"{pending_count} question{'s' if pending_count != 1 else ''} still pending your answer",
-            "color": "Attention",
-            "weight": "Bolder",
-            "wrap": True,
-        })
+        body.append(
+            {
+                "type": "TextBlock",
+                "text": f"{pending_count} question{'s' if pending_count != 1 else ''} still pending your answer",
+                "color": "Attention",
+                "weight": "Bolder",
+                "wrap": True,
+            }
+        )
 
     if answered_questions:
-        body.append({
-            "type": "TextBlock",
-            "text": "Recently answered:",
-            "weight": "Bolder",
-            "spacing": "Medium",
-        })
+        body.append(
+            {
+                "type": "TextBlock",
+                "text": "Recently answered:",
+                "weight": "Bolder",
+                "spacing": "Medium",
+            }
+        )
         for q in answered_questions:
             answer_text = ""
             if q.answers:
                 answer_text = q.answers[0].content[:200]
-            body.append({
-                "type": "TextBlock",
-                "text": f"**Q:** {q.content[:150]}",
-                "wrap": True,
-            })
-            body.append({
-                "type": "TextBlock",
-                "text": f"**A:** {answer_text}" if answer_text else "**A:** (no answer text)",
-                "wrap": True,
-                "isSubtle": True,
-            })
-            body.append({
-                "type": "TextBlock",
-                "text": "---",
-                "separator": True,
-            })
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "text": f"**Q:** {q.content[:150]}",
+                    "wrap": True,
+                }
+            )
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "text": f"**A:** {answer_text}" if answer_text else "**A:** (no answer text)",
+                    "wrap": True,
+                    "isSubtle": True,
+                }
+            )
+            body.append(
+                {
+                    "type": "TextBlock",
+                    "text": "---",
+                    "separator": True,
+                }
+            )
 
     return {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",

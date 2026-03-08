@@ -14,7 +14,7 @@ Depends on: app/services/vendor_score.py, conftest.py
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -30,20 +30,12 @@ from app.models import (
     VendorReview,
 )
 from app.services.vendor_score import (
-    ADVANCEMENT_WEIGHT,
-    MAX_STAGE_POINTS,
-    MIN_OFFERS_FOR_SCORE,
-    REVIEW_WEIGHT,
-    _calc_stage_points,
     _get_buyplan_offer_ids,
     _get_quote_offer_ids,
     compute_all_vendor_scores,
-    compute_single_vendor_score,
     compute_vendor_score,
 )
-
 from tests.conftest import engine  # noqa: F401
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -205,7 +197,9 @@ class TestGetQuoteOfferIds:
             quote_number=f"Q-empty-{_qc}",
             status="sent",
             line_items=[],  # Empty list
-            subtotal=0, total_cost=0, total_margin_pct=0,
+            subtotal=0,
+            total_cost=0,
+            total_margin_pct=0,
             created_by_id=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -230,7 +224,9 @@ class TestGetQuoteOfferIds:
             quote_number=f"Q-nooid-{_qc_local}",
             status="sent",
             line_items=[{"mpn": "ABC", "qty": 100}],  # No offer_id
-            subtotal=0, total_cost=0, total_margin_pct=0,
+            subtotal=0,
+            total_cost=0,
+            total_margin_pct=0,
             created_by_id=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -260,6 +256,7 @@ class TestGetBuyplanOfferIds:
 
         offer_ids = {o.id for o in offers}
         from app.services.vendor_score import AWARDED_STATUSES
+
         result = _get_buyplan_offer_ids(db_session, offer_ids, AWARDED_STATUSES)
         assert offers[0].id in result
 
@@ -275,6 +272,7 @@ class TestGetBuyplanOfferIds:
 
         offer_ids = {o.id for o in offers}
         from app.services.vendor_score import AWARDED_STATUSES
+
         result = _get_buyplan_offer_ids(db_session, offer_ids, AWARDED_STATUSES)
         assert len(result) == 0
 
@@ -290,6 +288,7 @@ class TestGetBuyplanOfferIds:
 
         offer_ids = {o.id for o in offers}
         from app.services.vendor_score import PO_CONFIRMED_STATUSES
+
         result = _get_buyplan_offer_ids(db_session, offer_ids, PO_CONFIRMED_STATUSES)
         assert offers[0].id in result
 
@@ -419,7 +418,9 @@ class TestComputeAllVendorScoresGaps:
             quote_number=f"Q-none-{_qc}",
             status="sent",
             line_items=None,
-            subtotal=0, total_cost=0, total_margin_pct=0,
+            subtotal=0,
+            total_cost=0,
+            total_margin_pct=0,
             created_by_id=user.id,
             created_at=datetime.now(timezone.utc),
         )

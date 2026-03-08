@@ -38,11 +38,6 @@ class TestDefaults:
             s = _make()
         assert s.rate_limit_enabled is True
 
-    def test_default_self_heal_enabled(self):
-        with patch.dict(os.environ, {}, clear=True):
-            s = _make()
-        assert s.self_heal_enabled is False
-
     def test_default_admin_emails_empty(self):
         with patch.dict(os.environ, {}, clear=True):
             s = _make()
@@ -73,14 +68,14 @@ class TestBooleanCoercion:
         assert s.rate_limit_enabled is False
 
     def test_one_is_true(self):
-        with patch.dict(os.environ, {"SELF_HEAL_ENABLED": "1"}, clear=True):
+        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": "1"}, clear=True):
             s = _make()
-        assert s.self_heal_enabled is True
+        assert s.rate_limit_enabled is True
 
     def test_zero_is_false(self):
-        with patch.dict(os.environ, {"SELF_HEAL_ENABLED": "0"}, clear=True):
+        with patch.dict(os.environ, {"RATE_LIMIT_ENABLED": "0"}, clear=True):
             s = _make()
-        assert s.self_heal_enabled is False
+        assert s.rate_limit_enabled is False
 
 
 class TestDatabaseUrlValidator:

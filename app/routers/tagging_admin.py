@@ -34,12 +34,7 @@ async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_us
     coverage = round((tagged_count / total_cards * 100), 1) if total_cards > 0 else 0.0
 
     # Internal part triage
-    internal_count = (
-        db.query(func.count(MaterialCard.id))
-        .filter(MaterialCard.is_internal_part.is_(True))
-        .scalar()
-        or 0
-    )
+    internal_count = db.query(func.count(MaterialCard.id)).filter(MaterialCard.is_internal_part.is_(True)).scalar() or 0
     effective_total = total_cards - internal_count
     effective_coverage = round((tagged_count / effective_total * 100), 1) if effective_total > 0 else 0.0
 
@@ -89,12 +84,7 @@ async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_us
         .scalar()
         or 0
     )
-    visible_tags = (
-        db.query(func.count(MaterialTag.id))
-        .filter(MaterialTag.confidence >= 0.70)
-        .scalar()
-        or 0
-    )
+    visible_tags = db.query(func.count(MaterialTag.id)).filter(MaterialTag.confidence >= 0.70).scalar() or 0
     total_tags = db.query(func.count(MaterialTag.id)).scalar() or 0
 
     return {
@@ -113,8 +103,7 @@ async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_us
         "top_brands": [{"name": n, "count": c} for n, c in top_brands],
         "top_commodities": [{"name": n, "count": c} for n, c in top_commodities],
         "source_distribution": [
-            {"source": s, "count": c, "avg_confidence": round(float(a), 2) if a else 0}
-            for s, c, a in source_dist
+            {"source": s, "count": c, "avg_confidence": round(float(a), 2) if a else 0} for s, c, a in source_dist
         ],
         "entity_coverage": [{"entity_type": t, "entities_with_visible_tags": c} for t, c in entity_coverage],
     }

@@ -991,7 +991,6 @@ from .routers.ics_admin import router as ics_admin_router
 app.include_router(ics_admin_router)
 
 
-
 from .routers.notifications import router as notifications_router
 
 app.include_router(notifications_router)
@@ -1016,16 +1015,16 @@ from .routers.teams_alerts import router as teams_alerts_router
 
 app.include_router(teams_alerts_router)
 
-from .routers.knowledge import router as knowledge_router
 from .routers.knowledge import insights_router as knowledge_insights_router
+from .routers.knowledge import router as knowledge_router
 from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
 
 app.include_router(knowledge_router)
 app.include_router(knowledge_insights_router)
 app.include_router(knowledge_sprinkles_router)
 
-from .routers.task import router as task_router
 from .routers.task import my_tasks_router
+from .routers.task import router as task_router
 
 app.include_router(task_router)
 app.include_router(my_tasks_router)

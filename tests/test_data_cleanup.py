@@ -362,9 +362,7 @@ def test_create_site_contact_dedup_by_email(client, db_session):
     db_session.add(existing)
     db_session.commit()
 
-    resp = client.post(f"/api/sites/{site.id}/contacts", json={
-        "full_name": "Johnny", "email": "john@test.com"
-    })
+    resp = client.post(f"/api/sites/{site.id}/contacts", json={"full_name": "Johnny", "email": "john@test.com"})
     assert resp.status_code == 200
     assert resp.json()["id"] == existing.id
     assert db_session.query(SiteContact).filter_by(customer_site_id=site.id).count() == 1
@@ -382,9 +380,7 @@ def test_create_site_contact_different_email_allowed(client, db_session):
     db_session.add(existing)
     db_session.commit()
 
-    resp = client.post(f"/api/sites/{site.id}/contacts", json={
-        "full_name": "Jane", "email": "jane@test.com"
-    })
+    resp = client.post(f"/api/sites/{site.id}/contacts", json={"full_name": "Jane", "email": "jane@test.com"})
     assert resp.status_code == 200
     assert resp.json()["id"] != existing.id
 
@@ -395,6 +391,7 @@ def test_create_site_contact_different_email_allowed(client, db_session):
 def test_site_create_extracts_phone_from_name():
     """SiteCreate validator extracts phone from site_name."""
     from app.schemas.crm import SiteCreate
+
     site = SiteCreate(site_name="Main Office (415) 555-1234")
     assert site.site_name == "Main Office"
     assert site.contact_phone == "+14155551234"
@@ -403,6 +400,7 @@ def test_site_create_extracts_phone_from_name():
 def test_site_create_phone_to_phone_2_when_phone_filled():
     """Phone goes to contact_phone_2 when contact_phone already set."""
     from app.schemas.crm import SiteCreate
+
     site = SiteCreate(site_name="Branch (212) 555-9999", contact_phone="+18005551234")
     assert site.site_name == "Branch"
     assert site.contact_phone == "+18005551234"
@@ -412,6 +410,7 @@ def test_site_create_phone_to_phone_2_when_phone_filled():
 def test_site_name_no_false_positive():
     """Address-like numbers in site_name are not extracted as phones."""
     from app.schemas.crm import SiteCreate
+
     site = SiteCreate(site_name="12345 Industrial Blvd")
     assert site.site_name == "12345 Industrial Blvd"
     assert site.contact_phone is None
@@ -419,8 +418,10 @@ def test_site_name_no_false_positive():
 
 def test_schema_rejects_unparseable_phone():
     """Phone validators reject gibberish instead of storing raw."""
-    from app.schemas.crm import SiteContactCreate
     import pytest
+
+    from app.schemas.crm import SiteContactCreate
+
     with pytest.raises(Exception):
         SiteContactCreate(full_name="Test", phone="not a phone number")
 
@@ -428,5 +429,6 @@ def test_schema_rejects_unparseable_phone():
 def test_schema_accepts_valid_phone():
     """Valid phone numbers still pass through."""
     from app.schemas.crm import SiteContactCreate
+
     c = SiteContactCreate(full_name="Test", phone="(415) 555-1234")
     assert c.phone == "+14155551234"

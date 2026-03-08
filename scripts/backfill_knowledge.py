@@ -4,15 +4,16 @@ Usage: docker compose exec app python scripts/backfill_knowledge.py
 """
 
 import sys
+
 sys.path.insert(0, "/app")
 
 from loguru import logger
 
 from app.database import SessionLocal
 from app.models.knowledge import KnowledgeEntry
-from app.models.quotes import Quote
 from app.models.offers import Offer
-from app.services.knowledge_service import capture_quote_fact, capture_offer_fact
+from app.models.quotes import Quote
+from app.services.knowledge_service import capture_offer_fact, capture_quote_fact
 
 
 def backfill():

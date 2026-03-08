@@ -48,8 +48,7 @@ async def _job_poll_8x8_cdrs():
         result = _process_cdrs(db, settings)
         db.commit()
         logger.info(
-            f"8x8 poll: {result['processed']} calls, "
-            f"{result['matched']} matched, {result['skipped']} skipped/dedup"
+            f"8x8 poll: {result['processed']} calls, {result['matched']} matched, {result['skipped']} skipped/dedup"
         )
     except Exception as e:
         logger.error(f"8x8 CDR poll error: {e}")
@@ -150,11 +149,13 @@ def _update_watermark(db, watermark_row, until: datetime):
     if watermark_row:
         watermark_row.value = until.isoformat()
     else:
-        db.add(SystemConfig(
-            key="8x8_last_poll",
-            value=until.isoformat(),
-            description="Last successful 8x8 CDR poll timestamp",
-        ))
+        db.add(
+            SystemConfig(
+                key="8x8_last_poll",
+                value=until.isoformat(),
+                description="Last successful 8x8 CDR poll timestamp",
+            )
+        )
     db.flush()
 
 
@@ -226,7 +227,9 @@ def run_8x8_poll_dry_run(ext_map: dict | None = None):
 
         caller = norm["caller_name"] or norm["caller_phone"]
         callee = norm["callee_name"] or norm["callee_phone"]
-        logger.info("  CDR {}: {:8s} {:25s} → {:30s} | {}", norm['external_id'], norm['direction'], caller, callee, status)
+        logger.info(
+            "  CDR {}: {:8s} {:25s} → {:30s} | {}", norm["external_id"], norm["direction"], caller, callee, status
+        )
 
     logger.info("Summary: {} would write, {} skipped", processed, skipped)
     logger.info("Dry run complete. No data written.")

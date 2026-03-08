@@ -171,20 +171,24 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
 
     if result.get("brand"):
         brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-        tags_to_apply.append({
-            "tag_id": brand_tag.id,
-            "source": f"connector_{source_name}",
-            "confidence": confidence,
-        })
+        tags_to_apply.append(
+            {
+                "tag_id": brand_tag.id,
+                "source": f"connector_{source_name}",
+                "confidence": confidence,
+            }
+        )
 
     if result.get("commodity"):
         commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
         if commodity_tag:
-            tags_to_apply.append({
-                "tag_id": commodity_tag.id,
-                "source": f"connector_{source_name}",
-                "confidence": min(confidence, 0.9),
-            })
+            tags_to_apply.append(
+                {
+                    "tag_id": commodity_tag.id,
+                    "source": f"connector_{source_name}",
+                    "confidence": min(confidence, 0.9),
+                }
+            )
 
     if tags_to_apply:
         tag_material_card(card.id, tags_to_apply, db)
@@ -201,8 +205,9 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
 
     Returns: {total_boosted, total_checked}
     """
-    from app.models.tags import MaterialTag, Tag
     from sqlalchemy import func
+
+    from app.models.tags import MaterialTag, Tag
 
     total_boosted = 0
     last_id = 0
@@ -318,7 +323,9 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
             .join(Sighting, Sighting.material_card_id == MaterialCard.id)
             .filter(
                 Tag.tag_type == "brand",
-                MaterialTag.source.in_(["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]),
+                MaterialTag.source.in_(
+                    ["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]
+                ),
                 MaterialTag.confidence < 0.95,
                 MaterialTag.confidence >= 0.7,
                 Sighting.manufacturer.isnot(None),
@@ -451,7 +458,12 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
                     if card:
                         _apply_enrichment_to_card(
                             card,
-                            {"manufacturer": nexar_mfr.title(), "source": "nexar", "confidence": 0.95, "category": None},
+                            {
+                                "manufacturer": nexar_mfr.title(),
+                                "source": "nexar",
+                                "confidence": 0.95,
+                                "category": None,
+                            },
                             db,
                         )
                         changed += 1
@@ -466,8 +478,7 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
 
     db.commit()
     logger.info(
-        f"Nexar bulk validate: {len(low_conf)} checked, {confirmed} confirmed, "
-        f"{changed} changed, {no_result} no result"
+        f"Nexar bulk validate: {len(low_conf)} checked, {confirmed} confirmed, {changed} changed, {no_result} no result"
     )
     return {"total_checked": len(low_conf), "confirmed": confirmed, "changed": changed, "no_result": no_result}
 
@@ -612,11 +623,7 @@ async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int =
 
         # Check if connector confirms the AI classification
         # Fuzzy match: either one contains the other, or exact match
-        is_confirmed = (
-            connector_mfr == ai_mfr
-            or connector_mfr in ai_mfr
-            or ai_mfr in connector_mfr
-        )
+        is_confirmed = connector_mfr == ai_mfr or connector_mfr in ai_mfr or ai_mfr in connector_mfr
 
         if is_confirmed:
             # Upgrade the existing tag confidence
@@ -645,8 +652,7 @@ async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int =
     db.commit()
     total = len(low_conf)
     logger.info(
-        f"Cross-validate complete: {total} checked, {confirmed} confirmed, "
-        f"{changed_mfr} changed, {no_result} no result"
+        f"Cross-validate complete: {total} checked, {confirmed} confirmed, {changed_mfr} changed, {no_result} no result"
     )
     return {
         "total": total,

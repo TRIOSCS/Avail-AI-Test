@@ -94,11 +94,7 @@ async def discover_contacts(
         for p in people:
             first = (p.get("first_name") or "").strip()
             last = (p.get("last_name") or "").strip()
-            full_name = (
-                f"{first} {last}".strip()
-                if first or last
-                else p.get("name", "Unknown")
-            )
+            full_name = f"{first} {last}".strip() if first or last else p.get("name", "Unknown")
             email = p.get("email") or ""
             title = p.get("title") or p.get("headline") or ""
             org = p.get("organization") or {}
@@ -245,9 +241,7 @@ async def enrich_selected_contacts(
             )
 
             if resp.status_code != 200:
-                logger.warning(
-                    "Apollo enrich failed for {}: {}", apollo_id, resp.status_code
-                )
+                logger.warning("Apollo enrich failed for {}: {}", apollo_id, resp.status_code)
                 continue
 
             person = resp.json().get("person")
@@ -269,19 +263,13 @@ async def enrich_selected_contacts(
             # Upsert VendorContact (dedup on vendor_card_id + email)
             existing = None
             if email:
-                existing = (
-                    db.query(VendorContact)
-                    .filter_by(vendor_card_id=vendor_card_id, email=email)
-                    .first()
-                )
+                existing = db.query(VendorContact).filter_by(vendor_card_id=vendor_card_id, email=email).first()
 
             if existing:
                 existing.full_name = full_name
                 existing.title = title
                 existing.phone = phone or existing.phone
-                existing.linkedin_url = (
-                    person.get("linkedin_url") or existing.linkedin_url
-                )
+                existing.linkedin_url = person.get("linkedin_url") or existing.linkedin_url
                 existing.is_verified = is_verified
                 existing.source = "apollo"
             else:
@@ -362,9 +350,7 @@ async def sync_contacts_to_apollo(
             "last_name": contact.last_name or "",
             "email": contact.email,
             "title": contact.title or "",
-            "organization_name": (
-                contact.vendor_card.display_name if contact.vendor_card else ""
-            ),
+            "organization_name": (contact.vendor_card.display_name if contact.vendor_card else ""),
             "label_names": [label],
             "run_dedupe": True,
         }
@@ -383,9 +369,7 @@ async def sync_contacts_to_apollo(
                 skipped += 1
             else:
                 errors += 1
-                logger.warning(
-                    "Apollo sync error for {}: {}", contact.email, resp.status_code
-                )
+                logger.warning("Apollo sync error for {}: {}", contact.email, resp.status_code)
 
         except Exception as e:
             errors += 1

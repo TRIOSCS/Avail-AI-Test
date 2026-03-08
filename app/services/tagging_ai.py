@@ -9,13 +9,6 @@ All public names re-exported here for backward compatibility.
 """
 
 # ── Classify ──────────────────────────────────────────────────────────
-from app.services.tagging_ai_classify import (  # noqa: F401
-    _CLASSIFY_PROMPT,
-    _SYSTEM,
-    _apply_ai_results,
-    classify_parts_with_ai,
-)
-
 # ── Batch ─────────────────────────────────────────────────────────────
 from app.services.tagging_ai_batch import (  # noqa: F401
     _apply_chunked_batch,
@@ -24,6 +17,12 @@ from app.services.tagging_ai_batch import (  # noqa: F401
     run_ai_backfill,
     submit_batch_backfill,
     submit_targeted_backfill,
+)
+from app.services.tagging_ai_classify import (  # noqa: F401
+    _CLASSIFY_PROMPT,
+    _SYSTEM,
+    _apply_ai_results,
+    classify_parts_with_ai,
 )
 
 # ── Triage ────────────────────────────────────────────────────────────

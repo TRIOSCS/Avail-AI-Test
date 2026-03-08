@@ -580,10 +580,7 @@ async def extract_durable_facts(
 
         from app.utils.claude_client import claude_structured
 
-        prompt = (
-            f"From: {sender_name} <{sender_email}>\n\n"
-            f"Body:\n{body[:3000]}"
-        )
+        prompt = f"From: {sender_name} <{sender_email}>\n\nBody:\n{body[:3000]}"
 
         result = await claude_structured(
             prompt,

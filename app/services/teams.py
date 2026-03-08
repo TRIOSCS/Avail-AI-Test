@@ -336,6 +336,7 @@ def _intelligence_gate(event_type: str, entity_id, context: dict | None = None) 
     """Check rate limiting — returns False if alert should be suppressed."""
     return not _is_rate_limited(event_type, entity_id)
 
+
 async def send_competitive_quote_alert(
     offer_id: int,
     mpn: str,

@@ -31,7 +31,12 @@ def _load_company_tags(company_id: int, db: Session) -> list[dict]:
         .all()
     )
     return [
-        {"tag_name": et.tag.name, "tag_type": et.tag.tag_type, "count": et.interaction_count, "is_visible": et.is_visible}
+        {
+            "tag_name": et.tag.name,
+            "tag_type": et.tag.tag_type,
+            "count": et.interaction_count,
+            "is_visible": et.is_visible,
+        }
         for et in tags
     ]
 
@@ -113,7 +118,8 @@ async def list_companies(
 
         # 90-day won revenue per company
         from datetime import datetime as _dt
-        from datetime import timedelta, timezone as _tz
+        from datetime import timedelta
+        from datetime import timezone as _tz
 
         rev_cutoff = _dt.now(_tz.utc) - timedelta(days=90)
         revenue_map: dict[int, float] = {}

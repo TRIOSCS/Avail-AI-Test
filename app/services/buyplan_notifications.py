@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import ActivityLog, BuyPlan, Offer, User
 
-
 # ── Background Task Helper ─────────────────────────────────────────────
 
 
@@ -74,18 +73,18 @@ def log_buyplan_activity(
 # ── Teams Integration (unified Graph API Adaptive Cards) ─────────────────
 
 
-async def _post_teams_card(plan: "BuyPlan", event: str, subtitle: str, facts: list[dict],
-                           admin_mentions: list[tuple[str, str]] | None = None):
+async def _post_teams_card(
+    plan: "BuyPlan", event: str, subtitle: str, facts: list[dict], admin_mentions: list[tuple[str, str]] | None = None
+):
     """Post a buy plan event as an Adaptive Card via Graph API.
 
     Replaces the old webhook-based plain text posts with rich Adaptive Cards.
     """
-    from app.services.teams import send_buyplan_card, send_buyplan_approval_card
+    from app.services.teams import send_buyplan_approval_card, send_buyplan_card
 
     if event == "buyplan_submitted":
         total_cost = sum(
-            (i.get("plan_qty") or i.get("qty") or 0) * (i.get("cost_price") or 0)
-            for i in (plan.line_items or [])
+            (i.get("plan_qty") or i.get("qty") or 0) * (i.get("cost_price") or 0) for i in (plan.line_items or [])
         )
         await send_buyplan_approval_card(
             plan_id=plan.id,
@@ -372,11 +371,16 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
     db.commit()
 
     # Teams channel post — Adaptive Card
-    await _post_teams_card(plan, "buyplan_approved", f"Approved by {approver_name}", [
-        {"title": "Approver", "value": approver_name},
-        {"title": "Buyers Notified", "value": ", ".join(b.name or b.email for b in buyers)},
-        {"title": "SO#", "value": so_number},
-    ])
+    await _post_teams_card(
+        plan,
+        "buyplan_approved",
+        f"Approved by {approver_name}",
+        [
+            {"title": "Approver", "value": approver_name},
+            {"title": "Buyers Notified", "value": ", ".join(b.name or b.email for b in buyers)},
+            {"title": "SO#", "value": so_number},
+        ],
+    )
 
 
 async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
@@ -542,12 +546,17 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     db.commit()
 
     # Teams channel post — Adaptive Card
-    await _post_teams_card(plan, "buyplan_completed", f"Stock sale approved by {approver_name}", [
-        {"title": "Approver", "value": approver_name},
-        {"title": "Submitter", "value": submitter_name},
-        {"title": "Total", "value": f"${total_cost:,.2f}"},
-        {"title": "Type", "value": "Stock Sale (no PO required)"},
-    ])
+    await _post_teams_card(
+        plan,
+        "buyplan_completed",
+        f"Stock sale approved by {approver_name}",
+        [
+            {"title": "Approver", "value": approver_name},
+            {"title": "Submitter", "value": submitter_name},
+            {"title": "Total", "value": f"${total_cost:,.2f}"},
+            {"title": "Type", "value": "Stock Sale (no PO required)"},
+        ],
+    )
 
 
 async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: str):
@@ -604,10 +613,15 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
     )
     db.commit()
 
-    await _post_teams_card(plan, "buyplan_completed", f"Completed by {completer_name}", [
-        {"title": "Completed By", "value": completer_name},
-        {"title": "Requisition", "value": f"#{plan.requisition_id}"},
-    ])
+    await _post_teams_card(
+        plan,
+        "buyplan_completed",
+        f"Completed by {completer_name}",
+        [
+            {"title": "Completed By", "value": completer_name},
+            {"title": "Requisition", "value": f"#{plan.requisition_id}"},
+        ],
+    )
 
 
 async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
@@ -635,7 +649,12 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
         )
     db.commit()
 
-    await _post_teams_card(plan, "buyplan_cancelled", f"Cancelled by {canceller_name}", [
-        {"title": "Cancelled By", "value": canceller_name},
-        {"title": "Reason", "value": plan.cancellation_reason or "No reason given"},
-    ])
+    await _post_teams_card(
+        plan,
+        "buyplan_cancelled",
+        f"Cancelled by {canceller_name}",
+        [
+            {"title": "Cancelled By", "value": canceller_name},
+            {"title": "Reason", "value": plan.cancellation_reason or "No reason given"},
+        ],
+    )

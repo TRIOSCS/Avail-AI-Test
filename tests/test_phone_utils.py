@@ -5,9 +5,7 @@ letters, empty strings, too-short numbers, 7-9 digit ambiguous,
 12+ digit international, _guess_country_code_len branches.
 """
 
-import pytest
-
-from app.utils.phone_utils import format_phone_display, format_phone_e164, _guess_country_code_len
+from app.utils.phone_utils import _guess_country_code_len, format_phone_display, format_phone_e164
 
 
 class TestFormatPhoneE164:

@@ -5,16 +5,14 @@ Uses MagicMock for db — no real database needed.
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-from app.services.resurfacing_service import get_mpn_hints, _build_hint, _format_age
-
+from app.services.resurfacing_service import _build_hint, _format_age, get_mpn_hints
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_db_no_results():
     """Return a mock db where all queries return None/empty."""
@@ -34,6 +32,7 @@ def _mock_db_no_results():
 # test_returns_dict_keyed_by_mpn
 # ---------------------------------------------------------------------------
 
+
 def test_returns_dict_keyed_by_mpn():
     """get_mpn_hints returns a dict keyed by each input MPN."""
     db = _mock_db_no_results()
@@ -48,6 +47,7 @@ def test_returns_dict_keyed_by_mpn():
 # test_returns_none_for_unknown_mpn
 # ---------------------------------------------------------------------------
 
+
 def test_returns_none_for_unknown_mpn():
     """Unknown MPNs (no offers, no cross-reqs, no knowledge) return None."""
     db = _mock_db_no_results()
@@ -59,6 +59,7 @@ def test_returns_none_for_unknown_mpn():
 # ---------------------------------------------------------------------------
 # test_empty_list_returns_empty_dict
 # ---------------------------------------------------------------------------
+
 
 def test_empty_list_returns_empty_dict():
     """Empty input list returns empty dict immediately."""
@@ -74,6 +75,7 @@ def test_empty_list_returns_empty_dict():
 # test_exclude_req_id_filters_current_req
 # ---------------------------------------------------------------------------
 
+
 def test_exclude_req_id_filters_current_req():
     """exclude_req_id adds extra filter calls to exclude the current requisition."""
     db = _mock_db_no_results()
@@ -88,6 +90,7 @@ def test_exclude_req_id_filters_current_req():
 # ---------------------------------------------------------------------------
 # test_offer_hint_formatting
 # ---------------------------------------------------------------------------
+
 
 def test_offer_hint_formatting():
     """When an offer exists, hint is formatted correctly."""
@@ -116,6 +119,7 @@ def test_offer_hint_formatting():
 # ---------------------------------------------------------------------------
 # test_format_age_today
 # ---------------------------------------------------------------------------
+
 
 def test_format_age_today():
     """_format_age returns 'today' for datetimes within the same day."""
@@ -156,6 +160,7 @@ def test_format_age_naive_datetime():
 # test_exception_handling
 # ---------------------------------------------------------------------------
 
+
 def test_exception_in_build_hint_returns_none():
     """If _build_hint raises, get_mpn_hints catches and returns None for that MPN."""
     db = MagicMock()
@@ -168,6 +173,7 @@ def test_exception_in_build_hint_returns_none():
 # ---------------------------------------------------------------------------
 # test_build_hint_returns_none_when_no_data
 # ---------------------------------------------------------------------------
+
 
 def test_build_hint_returns_none_when_no_data():
     """_build_hint returns None when no offers, cross-reqs, or knowledge found."""

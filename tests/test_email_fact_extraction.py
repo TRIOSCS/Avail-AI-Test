@@ -8,7 +8,6 @@ Called by: pytest
 Depends on: app/services/email_intelligence_service.py
 """
 
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

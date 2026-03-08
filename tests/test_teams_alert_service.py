@@ -197,5 +197,3 @@ def test_config_crud(client, db_session, test_user):
     # GET — gone
     resp = client.get("/api/teams-alerts/config")
     assert resp.json()["configured"] is False
-
-

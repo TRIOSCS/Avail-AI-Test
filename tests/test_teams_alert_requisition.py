@@ -10,8 +10,6 @@ Depends on: conftest fixtures
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.models.auth import User
 from app.models.teams_alert_config import TeamsAlertConfig
 from app.services.teams_alert_service import send_alert_to_role

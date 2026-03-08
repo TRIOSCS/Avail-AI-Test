@@ -6,9 +6,9 @@ Revision ID: 052
 Revises: 051
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 revision = "052"
 down_revision = "051"
@@ -18,7 +18,9 @@ depends_on = None
 
 def upgrade():
     op.add_column("users", sa.Column("eight_by_eight_extension", sa.String(20), nullable=True))
-    op.add_column("users", sa.Column("eight_by_eight_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column(
+        "users", sa.Column("eight_by_eight_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false"))
+    )
 
 
 def downgrade():

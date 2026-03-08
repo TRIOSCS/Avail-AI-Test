@@ -62,20 +62,24 @@ def seed_from_existing_manufacturers(db: Session) -> dict:
             if brand_tag.id is None:  # pragma: no cover
                 db.flush()
             brands_created.add(brand_tag.name)
-            tags_to_apply.append({
-                "tag_id": brand_tag.id,
-                "source": result["brand"]["source"],
-                "confidence": result["brand"]["confidence"],
-            })
+            tags_to_apply.append(
+                {
+                    "tag_id": brand_tag.id,
+                    "source": result["brand"]["source"],
+                    "confidence": result["brand"]["confidence"],
+                }
+            )
 
         if result.get("commodity"):
             commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
             if commodity_tag:
-                tags_to_apply.append({
-                    "tag_id": commodity_tag.id,
-                    "source": result["commodity"]["source"],
-                    "confidence": result["commodity"]["confidence"],
-                })
+                tags_to_apply.append(
+                    {
+                        "tag_id": commodity_tag.id,
+                        "source": result["commodity"]["source"],
+                        "confidence": result["commodity"]["confidence"],
+                    }
+                )
 
         if tags_to_apply:
             tag_material_card(card.id, tags_to_apply, db)
@@ -138,20 +142,24 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
                 if brand_tag.id is None:  # pragma: no cover
                     db.flush()
                 new_brands.add(brand_tag.name)
-                tags_to_apply.append({
-                    "tag_id": brand_tag.id,
-                    "source": result["brand"]["source"],
-                    "confidence": result["brand"]["confidence"],
-                })
+                tags_to_apply.append(
+                    {
+                        "tag_id": brand_tag.id,
+                        "source": result["brand"]["source"],
+                        "confidence": result["brand"]["confidence"],
+                    }
+                )
 
             if result.get("commodity"):  # pragma: no cover
                 commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
                 if commodity_tag:
-                    tags_to_apply.append({
-                        "tag_id": commodity_tag.id,
-                        "source": result["commodity"]["source"],
-                        "confidence": result["commodity"]["confidence"],
-                    })
+                    tags_to_apply.append(
+                        {
+                            "tag_id": commodity_tag.id,
+                            "source": result["commodity"]["source"],
+                            "confidence": result["commodity"]["confidence"],
+                        }
+                    )
 
             if tags_to_apply:
                 tag_material_card(card.id, tags_to_apply, db)
@@ -286,8 +294,7 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
         logger.info(f"Sighting mining: {total_processed}/{total_untagged} — {total_tagged} tagged")
 
     logger.info(
-        f"Sighting mining complete: {total_processed} processed, "
-        f"{total_tagged} tagged, {total_skipped} skipped"
+        f"Sighting mining complete: {total_processed} processed, {total_tagged} tagged, {total_skipped} skipped"
     )
     return {"total_processed": total_processed, "total_tagged": total_tagged, "total_skipped": total_skipped}
 
@@ -328,11 +335,7 @@ def purge_unknown_tags(db: Session, batch_size: int = 1000) -> dict:
             break
 
         ids = [row.id for row in mt_ids]
-        deleted = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(ids))
-            .delete(synchronize_session="fetch")
-        )
+        deleted = db.query(MaterialTag).filter(MaterialTag.id.in_(ids)).delete(synchronize_session="fetch")
         db.commit()
         total_purged += deleted
         logger.info(f"Purge: deleted {total_purged} 'Unknown' junk tags so far")
@@ -403,11 +406,7 @@ def repair_entity_tag_visibility(db: Session) -> dict:
     from app.services.tagging import recalculate_entity_tag_visibility
 
     # Get all distinct entity (type, id) pairs
-    entities = (
-        db.query(EntityTag.entity_type, EntityTag.entity_id)
-        .distinct()
-        .all()
-    )
+    entities = db.query(EntityTag.entity_type, EntityTag.entity_id).distinct().all()
 
     if not entities:
         logger.info("Visibility repair: no entity tags found")
@@ -430,10 +429,7 @@ def repair_entity_tag_visibility(db: Session) -> dict:
     now_visible = db.query(func.count(EntityTag.id)).filter(EntityTag.is_visible.is_(True)).scalar() or 0
     now_hidden = db.query(func.count(EntityTag.id)).filter(EntityTag.is_visible.is_(False)).scalar() or 0
 
-    logger.info(
-        f"Visibility repair complete: {total_entities} entities, "
-        f"{now_visible} visible, {now_hidden} hidden"
-    )
+    logger.info(f"Visibility repair complete: {total_entities} entities, {now_visible} visible, {now_hidden} hidden")
     return {
         "total_entities": total_entities,
         "total_tags_updated": now_visible + now_hidden,

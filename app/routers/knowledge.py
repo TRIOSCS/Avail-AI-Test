@@ -116,7 +116,9 @@ def update_entry_endpoint(
     user=Depends(require_user),
 ):
     entry = knowledge_service.update_entry(
-        db, entry_id, user.id,
+        db,
+        entry_id,
+        user.id,
         content=payload.content,
         is_resolved=payload.is_resolved,
         expires_at=payload.expires_at,
@@ -144,6 +146,7 @@ def get_quota(
 ):
     """Get the user's daily question quota."""
     from app.services.teams_qa_service import check_question_quota
+
     return check_question_quota(db, user.id)
 
 
@@ -154,6 +157,7 @@ def get_knowledge_config(
 ):
     """Get knowledge config values."""
     from app.models.knowledge import KnowledgeConfig
+
     rows = db.query(KnowledgeConfig).all()
     return {row.key: row.value for row in rows}
 
@@ -165,8 +169,9 @@ def update_knowledge_config(
     user=Depends(require_user),
 ):
     """Update knowledge config (admin only). Body: {key: value, ...}."""
-    from app.models.knowledge import KnowledgeConfig
     from app.config import settings
+    from app.models.knowledge import KnowledgeConfig
+
     if user.email not in (settings.ADMIN_EMAILS or "").split(","):
         raise HTTPException(403, "Admin only")
     for key, value in payload.items():
@@ -209,9 +214,7 @@ def post_answer(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    answer = knowledge_service.post_answer(
-        db, user_id=user.id, question_id=entry_id, content=payload.content
-    )
+    answer = knowledge_service.post_answer(db, user_id=user.id, question_id=entry_id, content=payload.content)
     if not answer:
         raise HTTPException(404, "Question not found")
     return _entry_to_response(answer)

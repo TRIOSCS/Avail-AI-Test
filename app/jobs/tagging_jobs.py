@@ -198,7 +198,7 @@ async def _job_gradient_ai_tagging():
     from ..database import SessionLocal
     from ..models.intelligence import MaterialCard
     from ..models.tags import MaterialTag, Tag
-    from ..services.tagging_ai import classify_parts_with_ai, _apply_ai_results
+    from ..services.tagging_ai import _apply_ai_results, classify_parts_with_ai
 
     db = SessionLocal()
     try:
@@ -240,10 +240,10 @@ async def _job_gradient_ai_tagging():
             async with sem:
                 return await classify_parts_with_ai(mpns)
 
-        all_batches = [untagged[i:i + batch_size] for i in range(0, len(untagged), batch_size)]
+        all_batches = [untagged[i : i + batch_size] for i in range(0, len(untagged), batch_size)]
 
         for round_start in range(0, len(all_batches), concurrency):
-            round_batches = all_batches[round_start:round_start + concurrency]
+            round_batches = all_batches[round_start : round_start + concurrency]
             results = await asyncio.gather(
                 *[_classify_batch(b) for b in round_batches],
                 return_exceptions=True,
@@ -261,8 +261,7 @@ async def _job_gradient_ai_tagging():
             db.commit()
 
         logger.info(
-            f"Gradient AI tagging done: {len(untagged)} processed, "
-            f"{total_matched} matched, {total_unknown} unknown"
+            f"Gradient AI tagging done: {len(untagged)} processed, {total_matched} matched, {total_unknown} unknown"
         )
     except Exception:
         db.rollback()

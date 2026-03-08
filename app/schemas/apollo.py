@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-
 # -- Discovery --
 
 
@@ -54,9 +53,7 @@ class ApolloDiscoverResponse(BaseModel, extra="allow"):
 
 class ApolloEnrichRequest(BaseModel):
     apollo_ids: list[str] = Field(..., min_length=1, max_length=25)
-    vendor_card_id: int = Field(
-        ..., description="AvailAI vendor card to attach contacts to"
-    )
+    vendor_card_id: int = Field(..., description="AvailAI vendor card to attach contacts to")
 
 
 class EnrichedContact(BaseModel, extra="allow"):
@@ -93,12 +90,8 @@ class ApolloSyncResponse(BaseModel, extra="allow"):
 
 class ApolloEnrollRequest(BaseModel):
     sequence_id: str = Field(..., description="Apollo sequence ID")
-    contact_ids: list[str] = Field(
-        ..., min_length=1, description="Apollo contact IDs"
-    )
-    email_account_id: str = Field(
-        ..., description="Apollo email account ID for sending"
-    )
+    contact_ids: list[str] = Field(..., min_length=1, description="Apollo contact IDs")
+    email_account_id: str = Field(..., description="Apollo email account ID for sending")
 
 
 class ApolloEnrollResponse(BaseModel, extra="allow"):

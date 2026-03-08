@@ -63,11 +63,7 @@ def _infer_manufacturer_from_prefix(db: Session, mpn: str) -> str | None:
 def backfill_missing_manufacturers(db: Session) -> int:
     """Bulk-update all rows where manufacturer IS NULL/empty and a prefix-match donor exists."""
     null_parts = (
-        db.query(MaterialCard)
-        .filter(
-            (MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")
-        )
-        .all()
+        db.query(MaterialCard).filter((MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")).all()
     )
     updated = 0
     for part in null_parts:
@@ -614,6 +610,7 @@ async def import_stock_list_standalone(
 
     # Validate file type
     import os as _os
+
     ext = _os.path.splitext(file.filename or "")[1].lower()
     allowed_extensions = {".csv", ".xlsx", ".xls", ".tsv"}
     if ext not in allowed_extensions:
@@ -621,8 +618,9 @@ async def import_stock_list_standalone(
 
     # Sanitize vendor name — strip HTML before length check
     import re as _re
+
     vendor_name = (form.get("vendor_name") or "").strip()
-    vendor_name = _re.sub(r'<[^>]+>', '', vendor_name).strip()
+    vendor_name = _re.sub(r"<[^>]+>", "", vendor_name).strip()
     if not vendor_name:
         raise HTTPException(400, "Vendor name is required")
     if len(vendor_name) > 255:

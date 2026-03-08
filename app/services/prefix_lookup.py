@@ -288,9 +288,7 @@ PREFIX_TABLE: dict[str, str] = {
 }
 
 # Pre-sorted longest-first for most-specific matching
-_SORTED_PREFIXES: list[tuple[str, str]] = sorted(
-    PREFIX_TABLE.items(), key=lambda x: len(x[0]), reverse=True
-)
+_SORTED_PREFIXES: list[tuple[str, str]] = sorted(PREFIX_TABLE.items(), key=lambda x: len(x[0]), reverse=True)
 
 
 def lookup_manufacturer_by_prefix(normalized_mpn: str) -> tuple[str | None, float]:

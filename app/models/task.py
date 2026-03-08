@@ -11,7 +11,14 @@ Depends on: models/base.py, models/auth.py, models/sourcing.py
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    Column, DateTime, Float, ForeignKey, Index, Integer, String, Text,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
 )
 from sqlalchemy.orm import relationship
 

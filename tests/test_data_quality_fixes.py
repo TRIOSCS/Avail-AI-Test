@@ -8,7 +8,7 @@ Covers:
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from app.models import (
     ActivityLog,
@@ -16,7 +16,6 @@ from app.models import (
     CustomerSite,
     User,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  TT-036: Proactive scorecard $500K cap
@@ -224,9 +223,7 @@ class TestCallActivitySubject:
         self._make_site(db_session, co.id, phone="+15559990001")
         db_session.commit()
 
-        record = log_call_activity(
-            test_user.id, "outbound", "5559990001", 120, "ext-sub-1", "Bob Smith", db_session
-        )
+        record = log_call_activity(test_user.id, "outbound", "5559990001", 120, "ext-sub-1", "Bob Smith", db_session)
         assert record is not None
         assert record.subject == "Call to Bob Smith"
 
@@ -237,27 +234,21 @@ class TestCallActivitySubject:
         self._make_site(db_session, co.id, phone="+15559990002")
         db_session.commit()
 
-        record = log_call_activity(
-            test_user.id, "inbound", "5559990002", 60, "ext-sub-2", "Jane Doe", db_session
-        )
+        record = log_call_activity(test_user.id, "inbound", "5559990002", 60, "ext-sub-2", "Jane Doe", db_session)
         assert record is not None
         assert record.subject == "Call from Jane Doe"
 
     def test_call_subject_falls_back_to_phone(self, db_session, test_user):
         from app.services.activity_service import log_call_activity
 
-        record = log_call_activity(
-            test_user.id, "outbound", "5559990003", 30, "ext-sub-3", None, db_session
-        )
+        record = log_call_activity(test_user.id, "outbound", "5559990003", 30, "ext-sub-3", None, db_session)
         assert record is not None
         assert record.subject == "Call to 5559990003"
 
     def test_call_subject_falls_back_to_unknown(self, db_session, test_user):
         from app.services.activity_service import log_call_activity
 
-        record = log_call_activity(
-            test_user.id, "inbound", "", None, "ext-sub-4", None, db_session
-        )
+        record = log_call_activity(test_user.id, "inbound", "", None, "ext-sub-4", None, db_session)
         assert record is not None
         assert record.subject == "Call from unknown"
 
@@ -280,9 +271,7 @@ class TestCallActivitySubject:
     def test_subject_persisted_in_db(self, db_session, test_user):
         from app.services.activity_service import log_call_activity
 
-        record = log_call_activity(
-            test_user.id, "outbound", "5559990006", 10, "ext-sub-6", "Charlie", db_session
-        )
+        record = log_call_activity(test_user.id, "outbound", "5559990006", 10, "ext-sub-6", "Charlie", db_session)
         db_session.commit()
 
         fetched = db_session.query(ActivityLog).filter(ActivityLog.external_id == "ext-sub-6").first()

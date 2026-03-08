@@ -953,6 +953,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 # Auto-capture offer facts into Knowledge Ledger
                 try:
                     from app.services.knowledge_service import capture_offer_fact
+
                     capture_offer_fact(db, offer=offer)
                 except Exception as e:
                     logger.warning("Knowledge auto-capture (email offer) failed: {}", e)

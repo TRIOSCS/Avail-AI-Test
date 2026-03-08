@@ -11,7 +11,6 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import ActivityLog, Company, CustomerSite
 
-
 # ── TT-026: Sales notification count endpoint ───────────────────────
 
 

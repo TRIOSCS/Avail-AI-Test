@@ -65,7 +65,8 @@ class CompanyCreate(BaseModel):
         if not v.startswith(("http://", "https://")):
             v = "https://" + v
         import re
-        if not re.match(r'^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}', v):
+
+        if not re.match(r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}", v):
             raise ValueError("Please enter a valid website URL")
         return v
 
@@ -181,16 +182,20 @@ class SiteCreate(BaseModel):
     @model_validator(mode="after")
     def extract_phone_from_name(self) -> "SiteCreate":
         import re
-        phone_re = re.compile(r'[\(+]?\d[\d\s\-\(\)\.]{8,}\d')
+
+        phone_re = re.compile(r"[\(+]?\d[\d\s\-\(\)\.]{8,}\d")
         match = phone_re.search(self.site_name)
         if not match:
             return self
         from app.utils.normalization_helpers import normalize_phone_e164
+
         raw = match.group(0).strip()
         e164 = normalize_phone_e164(raw)
         if not e164:
             return self
-        self.site_name = re.sub(r'\s+', ' ', self.site_name[:match.start()] + self.site_name[match.end():]).strip(' -,')
+        self.site_name = re.sub(r"\s+", " ", self.site_name[: match.start()] + self.site_name[match.end() :]).strip(
+            " -,"
+        )
         if not self.contact_phone:
             self.contact_phone = e164
         elif not self.contact_phone_2:

@@ -148,9 +148,15 @@ def get_account_timeline_endpoint(
     dto = dt.fromisoformat(date_to) if date_to else None
 
     items, total = get_account_timeline(
-        db, company_id, channel=channel, direction=direction,
-        event_type=event_type, date_from=df, date_to=dto,
-        limit=limit, offset=offset,
+        db,
+        company_id,
+        channel=channel,
+        direction=direction,
+        event_type=event_type,
+        date_from=df,
+        date_to=dto,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [_timeline_item(a) for a in items],
@@ -187,9 +193,15 @@ def get_contact_timeline_endpoint(
     dto = dt.fromisoformat(date_to) if date_to else None
 
     items, total = get_contact_timeline(
-        db, site_contact_id, channel=channel, direction=direction,
-        event_type=event_type, date_from=df, date_to=dto,
-        limit=limit, offset=offset,
+        db,
+        site_contact_id,
+        channel=channel,
+        direction=direction,
+        event_type=event_type,
+        date_from=df,
+        date_to=dto,
+        limit=limit,
+        offset=offset,
     )
     return {
         "items": [_timeline_item(a) for a in items],

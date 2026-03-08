@@ -91,7 +91,9 @@ async def list_vendors(
 ):
     """List vendor cards with search, pagination, tier filter, sort, and engagement scores."""
 
-    @cached_endpoint(prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "tier", "sort", "order", "limit", "offset"])
+    @cached_endpoint(
+        prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "tier", "sort", "order", "limit", "offset"]
+    )
     def _fetch(q, tag, tier, sort, order, limit, offset, db):
         query = db.query(VendorCard)
 
@@ -119,8 +121,7 @@ async def list_vendors(
                 )
             elif tier == "new":
                 query = query.filter(
-                    sqlfunc.coalesce(VendorCard.is_new_vendor, True).is_(True)
-                    | VendorCard.vendor_score.is_(None)
+                    sqlfunc.coalesce(VendorCard.is_new_vendor, True).is_(True) | VendorCard.vendor_score.is_(None)
                 )
 
         # ── Default order ──

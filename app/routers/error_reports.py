@@ -17,7 +17,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_admin, require_user
+from ..dependencies import require_user
 from ..models import User
 from ..models.trouble_ticket import TroubleTicket
 

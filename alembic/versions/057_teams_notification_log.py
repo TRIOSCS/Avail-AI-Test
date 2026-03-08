@@ -8,8 +8,9 @@ Tracks every Teams Adaptive Card post: event type, entity, channel,
 success/failure, and error details for admin troubleshooting.
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "057"
 down_revision = "056"

@@ -8,8 +8,6 @@ Depends on: app.jobs.maintenance_jobs
 import asyncio
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _run(coro):
     """Run an async coroutine synchronously."""
@@ -20,8 +18,9 @@ def _run(coro):
 class _FakeContact:
     """Minimal stand-in for SiteContact with attribute tracking."""
 
-    def __init__(self, id, customer_site_id, email, full_name=None, title=None,
-                 phone=None, notes=None, linkedin_url=None):
+    def __init__(
+        self, id, customer_site_id, email, full_name=None, title=None, phone=None, notes=None, linkedin_url=None
+    ):
         self.id = id
         self.customer_site_id = customer_site_id
         self.email = email
@@ -77,12 +76,18 @@ class TestJobContactDedup:
     def test_dedup_merges_and_deletes(self, mock_session_local):
         """Two contacts with same site+email: best keeps fields, loser deleted."""
         contact_a = _FakeContact(
-            id=1, customer_site_id=10, email="alice@example.com",
-            full_name="Alice Smith", phone="+15551234567",
+            id=1,
+            customer_site_id=10,
+            email="alice@example.com",
+            full_name="Alice Smith",
+            phone="+15551234567",
         )
         contact_b = _FakeContact(
-            id=2, customer_site_id=10, email="Alice@example.com",
-            title="VP Sales", notes="Met at trade show",
+            id=2,
+            customer_site_id=10,
+            email="Alice@example.com",
+            title="VP Sales",
+            notes="Met at trade show",
         )
         dupe_row = _FakeDupeRow(customer_site_id=10, em="alice@example.com", cnt=2)
 
@@ -90,6 +95,7 @@ class TestJobContactDedup:
         mock_session_local.return_value = db
 
         from app.jobs.maintenance_jobs import _job_contact_dedup
+
         _run(_job_contact_dedup())
 
         db.delete.assert_called_once()
@@ -109,12 +115,19 @@ class TestJobContactDedup:
     def test_dedup_best_has_most_fields(self, mock_session_local):
         """Contact with more filled fields is kept as the winner."""
         winner = _FakeContact(
-            id=1, customer_site_id=10, email="bob@example.com",
-            full_name="Bob", title="CTO", phone="+15559999999",
-            notes="Important", linkedin_url="https://linkedin.com/in/bob",
+            id=1,
+            customer_site_id=10,
+            email="bob@example.com",
+            full_name="Bob",
+            title="CTO",
+            phone="+15559999999",
+            notes="Important",
+            linkedin_url="https://linkedin.com/in/bob",
         )
         loser = _FakeContact(
-            id=2, customer_site_id=10, email="bob@example.com",
+            id=2,
+            customer_site_id=10,
+            email="bob@example.com",
             full_name="Robert",
         )
         dupe_row = _FakeDupeRow(customer_site_id=10, em="bob@example.com", cnt=2)
@@ -122,6 +135,7 @@ class TestJobContactDedup:
         mock_session_local.return_value = db
 
         from app.jobs.maintenance_jobs import _job_contact_dedup
+
         _run(_job_contact_dedup())
 
         db.delete.assert_called_once_with(loser)
@@ -134,6 +148,7 @@ class TestJobContactDedup:
         mock_session_local.return_value = db
 
         from app.jobs.maintenance_jobs import _job_contact_dedup
+
         _run(_job_contact_dedup())
 
         db.delete.assert_not_called()
@@ -150,6 +165,7 @@ class TestJobContactDedup:
         mock_session_local.return_value = db
 
         from app.jobs.maintenance_jobs import _job_contact_dedup
+
         _run(_job_contact_dedup())
 
         db.rollback.assert_called()

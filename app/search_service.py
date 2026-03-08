@@ -215,8 +215,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             r["cross_references"] = []
 
     # 7. Flag price outliers — historical results 20x+ above fresh median
-    fresh_prices = [r["unit_price"] for r in results
-                    if not r.get("is_material_history") and r.get("unit_price")]
+    fresh_prices = [r["unit_price"] for r in results if not r.get("is_material_history") and r.get("unit_price")]
     if fresh_prices:
         median_price = sorted(fresh_prices)[len(fresh_prices) // 2]
         if median_price > 0:
@@ -659,8 +658,8 @@ def _save_sightings(
 
     # Tag propagation: propagate material card tags to vendor entities
     try:
-        from .services.tagging import propagate_tags_to_entity
         from .models import VendorCard
+        from .services.tagging import propagate_tags_to_entity
 
         for s in sightings:  # pragma: no cover
             if not s.material_card_id or not s.vendor_name:
@@ -1001,17 +1000,34 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     # Tag classification: if manufacturer is now set, classify and tag the card
     try:
         if card.manufacturer:
-            from .services.tagging import classify_material_card, get_or_create_brand_tag, get_or_create_commodity_tag, tag_material_card
+            from .services.tagging import (
+                classify_material_card,
+                get_or_create_brand_tag,
+                get_or_create_commodity_tag,
+                tag_material_card,
+            )
 
             result = classify_material_card(card.normalized_mpn, card.manufacturer, card.category)
             tags_to_apply = []
             if result.get("brand"):
                 brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-                tags_to_apply.append({"tag_id": brand_tag.id, "source": result["brand"]["source"], "confidence": result["brand"]["confidence"]})
+                tags_to_apply.append(
+                    {
+                        "tag_id": brand_tag.id,
+                        "source": result["brand"]["source"],
+                        "confidence": result["brand"]["confidence"],
+                    }
+                )
             if result.get("commodity"):  # pragma: no cover
                 commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
                 if commodity_tag:
-                    tags_to_apply.append({"tag_id": commodity_tag.id, "source": result["commodity"]["source"], "confidence": result["commodity"]["confidence"]})
+                    tags_to_apply.append(
+                        {
+                            "tag_id": commodity_tag.id,
+                            "source": result["commodity"]["source"],
+                            "confidence": result["commodity"]["confidence"],
+                        }
+                    )
             if tags_to_apply:  # pragma: no cover
                 tag_material_card(card.id, tags_to_apply, db)
                 db.commit()
@@ -1040,7 +1056,7 @@ def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
 
     async def _enrich_cards():
         from .database import SessionLocal
-        from .services.enrichment import enrich_material_card, _apply_enrichment_to_card
+        from .services.enrichment import _apply_enrichment_to_card, enrich_material_card
 
         session = SessionLocal()
         try:

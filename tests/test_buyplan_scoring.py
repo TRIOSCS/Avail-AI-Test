@@ -15,8 +15,6 @@ Depends on: app/services/buyplan_scoring.py, conftest.py
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.models import Offer, Requirement, Requisition, User, VendorCard
 from app.services.buyplan_scoring import (
     _country_to_region,
@@ -25,7 +23,6 @@ from app.services.buyplan_scoring import (
     score_offer,
 )
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _parse_lead_time_days
@@ -294,15 +291,19 @@ class TestAssignBuyer:
     def test_vendor_ownership_priority(self, db_session):
         """Buyer who entered the offer gets priority assignment."""
         buyer = User(
-            email="buyer@test.com", name="Buyer", role="buyer",
-            azure_id="az-buyer-1", is_active=True,
+            email="buyer@test.com",
+            name="Buyer",
+            role="buyer",
+            azure_id="az-buyer-1",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(buyer)
         db_session.flush()
 
         req = Requisition(
-            name="Test", status="active",
+            name="Test",
+            status="active",
             created_by=buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -311,8 +312,10 @@ class TestAssignBuyer:
 
         offer = Offer(
             requisition_id=req.id,
-            vendor_name="Arrow", mpn="TEST",
-            unit_price=10.0, status="active",
+            vendor_name="Arrow",
+            mpn="TEST",
+            unit_price=10.0,
+            status="active",
             entered_by_id=buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -326,15 +329,19 @@ class TestAssignBuyer:
     def test_no_buyers_available(self, db_session):
         """When no active buyers exist, returns (None, 'no_buyers')."""
         user = User(
-            email="sales@test.com", name="Sales", role="sales",
-            azure_id="az-sales-1", is_active=True,
+            email="sales@test.com",
+            name="Sales",
+            role="sales",
+            azure_id="az-sales-1",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(user)
         db_session.flush()
 
         req = Requisition(
-            name="Test", status="active",
+            name="Test",
+            status="active",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -343,8 +350,10 @@ class TestAssignBuyer:
 
         offer = Offer(
             requisition_id=req.id,
-            vendor_name="Arrow", mpn="TEST",
-            unit_price=10.0, status="active",
+            vendor_name="Arrow",
+            mpn="TEST",
+            unit_price=10.0,
+            status="active",
             entered_by_id=None,  # No entered_by
             created_at=datetime.now(timezone.utc),
         )
@@ -358,20 +367,27 @@ class TestAssignBuyer:
     def test_workload_assignment(self, db_session):
         """When no ownership/commodity/geography match, assigns by workload."""
         buyer1 = User(
-            email="buyer1@test.com", name="Buyer1", role="buyer",
-            azure_id="az-buyer-wl-1", is_active=True,
+            email="buyer1@test.com",
+            name="Buyer1",
+            role="buyer",
+            azure_id="az-buyer-wl-1",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         buyer2 = User(
-            email="buyer2@test.com", name="Buyer2", role="buyer",
-            azure_id="az-buyer-wl-2", is_active=True,
+            email="buyer2@test.com",
+            name="Buyer2",
+            role="buyer",
+            azure_id="az-buyer-wl-2",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add_all([buyer1, buyer2])
         db_session.flush()
 
         req = Requisition(
-            name="Test", status="active",
+            name="Test",
+            status="active",
             created_by=buyer1.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -380,8 +396,10 @@ class TestAssignBuyer:
 
         offer = Offer(
             requisition_id=req.id,
-            vendor_name="NewVendor", mpn="TEST",
-            unit_price=10.0, status="active",
+            vendor_name="NewVendor",
+            mpn="TEST",
+            unit_price=10.0,
+            status="active",
             entered_by_id=None,
             created_at=datetime.now(timezone.utc),
         )
@@ -395,20 +413,27 @@ class TestAssignBuyer:
     def test_entered_by_inactive_falls_through(self, db_session):
         """Inactive entered_by buyer falls through to other priorities."""
         inactive_buyer = User(
-            email="inactive@test.com", name="Inactive", role="buyer",
-            azure_id="az-inactive-1", is_active=False,
+            email="inactive@test.com",
+            name="Inactive",
+            role="buyer",
+            azure_id="az-inactive-1",
+            is_active=False,
             created_at=datetime.now(timezone.utc),
         )
         active_buyer = User(
-            email="active@test.com", name="Active", role="buyer",
-            azure_id="az-active-1", is_active=True,
+            email="active@test.com",
+            name="Active",
+            role="buyer",
+            azure_id="az-active-1",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add_all([inactive_buyer, active_buyer])
         db_session.flush()
 
         req = Requisition(
-            name="Test", status="active",
+            name="Test",
+            status="active",
             created_by=inactive_buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -417,8 +442,10 @@ class TestAssignBuyer:
 
         offer = Offer(
             requisition_id=req.id,
-            vendor_name="Test", mpn="TEST",
-            unit_price=10.0, status="active",
+            vendor_name="Test",
+            mpn="TEST",
+            unit_price=10.0,
+            status="active",
             entered_by_id=inactive_buyer.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -432,20 +459,27 @@ class TestAssignBuyer:
     def test_entered_by_sales_role_falls_through(self, db_session):
         """entered_by user with 'sales' role (not buyer/trader) falls through."""
         sales_user = User(
-            email="sales2@test.com", name="Sales", role="sales",
-            azure_id="az-sales-2", is_active=True,
+            email="sales2@test.com",
+            name="Sales",
+            role="sales",
+            azure_id="az-sales-2",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         buyer = User(
-            email="buyer3@test.com", name="Buyer", role="trader",
-            azure_id="az-trader-1", is_active=True,
+            email="buyer3@test.com",
+            name="Buyer",
+            role="trader",
+            azure_id="az-trader-1",
+            is_active=True,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add_all([sales_user, buyer])
         db_session.flush()
 
         req = Requisition(
-            name="Test", status="active",
+            name="Test",
+            status="active",
             created_by=sales_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -454,8 +488,10 @@ class TestAssignBuyer:
 
         offer = Offer(
             requisition_id=req.id,
-            vendor_name="Test", mpn="TEST",
-            unit_price=10.0, status="active",
+            vendor_name="Test",
+            mpn="TEST",
+            unit_price=10.0,
+            status="active",
             entered_by_id=sales_user.id,  # Sales, not buyer/trader
             created_at=datetime.now(timezone.utc),
         )
@@ -476,6 +512,7 @@ class TestGetRoutingMaps:
     def test_loads_maps_or_uses_fallback(self):
         """_get_routing_maps returns a dict, either from file or defaults."""
         import app.services.buyplan_scoring as bps
+
         bps._ROUTING_MAPS = None  # Reset cache
         maps = bps._get_routing_maps()
         assert isinstance(maps, dict)
@@ -484,6 +521,7 @@ class TestGetRoutingMaps:
     def test_fallback_when_no_file(self):
         """When routing_maps.json doesn't exist, returns empty defaults."""
         import app.services.buyplan_scoring as bps
+
         bps._ROUTING_MAPS = None
 
         with patch("pathlib.Path.exists", return_value=False):

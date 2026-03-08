@@ -127,9 +127,7 @@ def _map_category_to_commodity(category: str) -> str | None:
     return None
 
 
-def classify_material_card(
-    normalized_mpn: str, manufacturer: str | None, category: str | None
-) -> dict:
+def classify_material_card(normalized_mpn: str, manufacturer: str | None, category: str | None) -> dict:
     """Waterfall classification: existing_data → prefix_lookup.
 
     Returns dict with 'brand' and 'commodity' keys, each either
@@ -169,11 +167,7 @@ def classify_material_card(
 def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
     """Find or create a brand Tag. Case-insensitive dedup via func.lower()."""
     normalized = manufacturer_name.strip()
-    tag = (
-        db.query(Tag)
-        .filter(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
-        .first()
-    )
+    tag = db.query(Tag).filter(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand").first()
     if tag:
         return tag
 
@@ -185,11 +179,7 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
 
 def get_or_create_commodity_tag(commodity_name: str, db: Session) -> Tag | None:
     """Find a commodity Tag by name. Commodity tags are pre-seeded; don't create new ones."""
-    return (
-        db.query(Tag)
-        .filter(func.lower(Tag.name) == commodity_name.lower(), Tag.tag_type == "commodity")
-        .first()
-    )
+    return db.query(Tag).filter(func.lower(Tag.name) == commodity_name.lower(), Tag.tag_type == "commodity").first()
 
 
 def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> list[MaterialTag]:
@@ -206,11 +196,7 @@ def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> l
         confidence = tag_data["confidence"]
         source = tag_data["source"]
 
-        existing = (
-            db.query(MaterialTag)
-            .filter_by(material_card_id=material_card_id, tag_id=tag_id)
-            .first()
-        )
+        existing = db.query(MaterialTag).filter_by(material_card_id=material_card_id, tag_id=tag_id).first()
         if existing:
             if confidence > existing.confidence:
                 existing.confidence = confidence
@@ -239,29 +225,20 @@ def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> l
     return created
 
 
-def recalculate_entity_tag_visibility(
-    entity_type: str, entity_id: int, db: Session
-) -> None:
+def recalculate_entity_tag_visibility(entity_type: str, entity_id: int, db: Session) -> None:
     """Two-gate visibility: Gate 1 (min_count) AND Gate 2 (min_percentage).
 
     Loads all EntityTags for the entity, computes total interactions,
     then sets is_visible based on thresholds from TagThresholdConfig.
     """
-    entity_tags = (
-        db.query(EntityTag)
-        .filter_by(entity_type=entity_type, entity_id=entity_id)
-        .all()
-    )
+    entity_tags = db.query(EntityTag).filter_by(entity_type=entity_type, entity_id=entity_id).all()
     if not entity_tags:
         return
 
     total = sum(et.interaction_count for et in entity_tags)
 
     # Load thresholds for this entity type
-    thresholds = {
-        cfg.tag_type: cfg
-        for cfg in db.query(TagThresholdConfig).filter_by(entity_type=entity_type).all()
-    }
+    thresholds = {cfg.tag_type: cfg for cfg in db.query(TagThresholdConfig).filter_by(entity_type=entity_type).all()}
 
     for et in entity_tags:
         et.total_entity_interactions = total
@@ -286,21 +263,14 @@ def propagate_tags_to_entity(
 ) -> None:
     """Propagate MaterialTags (confidence >= 0.90) for a part to an entity. Upsert EntityTag counts."""
     material_tags = (
-        db.query(MaterialTag)
-        .filter_by(material_card_id=material_card_id)
-        .filter(MaterialTag.confidence >= 0.90)
-        .all()
+        db.query(MaterialTag).filter_by(material_card_id=material_card_id).filter(MaterialTag.confidence >= 0.90).all()
     )
     if not material_tags:
         return
 
     now = datetime.now(timezone.utc)
     for mt in material_tags:
-        existing = (
-            db.query(EntityTag)
-            .filter_by(entity_type=entity_type, entity_id=entity_id, tag_id=mt.tag_id)
-            .first()
-        )
+        existing = db.query(EntityTag).filter_by(entity_type=entity_type, entity_id=entity_id, tag_id=mt.tag_id).first()
         if existing:
             existing.interaction_count += weight
             existing.last_seen_at = now

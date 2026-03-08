@@ -313,9 +313,7 @@ async def promote_prospect_contact(
         # Dedup: check if contact with same email already exists on this vendor
         existing = None
         if pc.email:
-            existing = db.query(VendorContact).filter_by(
-                vendor_card_id=pc.vendor_card_id, email=pc.email
-            ).first()
+            existing = db.query(VendorContact).filter_by(vendor_card_id=pc.vendor_card_id, email=pc.email).first()
         if existing:
             # Update existing contact with any new data
             if pc.full_name and not existing.full_name:
@@ -345,9 +343,7 @@ async def promote_prospect_contact(
         # Dedup: check if contact with same email already exists on this site
         existing = None
         if pc.email:
-            existing = db.query(SiteContact).filter_by(
-                customer_site_id=pc.customer_site_id, email=pc.email
-            ).first()
+            existing = db.query(SiteContact).filter_by(customer_site_id=pc.customer_site_id, email=pc.email).first()
         if existing:
             if pc.full_name and not existing.full_name:
                 existing.full_name = pc.full_name
