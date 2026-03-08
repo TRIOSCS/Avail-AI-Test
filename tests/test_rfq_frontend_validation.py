@@ -293,3 +293,48 @@ class TestFunctionCrossRefs:
 
     def test_renderReqList_calls_renderPriorityLanes(self, app_js):
         assert "_renderPriorityLanes" in app_js
+
+
+# ── Tasks Sidebar Right-Side Widget ─────────────────────────────────────
+
+class TestTasksSidebarRight:
+    """Verify Tasks sidebar is positioned on the right with correct behavior."""
+
+    def test_sidebar_html_right_side(self, index_html):
+        """Tasks sidebar widget exists in HTML."""
+        assert 'id="myTasksSidebar"' in index_html
+        assert 'id="myTasksPanel"' in index_html
+        assert 'id="myTasksList"' in index_html
+
+    def test_sidebar_css_right_positioned(self, styles_css):
+        """Tasks sidebar is fixed to the right."""
+        assert "right: 0" in styles_css or "right:0" in styles_css
+        # Panel slides from right (translateX(100%))
+        assert "translateX(100%)" in styles_css
+
+    def test_sidebar_css_matches_nav_aesthetic(self, styles_css):
+        """Tasks sidebar uses same background and border as nav sidebar."""
+        # Both use #e8eaed background
+        assert styles_css.count("#e8eaed") >= 2  # toggle + panel
+        # Both use var(--blue) border
+        assert "border-left: 1px solid var(--blue)" in styles_css or "border-left:1px solid var(--blue)" in styles_css
+
+    def test_sidebar_body_class_for_page_react(self, styles_css):
+        """Body class tasks-open triggers margin-right on main content."""
+        assert "body.tasks-open .main" in styles_css
+        assert "margin-right: 280px" in styles_css or "margin-right:280px" in styles_css
+
+    def test_sidebar_default_open_js(self, app_js):
+        """Sidebar opens by default on page load (localStorage preference)."""
+        assert "sidebar.classList.add('open')" in app_js
+        assert "document.body.classList.add('tasks-open')" in app_js
+        assert "localStorage" in app_js
+
+    def test_sidebar_toggle_saves_preference(self, app_js):
+        """Toggle function saves open/close preference."""
+        assert "localStorage.setItem('myTasksOpen'" in app_js
+
+    def test_sidebar_loading_resilience(self, app_js):
+        """loadMyTasks uses Promise.allSettled for resilience."""
+        assert "Promise.allSettled" in app_js
+        assert "Array.isArray(tasksRes.value)" in app_js

@@ -246,20 +246,18 @@
     </div>
 </aside>
 
-<!-- My Tasks Sidebar Widget -->
+<!-- My Tasks Sidebar Widget (right side, open by default) -->
 <div id="myTasksSidebar" class="my-tasks-sidebar">
     <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
-        <span style="font-size:14px">&#9776;</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
         <span id="myTasksBadge" class="my-tasks-badge" style="display:none">0</span>
     </button>
     <div class="my-tasks-panel" id="myTasksPanel">
         <div class="my-tasks-header">
-            <span style="font-weight:700;font-size:13px">My Tasks</span>
-            <button class="btn btn-ghost btn-sm" onclick="toggleMyTasksSidebar()" style="font-size:14px">&times;</button>
+            <span>My Tasks</span>
+            <button class="btn btn-ghost btn-sm" onclick="toggleMyTasksSidebar()" style="font-size:16px;color:var(--muted)">&times;</button>
         </div>
-        <div id="myTasksList" class="my-tasks-list">
-            <span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>
-        </div>
+        <div id="myTasksList" class="my-tasks-list"></div>
     </div>
 </div>
 

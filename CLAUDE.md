@@ -42,6 +42,14 @@ AvailAI is an electronic component sourcing engine. It searches multiple supplie
 - WARN before any destructive operation (DROP, DELETE, production changes). Include backup and rollback steps.
 - Flag security issues, missing error handling, N+1 queries, missing indexes.
 
+## DEPLOY RULE
+
+When changes are ready to test, always provide a **single copy-paste command block** for Termius that does everything needed to get it live. No separate steps, no explanation needed. Example:
+```bash
+cd /root/availai && git pull origin main && docker compose up -d --build && echo "Done — hard refresh browser"
+```
+Always merge into main and push before giving the deploy command. The user should never need more than one paste to go live.
+
 ## SESSION RULES
 
 - End sessions with: what changed, git commands, what to test, any tech debt.
