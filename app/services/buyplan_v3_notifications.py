@@ -372,42 +372,6 @@ async def notify_v3_so_rejected(plan: BuyPlanV3, db: Session, action: str):
     db.commit()
 
 
-async def notify_v3_issue_flagged(plan: BuyPlanV3, db: Session, line_id: int, issue_type: str):
-    """Notify managers when a buyer flags an issue on a line."""
-    from ..models.buy_plan import BuyPlanLine
-
-    line = db.get(BuyPlanLine, line_id)
-    mpn = line.offer.mpn if line and line.offer else "—"
-
-    managers = db.query(User).filter(User.role.in_(["manager", "admin"])).all()
-    if not managers:
-        managers = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-
-    issue_labels = {
-        "sold_out": "Sold Out",
-        "price_changed": "Price Changed",
-        "lead_time_changed": "Lead Time Changed",
-        "other": "Other",
-    }
-    label = issue_labels.get(issue_type, issue_type)
-
-    for m in managers:
-        db.add(
-            ActivityLog(
-                user_id=m.id,
-                activity_type="buyplan_pending",
-                channel="system",
-                requisition_id=plan.requisition_id,
-                subject=f"Issue on plan #{plan.id}: {mpn} — {label}",
-            )
-        )
-    db.commit()
-
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} — Issue Flagged**\n\nMPN: {mpn} | Issue: {label}\nAction may be required."
-    )
-
-
 async def notify_v3_po_confirmed(plan: BuyPlanV3, db: Session, line_id: int):
     """Notify ops verification group that a PO was confirmed and needs verification."""
     from ..models.buy_plan import BuyPlanLine, VerificationGroupMember

@@ -668,19 +668,6 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
     except Exception as e:
         logger.error(f"Failed to send warning email to {owner.email} for {company.name}: {e}")
 
-    # Teams channel alert (fire-and-forget)
-    try:
-        from app.services.teams import send_ownership_warning
-
-        await send_ownership_warning(
-            company_id=company.id,
-            company_name=company.name,
-            owner_name=owner.name or owner.email,
-            days_remaining=days_remaining,
-        )
-    except Exception as e:
-        logger.debug(f"Teams ownership warning skipped for {company.name}: {e}")
-
 
 async def send_manager_digest_email(db: Session):
     """Send the weekly manager digest email to all admins."""

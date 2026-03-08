@@ -55,7 +55,9 @@ def _notify_admins(db: Session, event_type: str, title: str, body: str | None = 
             logger.warning("Failed to notify admin {}: {}", admin.email, e)
 
 
-def _check_status_transition(source: ApiSource, old_status: str, new_status: str, db: Session, error_msg: str | None = None):
+def _check_status_transition(
+    source: ApiSource, old_status: str, new_status: str, db: Session, error_msg: str | None = None
+):
     """Fire notification when a source transitions from live to error."""
     if old_status == "live" and new_status == "error":
         _notify_admins(
@@ -64,18 +66,6 @@ def _check_status_transition(source: ApiSource, old_status: str, new_status: str
             title=f"API down: {source.display_name or source.name}",
             body=f"{source.display_name or source.name} changed from live → error. Last error: {error_msg or 'unknown'}",
         )
-        # Teams notification for connector down
-        import asyncio
-
-        from app.services.teams import send_connector_down_alert
-
-        try:
-            asyncio.create_task(send_connector_down_alert(
-                source_name=source.display_name or source.name,
-                error_msg=error_msg or "Unknown error",
-            ))
-        except RuntimeError:
-            pass  # No event loop — skip Teams alert
         logger.warning("Source {} transitioned live → error, admin notification sent", source.name)
 
 

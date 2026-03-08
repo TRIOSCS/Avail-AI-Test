@@ -1,17 +1,11 @@
 """Teams notification service — channel posting via Graph API with Redis rate limiting.
 
 Posts Adaptive Cards to configured Teams channels for critical AVAIL events:
-1. HOT REQUIREMENT — target value > configurable threshold ($10k default)
-2. COMPETITIVE QUOTE — vendor quotes >20% below current best price
-3. OWNERSHIP EXPIRING — customer ownership expires in 7 days (day-23/83)
-4. STOCK LIST GOLD — auto-imported stock list matches open requirements
-5. BUY PLAN lifecycle (submit/approve/reject/complete/cancel)
-6. TROUBLE TICKET opened/resolved
-7. CONNECTOR DOWN — health monitor detects API failure
-8. PRICE DROP — sighting price drops >15% from last known
-9. PIPELINE MILESTONE — requisition won/lost
-10. BUY PLAN ESCALATION — approval pending >8h
-11. WEEKLY DIGEST — Monday 8am summary
+1. COMPETITIVE QUOTE — vendor quotes >20% below current best price
+2. STOCK LIST GOLD — auto-imported stock list matches open requirements
+3. BUY PLAN lifecycle (submit/approve/reject/complete/cancel)
+4. BUY PLAN ESCALATION — approval pending >8h
+5. WEEKLY DIGEST — Monday 8am summary
 
 Business Rules:
 - Rate limited via Redis (1h TTL, fallback to in-memory if Redis unavailable)
@@ -20,8 +14,7 @@ Business Rules:
 - Graceful degradation: if Teams not configured or API fails, returns False
 - All posts logged to teams_notification_log table
 
-Called by: scheduler.py, ownership_service.py, requisitions.py, crm.py, health_monitor.py,
-          buyplan_notifications.py, buyplan_v3_notifications.py, trouble_ticket_service.py
+Called by: scheduler.py, crm.py, buyplan_notifications.py, buyplan_v3_notifications.py
 Depends on: utils/graph_client.py, config.py, cache/intel_cache.py (Redis pattern)
 """
 
@@ -36,21 +29,14 @@ _REDIS_PREFIX = "teams_rl:"
 
 # Event type → channel config key mapping
 EVENT_CHANNEL_MAP = {
-    "hot_requirement": "teams_channel_hot",
     "competitive_quote": "teams_channel_quotes",
     "stock_match": "teams_channel_inventory",
-    "ownership_expiring": "teams_channel_ownership",
     "buyplan_submitted": "teams_channel_buyplan",
     "buyplan_approved": "teams_channel_buyplan",
     "buyplan_rejected": "teams_channel_buyplan",
     "buyplan_completed": "teams_channel_buyplan",
     "buyplan_cancelled": "teams_channel_buyplan",
     "buyplan_escalation": "teams_channel_buyplan",
-    "trouble_ticket_opened": "teams_channel_ops",
-    "trouble_ticket_resolved": "teams_channel_ops",
-    "connector_down": "teams_channel_ops",
-    "price_drop": "teams_channel_inventory",
-    "pipeline_milestone": "teams_channel_hot",
     "weekly_digest": "teams_channel_hot",
 }
 
@@ -354,6 +340,7 @@ def _intelligence_gate(event_type: str, entity_id, context: dict | None = None) 
     """
     try:
         from app.services.notify_intelligence import evaluate_channel_alert, is_intelligence_enabled
+
         if not is_intelligence_enabled():
             return not _is_rate_limited(event_type, entity_id)
 
@@ -365,66 +352,6 @@ def _intelligence_gate(event_type: str, entity_id, context: dict | None = None) 
     except Exception:
         # Fire-and-forget: fall through to legacy rate limiting
         return not _is_rate_limited(event_type, entity_id)
-
-
-async def send_hot_requirement_alert(
-    requirement_id: int,
-    mpn: str,
-    target_qty: int,
-    target_price: float,
-    customer_name: str,
-    requisition_id: int,
-    token: str | None = None,
-    owner_email: str = "",
-    owner_name: str = "",
-) -> bool:
-    """Post alert for a high-value new requirement.
-
-    Triggered when target_qty * target_price > threshold (default $10,000).
-    Optionally @mentions the buyer who owns the customer.
-    """
-    channel_id, team_id, enabled = _get_channel_for_event("hot_requirement")
-    if not enabled:
-        return False
-    total_value = target_qty * target_price
-    if not _intelligence_gate("hot_requirement", requirement_id, {"total_value": total_value}):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-    mentions = []
-    subtitle = f"High-value requirement: {mpn} (${total_value:,.0f})"
-    if owner_email and owner_name:
-        mention_text, mention_entity = _build_mention(owner_email, owner_name)
-        subtitle = f"{mention_text} — {subtitle}"
-        mentions.append(mention_entity)
-
-    card = _make_card(
-        title="HOT REQUIREMENT",
-        subtitle=subtitle,
-        facts=[
-            {"title": "MPN", "value": mpn},
-            {"title": "Quantity", "value": f"{target_qty:,}"},
-            {"title": "Target Price", "value": f"${target_price:,.4f}"},
-            {"title": "Total Value", "value": f"${total_value:,.0f}"},
-            {"title": "Customer", "value": customer_name or "—"},
-        ],
-        action_url=_build_deep_link(f"#requisition/{requisition_id}"),
-        action_title="View Requirement",
-        accent_color="attention",
-    )
-    if mentions:
-        card["msteams"] = {"entities": mentions}
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="hot_requirement", entity_id=requirement_id, entity_name=mpn,
-    )
-    if ok:
-        _mark_posted("hot_requirement", requirement_id)
-    return ok
 
 
 async def send_competitive_quote_alert(
@@ -487,66 +414,16 @@ async def send_competitive_quote_alert(
         card["msteams"] = {"entities": mentions}
 
     ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="competitive_quote", entity_id=offer_id, entity_name=mpn,
+        team_id,
+        channel_id,
+        card,
+        token,
+        event_type="competitive_quote",
+        entity_id=offer_id,
+        entity_name=mpn,
     )
     if ok:
         _mark_posted("competitive_quote", offer_id)
-    return ok
-
-
-async def send_ownership_warning(
-    company_id: int,
-    company_name: str,
-    owner_name: str,
-    days_remaining: int,
-    token: str | None = None,
-    owner_email: str = "",
-) -> bool:
-    """Post alert when customer ownership is about to expire.
-
-    Optionally @mentions the current owner.
-    """
-    channel_id, team_id, enabled = _get_channel_for_event("ownership_expiring")
-    if not enabled:
-        return False
-    if not _intelligence_gate("ownership_expiring", company_id):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-
-    mentions = []
-    subtitle = f"{company_name} ownership expires in {days_remaining} days"
-    if owner_email:
-        mention_text, mention_entity = _build_mention(owner_email, owner_name)
-        subtitle = f"{mention_text} — {subtitle}"
-        mentions.append(mention_entity)
-
-    card = _make_card(
-        title="OWNERSHIP EXPIRING",
-        subtitle=subtitle,
-        facts=[
-            {"title": "Company", "value": company_name},
-            {"title": "Owner", "value": owner_name},
-            {"title": "Days Remaining", "value": str(days_remaining)},
-            {"title": "Action Needed", "value": "Log activity to retain ownership"},
-        ],
-        action_url=_build_deep_link(f"#company/{company_id}"),
-        action_title="View Company",
-        accent_color="warning",
-    )
-    if mentions:
-        card["msteams"] = {"entities": mentions}
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="ownership_expiring", entity_id=company_id, entity_name=company_name,
-    )
-    if ok:
-        _mark_posted("ownership_expiring", company_id)
     return ok
 
 
@@ -594,8 +471,13 @@ async def send_stock_match_alert(
     )
 
     ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="stock_match", entity_id=rate_key, entity_name=filename,
+        team_id,
+        channel_id,
+        card,
+        token,
+        event_type="stock_match",
+        entity_id=rate_key,
+        entity_name=filename,
     )
     if ok:
         _mark_posted("stock_match", rate_key)
@@ -673,8 +555,13 @@ async def send_buyplan_card(
     )
 
     ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type=event_type, entity_id=plan_id, entity_name=f"Buy Plan #{plan_id}",
+        team_id,
+        channel_id,
+        card,
+        token,
+        event_type=event_type,
+        entity_id=plan_id,
+        entity_name=f"Buy Plan #{plan_id}",
     )
     if ok:
         _mark_posted(event_type, plan_id)
@@ -691,7 +578,6 @@ async def send_buyplan_approval_card(
     token: str | None = None,
 ) -> bool:
     """Interactive buy plan approval card with Approve/Reject buttons."""
-    from app.config import settings
 
     actions = [
         {
@@ -727,187 +613,6 @@ async def send_buyplan_approval_card(
         mention_emails=admin_emails,
         token=token,
     )
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  NEW EVENT SENDERS (Phase 5)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-async def send_trouble_ticket_alert(
-    ticket_id: int,
-    ticket_number: str,
-    category: str,
-    severity: str,
-    description: str,
-    resolved: bool = False,
-    token: str | None = None,
-) -> bool:
-    """Post alert when a trouble ticket is opened or resolved."""
-    event_type = "trouble_ticket_resolved" if resolved else "trouble_ticket_opened"
-    channel_id, team_id, enabled = _get_channel_for_event(event_type)
-    if not enabled:
-        return False
-    if not _intelligence_gate(event_type, ticket_id):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-
-    title = "TICKET RESOLVED" if resolved else "TROUBLE TICKET OPENED"
-    accent = "good" if resolved else "warning"
-
-    card = _make_card(
-        title=title,
-        subtitle=f"{ticket_number}: {description[:100]}",
-        facts=[
-            {"title": "Ticket", "value": ticket_number},
-            {"title": "Category", "value": category},
-            {"title": "Severity", "value": severity},
-            {"title": "Status", "value": "Resolved" if resolved else "Open"},
-        ],
-        action_url=_build_deep_link(f"#tickets/{ticket_id}"),
-        action_title="View Ticket",
-        accent_color=accent,
-    )
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type=event_type, entity_id=ticket_id, entity_name=ticket_number,
-    )
-    if ok:
-        _mark_posted(event_type, ticket_id)
-    return ok
-
-
-async def send_connector_down_alert(
-    source_name: str,
-    error_msg: str,
-    token: str | None = None,
-) -> bool:
-    """Post alert when health monitor detects a connector API failure."""
-    channel_id, team_id, enabled = _get_channel_for_event("connector_down")
-    if not enabled:
-        return False
-    if not _intelligence_gate("connector_down", source_name):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-
-    card = _make_card(
-        title="CONNECTOR DOWN",
-        subtitle=f"{source_name} API is not responding",
-        facts=[
-            {"title": "Connector", "value": source_name},
-            {"title": "Error", "value": error_msg[:200]},
-            {"title": "Action", "value": "Check API credentials and status"},
-        ],
-        action_url=_build_deep_link("#admin/api-health"),
-        action_title="View API Health",
-        accent_color="attention",
-    )
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="connector_down", entity_id=source_name, entity_name=source_name,
-    )
-    if ok:
-        _mark_posted("connector_down", source_name)
-    return ok
-
-
-async def send_price_drop_alert(
-    mpn: str,
-    vendor_name: str,
-    old_price: float,
-    new_price: float,
-    drop_pct: float,
-    requisition_id: int = 0,
-    token: str | None = None,
-) -> bool:
-    """Post alert when a sighting price drops >15% from last known."""
-    channel_id, team_id, enabled = _get_channel_for_event("price_drop")
-    if not enabled:
-        return False
-    rate_key = f"{mpn}:{vendor_name}"
-    if not _intelligence_gate("price_drop", rate_key):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-
-    card = _make_card(
-        title="PRICE DROP ALERT",
-        subtitle=f"{mpn} dropped {drop_pct:.0f}% at {vendor_name}",
-        facts=[
-            {"title": "MPN", "value": mpn},
-            {"title": "Vendor", "value": vendor_name},
-            {"title": "Old Price", "value": f"${old_price:,.4f}"},
-            {"title": "New Price", "value": f"${new_price:,.4f}"},
-            {"title": "Drop", "value": f"{drop_pct:.1f}%"},
-        ],
-        action_url=_build_deep_link(f"#requisition/{requisition_id}") if requisition_id else _build_deep_link("#"),
-        action_title="View Details",
-        accent_color="good",
-    )
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="price_drop", entity_id=rate_key, entity_name=mpn,
-    )
-    if ok:
-        _mark_posted("price_drop", rate_key)
-    return ok
-
-
-async def send_pipeline_milestone_alert(
-    requisition_id: int,
-    status: str,
-    customer_name: str,
-    total_value: float,
-    token: str | None = None,
-) -> bool:
-    """Post alert when a requisition moves to won or lost."""
-    channel_id, team_id, enabled = _get_channel_for_event("pipeline_milestone")
-    if not enabled:
-        return False
-    if not _intelligence_gate("pipeline_milestone", requisition_id, {"status": status}):
-        return False
-
-    if not token:
-        token = await _get_system_token()
-        if not token:
-            return False
-
-    is_won = status.lower() == "won"
-    card = _make_card(
-        title=f"DEAL {'WON' if is_won else 'LOST'}",
-        subtitle=f"Requisition #{requisition_id} — {customer_name}",
-        facts=[
-            {"title": "Requisition", "value": f"#{requisition_id}"},
-            {"title": "Customer", "value": customer_name or "—"},
-            {"title": "Status", "value": status.upper()},
-            {"title": "Value", "value": f"${total_value:,.0f}"},
-        ],
-        action_url=_build_deep_link(f"#requisition/{requisition_id}"),
-        action_title="View Requisition",
-        accent_color="good" if is_won else "attention",
-    )
-
-    ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="pipeline_milestone", entity_id=requisition_id, entity_name=customer_name,
-    )
-    if ok:
-        _mark_posted("pipeline_milestone", requisition_id)
-    return ok
 
 
 async def send_buyplan_escalation_alert(
@@ -972,8 +677,13 @@ async def send_weekly_digest(
     )
 
     ok = await post_to_channel(
-        team_id, channel_id, card, token,
-        event_type="weekly_digest", entity_id="weekly", entity_name="Weekly Digest",
+        team_id,
+        channel_id,
+        card,
+        token,
+        event_type="weekly_digest",
+        entity_id="weekly",
+        entity_name="Weekly Digest",
     )
     return ok
 
@@ -998,14 +708,16 @@ def _log_notification(
 
         db = SessionLocal()
         try:
-            db.add(TeamsNotificationLog(
-                event_type=event_type,
-                entity_id=str(entity_id),
-                entity_name=str(entity_name)[:200],
-                channel_id=channel_id,
-                success=success,
-                error_msg=error_msg[:500] if error_msg else None,
-            ))
+            db.add(
+                TeamsNotificationLog(
+                    event_type=event_type,
+                    entity_id=str(entity_id),
+                    entity_name=str(entity_name)[:200],
+                    channel_id=channel_id,
+                    success=success,
+                    error_msg=error_msg[:500] if error_msg else None,
+                )
+            )
             db.commit()
         finally:
             db.close()
@@ -1049,12 +761,7 @@ def get_notification_log(limit: int = 50) -> list[dict]:
 
         db = SessionLocal()
         try:
-            rows = (
-                db.query(TeamsNotificationLog)
-                .order_by(TeamsNotificationLog.created_at.desc())
-                .limit(limit)
-                .all()
-            )
+            rows = db.query(TeamsNotificationLog).order_by(TeamsNotificationLog.created_at.desc()).limit(limit).all()
             return [
                 {
                     "id": r.id,

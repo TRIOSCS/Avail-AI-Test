@@ -11,12 +11,9 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from app.models.auth import User
 from app.models.teams_alert_config import TeamsAlertConfig
 from app.services import teams_alert_service
-
 
 # ── send_alert tests ────────────────────────────────────────────────
 
@@ -180,7 +177,9 @@ def test_config_crud(client, db_session, test_user):
     assert resp.json()["configured"] is False
 
     # PUT — create
-    resp = client.put("/api/teams-alerts/config", json={"teams_webhook_url": "https://hook.test/abc", "alerts_enabled": True})
+    resp = client.put(
+        "/api/teams-alerts/config", json={"teams_webhook_url": "https://hook.test/abc", "alerts_enabled": True}
+    )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
@@ -200,9 +199,3 @@ def test_config_crud(client, db_session, test_user):
     assert resp.json()["configured"] is False
 
 
-def test_test_endpoint(client, db_session, test_user):
-    """Test alert endpoint returns success/failure."""
-    with patch("app.services.teams_alert_service.send_alert", new_callable=AsyncMock, return_value=False):
-        resp = client.post("/api/teams-alerts/test")
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is False

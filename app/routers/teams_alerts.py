@@ -59,10 +59,3 @@ async def delete_config(user: User = Depends(require_user), db: Session = Depend
     return {"ok": True}
 
 
-@router.post("/test")
-async def send_test_alert(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Send a test alert to the current user."""
-    from ..services.teams_alert_service import send_alert
-
-    ok = await send_alert(db, user.id, "AVAIL test alert — if you see this, alerts are working.", "test", str(user.id))
-    return {"ok": ok, "message": "Test alert sent" if ok else "Delivery failed — check Graph token or webhook URL"}

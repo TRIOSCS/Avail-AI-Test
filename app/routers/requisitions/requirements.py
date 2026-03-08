@@ -14,7 +14,7 @@ Depends on: models, schemas, search_service, file_utils, normalization utils
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
@@ -31,7 +31,6 @@ from ...models import (
     Requisition,
     Sighting,
     User,
-    VendorResponse,
 )
 from ...rate_limit import limiter
 from ...schemas.requisitions import (
@@ -242,33 +241,6 @@ async def add_requirements(
     if created:
         background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
         background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
-
-    # Teams: hot requirement alert
-    try:
-        from ...config import settings as cfg
-        from ...services.teams import send_hot_requirement_alert
-
-        for r in created:
-            price = float(r.target_price or 0)
-            qty = r.target_qty or 0
-            if qty * price >= cfg.teams_hot_threshold:
-                customer = (
-                    req.customer_site.company.name
-                    if req.customer_site and req.customer_site.company
-                    else (req.customer_name or "")
-                )
-                asyncio.create_task(
-                    send_hot_requirement_alert(
-                        requirement_id=r.id,
-                        mpn=r.primary_mpn,
-                        target_qty=qty,
-                        target_price=price,
-                        customer_name=customer,
-                        requisition_id=req_id,
-                    )
-                )
-    except (AttributeError, ValueError, RuntimeError):
-        logger.debug("Teams hot-requirement alert failed", exc_info=True)
 
     # Duplicate detection
     duplicates = []
@@ -635,7 +607,13 @@ async def get_saved_sightings(
     db: Session = Depends(get_db),
 ):
     """Return previously saved sightings from DB without triggering a new search."""
-    from . import _deduplicate_sightings, _enrich_with_vendor_cards, _get_material_history, _history_to_result, sighting_to_dict
+    from . import (
+        _deduplicate_sightings,
+        _enrich_with_vendor_cards,
+        _get_material_history,
+        _history_to_result,
+        sighting_to_dict,
+    )
 
     req = get_req_for_user(db, user, req_id)
     if not req:
@@ -644,7 +622,13 @@ async def get_saved_sightings(
     results: dict = {}
     req_ids = [r.id for r in req.requirements]
     all_sightings = (
-        (db.query(Sighting).filter(Sighting.requirement_id.in_(req_ids)).order_by(Sighting.created_at.desc()).limit(5000).all())
+        (
+            db.query(Sighting)
+            .filter(Sighting.requirement_id.in_(req_ids))
+            .order_by(Sighting.created_at.desc())
+            .limit(5000)
+            .all()
+        )
         if req_ids
         else []
     )

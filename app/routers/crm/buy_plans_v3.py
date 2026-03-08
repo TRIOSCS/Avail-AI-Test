@@ -61,7 +61,6 @@ from ...services.buy_plan_v3_service import (
 from ...services.buyplan_v3_notifications import (
     notify_v3_approved,
     notify_v3_completed,
-    notify_v3_issue_flagged,
     notify_v3_po_confirmed,
     notify_v3_rejected,
     notify_v3_so_rejected,
@@ -616,7 +615,6 @@ async def flag_issue_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
-    run_v3_notify_bg(notify_v3_issue_flagged, plan_id, line_id=line.id, issue_type=body.issue_type)
     return {"ok": True, "line_id": line.id, "status": line.status, "issue_type": line.issue_type}
 
 

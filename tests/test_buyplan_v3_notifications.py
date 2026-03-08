@@ -749,61 +749,6 @@ class TestNotifyV3SORejected:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# notify_v3_issue_flagged
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNotifyV3IssueFlagged:
-    @pytest.mark.asyncio
-    async def test_issue_flagged(self, db_session):
-        from app.services.buyplan_v3_notifications import notify_v3_issue_flagged
-
-        user = _make_user(db_session)
-        mgr = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id)
-        line = _add_line(db_session, plan)
-
-        with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-            await notify_v3_issue_flagged(plan, db_session, line.id, "sold_out")
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert len(activities) == 1
-        assert "Sold Out" in activities[0].subject
-
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Issue Flagged" in msg
-
-    @pytest.mark.asyncio
-    async def test_issue_flagged_unknown_type(self, db_session):
-        from app.services.buyplan_v3_notifications import notify_v3_issue_flagged
-
-        user = _make_user(db_session)
-        _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
-        plan = _make_plan(db_session, user.id)
-        line = _add_line(db_session, plan)
-
-        with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
-            await notify_v3_issue_flagged(plan, db_session, line.id, "custom_issue")
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-        assert "custom_issue" in activities[0].subject
-
-    @pytest.mark.asyncio
-    async def test_issue_flagged_fallback_admins(self, db_session):
-        from app.services.buyplan_v3_notifications import notify_v3_issue_flagged
-
-        user = _make_user(db_session)
-        # No managers
-        plan = _make_plan(db_session, user.id)
-        line = _add_line(db_session, plan)
-
-        with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
-            await notify_v3_issue_flagged(plan, db_session, line.id, "price_changed")
-        # No crash
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # notify_v3_po_confirmed
 # ═══════════════════════════════════════════════════════════════════════
 
