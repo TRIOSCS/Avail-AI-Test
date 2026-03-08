@@ -1613,6 +1613,14 @@ table tr.dl-row-warn>td{background:rgba(217,136,11,.06)}
 .effort-sig-fill.mid { background: var(--amber); }
 .effort-sig-fill.low { background: var(--red); }
 
+/* Drill-down summary dashboard */
+.dd-summary { display: flex; gap: 12px; padding: 8px 12px; margin-bottom: 6px; background: var(--bg2, rgba(0,0,0,.02)); border-radius: var(--radius-sm, 6px); align-items: center; flex-wrap: wrap; }
+.dd-stat { display: flex; flex-direction: column; align-items: center; min-width: 60px; }
+.dd-stat-val { font-size: 16px; font-weight: 700; line-height: 1.2; }
+.dd-stat-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.dd-stat-bar { width: 48px; height: 4px; background: var(--bg3, #e2e8f0); border-radius: 2px; overflow: hidden; margin-top: 2px; }
+.dd-stat-bar-fill { height: 100%; border-radius: 2px; }
+
 /* Drill-down sub-tabs */
 .dd-tabs { display: flex; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
 .dd-tab { background: none; border: none; padding: 5px 12px; font-size: 11px; font-weight: 600;

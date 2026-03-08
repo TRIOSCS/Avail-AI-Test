@@ -3188,6 +3188,39 @@ async function expandToSubTab(reqId, tabName) {
     _switchDdTab(reqId, tabName);
 }
 
+// ── Drill-down summary dashboard — at-a-glance stats per requisition ──
+// Shows key metrics (parts, sourced, offers, RFQs sent, quote status) above sub-tabs.
+// Called from _renderReqRow() and _openMobileDrillDown().
+function _renderDdSummary(reqId) {
+    const r = _reqListData.find(x => x.id === reqId);
+    if (!r) return '';
+    const total = r.requirement_count || 0;
+    const sourced = r.sourced_count || 0;
+    const offers = r.offer_count || 0;
+    const sent = r.rfq_sent_count || 0;
+    const respPct = sent > 0 ? Math.round(((r.reply_count || 0) / sent) * 100) : 0;
+    const srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+    const srcColor = srcPct >= 80 ? 'var(--green)' : srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
+
+    // Quote status badge
+    let qBadge = '<span style="color:var(--muted)">\u2014</span>';
+    const qs = r.quote_status;
+    if (qs === 'won') qBadge = '<span style="color:var(--green);font-weight:600">Won</span>';
+    else if (qs === 'lost') qBadge = '<span style="color:var(--red)">Lost</span>';
+    else if (qs === 'sent') qBadge = '<span style="color:var(--blue)">Sent</span>';
+    else if (qs === 'revised') qBadge = '<span style="color:var(--amber)">Revised</span>';
+    else if (qs === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
+
+    return `<div class="dd-summary">
+        <div class="dd-stat"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
+        <div class="dd-stat"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
+        <div class="dd-stat"><span class="dd-stat-val">${offers}</span><span class="dd-stat-label">Offers</span></div>
+        <div class="dd-stat"><span class="dd-stat-val">${sent}</span><span class="dd-stat-label">RFQs Sent</span></div>
+        <div class="dd-stat"><span class="dd-stat-val">${respPct}%</span><span class="dd-stat-label">Response</span></div>
+        <div class="dd-stat"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
+    </div>`;
+}
+
 function _renderDdTabPills(reqId) {
     const tabs = _ddSubTabs(_currentMainView);
     const active = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
@@ -5998,6 +6031,7 @@ function _openMobileDrillDown(reqId) {
                     </div>
                 </div>
             </div>
+            ${_renderDdSummary(reqId)}
             <div class="m-tabs-scroll" id="mobileDdTabs">${pillsHtml}</div>
             <div id="mobileDdPanel" style="padding:8px 12px">
                 <span style="font-size:12px;color:var(--muted)">Loading\u2026</span>
@@ -8234,6 +8268,7 @@ function _renderReqRow(r) {
         ${actions}
     </tr>
     <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
+        ${_renderDdSummary(r.id)}
         ${ddHeader}
         <div class="dd-tabs">${_renderDdTabPills(r.id)}</div>
         <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} part${total !== 1 ? 's' : ''} \u2014 click row or arrow to expand</span></div>
