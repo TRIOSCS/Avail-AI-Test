@@ -4462,6 +4462,7 @@ function _editTaskInline(reqId, task, cardEl) {
 // My Tasks Sidebar Widget
 // ---------------------------------------------------------------------------
 
+window.toggleMyTasksSidebar = toggleMyTasksSidebar;
 function toggleMyTasksSidebar() {
     var sidebar = document.getElementById('myTasksSidebar');
     if (!sidebar) return;
