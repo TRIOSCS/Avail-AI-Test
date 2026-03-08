@@ -1,76 +1,158 @@
-# RFQ Layout Redesign Plan
+# Task Board Feature Plan (Replacing Q&A Sub-Tab)
 
 ## Overview
-Four interconnected changes to simplify the RFQ workflow and reduce tab-switching.
+Replace the Q&A sub-tab with a **pipeline-style task board** per requisition, plus a
+**"My Tasks" sidebar widget** showing the logged-in buyer's tasks across all reqs.
+AI provides priority scoring and risk alerts.
 
-## Change 1: Merge Open + Sourcing into Unified View
-**What changes:**
-- Remove the separate "Open" and "Sourcing" pill buttons, replace with single "Active" pill
-- Combine sub-tabs from both views: `['parts', 'sightings', 'offers', 'activity', 'quotes', 'qa', 'files']`
-- Keep "Archive" as a separate view (it serves a different purpose)
-- Merge the column sets: use the RFQ (Open) table columns but add Sourcing Score + RFQs Sent + Resp %
-- The drill-down header gets both sets of action buttons (Search All, Log Offer, Add Part, Upload, Paste)
+## Pipeline Stages
+Requisitions progress through 4 stages:
+1. **New** — just received, no sourcing activity yet
+2. **Sourcing** — actively searching, sending RFQs, collecting offers
+3. **Quoted** — quote built and sent to customer, awaiting response
+4. **Won/Lost** — terminal: customer placed PO (Won) or declined (Lost)
 
-**Files:**
-- `app/static/app.js`: `_ddSubTabs()`, `_ddDefaultTab()`, `setMainView()`, `renderReqList()` thead, `_renderReqRow()`, `_renderDdTabPills()`
-- `app/templates/index.html`: Remove "Open"/"Sourcing" pills, replace with "Active"; update mobile pills too
-- `app/static/styles.css`: Minor adjustments
+Tasks are generated per stage. The board shows tasks grouped by the req's current
+pipeline stage.
 
-## Change 2: Split-Pane Parts + Offers
-**What changes:**
-- When the "parts" sub-tab is active, render a split-pane layout: parts table on the left, offers panel on the right
-- Use the existing `.split-panel` CSS classes (already defined in styles.css lines 2103-2106)
-- Left pane (40%): parts table (`_renderDrillDownTable`)
-- Right pane (60%): offers list (`_renderDdOffers`) — or placeholder "No offers yet" if empty
-- On mobile: stack vertically (already handled by existing CSS at line 2383)
-- Remove "offers" as a standalone sub-tab since it's now visible alongside parts
-- Updated sub-tabs become: `['parts', 'sightings', 'activity', 'quotes', 'qa', 'files']`
+## Data Model: `RequisitionTask`
 
-**Files:**
-- `app/static/app.js`: Modify `_renderDdTab()` for 'parts' case to render split pane, update `_ddSubTabs()` to remove standalone 'offers'
+New table `requisition_tasks`:
+- `id` (PK)
+- `requisition_id` (FK → requisitions, required)
+- `title` (String 255, required) — short task description
+- `description` (Text, nullable) — detail/notes
+- `task_type` (String 20) — `sourcing`, `sales`, `general`
+- `status` (String 20, default `todo`) — `todo`, `in_progress`, `done`
+- `priority` (Integer, default 2) — 1=low, 2=medium, 3=high
+- `ai_priority_score` (Float, nullable) — AI-computed urgency 0.0-1.0
+- `ai_risk_flag` (String 255, nullable) — AI risk alert text
+- `assigned_to_id` (FK → users, nullable)
+- `created_by` (FK → users, nullable)
+- `source` (String 20, default `manual`) — `manual` | `system` | `ai`
+- `source_ref` (String 100, nullable) — e.g. `offer:123`, `rfq:456`
+- `due_at` (DateTime, nullable)
+- `completed_at` (DateTime, nullable)
+- `created_at`, `updated_at` (timestamps)
 
-## Change 3: RFQ Send as Slide-In Panel (not modal)
-**What changes:**
-- Convert the `#rfqModal` modal into a slide-in panel that appears on the right side of the screen (like a drawer)
-- Give it a persistent class `.rfq-drawer` instead of `.modal-bg`
-- The drawer slides in from the right, stays open while users interact with the main list behind it
-- State is preserved if users click away (drawer just hides, doesn't reset)
-- Add a minimize/restore toggle so users can collapse it to a small bar
-- Keep all existing phases (prepare, ready, preview, results) — just change the container
+Indexes: `(requisition_id, status)`, `(assigned_to_id, status)`, `(status, due_at)`
 
-**Files:**
-- `app/templates/index.html`: Replace `#rfqModal .modal-bg` wrapper with `.rfq-drawer` panel
-- `app/static/styles.css`: Add `.rfq-drawer` styles (slide from right, width: 520px)
-- `app/static/app.js`: Update `ddSendBulkRfq()` to open drawer instead of modal, update close behavior
+## API Endpoints
 
-## Change 4: Summary Dashboard per Requisition
-**What changes:**
-- Add a summary stats bar at the top of each drill-down panel (above the sub-tabs)
-- Shows 4-5 key metrics as compact stat cards:
-  - Parts: X total
-  - Sourced: X/Y (with progress bar)
-  - Offers: X received
-  - RFQs: X sent, Y% response rate
-  - Quote: status badge (Draft/Sent/Won)
-- This replaces the need to click through tabs to understand req status at a glance
-- Rendered by a new `_renderDdSummary(reqId)` function
+### Per-requisition tasks: `/api/requisitions/{req_id}/tasks`
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/tasks` | List tasks (filter: status, type, assignee) |
+| POST | `/tasks` | Create task |
+| PUT | `/tasks/{id}` | Update task fields |
+| PATCH | `/tasks/{id}/status` | Quick status change (drag-drop / auto-close) |
+| DELETE | `/tasks/{id}` | Delete task |
 
-**Files:**
-- `app/static/app.js`: New `_renderDdSummary()` function, called from `toggleDrillDown()` and `_openMobileDrillDown()`
-- `app/static/styles.css`: `.dd-summary` stat card styles
+### Cross-req "My Tasks": `/api/tasks/mine`
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/mine` | All tasks assigned to current user, sorted by AI priority + due date |
+| GET | `/mine/summary` | Counts by status + overdue count (for sidebar badge) |
+
+## Auto-Generated Tasks (source='system')
+
+Triggered from existing service functions:
+1. **New requirement added** → "Source {mpn} — find vendors" (sourcing, priority 2)
+2. **New offer received** → "Review offer from {vendor} for {mpn}" (sourcing, priority 2)
+3. **RFQ sent** → "Awaiting response from {vendor}" (sourcing, priority 1, due +3 days)
+4. **No RFQ response after 3 days** → "Follow up RFQ to {vendor}" (sourcing, priority 3)
+5. **Quote created** → "Send quote to {customer}" (sales, priority 3)
+6. **Quote expiring in 2 days** → "Quote expires soon — follow up" (sales, priority 3)
+
+## Auto-Close Logic
+
+System marks tasks `done` + sets `completed_at` when:
+- "Review offer" → offer status changes from `pending_review`
+- "Source {mpn}" → at least one offer exists for that MPN
+- "Awaiting response" → vendor reply parsed
+- "Send quote" → quote status = `sent`
+- "Follow up RFQ" → vendor responds OR task manually closed
+
+## AI Features
+
+### Priority Scoring (runs on task list load or periodic refresh)
+- Computes `ai_priority_score` (0.0-1.0) based on:
+  - Due date proximity (higher = more urgent)
+  - Customer importance / deal size
+  - Time since last activity on the req
+  - Number of stale/unreviewed offers
+- Tasks sorted by this score in "My Tasks" sidebar
+
+### Risk Alerts (runs as background job)
+- Sets `ai_risk_flag` text on tasks when:
+  - "No activity in 3+ days" on active req
+  - "Quote expires tomorrow"
+  - "Offer price increasing vs last quote"
+  - "All RFQs unanswered — try different vendors"
+- Shown as warning badge on task card
+
+## Frontend
+
+### 1. Pipeline Board (replaces Q&A sub-tab)
+Sub-tab renamed: `qa` → `tasks`
+
+Layout: 4 pipeline columns matching req stages:
+```
+[New]          [Sourcing]       [Quoted]        [Won/Lost]
+│ Source MPN   │ Review offer   │ Follow up     │ ✓ PO received
+│ Find vendor  │ Follow up RFQ  │ Quote expires │
+│ + Add task   │ + Add task     │ + Add task    │
+```
+
+- Cards show: title, type badge (teal=sourcing, blue=sales, gray=general),
+  assignee initials, due date, priority dot (red/yellow/green), risk flag icon
+- System-generated cards have subtle "auto" label
+- Drag-and-drop between columns (HTML5 drag API)
+- "+" inline form at bottom of each column (no modal)
+- Click card → expand inline for editing
+- Filter bar: All | Sourcing | Sales | General
+
+### 2. My Tasks Sidebar Widget
+Collapsible sidebar on the left side of the main view:
+- Toggle button visible at all times (with badge count of pending tasks)
+- When expanded (250px wide): task list grouped by urgency
+  - Overdue (red header)
+  - Due Today (amber header)
+  - Upcoming (default)
+  - No due date
+- Each task card links to its requisition (click → drill-down opens)
+- Compact card: title + req name + due date + priority dot
+
+## Files to Create/Modify
+
+### New files:
+- `app/models/task.py` — RequisitionTask model
+- `app/schemas/task.py` — Pydantic request/response schemas
+- `app/services/task_service.py` — CRUD, auto-gen, auto-close, AI scoring
+- `app/routers/task.py` — API endpoints
+- `alembic/versions/065_requisition_tasks.py` — migration
+- `tests/test_task_service.py` — service tests
+- `tests/test_routers_task.py` — API endpoint tests
+
+### Modified files:
+- `app/models/__init__.py` — export RequisitionTask
+- `app/main.py` — register task router
+- `app/static/app.js` — pipeline board + My Tasks sidebar
+- `app/static/styles.css` — pipeline board + sidebar CSS
+- `app/templates/index.html` — sidebar HTML container + sub-tab label
+
+### Untouched:
+- Knowledge system (facts, AI insights, auto-capture) stays intact
+- Q&A JS functions remain in code but sub-tab no longer links to them
+- Knowledge API endpoints unchanged
 
 ## Implementation Order
-1. Summary dashboard (smallest, no breaking changes)
-2. Merge Open + Sourcing (medium, changes view model)
-3. Split-pane Parts + Offers (medium, changes drill-down rendering)
-4. RFQ drawer (largest, changes modal → panel)
-
-## Testing
-- Existing tests in `tests/test_routers_rfq.py` test backend endpoints — these are unaffected
-- Frontend changes are UI-only, no API contract changes
-- Manual testing checklist:
-  - Verify all sub-tabs load correctly in unified view
-  - Verify split-pane renders parts + offers side by side
-  - Verify RFQ drawer opens, stays open, and sends correctly
-  - Verify summary stats update when data changes
-  - Verify mobile layouts still work (stacked split-pane, mobile drill-down)
+1. Model + migration
+2. Schemas
+3. Service layer (CRUD + auto-gen + auto-close)
+4. API router + register
+5. Tests
+6. Frontend: pipeline board CSS + JS
+7. Frontend: My Tasks sidebar
+8. AI priority scoring + risk alerts
+9. Commit + push + deploy

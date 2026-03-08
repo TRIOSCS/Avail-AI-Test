@@ -43,6 +43,9 @@ from .notification import Notification  # noqa: F401
 # Knowledge Ledger
 from .knowledge import KnowledgeConfig, KnowledgeEntry  # noqa: F401
 
+# Task Board (pipeline tasks per requisition)
+from .task import RequisitionTask  # noqa: F401
+
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
