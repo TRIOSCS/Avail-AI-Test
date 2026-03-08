@@ -18,7 +18,7 @@
     {{ vite_css_tags }}
     <style>
         .rfq-table-container { overflow-x: auto; }
-        #rfqs table, #view-list table.tbl { table-layout: fixed; width: 100%; }
+        #rfqs table, #view-list table.tbl { table-layout: auto; width: 100%; }
         #rfqs table colgroup col.col-actions, #view-list table.tbl colgroup col.col-actions { width: 13%; }
         #rfqs table colgroup col.col-desc, #view-list table.tbl colgroup col.col-desc { width: 22%; }
         #rfqs table td.td-desc, #view-list table.tbl td.td-desc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0; }
@@ -54,20 +54,8 @@
         .qa-buyer-chip{font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid var(--border,#ddd);cursor:pointer;background:var(--bg2,#f5f5f5);transition:all .15s}
         .qa-buyer-chip:hover{border-color:var(--teal)}
         .qa-buyer-chip.selected{background:var(--teal,#0e7490);color:#fff;border-color:var(--teal)}
-        /* Priority Lanes */
-        .priority-lane{margin-bottom:4px}
-        .priority-lane-header{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;border-radius:6px;font-size:13px;font-weight:600}
-        .priority-lane-header:hover{filter:brightness(0.96)}
-        .priority-lane-header .lane-chevron{transition:transform .15s;font-size:10px}
-        .priority-lane-header .lane-chevron.open{transform:rotate(90deg)}
-        .priority-lane-header .lane-count{font-size:11px;font-weight:500;opacity:.7}
-        .priority-lane.lane-red .priority-lane-header{background:rgba(220,38,38,.08);color:#dc2626}
-        .priority-lane.lane-yellow .priority-lane-header{background:rgba(245,158,11,.08);color:#d97706}
-        .priority-lane.lane-green .priority-lane-header{background:rgba(16,185,129,.08);color:#059669}
-        .priority-lane.lane-gray .priority-lane-header{background:rgba(107,114,128,.06);color:#6b7280}
-        .priority-lane-body{display:none}
-        .priority-lane.open .priority-lane-body{display:block}
-        .priority-lane.open .lane-chevron{transform:rotate(90deg)}
+        /* Priority Lanes — simple table row separators */
+        tr[onclick*="togglePriorityLane"]:hover td{filter:brightness(0.95)}
         /* Notification bar */
         .notif-action-bar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(59,130,246,.06),rgba(16,185,129,.06));border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap}
         .notif-action-bar:empty{display:none}

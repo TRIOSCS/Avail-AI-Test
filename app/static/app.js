@@ -926,21 +926,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === _savedView));
     });
     await loadRequisitions();
-    // ── Onboarding welcome message for first-time users ──
-    if (!safeGet('onboardingDismissed')) {
+    // ── Onboarding — auto-dismiss old banner, show compact new-layout hint ──
+    // Force dismiss old onboarding for existing users seeing the redesign
+    safeSet('onboardingDismissed', '1');
+    if (!safeGet('v8LayoutSeen')) {
         const reqList = document.getElementById('reqList');
         if (reqList) {
-            const welcomeHtml = `<div id="onboardingBanner" style="margin:12px 0;padding:16px 20px;background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1px solid #93c5fd;border-radius:8px;position:relative">
-                <button onclick="this.parentElement.remove();safeSet('onboardingDismissed','1')" style="position:absolute;top:8px;right:12px;background:none;border:none;font-size:16px;color:#64748b;cursor:pointer" title="Dismiss">\u2715</button>
-                <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:8px">Welcome to AVAIL</div>
-                <div style="font-size:12px;color:#334155;line-height:1.6">
-                    <b>Sales</b> \u2014 Customer-focused: quotes, deadlines, dollar values. Track what needs action.<br>
-                    <b>Sourcing</b> \u2014 Part-focused: coverage, sightings, RFQs, vendor responses. Find and source parts.<br>
-                    <b>Archive</b> \u2014 Completed deals: won, lost, and closed<br>
-                    <span style="color:#64748b;margin-top:4px;display:inline-block">Click any row to expand \u00b7 Select sightings to send RFQs \u00b7 Parts are grouped by priority</span>
-                </div>
+            const hintHtml = `<div id="v8Hint" style="padding:8px 16px;background:#f0f9ff;border-bottom:1px solid #bfdbfe;font-size:12px;color:#1e40af;display:flex;align-items:center;gap:8px">
+                <span>New layout: <b>Sales</b> and <b>Sourcing</b> views show different columns. Reqs are grouped by priority.</span>
+                <button onclick="this.parentElement.remove();safeSet('v8LayoutSeen','1')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;margin-left:auto">\u2715</button>
             </div>`;
-            reqList.insertAdjacentHTML('afterbegin', welcomeHtml);
+            reqList.insertAdjacentHTML('afterbegin', hintHtml);
         }
     }
     // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
@@ -8754,21 +8750,20 @@ function _isDeadlineUrgent(r, now) {
 }
 
 function _renderPriorityLanes(lanes, viewMode) {
+    const colorMap = { red: '#dc2626', yellow: '#d97706', green: '#059669', gray: '#6b7280' };
+    const bgMap = { red: 'rgba(220,38,38,.06)', yellow: 'rgba(245,158,11,.06)', green: 'rgba(16,185,129,.06)', gray: 'rgba(107,114,128,.04)' };
     let html = '';
     for (const lane of lanes) {
         if (lane.items.length === 0) continue;
-        const isOpen = _laneCollapseState[lane.key] !== false; // default open
-        const openClass = isOpen ? ' open' : '';
+        const isOpen = _laneCollapseState[lane.key] !== false;
         const chevron = isOpen ? '\u25bc' : '\u25b6';
-        html += `<tr class="priority-lane-row"><td colspan="20" style="padding:0">
-            <div class="priority-lane lane-${lane.color}${openClass}" data-lane="${lane.key}">
-                <div class="priority-lane-header" onclick="togglePriorityLane('${lane.key}')">
-                    <span class="lane-chevron${openClass ? ' open' : ''}">${chevron}</span>
-                    <span>${lane.icon} ${lane.label}</span>
-                    <span class="lane-count">(${lane.items.length})</span>
-                </div>
-            </div>
-        </td></tr>`;
+        const color = colorMap[lane.color] || '#6b7280';
+        const bg = bgMap[lane.color] || 'transparent';
+        html += `<tr style="cursor:pointer;user-select:none" onclick="togglePriorityLane('${lane.key}')">
+            <td colspan="20" style="padding:6px 12px;background:${bg};border-left:3px solid ${color};font-size:12px;font-weight:600;color:${color}">
+                <span style="margin-right:6px;font-size:10px">${chevron}</span>${lane.label} <span style="font-weight:400;opacity:.7">(${lane.items.length})</span>
+            </td>
+        </tr>`;
         if (isOpen) {
             html += lane.items.map(r => _renderReqRow(r)).join('');
         }
