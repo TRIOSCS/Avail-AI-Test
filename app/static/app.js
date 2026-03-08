@@ -928,8 +928,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <button onclick="this.parentElement.remove();safeSet('onboardingDismissed','1')" style="position:absolute;top:8px;right:12px;background:none;border:none;font-size:16px;color:#64748b;cursor:pointer" title="Dismiss">\u2715</button>
                 <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:8px">Welcome to AVAIL</div>
                 <div style="font-size:12px;color:#334155;line-height:1.6">
-                    <b>Open</b> \u2014 Active requisitions: add parts, send RFQs, manage quotes<br>
-                    <b>Sourcing</b> \u2014 Track vendor sightings, response rates, and search progress<br>
+                    <b>Active</b> \u2014 All open requisitions: add parts, source vendors, send RFQs, manage quotes. Use the filter pills to narrow by status (Draft, Sourcing, Quoted).<br>
                     <b>Archive</b> \u2014 Completed RFQs: won, lost, and closed deals<br>
                     <span style="color:#64748b;margin-top:4px;display:inline-block">Click any row to expand details \u00b7 Use the search bar to find parts or customers \u00b7 Click column headers to sort</span>
                 </div>
@@ -1229,7 +1228,7 @@ window.addEventListener('popstate', (e) => {
     const routes = {
         'view-list': () => {
             showView('view-list');
-            setMainPill('rfq');
+            setMainPill('active');
             _reqFullyLoaded = false;
             _collapseAllDrillDowns();
             loadRequisitions(); // re-fetch requirements list
@@ -2987,7 +2986,7 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
+let _currentMainView = 'active';  // 'active' | 'archive'
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -8827,7 +8826,7 @@ export function sidebarNav(page, el) {
     var np = document.getElementById('notifPanel');
     if (np) np.classList.remove('open');
     const routes = {
-        reqs: () => { showList(); setMainPill('rfq'); },
+        reqs: () => { showList(); setMainPill('active'); },
         customers: () => window.showCustomers(),
         vendors: () => showVendors(),
         materials: () => showMaterials(),
