@@ -6049,7 +6049,7 @@ function _renderMobilePartsList(parts, reqId, panel) {
         const subs = (r.substitutes || []).filter(Boolean);
         html += '<div class="m-card" style="cursor:default;margin-bottom:8px">';
         html += '<div class="m-card-header">';
-        html += '<span class="mono" style="font-weight:700;font-size:14px">' + esc(r.primary_mpn || '---') + '</span>';
+        html += '<span class="mono" data-mpn="' + escAttr(r.primary_mpn || '') + '" style="font-weight:700;font-size:14px">' + esc(r.primary_mpn || '---') + '</span>';
         html += _reqBadge(r);
         html += '</div>';
         html += '<div class="m-card-body" style="margin-top:6px;gap:12px">';
@@ -6085,6 +6085,9 @@ function _renderMobilePartsList(parts, reqId, panel) {
         html += '</div>';
     }
     panel.innerHTML = html;
+    // MPN resurfacing hints for mobile parts
+    var mobileMpns = reqs.map(function(r) { return r.primary_mpn; }).filter(Boolean);
+    if (mobileMpns.length) _fetchMpnHints(mobileMpns, reqId).then(function(hints) { _renderMpnHints(panel, hints); });
 }
 
 function _renderMobileOffersList(data, reqId, panel) {
@@ -6371,7 +6374,7 @@ function _renderDdDetails(reqId, targetPanel) {
 
             // Left: core need
             html += '<div class="det-part-core">';
-            html += `<div class="det-part-mpn mono">${esc(r.primary_mpn || '—')}</div>`;
+            html += `<div class="det-part-mpn mono" data-mpn="${escAttr(r.primary_mpn || '')}">${esc(r.primary_mpn || '—')}</div>`;
             const displayBrand = r.brand || r.manufacturer;
             if (displayBrand) html += '<div class="det-part-brand">' + esc(displayBrand) + '</div>';
             if (r.manufacturer && r.manufacturer !== r.brand && r.brand) html += '<div style="font-size:11px;color:var(--muted)">Mfr: ' + esc(r.manufacturer) + '</div>';
@@ -6414,6 +6417,9 @@ function _renderDdDetails(reqId, targetPanel) {
 
     html += '</div>';
     dd.innerHTML = html;
+    // MPN resurfacing hints for detail view
+    var detMpns = reqs.map(function(r) { return r.primary_mpn; }).filter(Boolean);
+    if (detMpns.length) _fetchMpnHints(detMpns, reqId).then(function(hints) { _renderMpnHints(dd, hints); });
 }
 
 function _reqBadge(r) {
@@ -6423,6 +6429,34 @@ function _reqBadge(r) {
     if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled" title="RFQ sent but no vendor activity in 48+ hours"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10.5" y2="10"/></svg>STALLED</span>';
     if (r.sighting_count > 0) return `<span class="req-badge req-badge-searching" title="${r.sighting_count} vendor${r.sighting_count !== 1 ? 's' : ''} found — review sightings and send RFQ"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>SOURCING (${r.sighting_count})</span>`;
     return '<span class="req-badge req-badge-norfq" title="No RFQ sent yet — search for vendors first"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="8" x2="12" y2="8"/></svg>NO RFQ</span>';
+}
+
+async function _fetchMpnHints(mpns, excludeReqId) {
+    if (!mpns || mpns.length === 0) return {};
+    var params = new URLSearchParams();
+    params.set('mpns', mpns.join(','));
+    if (excludeReqId) params.set('exclude_req', excludeReqId);
+    try {
+        var data = await apiFetch('/api/resurfacing/hints?' + params);
+        return data.hints || {};
+    } catch (e) { return {}; }
+}
+
+function _renderMpnHints(container, hints) {
+    if (!hints || Object.keys(hints).length === 0) return;
+    var mpnCells = container.querySelectorAll('[data-mpn]');
+    mpnCells.forEach(function(cell) {
+        var mpn = cell.dataset.mpn;
+        var hint = hints[mpn];
+        if (!hint) return;
+        var existing = cell.querySelector('.mpn-hint');
+        if (existing) existing.remove();
+        var el = document.createElement('div');
+        el.className = 'mpn-hint';
+        el.style.cssText = 'font-size:0.75em;color:var(--muted);font-weight:400;font-family:inherit;margin-top:1px';
+        el.textContent = hint;
+        cell.appendChild(el);
+    });
 }
 
 function _renderDrillDownTable(rfqId, targetPanel) {
@@ -6451,7 +6485,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
         const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '—');
         html += `<tr>
             <td style="padding:2px 4px">${_reqBadge(r)}</td>
-            <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
+            <td class="mono dd-edit" data-mpn="${escAttr(r.primary_mpn || '')}" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_price')" style="color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'substitutes')" style="font-size:10px">${esc(subsText)}</td>
@@ -6472,6 +6506,9 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     if (_addRowActive[rfqId]) _appendAddRow(rfqId, dd);
     // AI Insights card above parts table
     _renderInsightsCard(rfqId, dd);
+    // MPN resurfacing hints
+    var ddMpns = visible.map(function(r) { return r.primary_mpn; }).filter(Boolean);
+    if (ddMpns.length) _fetchMpnHints(ddMpns, rfqId).then(function(hints) { _renderMpnHints(dd, hints); });
 }
 
 function editDrillCell(td, rfqId, reqId, field) {

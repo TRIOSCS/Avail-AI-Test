@@ -4,7 +4,7 @@ Covers buyer and sales briefings, empty states, and timestamp generation.
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -203,3 +203,85 @@ def test_default_role_is_buyer():
     assert result["role"] == "buyer"
     names = [s["name"] for s in result["sections"]]
     assert names == BUYER_SECTION_NAMES
+
+
+class TestSendBriefingToTeams:
+    """Test the _send_briefing_to_teams helper in knowledge_jobs."""
+
+    @pytest.mark.asyncio
+    async def test_sends_adaptive_card_to_webhook(self):
+        from app.jobs.knowledge_jobs import _send_briefing_to_teams
+
+        briefing = {
+            "total_items": 3,
+            "sections": [
+                {"label": "Vendor Emails", "count": 2, "items": [
+                    {"title": "Email from Arrow"}, {"title": "Email from Avnet"}
+                ]},
+                {"label": "Stalling Deals", "count": 1, "items": [
+                    {"title": "Req #42 idle 5d"}
+                ]},
+                {"label": "Empty Section", "count": 0, "items": []},
+            ],
+        }
+
+        captured = {}
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        async def mock_post(url, json=None, **kwargs):
+            captured["url"] = url
+            captured["json"] = json
+            return mock_resp
+
+        with patch("httpx.AsyncClient") as MockClient:
+            instance = AsyncMock()
+            instance.post = mock_post
+            MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await _send_briefing_to_teams(
+                "https://webhook.example.com/test", briefing, "Alice"
+            )
+
+        assert captured["url"] == "https://webhook.example.com/test"
+        body = captured["json"]
+        assert body["type"] == "message"
+        card = body["attachments"][0]["content"]
+        assert card["type"] == "AdaptiveCard"
+        assert "Alice" in card["body"][0]["text"]
+        assert "3" in card["body"][1]["text"]
+
+    @pytest.mark.asyncio
+    async def test_skips_empty_sections_in_text(self):
+        from app.jobs.knowledge_jobs import _send_briefing_to_teams
+
+        briefing = {
+            "total_items": 1,
+            "sections": [
+                {"label": "Active", "count": 1, "items": [{"title": "item1"}]},
+                {"label": "Empty", "count": 0, "items": []},
+            ],
+        }
+
+        captured = {}
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+
+        async def mock_post(url, json=None, **kwargs):
+            captured["json"] = json
+            return mock_resp
+
+        with patch("httpx.AsyncClient") as MockClient:
+            instance = AsyncMock()
+            instance.post = mock_post
+            MockClient.return_value.__aenter__ = AsyncMock(return_value=instance)
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await _send_briefing_to_teams(
+                "https://webhook.example.com/test", briefing, "Bob"
+            )
+
+        sections_text = captured["json"]["attachments"][0]["content"]["body"][2]["text"]
+        assert "Active" in sections_text
+        assert "Empty" not in sections_text

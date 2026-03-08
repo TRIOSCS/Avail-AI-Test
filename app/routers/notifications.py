@@ -31,6 +31,16 @@ async def list_notifications(
     return svc.get_all(db=db, user_id=user.id, limit=limit, offset=offset)
 
 
+@router.get("/api/notifications/unread-count")
+async def unread_count(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return unread notification count for badge display."""
+    count = svc.get_unread_count(db=db, user_id=user.id)
+    return {"count": count}
+
+
 @router.get("/api/notifications/unread")
 async def unread_notifications(
     limit: int = Query(50, ge=1, le=200),
