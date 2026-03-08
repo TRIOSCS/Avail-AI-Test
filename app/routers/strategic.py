@@ -7,7 +7,8 @@ Called by: frontend (crm.js)
 Depends on: services/strategic_vendor_service.py, dependencies.py
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -26,9 +27,11 @@ class ReplaceRequest(BaseModel):
 def _vendor_to_dict(record):
     """Convert a StrategicVendor record to API response dict."""
     from datetime import datetime, timezone
+    from app.services.strategic_vendor_service import _ensure_utc
 
     now = datetime.now(timezone.utc)
-    days_left = max(0, (record.expires_at - now).days)
+    expires = _ensure_utc(record.expires_at)
+    days_left = max(0, (expires - now).days)
     return {
         "id": record.id,
         "vendor_card_id": record.vendor_card_id,
@@ -66,7 +69,7 @@ def claim_vendor(
     """Claim a vendor as strategic."""
     record, err = svc.claim_vendor(db, user.id, vendor_card_id)
     if not record:
-        raise HTTPException(status_code=409, detail=err)
+        return JSONResponse(status_code=409, content={"error": err, "status_code": 409})
     return _vendor_to_dict(record)
 
 
@@ -79,7 +82,7 @@ def drop_vendor(
     """Drop a strategic vendor back to the open pool."""
     ok, err = svc.drop_vendor(db, user.id, vendor_card_id)
     if not ok:
-        raise HTTPException(status_code=404, detail=err)
+        return JSONResponse(status_code=404, content={"error": err, "status_code": 404})
     return {"ok": True}
 
 
@@ -94,7 +97,7 @@ def replace_vendor(
         db, user.id, body.drop_vendor_card_id, body.claim_vendor_card_id
     )
     if not record:
-        raise HTTPException(status_code=409, detail=err)
+        return JSONResponse(status_code=409, content={"error": err, "status_code": 409})
     return _vendor_to_dict(record)
 
 
