@@ -11,7 +11,7 @@ Depends on: models/strategic.py, models/vendors.py, models/auth.py
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.strategic import StrategicVendor
