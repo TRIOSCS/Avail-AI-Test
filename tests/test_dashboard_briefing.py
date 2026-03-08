@@ -31,6 +31,15 @@ SALES_SECTION_NAMES = [
 ]
 
 
+DIRECTOR_SECTION_NAMES = [
+    "high_value_idle_deals",
+    "team_response_times",
+    "workload_snapshot",
+    "stale_accounts",
+    "avail_scores",
+]
+
+
 def _mock_db():
     """Return a MagicMock that behaves like a SQLAlchemy Session.
 
@@ -244,6 +253,127 @@ def test_overnight_vendor_quotes_section_exists():
 
     names = [s["name"] for s in result["sections"]]
     assert "overnight_vendor_quotes" in names
+
+
+def test_director_briefing_returns_expected_sections():
+    db = _mock_db()
+    result = generate_briefing(db, user_id=1, role="director")
+
+    assert result["role"] == "director"
+    assert len(result["sections"]) == 5
+    names = [s["name"] for s in result["sections"]]
+    assert names == DIRECTOR_SECTION_NAMES
+
+    for section in result["sections"]:
+        assert "name" in section
+        assert "label" in section
+        assert "count" in section
+        assert "items" in section
+        assert isinstance(section["items"], list)
+
+
+def test_director_high_value_idle_deals():
+    """High-value idle deals appear with estimated value."""
+    from app.services.dashboard_briefing import _high_value_idle_deals
+
+    db = _mock_db()
+    now = datetime.now(timezone.utc)
+
+    req_mock = MagicMock()
+    req_mock.id = 7
+    req_mock.name = "Big Order"
+    req_mock.created_by = 2
+    req_mock.created_at = now - timedelta(days=5)
+    req_mock.updated_at = now - timedelta(days=3)
+    req_mock.status = "open"
+
+    part_mock = MagicMock()
+    part_mock.target_qty = 1000
+    part_mock.target_price = 5.50
+
+    owner_mock = MagicMock()
+    owner_mock.name = "Jane"
+
+    db.query.return_value.filter.return_value.all.return_value = [req_mock]
+    # Second .filter().all() returns parts
+    call_count = {"n": 0}
+    original_all = db.query.return_value.filter.return_value.all
+
+    def side_effect():
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return [req_mock]
+        return [part_mock]
+
+    db.query.return_value.filter.return_value.all.side_effect = side_effect
+    db.get.return_value = owner_mock
+
+    section = _high_value_idle_deals(db, now)
+    assert section["name"] == "high_value_idle_deals"
+    assert section["count"] >= 1
+    assert "$5,500" in section["items"][0]["title"]
+    assert "Jane" in section["items"][0]["detail"]
+
+
+def test_director_workload_snapshot():
+    """Workload snapshot returns per-user active req counts."""
+    from app.services.dashboard_briefing import _workload_snapshot
+
+    db = _mock_db()
+    now = datetime.now(timezone.utc)
+
+    user_mock = MagicMock()
+    user_mock.name = "Bob"
+
+    db.query.return_value.filter.return_value.group_by.return_value.all.return_value = [
+        (1, 15),
+        (2, 8),
+    ]
+    db.get.return_value = user_mock
+
+    section = _workload_snapshot(db, now)
+    assert section["name"] == "workload_snapshot"
+    assert section["count"] == 2
+    assert "Bob" in section["items"][0]["title"]
+
+
+def test_director_stale_accounts():
+    """Stale accounts section picks up idle companies."""
+    from app.services.dashboard_briefing import _stale_accounts
+
+    db = _mock_db()
+    now = datetime.now(timezone.utc)
+
+    company_mock = MagicMock()
+    company_mock.id = 10
+    company_mock.name = "Acme Corp"
+    company_mock.is_active = True
+    company_mock.last_activity_at = now - timedelta(days=10)
+    company_mock.account_owner_id = 1
+
+    owner_mock = MagicMock()
+    owner_mock.name = "Alice"
+
+    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [company_mock]
+    db.get.return_value = owner_mock
+
+    section = _stale_accounts(db, now)
+    assert section["name"] == "stale_accounts"
+    assert section["count"] == 1
+    assert "Acme Corp" in section["items"][0]["title"]
+    assert "10d" in section["items"][0]["title"]
+    assert "Alice" in section["items"][0]["detail"]
+
+
+def test_director_empty_briefing():
+    """Director briefing with no data returns all 5 sections empty."""
+    db = _mock_db()
+    result = generate_briefing(db, user_id=1, role="director")
+
+    assert len(result["sections"]) == 5
+    assert result["total_items"] == 0
+    for section in result["sections"]:
+        assert section["count"] == 0
 
 
 class TestSendBriefingToTeams:

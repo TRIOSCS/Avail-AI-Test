@@ -27,7 +27,9 @@ def generate_briefing(db: Session, user_id: int, role: str = "buyer") -> dict:
     """
     now = datetime.now(timezone.utc)
 
-    if role == "sales":
+    if role == "director":
+        sections = _build_director_sections(db, user_id, now)
+    elif role == "sales":
         sections = _build_sales_sections(db, user_id, now)
     else:
         sections = _build_buyer_sections(db, user_id, now)
@@ -563,6 +565,236 @@ def _quotes_ready(db: Session, user_id: int, now: datetime) -> dict:
     except Exception:
         logger.debug("quotes_ready section failed", exc_info=True)
         return _section("quotes_ready", "Quotes Ready", [])
+
+
+# ---------------------------------------------------------------------------
+# Director sections
+# ---------------------------------------------------------------------------
+
+def _build_director_sections(db: Session, user_id: int, now: datetime) -> list:
+    return [
+        _high_value_idle_deals(db, now),
+        _team_response_times(db, now),
+        _workload_snapshot(db, now),
+        _stale_accounts(db, now),
+        _avail_scores_summary(db, now),
+    ]
+
+
+def _high_value_idle_deals(db: Session, now: datetime) -> dict:
+    """High-value deals (by target_qty * target_price) idle >48h."""
+    try:
+        from app.models.sourcing import Requirement, Requisition
+
+        cutoff = now - timedelta(hours=48)
+        reqs = (
+            db.query(Requisition)
+            .filter(
+                Requisition.status.in_(["open", "in_progress", "quoting", "active"]),
+                Requisition.updated_at < cutoff,
+            )
+            .all()
+        )
+        items = []
+        for req in reqs:
+            # Estimate value from requirements
+            parts = (
+                db.query(Requirement)
+                .filter(Requirement.requisition_id == req.id)
+                .all()
+            )
+            total_value = 0.0
+            for p in parts:
+                qty = float(p.target_qty or 0)
+                price = float(p.target_price or 0)
+                total_value += qty * price
+            if total_value < 100:  # Skip low-value deals
+                continue
+            idle_hours = (now - (req.updated_at or req.created_at or now)).total_seconds() / 3600.0
+            try:
+                from app.models.auth import User
+                owner = db.get(User, req.created_by)
+            except Exception:
+                owner = None
+            owner_name = owner.name if owner and hasattr(owner, "name") else "Unknown"
+            items.append({
+                "title": "{} — ${:,.0f}".format(req.name or "Req #{}".format(req.id), total_value),
+                "detail": "Idle {:.0f}h — owned by {}".format(idle_hours, owner_name),
+                "entity_type": "requisition",
+                "entity_id": req.id,
+                "priority": "high" if idle_hours > 96 else "medium",
+                "age_hours": round(idle_hours, 1),
+            })
+        items.sort(key=lambda x: -x["age_hours"])
+        return _section("high_value_idle_deals", "High-Value Deals Idle >48h", items[:15])
+    except Exception:
+        logger.debug("high_value_idle_deals section failed", exc_info=True)
+        return _section("high_value_idle_deals", "High-Value Deals Idle >48h", [])
+
+
+def _team_response_times(db: Session, now: datetime) -> dict:
+    """Average response time per AM over the last 7 days (quote sent_at - req created_at)."""
+    try:
+        from app.models.auth import User
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        cutoff = now - timedelta(days=7)
+        rows = (
+            db.query(
+                Requisition.created_by,
+                func.avg(
+                    func.extract("epoch", Quote.sent_at) - func.extract("epoch", Requisition.created_at)
+                ),
+                func.count(Quote.id),
+            )
+            .join(Quote, Quote.requisition_id == Requisition.id)
+            .filter(Quote.sent_at >= cutoff, Quote.sent_at.isnot(None))
+            .group_by(Requisition.created_by)
+            .all()
+        )
+        items = []
+        for user_id_val, avg_seconds, quote_count in rows:
+            if avg_seconds is None:
+                continue
+            avg_hours = float(avg_seconds) / 3600.0
+            try:
+                user = db.get(User, user_id_val)
+                name = user.name if user and hasattr(user, "name") else "User #{}".format(user_id_val)
+            except Exception:
+                name = "User #{}".format(user_id_val)
+            items.append({
+                "title": "{} — avg {:.1f}h".format(name, avg_hours),
+                "detail": "{} quotes sent this week".format(quote_count),
+                "entity_type": "user",
+                "entity_id": user_id_val,
+                "priority": "high" if avg_hours > 48 else "medium" if avg_hours > 24 else "low",
+                "age_hours": round(avg_hours, 1),
+            })
+        items.sort(key=lambda x: -x["age_hours"])
+        return _section("team_response_times", "Team Response Times (7d Avg)", items)
+    except Exception:
+        logger.debug("team_response_times section failed", exc_info=True)
+        return _section("team_response_times", "Team Response Times (7d Avg)", [])
+
+
+def _workload_snapshot(db: Session, now: datetime) -> dict:
+    """Active requisitions per AM — shows workload distribution."""
+    try:
+        from app.models.auth import User
+        from app.models.sourcing import Requisition
+
+        rows = (
+            db.query(Requisition.created_by, func.count(Requisition.id))
+            .filter(Requisition.status.in_(["open", "in_progress", "quoting", "active"]))
+            .group_by(Requisition.created_by)
+            .all()
+        )
+        items = []
+        for user_id_val, req_count in rows:
+            try:
+                user = db.get(User, user_id_val)
+                name = user.name if user and hasattr(user, "name") else "User #{}".format(user_id_val)
+            except Exception:
+                name = "User #{}".format(user_id_val)
+            items.append({
+                "title": "{} — {} active reqs".format(name, req_count),
+                "detail": "Currently active requisitions",
+                "entity_type": "user",
+                "entity_id": user_id_val,
+                "priority": "high" if req_count > 20 else "medium" if req_count > 10 else "low",
+                "age_hours": 0.0,
+            })
+        items.sort(key=lambda x: -int(x["title"].split(" — ")[1].split(" ")[0]))
+        return _section("workload_snapshot", "Workload per AM", items)
+    except Exception:
+        logger.debug("workload_snapshot section failed", exc_info=True)
+        return _section("workload_snapshot", "Workload per AM", [])
+
+
+def _stale_accounts(db: Session, now: datetime) -> dict:
+    """Companies with no activity in 5+ days."""
+    try:
+        from app.models.crm import Company
+
+        cutoff = now - timedelta(days=5)
+        companies = (
+            db.query(Company)
+            .filter(
+                Company.is_active.is_(True),
+                Company.last_activity_at.isnot(None),
+                Company.last_activity_at < cutoff,
+            )
+            .order_by(Company.last_activity_at.asc())
+            .limit(20)
+            .all()
+        )
+        items = []
+        for c in companies:
+            idle_days = (now - c.last_activity_at).total_seconds() / 86400.0
+            # Get owner name
+            owner_name = "Unassigned"
+            if c.account_owner_id:
+                try:
+                    from app.models.auth import User
+                    owner = db.get(User, c.account_owner_id)
+                    owner_name = owner.name if owner and hasattr(owner, "name") else "Unknown"
+                except Exception:
+                    pass
+            items.append({
+                "title": "{} — {:.0f}d idle".format(c.name, idle_days),
+                "detail": "Owned by {}".format(owner_name),
+                "entity_type": "company",
+                "entity_id": c.id,
+                "priority": "high" if idle_days > 14 else "medium",
+                "age_hours": round(idle_days * 24, 1),
+            })
+        return _section("stale_accounts", "Stale Accounts (5+ Days)", items)
+    except Exception:
+        logger.debug("stale_accounts section failed", exc_info=True)
+        return _section("stale_accounts", "Stale Accounts (5+ Days)", [])
+
+
+def _avail_scores_summary(db: Session, now: datetime) -> dict:
+    """Top/bottom Avail Scores from the latest month — conditional on data."""
+    try:
+        from app.models.performance import AvailScoreSnapshot
+
+        # Get the latest month with data
+        latest_month = (
+            db.query(func.max(AvailScoreSnapshot.month))
+            .scalar()
+        )
+        if not latest_month:
+            return _section("avail_scores", "Avail Scores", [])
+
+        snapshots = (
+            db.query(AvailScoreSnapshot)
+            .filter(AvailScoreSnapshot.month == latest_month)
+            .order_by(AvailScoreSnapshot.total_score.desc())
+            .all()
+        )
+        items = []
+        for s in snapshots:
+            try:
+                from app.models.auth import User
+                user = db.get(User, s.user_id)
+                name = user.name if user and hasattr(user, "name") else "User #{}".format(s.user_id)
+            except Exception:
+                name = "User #{}".format(s.user_id)
+            rank_label = "#{}".format(s.rank) if hasattr(s, "rank") and s.rank else ""
+            items.append({
+                "title": "{} {} — {:.0f} pts".format(rank_label, name, float(s.total_score or 0)),
+                "detail": "{} role".format(s.role_type) if hasattr(s, "role_type") else "",
+                "entity_type": "user",
+                "entity_id": s.user_id,
+                "priority": "low",
+                "age_hours": 0.0,
+            })
+        return _section("avail_scores", "Avail Scores", items)
+    except Exception:
+        logger.debug("avail_scores section failed", exc_info=True)
+        return _section("avail_scores", "Avail Scores", [])
 
 
 # ---------------------------------------------------------------------------

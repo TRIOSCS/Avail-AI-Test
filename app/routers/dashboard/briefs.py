@@ -901,7 +901,7 @@ def buyer_brief(
 @router.get("/briefing")
 @cached_endpoint(prefix="daily_briefing", ttl_hours=1, key_params=[])
 def daily_briefing(
-    role: str = Query("buyer", regex="^(buyer|sales)$"),
+    role: str = Query("buyer", regex="^(buyer|sales|director)$"),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
