@@ -93,7 +93,8 @@ async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = N
     if baseline_file and os.path.exists(baseline_file):
         with open(baseline_file) as f:
             baseline = json.load(f)
-        baseline_keys = {(b.get("area", ""), b.get("title", "")[:80]) for b in baseline}
+        known = baseline.get("known_issues", baseline) if isinstance(baseline, dict) else baseline
+        baseline_keys = {(b.get("area", ""), b.get("title", "")[:80]) for b in known}
         new_issues = [i for i in issues if (i.get("area", ""), i.get("title", "")[:80]) not in baseline_keys]
 
     _output({
@@ -115,7 +116,7 @@ async def cmd_smoke_test() -> None:
 
     cookie = _get_session_cookie()
     endpoints = [
-        ("GET", "/api/health", None),
+        ("GET", "/health", None),
         ("GET", "/api/system/alerts", None),
         ("GET", "/api/requisitions?limit=1", None),
         ("GET", "/api/companies?limit=1", None),
@@ -226,15 +227,10 @@ async def cmd_poll_queue(ticket_ids_json: str, timeout_secs: int = 120) -> None:
         for tid in ticket_ids:
             if tid in found:
                 continue
-            # Look for patch files matching this ticket ID
-            pattern = f"ticket_{tid}_*.py"
-            matches = list(FIX_QUEUE_DIR.glob(pattern))
-            if not matches:
-                # Also try JSON patch format
-                pattern_json = f"ticket_{tid}_*.json"
-                matches = list(FIX_QUEUE_DIR.glob(pattern_json))
-            if matches:
-                found[tid] = str(matches[0])
+            # Look for patch file: execution_service writes {ticket_id}.json
+            fix_file = FIX_QUEUE_DIR / f"{tid}.json"
+            if fix_file.is_file():
+                found[tid] = str(fix_file)
             else:
                 skipped.append(tid)
 
@@ -305,13 +301,16 @@ async def cmd_fix_confidence(fix_file: str) -> None:
 
     content = fix_path.read_text()
 
-    # Try to parse as JSON patch format
+    # Parse fix queue JSON: {"ticket_id": ..., "patches": [...]}
     try:
-        patches = json.loads(content)
-        if isinstance(patches, dict):
-            patches = [patches]
+        data = json.loads(content)
+        if isinstance(data, dict) and "patches" in data:
+            patches = data["patches"]
+        elif isinstance(data, list):
+            patches = data
+        else:
+            patches = [data]
     except json.JSONDecodeError:
-        # Not JSON — treat as a Python patch script, score 0.5 (can't verify)
         _output({"ok": True, "score": 0.5, "reason": "non-json patch format"})
         return
 

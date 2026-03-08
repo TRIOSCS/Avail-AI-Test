@@ -24,7 +24,17 @@ for i in $(seq 1 12); do
         echo ""
         echo "=== Running site agents ==="
         ./scripts/test-site.sh
-        exit $?
+        AGENT_EXIT=$?
+
+        # Post-deploy UX smoke test + repair
+        SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+        echo ""
+        echo "=== Running post-deploy UX repair ==="
+        "${SCRIPT_DIR}/ultimate_ux_repair.sh" --post-deploy --no-notify || {
+            echo "WARN: Post-deploy UX repair found issues (see report)"
+        }
+
+        exit $AGENT_EXIT
     fi
     echo "  Attempt $i/12..."
 done
