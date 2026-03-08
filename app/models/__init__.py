@@ -119,5 +119,8 @@ from .trouble_ticket import TroubleTicket  # noqa: F401
 # Unified Score (cross-role leaderboard)
 from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 
+# Strategic Vendors
+from .strategic import StrategicVendor  # noqa: F401
+
 # Vendors
 from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401
