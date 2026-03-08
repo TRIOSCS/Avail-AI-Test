@@ -281,8 +281,10 @@ def capture_quote_fact(db: Session, *, quote, user_id: int) -> KnowledgeEntry | 
 def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> KnowledgeEntry | None:
     """Auto-capture facts when an offer is created (manual or parsed).
 
+    Uses a savepoint so FK failures don't corrupt the caller's transaction.
     Called from: app/routers/crm/offers.py, app/email_service.py
     """
+    nested = db.begin_nested()
     try:
         mpn = getattr(offer, "mpn", None) or ""
         price = getattr(offer, "unit_price", None)
@@ -303,10 +305,11 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             content_parts.append("lead time: {}".format(lead_time))
 
         if not content_parts:
+            nested.rollback()
             return None
 
         content = "Offer — " + ", ".join(content_parts)
-        return create_entry(
+        entry = create_entry(
             db,
             user_id=user_id or 0,
             entry_type="fact",
@@ -318,7 +321,10 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             vendor_card_id=getattr(offer, "vendor_card_id", None),
             requisition_id=getattr(offer, "requisition_id", None),
         )
+        nested.commit()
+        return entry
     except Exception as e:
+        nested.rollback()
         logger.warning("Failed to capture offer fact: {}", e)
         return None
 

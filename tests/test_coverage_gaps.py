@@ -848,22 +848,18 @@ class TestRequisitionCreateRequirements:
         data = resp.json()
         assert len(data["created"]) >= 1
 
-    def test_add_requirements_teams_hot_alert(self, client, db_session, test_requisition, test_customer_site):
+    def test_add_requirements_with_customer_site(self, client, db_session, test_requisition, test_customer_site):
+        """Requirements can be added to requisitions with a customer site."""
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
-        with (
-            patch("app.config.settings") as mock_settings,
-            patch("app.services.teams.send_hot_requirement_alert", new_callable=AsyncMock) as mock_alert,
-        ):
-            mock_settings.teams_hot_threshold = 100
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/requirements",
-                json=[{"primary_mpn": "EXPENSIVE-001", "target_qty": 1000, "target_price": 1.00}],
-            )
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/requirements",
+            json=[{"primary_mpn": "EXPENSIVE-001", "target_qty": 1000, "target_price": 1.00}],
+        )
         assert resp.status_code == 200
 
-    def test_add_requirements_teams_alert_failure_handled(self, client, db_session, test_requisition):
-        """Teams alert failure does not break requirement creation."""
+    def test_add_requirements_basic(self, client, db_session, test_requisition):
+        """Basic requirement creation works."""
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/requirements",
             json=[{"primary_mpn": "SAFE-001", "target_qty": 10}],

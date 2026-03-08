@@ -83,8 +83,7 @@ def test_buyer_briefing_returns_expected_sections():
 
 def test_sales_briefing_returns_expected_sections():
     db = _mock_db()
-    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]):
-        result = generate_briefing(db, user_id=1, role="sales")
+    result = generate_briefing(db, user_id=1, role="sales")
 
     assert result["role"] == "sales"
     assert len(result["sections"]) == 7
@@ -166,19 +165,7 @@ def test_sales_deals_at_risk_includes_red_only():
     query_mock.all.return_value = [req_mock]
     query_mock.scalar.return_value = 0
 
-    with (
-        patch("app.services.activity_insights._detect_gone_quiet", return_value=[]),
-        patch(
-            "app.services.deal_risk.assess_risk",
-            return_value={
-                "risk_level": "red",
-                "score": 85,
-                "explanation": "No activity in 14 days",
-                "suggested_action": "Follow up immediately",
-            },
-        ),
-    ):
-        result = generate_briefing(db, user_id=1, role="sales")
+    result = generate_briefing(db, user_id=1, role="sales")
 
     risk_section = next(s for s in result["sections"] if s["name"] == "deals_at_risk")
     assert risk_section["count"] >= 1
@@ -242,8 +229,7 @@ def test_open_rfqs_no_offers_section():
 def test_quotes_needing_followup_section_exists():
     """The quotes_needing_followup section is in sales briefing."""
     db = _mock_db()
-    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]):
-        result = generate_briefing(db, user_id=1, role="sales")
+    result = generate_briefing(db, user_id=1, role="sales")
 
     names = [s["name"] for s in result["sections"]]
     assert "quotes_needing_followup" in names
@@ -252,8 +238,7 @@ def test_quotes_needing_followup_section_exists():
 def test_overnight_vendor_quotes_section_exists():
     """The overnight_vendor_quotes section is in sales briefing."""
     db = _mock_db()
-    with patch("app.services.activity_insights._detect_gone_quiet", return_value=[]):
-        result = generate_briefing(db, user_id=1, role="sales")
+    result = generate_briefing(db, user_id=1, role="sales")
 
     names = [s["name"] for s in result["sections"]]
     assert "overnight_vendor_quotes" in names

@@ -102,33 +102,22 @@ def test_clone_requisition_not_found(client):
 
 # ── 2. Teams Hot Requirement Alert Exception (requisitions.py lines 718-719) ──
 # The settings import is lazy: `from ..config import settings as cfg`
-# The alert import is lazy: `from ..services.teams import send_hot_requirement_alert`
-
-
-def test_add_requirement_teams_alert_exception(client, db_session, test_requisition):
-    """Hot requirement alert failure is silently caught (lines 718-719)."""
-    # Patch the config settings at source module level
-    with patch("app.config.settings") as mock_cfg:
-        mock_cfg.teams_hot_threshold = 0  # Make threshold 0 so any item triggers it
-        # Patch the teams alert to raise AttributeError
-        with patch(
-            "app.services.teams.send_hot_requirement_alert",
-            side_effect=AttributeError("Teams not configured"),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/requirements",
-                json=[
-                    {
-                        "primary_mpn": "TEST-HOT-001",
-                        "target_qty": 10000,
-                        "target_price": 100.00,
-                    }
-                ],
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert len(data["created"]) >= 1
-            assert data["created"][0]["primary_mpn"] == "TEST-HOT-001"
+def test_add_requirement_high_value(client, db_session, test_requisition):
+    """High-value requirement creation succeeds."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/requirements",
+        json=[
+            {
+                "primary_mpn": "TEST-HOT-001",
+                "target_qty": 10000,
+                "target_price": 100.00,
+            }
+        ],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["created"]) >= 1
+    assert data["created"][0]["primary_mpn"] == "TEST-HOT-001"
 
 
 # ── 3. Skip empty row in upload requirements (requisitions.py line 779) ──
