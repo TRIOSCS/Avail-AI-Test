@@ -896,3 +896,19 @@ def buyer_brief(
             "buyplans_approved": pipeline_buyplans,
         },
     }
+
+
+@router.get("/briefing")
+@cached_endpoint(prefix="daily_briefing", ttl_hours=1, key_params=[])
+def daily_briefing(
+    role: str = Query("buyer", regex="^(buyer|sales)$"),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Role-aware morning briefing — replaces the daily Excel handoff.
+
+    Pure data aggregation, no AI calls. Cached per user for 1 hour.
+    """
+    from app.services.dashboard_briefing import generate_briefing
+
+    return generate_briefing(db=db, user_id=user.id, role=role)

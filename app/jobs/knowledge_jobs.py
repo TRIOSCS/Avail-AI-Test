@@ -40,6 +40,12 @@ def register_knowledge_jobs(scheduler, settings):
         id="knowledge_send_digests",
         name="Send daily knowledge digests",
     )
+    scheduler.add_job(
+        _job_precompute_briefings,
+        CronTrigger(hour=6, minute=0),
+        id="knowledge_precompute_briefings",
+        name="Pre-compute morning briefings at 6 AM UTC",
+    )
 
 
 async def _job_refresh_insights():
@@ -221,6 +227,30 @@ async def _job_send_knowledge_digests():
             logger.info("Sent {} knowledge digests", sent_count)
     except Exception as e:
         logger.error("send_knowledge_digests job failed: {}", e)
+    finally:
+        db.close()
+
+
+async def _job_precompute_briefings():
+    """Pre-compute briefings for all users at 6 AM UTC, warming the cache."""
+    from app.database import SessionLocal
+    from app.models.auth import User
+    from app.services.dashboard_briefing import generate_briefing
+
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.is_active.is_(True)).all()
+        ok = 0
+        for user in users:
+            try:
+                role = getattr(user, "role", "buyer") or "buyer"
+                generate_briefing(db=db, user_id=user.id, role=role)
+                ok += 1
+            except Exception as e:
+                logger.warning("Briefing pre-compute failed for user {}: {}", user.id, e)
+        logger.info("Pre-computed briefings for {}/{} users", ok, len(users))
+    except Exception as e:
+        logger.error("precompute_briefings job failed: {}", e)
     finally:
         db.close()
 
