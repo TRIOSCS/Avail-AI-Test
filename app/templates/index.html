@@ -67,8 +67,7 @@
     <img src="/static/avail_logo.png" alt="AVAIL" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer" title="Back to Requirements">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
-            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)" title="Your active requisitions — manage parts, quotes, and RFQs. Same reqs as Sourcing tab, focused on quoting workflow.">Open</button>
-            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Same active requisitions as Open tab, focused on sourcing — track vendor sightings, RFQ responses, and search activity.">Sourcing</button>
+            <button type="button" class="fp on" data-view="active" onclick="setMainView('active',this)" title="All active requisitions — manage parts, sourcing, quotes, and RFQs in one view">Active</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
         <div class="search-wrap">
@@ -76,9 +75,11 @@
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
             <kbd class="search-hint">/</kbd>
         </div>
-        <div class="fpills fpills-sm hidden" id="statusToggle">
+        <div class="fpills fpills-sm" id="statusToggle">
+            <button type="button" class="fp fp-sm on" data-sf="all" onclick="setStatusFilter('all',this)">All</button>
             <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
-            <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
+            <button type="button" class="fp fp-sm" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
+            <button type="button" class="fp fp-sm" data-sf="quoted" onclick="setStatusFilter('quoted',this)">Quoted</button>
         </div>
         <div id="topBreadcrumb" class="top-breadcrumb hidden">
             <button class="breadcrumb-back" onclick="closeCustDrawer()" title="Back to list">&larr; <span id="breadcrumbBackLabel">Accounts</span></button>
@@ -126,8 +127,7 @@
 <!-- Mobile action toolbar — view pills + quick actions -->
 <div class="mobile-toolbar" id="mobileToolbar">
     <div class="fpills fpills-sm" id="mobilePills">
-        <button type="button" class="fp fp-sm on" data-view="rfq" onclick="setMainView('rfq',this);_syncMobilePills(this)" title="Active requisitions">Open</button>
-        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)" title="Sourcing progress">Sourcing</button>
+        <button type="button" class="fp fp-sm on" data-view="active" onclick="setMainView('active',this);_syncMobilePills(this)" title="All active requisitions">Active</button>
         <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)" title="Completed RFQs">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
@@ -222,8 +222,7 @@
         <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>
         <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
         <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
-            <button type="button" class="m-tab-pill active" data-view="rfq" onclick="mobileReqPillTap('rfq',this)">Open</button>
-            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
+            <button type="button" class="m-tab-pill active" data-view="active" onclick="mobileReqPillTap('active',this)">Active</button>
             <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
         </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
@@ -609,9 +608,13 @@
 </div>
 
 <!-- Batch RFQ Modal -->
-<div id="rfqModal" class="modal-bg" onclick="if(event.target===this&&!this.dataset.loading)closeModal('rfqModal')">
-    <div class="modal modal-lg">
-        <h2>Send Batch RFQ</h2>
+<!-- RFQ Side Panel (push-style drawer) -->
+<div id="rfqDrawer" class="rfq-drawer">
+    <div class="rfq-drawer-header">
+        <h2 style="margin:0;font-size:16px">Send Batch RFQ</h2>
+        <button type="button" class="rfq-drawer-close" onclick="closeRfqDrawer()" title="Close">&times;</button>
+    </div>
+    <div class="rfq-drawer-body">
         <div id="rfqPrepare">
             <div class="u-flex u-items-center u-gap-md u-mb-md">
                 <div class="spinner"></div>
@@ -619,9 +622,8 @@
             </div>
             <div id="rfqPrepareVendors" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
             <style>.rfq-parts-table td.qty,.rfq-parts-table th.qty{min-width:64px;width:auto;overflow:visible;white-space:nowrap}</style>
-            <style>.rfq-parts-table td.qty,.rfq-parts-table th.qty{min-width:64px;width:auto;overflow:visible;white-space:nowrap}</style>
             <div id="rfqPrepareCancel" class="u-hidden" style="margin-bottom:8px"></div>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="closeRfqDrawer()">Cancel</button>
         </div>
         <div id="rfqReady" class="hidden">
             <p style="font-size:12px;color:var(--text2);margin-bottom:10px" id="rfqSummary"></p>
@@ -651,7 +653,7 @@
                 <button type="button" class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="aiDraftRfq(this)">AI Draft</button>
             </div>
             <div class="mactions">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="closeRfqDrawer()">Cancel</button>
                 <button type="button" class="btn btn-success" id="rfqPreviewBtn" onclick="rfqShowPreview()">Preview &amp; Send</button>
             </div>
         </div>
@@ -670,7 +672,7 @@
             <div id="rfqResultsList" style="max-height:340px;overflow-y:auto;margin-bottom:12px"></div>
             <div class="mactions">
                 <button type="button" class="btn btn-danger u-hidden" id="rfqRetryBtn" onclick="rfqRetryFailed()">Retry Failed</button>
-                <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Close</button>
+                <button type="button" class="btn btn-ghost" onclick="closeRfqDrawer()">Close</button>
             </div>
         </div>
     </div>
