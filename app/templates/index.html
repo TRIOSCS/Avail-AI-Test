@@ -54,6 +54,39 @@
         .qa-buyer-chip{font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid var(--border,#ddd);cursor:pointer;background:var(--bg2,#f5f5f5);transition:all .15s}
         .qa-buyer-chip:hover{border-color:var(--teal)}
         .qa-buyer-chip.selected{background:var(--teal,#0e7490);color:#fff;border-color:var(--teal)}
+        /* Priority Lanes */
+        .priority-lane{margin-bottom:4px}
+        .priority-lane-header{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;border-radius:6px;font-size:13px;font-weight:600}
+        .priority-lane-header:hover{filter:brightness(0.96)}
+        .priority-lane-header .lane-chevron{transition:transform .15s;font-size:10px}
+        .priority-lane-header .lane-chevron.open{transform:rotate(90deg)}
+        .priority-lane-header .lane-count{font-size:11px;font-weight:500;opacity:.7}
+        .priority-lane.lane-red .priority-lane-header{background:rgba(220,38,38,.08);color:#dc2626}
+        .priority-lane.lane-yellow .priority-lane-header{background:rgba(245,158,11,.08);color:#d97706}
+        .priority-lane.lane-green .priority-lane-header{background:rgba(16,185,129,.08);color:#059669}
+        .priority-lane.lane-gray .priority-lane-header{background:rgba(107,114,128,.06);color:#6b7280}
+        .priority-lane-body{display:none}
+        .priority-lane.open .priority-lane-body{display:block}
+        .priority-lane.open .lane-chevron{transform:rotate(90deg)}
+        /* Notification bar */
+        .notif-action-bar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(59,130,246,.06),rgba(16,185,129,.06));border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap}
+        .notif-action-bar:empty{display:none}
+        .notif-action-item{display:flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:background .15s}
+        .notif-action-item:hover{background:rgba(0,0,0,.05)}
+        .notif-action-item .notif-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+        .notif-action-item .notif-dot-red{background:#dc2626}
+        .notif-action-item .notif-dot-amber{background:#f59e0b}
+        .notif-action-item .notif-dot-green{background:#10b981}
+        .notif-action-item .notif-dot-blue{background:#3b82f6}
+        .notif-action-dismiss{margin-left:auto;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
+        .notif-action-dismiss:hover{color:var(--text1)}
+        /* Inline RFQ compose panel */
+        .rfq-inline-bar{position:sticky;bottom:0;left:0;right:0;padding:10px 16px;background:var(--card,#fff);border-top:2px solid var(--blue,#3b82f6);display:flex;align-items:center;gap:12px;box-shadow:0 -4px 12px rgba(0,0,0,.08);z-index:50;font-size:13px}
+        .rfq-inline-bar .rfq-bar-count{font-weight:600}
+        .rfq-inline-bar .btn{white-space:nowrap}
+        .rfq-compose-panel{background:var(--card,#fff);border-top:1px solid var(--border);padding:16px;max-height:500px;overflow-y:auto}
+        .rfq-compose-panel .rfq-vendor-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-light,#eee);font-size:12px}
+        .rfq-compose-panel .rfq-vendor-row:last-child{border-bottom:none}
     </style>
 </head>
 <body>
@@ -77,7 +110,8 @@
     <img src="/static/avail_logo.png" alt="AVAIL" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer" title="Back to Requirements">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
-            <button type="button" class="fp on" data-view="active" onclick="setMainView('active',this)" title="All active requisitions — manage parts, sourcing, quotes, and RFQs in one view">Active</button>
+            <button type="button" class="fp on" data-view="sales" onclick="setMainView('sales',this)" title="Sales view — customer focus, quotes, deadlines, dollar values">Sales</button>
+            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Sourcing view — part coverage, sightings, RFQs, vendor responses">Sourcing</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
         <div class="search-wrap">
@@ -137,7 +171,8 @@
 <!-- Mobile action toolbar — view pills + quick actions -->
 <div class="mobile-toolbar" id="mobileToolbar">
     <div class="fpills fpills-sm" id="mobilePills">
-        <button type="button" class="fp fp-sm on" data-view="active" onclick="setMainView('active',this);_syncMobilePills(this)" title="All active requisitions">Active</button>
+        <button type="button" class="fp fp-sm on" data-view="sales" onclick="setMainView('sales',this);_syncMobilePills(this)" title="Sales view">Sales</button>
+        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)" title="Sourcing view">Sourcing</button>
         <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)" title="Completed RFQs">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
@@ -244,12 +279,16 @@
 <main class="main">
     <div class="main-scroll">
 
-    <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
+    <!-- Smart notification bar — surfaces urgent items -->
+    <div id="notifActionBar" class="notif-action-bar"></div>
+
+    <!-- VIEW: Requisition List (v8 — role-aware priority lanes) -->
     <div id="view-list">
         <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>
         <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
         <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
-            <button type="button" class="m-tab-pill active" data-view="active" onclick="mobileReqPillTap('active',this)">Active</button>
+            <button type="button" class="m-tab-pill active" data-view="sales" onclick="mobileReqPillTap('sales',this)">Sales</button>
+            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
             <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
         </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>

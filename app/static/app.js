@@ -919,6 +919,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         var _initGradient = document.querySelector('.sb-top-gradient');
         if (_initSection && _initGradient) _initGradient.dataset.section = _initSection.dataset.section;
     }
+    // Sync pill state with saved view preference
+    const _savedView = _currentMainView;
+    ['mainPills', 'mobilePills'].forEach(id => {
+        const cont = document.getElementById(id);
+        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === _savedView));
+    });
     await loadRequisitions();
     // ── Onboarding welcome message for first-time users ──
     if (!safeGet('onboardingDismissed')) {
@@ -928,9 +934,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <button onclick="this.parentElement.remove();safeSet('onboardingDismissed','1')" style="position:absolute;top:8px;right:12px;background:none;border:none;font-size:16px;color:#64748b;cursor:pointer" title="Dismiss">\u2715</button>
                 <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:8px">Welcome to AVAIL</div>
                 <div style="font-size:12px;color:#334155;line-height:1.6">
-                    <b>Active</b> \u2014 All open requisitions: add parts, source vendors, send RFQs, manage quotes. Use the filter pills to narrow by status (Draft, Sourcing, Quoted).<br>
-                    <b>Archive</b> \u2014 Completed RFQs: won, lost, and closed deals<br>
-                    <span style="color:#64748b;margin-top:4px;display:inline-block">Click any row to expand details \u00b7 Use the search bar to find parts or customers \u00b7 Click column headers to sort</span>
+                    <b>Sales</b> \u2014 Customer-focused: quotes, deadlines, dollar values. Track what needs action.<br>
+                    <b>Sourcing</b> \u2014 Part-focused: coverage, sightings, RFQs, vendor responses. Find and source parts.<br>
+                    <b>Archive</b> \u2014 Completed deals: won, lost, and closed<br>
+                    <span style="color:#64748b;margin-top:4px;display:inline-block">Click any row to expand \u00b7 Select sightings to send RFQs \u00b7 Parts are grouped by priority</span>
                 </div>
             </div>`;
             reqList.insertAdjacentHTML('afterbegin', welcomeHtml);
@@ -2986,7 +2993,8 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = 'active';  // 'active' | 'archive'
+let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'sourcing' | 'archive'
+let _laneCollapseState = JSON.parse(localStorage.getItem('avail_lane_collapse') || '{}');  // { lane_key: true/false }
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3150,18 +3158,28 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'tasks', 'files'];
-    // Active view: unified tabs combining former Open + Sourcing
-    if (window.__isMobile) return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'buyplans', 'tasks'];
-    return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'tasks', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'offers', 'quote', 'activity'];
+    // Consolidated tabs: Sourcing (parts+sightings), Offers, Quote (quotes+buyplans+files), Activity (activity+tasks)
+    return ['sourcing', 'offers', 'quote', 'activity'];
 }
 
 function _ddDefaultTab(mainView) {
-    return 'parts';
+    // Sales view defaults to quote tab, sourcing view defaults to sourcing tab
+    if (mainView === 'sales') return 'sourcing';
+    if (mainView === 'sourcing') return 'sourcing';
+    return 'sourcing';
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', tasks:'Tasks'};
+    const map = {
+        sourcing: 'Sourcing',
+        offers: 'Offers',
+        quote: 'Quote',
+        activity: 'Activity',
+        // Legacy tab names still supported for backward compatibility
+        details: 'Details', sightings: 'Sightings', parts: 'Parts',
+        quotes: 'Quotes', buyplans: 'Buy Plans', files: 'Files', tasks: 'Tasks'
+    };
     return map[tab] || tab;
 }
 
@@ -3208,12 +3226,12 @@ function _renderDdSummary(reqId) {
     else if (qs === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
 
     return `<div class="dd-summary">
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'parts')"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sightings')"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sourcing')"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sourcing')"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
         <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'offers')"><span class="dd-stat-val">${offers}</span><span class="dd-stat-label">Offers</span></div>
         <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'activity')"><span class="dd-stat-val">${sent}</span><span class="dd-stat-label">RFQs Sent</span></div>
         <div class="dd-stat"><span class="dd-stat-val">${respPct}%</span><span class="dd-stat-label">Response</span></div>
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'quotes')"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'quote')"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
     </div>`;
 }
 
@@ -3230,7 +3248,7 @@ async function ddRefreshTab(reqId) {
     const tabName = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
     // Clear cached data for this tab
     if (_ddTabCache[reqId]) delete _ddTabCache[reqId][tabName];
-    if (tabName === 'parts' || tabName === 'details') delete _ddReqCache[reqId];
+    if (tabName === 'parts' || tabName === 'details' || tabName === 'sourcing') { delete _ddReqCache[reqId]; delete _ddSightingsCache[reqId]; }
     if (tabName === 'sightings') delete _ddSightingsCache[reqId];
     const drow = document.getElementById('d-' + reqId);
     const panel = drow?.querySelector('.dd-panel');
@@ -3276,6 +3294,19 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     try {
         let data;
         switch (tabName) {
+            case 'sourcing':
+                // Consolidated tab: load both parts and sightings
+                {
+                    const [parts, sightings] = await Promise.all([
+                        _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
+                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`)
+                    ]);
+                    _ddReqCache[reqId] = parts;
+                    _ddSightingsCache[reqId] = sightings;
+                    if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+                    data = { parts, sightings };
+                }
+                break;
             case 'details':
             case 'parts':
                 data = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
@@ -3287,16 +3318,38 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
                 break;
             case 'activity':
-                data = await apiFetch(`/api/requisitions/${reqId}/activity`);
+                // Consolidated tab: load activity + tasks together
+                {
+                    const [activityData, tasksData] = await Promise.all([
+                        apiFetch(`/api/requisitions/${reqId}/activity`),
+                        apiFetch(`/api/requisitions/${reqId}/tasks`)
+                    ]);
+                    data = { activity: activityData, tasks: tasksData };
+                }
                 break;
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
+                break;
+            case 'quote':
+                // Consolidated tab: load quotes + attachments + buy plans
+                {
+                    const quotes = await apiFetch(`/api/requisitions/${reqId}/quotes`);
+                    const files = await apiFetch(`/api/requisitions/${reqId}/attachments`);
+                    const qArr = Array.isArray(quotes) ? quotes : [];
+                    const plans = [];
+                    for (const q of qArr) {
+                        try {
+                            const bp = await apiFetch(`/api/buy-plans/for-quote/${q.id}`);
+                            if (bp) plans.push(bp);
+                        } catch(_) { /* no buy plan for this quote */ }
+                    }
+                    data = { quotes, files, buyplans: plans };
+                }
                 break;
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
             case 'buyplans': {
-                // Buy plans are linked via quotes — fetch quotes first, then buy plans per quote
                 const quotes = _ddTabCache[reqId]?.quotes || await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
                 _ddTabCache[reqId].quotes = quotes;
@@ -3346,9 +3399,20 @@ function _renderDdTab(reqId, tabName, data, panel) {
         return;
     }
     switch (tabName) {
+        case 'sourcing':
+            // Consolidated Sourcing tab: parts table + sightings in one view
+            if (data && data.parts && data.sightings) {
+                _ddReqCache[reqId] = data.parts;
+                _ddSightingsCache[reqId] = data.sightings;
+            }
+            if (_currentMainView !== 'archive') {
+                _renderSplitPartsOffers(reqId, data?.parts || data, panel);
+            } else {
+                _renderDrillDownTable(reqId, panel);
+            }
+            break;
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts':
-            // Split-pane: parts on left, offers on right (active view only)
             if (_currentMainView !== 'archive') {
                 _renderSplitPartsOffers(reqId, data, panel);
             } else {
@@ -3360,10 +3424,47 @@ function _renderDdTab(reqId, tabName, data, panel) {
             _renderSourcingDrillDown(reqId, panel);
             break;
         case 'activity':
-            _renderDdActivity(reqId, data, panel);
-            _autoPollReplies(reqId, data, panel);
+            // Consolidated Activity tab: activity timeline + tasks
+            if (data && data.activity !== undefined) {
+                // Render activity timeline
+                _renderDdActivity(reqId, data.activity, panel);
+                _autoPollReplies(reqId, data.activity, panel);
+                // Append tasks section below activity
+                const tasksSection = document.createElement('div');
+                tasksSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
+                tasksSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Tasks</div>';
+                panel.appendChild(tasksSection);
+                _renderDdTasks(reqId, data.tasks, tasksSection);
+            } else {
+                // Legacy single-data format
+                _renderDdActivity(reqId, data, panel);
+                _autoPollReplies(reqId, data, panel);
+            }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
+        case 'quote':
+            // Consolidated Quote tab: quotes + files + buy plans
+            if (data && data.quotes !== undefined) {
+                _renderDdQuotes(reqId, data.quotes, panel);
+                // Append files section
+                if (data.files && data.files.length > 0) {
+                    const filesSection = document.createElement('div');
+                    filesSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
+                    filesSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Files & Attachments</div>';
+                    panel.appendChild(filesSection);
+                    _renderDdFiles(reqId, data.files, filesSection);
+                }
+                // Append buy plans if any
+                if (data.buyplans && data.buyplans.length > 0) {
+                    const bpSection = document.createElement('div');
+                    bpSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
+                    bpSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Buy Plans</div>';
+                    panel.appendChild(bpSection);
+                }
+            } else {
+                _renderDdQuotes(reqId, data, panel);
+            }
+            break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
@@ -4438,7 +4539,7 @@ function _renderMyTaskItem(task) {
     item.onclick = function() {
         // Navigate to the requisition and open tasks tab
         toggleMyTasksSidebar();
-        expandToSubTab(task.requisition_id, 'tasks');
+        expandToSubTab(task.requisition_id, 'activity');
     };
 
     var title = document.createElement('div');
@@ -7950,19 +8051,22 @@ function _updateDdBulkButton(reqId) {
     const count = sel ? sel.size : 0;
     // Group selected sightings by normalized vendor name
     const data = _ddSightingsCache[reqId] || {};
-    const vendorMap = {}; // normalized name -> { hasEmail: bool }
+    const vendorMap = {}; // normalized name -> { hasEmail: bool, parts: Set }
     for (const [, group] of Object.entries(data)) {
         for (const s of (group.sightings || [])) {
             if (!sel || !sel.has(s.id)) continue;
             const vn = (s.vendor_name || '').trim().toLowerCase();
             if (!vn || vn === 'no seller listed') continue;
             const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
-            if (!vendorMap[vn]) vendorMap[vn] = { hasEmail: false };
+            if (!vendorMap[vn]) vendorMap[vn] = { hasEmail: false, parts: new Set() };
             if (hasEmail) vendorMap[vn].hasEmail = true;
+            if (s.mpn) vendorMap[vn].parts.add(s.mpn);
         }
     }
     const totalVendors = Object.keys(vendorMap).length;
     const withEmail = Object.values(vendorMap).filter(v => v.hasEmail).length;
+    const totalParts = new Set();
+    Object.values(vendorMap).forEach(v => v.parts.forEach(p => totalParts.add(p)));
     const vLabel = totalVendors === 1 ? 'vendor' : 'vendors';
     const label = withEmail < totalVendors
         ? `Prepare RFQ (${withEmail} of ${totalVendors} ${vLabel})`
@@ -7974,6 +8078,9 @@ function _updateDdBulkButton(reqId) {
     }
     const hint = document.getElementById('ddBulkHint-' + reqId);
     if (hint) hint.style.display = count > 0 ? 'none' : '';
+
+    // Update inline RFQ sticky bar
+    _updateInlineRfqBar(reqId, totalVendors, totalParts.size, count);
 }
 
 function ddPromptVendorEmail(reqId, sightingId, vendorName) {
@@ -8042,6 +8149,48 @@ function ddSendBulkRfq(reqId) {
     if (!vendorGroups.length) { showToast('No valid vendors selected', 'error'); return; }
     currentReqId = reqId;
     openBatchRfqModal(vendorGroups);
+}
+
+// ── Inline RFQ Bar ──────────────────────────────────────────────────────
+// Shows a sticky bottom bar when sightings are selected, providing a clear
+// path to sending RFQs without the hidden drawer pattern.
+// Called by: _updateDdBulkButton (when sighting selection changes)
+// Depends on: _ddSelectedSightings, _ddSightingsCache, ddSendBulkRfq
+
+function _updateInlineRfqBar(reqId, vendorCount, partCount, sightingCount) {
+    const existingBar = document.getElementById('inlineRfqBar-' + reqId);
+
+    if (sightingCount === 0) {
+        if (existingBar) existingBar.remove();
+        return;
+    }
+
+    const vLabel = vendorCount === 1 ? 'vendor' : 'vendors';
+    const pLabel = partCount === 1 ? 'part' : 'parts';
+    const barHtml = `
+        <div class="rfq-inline-bar" id="inlineRfqBar-${reqId}">
+            <span class="rfq-bar-count">${sightingCount} selected</span>
+            <span style="color:var(--muted);font-size:12px">${vendorCount} ${vLabel} \u00b7 ${partCount} ${pLabel}</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();_clearSightingSelection(${reqId})" title="Clear selection">Clear</button>
+            <button class="btn btn-primary" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})" title="Compose and send RFQs to selected vendors">Send RFQs \u2192</button>
+        </div>`;
+
+    if (existingBar) {
+        existingBar.outerHTML = barHtml;
+    } else {
+        // Append to the drill-down panel
+        const drow = document.getElementById('d-' + reqId);
+        const panel = drow?.querySelector('.dd-panel');
+        if (panel) panel.insertAdjacentHTML('beforeend', barHtml);
+    }
+}
+
+function _clearSightingSelection(reqId) {
+    const sel = _ddSelectedSightings[reqId];
+    if (sel) sel.clear();
+    _renderSourcingDrillDown(reqId);
+    _updateDdBulkButton(reqId);
 }
 
 function ddExportSightingsCsv(reqId) {
@@ -8392,9 +8541,11 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
+            const viewLabel = v === 'sales' ? 'sales' : v === 'sourcing' ? 'sourcing' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
-            el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || '') + ' requisitions</p>';
+            el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
+        _renderNotifActionBar();
         return;
     }
 
@@ -8415,23 +8566,35 @@ function renderReqList() {
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
+    } else if (v === 'sales') {
+        // Sales view: Customer-focused columns — Quote status, Value, Deadline prominent
+        thead = `<thead><tr>
+            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status and value">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} title="Vendor offers received">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+            ${_thIcons}
+        </tr></thead>`;
     } else {
-        // Active view: unified columns combining Open + Sourcing
+        // Sourcing view: Part coverage, sightings, RFQs, response rate prominent
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status">Quote ${sa('quote')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')} title="Vendor offers received">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs ${sa('sent')}</th>
-            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
+            <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
             ${_thIcons}
         </tr></thead>`;
     }
 
+    // Priority lane grouping for sales/sourcing views (skip if column sort is active)
     let rowsHtml;
     if (v === 'archive' && !_reqSortCol) {
         // Group by customer when no column sort is active
@@ -8452,6 +8615,10 @@ function renderReqList() {
             if (isOpen) html += g.reqs.map(r => _renderReqRow(r)).join('');
         }
         rowsHtml = html;
+    } else if ((v === 'sales' || v === 'sourcing') && !_reqSortCol && !_serverSearchActive) {
+        // Priority lanes — group reqs by urgency
+        const lanes = _classifyIntoLanes(data, v);
+        rowsHtml = _renderPriorityLanes(lanes, v);
     } else {
         rowsHtml = data.map(r => _renderReqRow(r)).join('');
     }
@@ -8468,12 +8635,14 @@ function renderReqList() {
         renderMobileReqList(data, loadMoreHtml);
         _populateUserFilter();
         _updateToolbarStats();
+        _renderNotifActionBar();
         return;
     } else {
         el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     }
     _populateUserFilter();
     _updateToolbarStats();
+    _renderNotifActionBar();
     _applyColVisCSS();
     // Restore previously open drill-downs (CSS only to avoid content reload flash)
     if (_openDrillIds.length) {
@@ -8498,6 +8667,160 @@ function renderReqList() {
             }, 50);
         }
     }
+}
+
+// ── Priority Lane Classification ─────────────────────────────────────────
+// Classifies requisitions into priority lanes based on the current view mode.
+// Called by renderReqList when not doing column sort or server search.
+// Depends on: _laneCollapseState (persisted in localStorage)
+
+function _classifyIntoLanes(data, viewMode) {
+    const now = new Date(); now.setHours(0,0,0,0);
+
+    if (viewMode === 'sales') {
+        // Sales lanes: Needs Action, In Progress, Waiting, New/Draft
+        const needsAction = [];
+        const inProgress = [];
+        const waiting = [];
+        const newDraft = [];
+
+        for (const r of data) {
+            const hasNewOffers = r.has_new_offers && (r.offer_count || 0) > 0;
+            const isOverdue = _isDeadlineUrgent(r, now) === 'overdue';
+            const isDueToday = _isDeadlineUrgent(r, now) === 'today';
+            const isDueSoon = _isDeadlineUrgent(r, now) === 'soon';
+            const hasQuoteDraft = r.quote_status === 'draft';
+            const hasQuoteSent = r.quote_status === 'sent';
+
+            if (hasNewOffers || isOverdue || isDueToday) {
+                needsAction.push(r);
+            } else if (hasQuoteDraft || isDueSoon || (r.status === 'active' && (r.offer_count || 0) > 0)) {
+                inProgress.push(r);
+            } else if (hasQuoteSent || (r.rfq_sent_count || 0) > 0) {
+                waiting.push(r);
+            } else {
+                newDraft.push(r);
+            }
+        }
+
+        return [
+            { key: 'sales-action', label: 'Needs Action', color: 'red', icon: '\ud83d\udd34', items: needsAction },
+            { key: 'sales-progress', label: 'In Progress', color: 'yellow', icon: '\ud83d\udfe1', items: inProgress },
+            { key: 'sales-waiting', label: 'Waiting', color: 'green', icon: '\ud83d\udfe2', items: waiting },
+            { key: 'sales-new', label: 'New / Draft', color: 'gray', icon: '\u26aa', items: newDraft },
+        ];
+    } else {
+        // Sourcing lanes: Unsourced, Sightings Found, Awaiting Responses, Offers In
+        const unsourced = [];
+        const sightingsFound = [];
+        const awaitingResponses = [];
+        const offersIn = [];
+
+        for (const r of data) {
+            const total = r.requirement_count || 0;
+            const sourced = r.sourced_count || 0;
+            const offers = r.offer_count || 0;
+            const sent = r.rfq_sent_count || 0;
+            const pct = total > 0 ? (sourced / total) : 0;
+
+            if (offers > 0) {
+                offersIn.push(r);
+            } else if (sent > 0) {
+                awaitingResponses.push(r);
+            } else if (pct > 0 || (r.status === 'active' && total > 0)) {
+                sightingsFound.push(r);
+            } else {
+                unsourced.push(r);
+            }
+        }
+
+        return [
+            { key: 'src-unsourced', label: 'Unsourced', color: 'red', icon: '\ud83d\udd34', items: unsourced },
+            { key: 'src-sightings', label: 'Sightings Found — Send RFQs', color: 'yellow', icon: '\ud83d\udfe1', items: sightingsFound },
+            { key: 'src-awaiting', label: 'Awaiting Responses', color: 'green', icon: '\ud83d\udfe2', items: awaitingResponses },
+            { key: 'src-offers', label: 'Offers In — Ready to Quote', color: 'gray', icon: '\u2705', items: offersIn },
+        ];
+    }
+}
+
+function _isDeadlineUrgent(r, now) {
+    if (!r.deadline || r.deadline === 'ASAP') return r.deadline === 'ASAP' ? 'soon' : 'none';
+    const d = new Date(r.deadline + 'T12:00:00Z');
+    const diff = Math.round((d - now) / 86400000);
+    if (diff < 0) return 'overdue';
+    if (diff === 0) return 'today';
+    if (diff <= 3) return 'soon';
+    return 'none';
+}
+
+function _renderPriorityLanes(lanes, viewMode) {
+    let html = '';
+    for (const lane of lanes) {
+        if (lane.items.length === 0) continue;
+        const isOpen = _laneCollapseState[lane.key] !== false; // default open
+        const openClass = isOpen ? ' open' : '';
+        const chevron = isOpen ? '\u25bc' : '\u25b6';
+        html += `<tr class="priority-lane-row"><td colspan="20" style="padding:0">
+            <div class="priority-lane lane-${lane.color}${openClass}" data-lane="${lane.key}">
+                <div class="priority-lane-header" onclick="togglePriorityLane('${lane.key}')">
+                    <span class="lane-chevron${openClass ? ' open' : ''}">${chevron}</span>
+                    <span>${lane.icon} ${lane.label}</span>
+                    <span class="lane-count">(${lane.items.length})</span>
+                </div>
+            </div>
+        </td></tr>`;
+        if (isOpen) {
+            html += lane.items.map(r => _renderReqRow(r)).join('');
+        }
+    }
+    return html;
+}
+
+function togglePriorityLane(key) {
+    const current = _laneCollapseState[key] !== false;
+    _laneCollapseState[key] = !current;
+    try { localStorage.setItem('avail_lane_collapse', JSON.stringify(_laneCollapseState)); } catch(e) {}
+    renderReqList();
+}
+
+// ── Smart Notification Bar ─────────────────────────────────────────────
+// Renders actionable items at the top of the list.
+// Called by renderReqList and setMainView.
+// Depends on: _reqListData, _currentMainView
+
+function _renderNotifActionBar() {
+    const bar = document.getElementById('notifActionBar');
+    if (!bar) return;
+    if (_currentMainView === 'archive') { bar.innerHTML = ''; return; }
+
+    const data = _reqListData;
+    if (!data || !data.length) { bar.innerHTML = ''; return; }
+
+    const now = new Date(); now.setHours(0,0,0,0);
+    let newResponses = 0, dueSoon = 0, unsourced = 0, newOffers = 0;
+
+    for (const r of data) {
+        if (['archived','won','lost','closed'].includes(r.status)) continue;
+        if (r.has_new_offers) newOffers++;
+        if (r.latest_reply_at) {
+            const h = (Date.now() - new Date(r.latest_reply_at).getTime()) / 3600000;
+            if (h < 24) newResponses++;
+        }
+        const urgency = _isDeadlineUrgent(r, now);
+        if (urgency === 'overdue' || urgency === 'today' || urgency === 'soon') dueSoon++;
+        const total = r.requirement_count || 0;
+        const sourced = r.sourced_count || 0;
+        if (total > 0 && sourced === 0 && r.status !== 'draft') unsourced++;
+    }
+
+    const items = [];
+    if (newOffers > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);_toolbarQuickFilter='green';renderReqList()"><span class="notif-dot notif-dot-green"></span><b>${newOffers}</b> new offer${newOffers !== 1 ? 's' : ''} to review</span>`);
+    if (newResponses > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-blue"></span><b>${newResponses}</b> vendor response${newResponses !== 1 ? 's' : ''} today</span>`);
+    if (dueSoon > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-amber"></span><b>${dueSoon}</b> due soon or overdue</span>`);
+    if (unsourced > 0 && _currentMainView === 'sourcing') items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-red"></span><b>${unsourced}</b> unsourced req${unsourced !== 1 ? 's' : ''}</span>`);
+
+    if (items.length === 0) { bar.innerHTML = ''; return; }
+    bar.innerHTML = items.join('') + '<span class="notif-action-dismiss" onclick="this.parentElement.innerHTML=\'\'" title="Dismiss">&times;</span>';
 }
 
 function setToolbarQuickFilter(key) {
@@ -8638,25 +8961,16 @@ function _renderReqRow(r) {
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
-    } else {
-        // RFQ: Parts, Quote, Sourcing, Offers, Sales, Age, Bid Due
-        // Quote status cell
+    } else if (v === 'sales') {
+        // Sales view: Parts, Quote (with value), Offers, Bid Due, Sales, Age
         let qCell = '<span style="color:var(--muted)" title="No quote created yet">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
         else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
         else if (r.quote_status === 'sent') qCell = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
         else if (r.quote_status === 'revised') qCell = '<span style="color:var(--amber)">Revised</span>';
         else if (r.quote_status === 'draft') qCell = '<span style="color:var(--muted)">Draft</span>';
-        // Source Progress cell — compact sourcing status
-        const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
-        let srcCell;
-        if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
-        else {
-            const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
-            srcCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
-        }
-        // Offers cell — show confirmed offers, fall back to reply count
-        let offCell = '<span style="color:var(--muted)" title="No vendor offers received yet">\u2014</span>';
+
+        let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
         const _rCnt = r.reply_count || 0;
         if (_oCnt > 0) {
@@ -8666,35 +8980,80 @@ function _renderReqRow(r) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
 
-        // RFQs sent count
-        const sent = r.rfq_sent_count || 0;
-
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
-            <td class="mono" style="font-size:11px">${sent}</td>
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             <td>${esc(r.created_by_name || '')}</td>
-            <td class="mono" style="font-size:11px">${age}</td>
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
-        // RFQ tab button state machine: blue Source → yellow Sourcing → green Offers
-        let rfqBtn;
-        if (r.status === 'draft') {
-            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing — search supplier APIs for parts">&#x25b6; Sourcing</button>`;
-        } else if (r.status === 'quoted' || r.status === 'quoting') {
-            const hasQuoteSent = r.quote_status === 'sent';
-            rfqBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="View quote">Quoted</button>`;
-            if (hasQuoteSent) rfqBtn += ` <button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-        } else if (offers > 0 && r.has_new_offers) {
-            rfqBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers — click to review">Offers (${offers})</button>`;
-        } else if (offers > 0) {
-            rfqBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View offers">Offers (${offers})</button>`;
+            <td class="mono" style="font-size:11px">${age}</td>`;
+
+        // Sales actions: context-aware primary action
+        let salesBtn;
+        if (r.has_new_offers && (r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
+        } else if (r.quote_status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quote')" title="Finish and send quote">Send Quote</button>`;
+        } else if (r.quote_status === 'sent') {
+            salesBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+        } else if ((r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quote')" title="Build a quote from offers">Build Quote</button>`;
+        } else if (r.status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source</button>`;
         } else {
-            rfqBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sourcing in progress — click to view sightings">Sourcing</button>`;
+            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="View sourcing progress">Sourcing</button>`;
         }
-        actions = `<td style="white-space:nowrap">${rfqBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
-        colspan = 11;
+        actions = `<td style="white-space:nowrap">${salesBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 9;
+    } else {
+        // Sourcing view: Parts, Sourced bar, RFQs sent, Response rate, Offers, Age
+        const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+        let srcCell;
+        if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
+        else {
+            const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
+        }
+
+        const sent = r.rfq_sent_count || 0;
+        const replied = r.reply_count || 0;
+        const respPct = sent > 0 ? Math.round((replied / sent) * 100) : 0;
+        const respCell = sent > 0
+            ? `<span class="mono" style="font-size:11px">${respPct}% <span style="color:var(--muted)">(${replied}/${sent})</span></span>`
+            : '<span style="color:var(--muted)">\u2014</span>';
+
+        let offCell = '<span style="color:var(--muted)">\u2014</span>';
+        const _oCnt = r.offer_count || 0;
+        if (_oCnt > 0) {
+            offCell = `<b>${_oCnt}</b>`;
+            if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
+        }
+
+        dataCells = `
+            <td class="mono">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+            <td class="mono" style="font-size:11px">${sent}</td>
+            <td style="font-size:11px;white-space:nowrap">${respCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td class="mono" style="font-size:11px">${age}</td>`;
+
+        // Sourcing actions: context-aware primary action
+        let srcBtn;
+        if (r.status === 'draft') {
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
+        } else if (_oCnt > 0 && r.has_new_offers) {
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
+        } else if (sourced > 0 && sent === 0) {
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+        } else if (sent > 0 && _oCnt === 0) {
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="RFQs sent, waiting for responses">${replied > 0 ? replied + ' Replies' : 'Awaiting'}</button>`;
+        } else if (_oCnt > 0) {
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
+        } else {
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="View sourcing progress">Sourcing</button>`;
+        }
+        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 9;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -9114,6 +9473,8 @@ function setMainView(view, btn) {
     _reqFullyLoaded = false;
 
     _currentMainView = view;
+    // Persist view preference (not archive — that's a temporary view)
+    if (view !== 'archive') localStorage.setItem('avail_main_view', view);
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
@@ -9132,17 +9493,17 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on active view, hide on archive
+    // Show status filter pills on sales/sourcing views, hide on archive
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'active') ? '' : 'none';
-    if (view === 'active') {
+    if (stEl) stEl.style.display = (view === 'sales' || view === 'sourcing') ? '' : 'none';
+    if (view === 'sales' || view === 'sourcing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
         loadFollowUpsPanel();
-    } else if (view === 'rfq' || view === 'sourcing') {
-        // Legacy: redirect old view names to active
-        _currentMainView = 'active';
+    } else if (view === 'active' || view === 'rfq') {
+        // Legacy: redirect old view names to sales
+        _currentMainView = 'sales';
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -9153,6 +9514,8 @@ function setMainView(view, btn) {
         _archivePage = 1;
         loadRequisitions();
     }
+    // Update notification bar
+    _renderNotifActionBar();
 }
 
 // ── Toolbar Controls ────────────────────────────────────────────────────
@@ -9450,7 +9813,7 @@ async function createRequisition() {
         const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
         const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         await loadRequisitions();
-        expandToSubTab(data.id, 'parts');
+        expandToSubTab(data.id, 'sourcing');
         showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
@@ -9598,7 +9961,7 @@ async function requoteFromList(reqId) {
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
-                expandToSubTab(resp.id, 'sightings');
+                expandToSubTab(resp.id, 'sourcing');
             } else {
                 showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
             }
@@ -14231,7 +14594,7 @@ Object.assign(window, {
     // Internal/underscore-prefixed functions used in inline handlers
     _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
     ddInlineEditOffer, ddApproveOffer, ddRejectOffer, ddShowChangelog, ddRefreshTab,
-    _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
+    _clearSightingSelection, _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
@@ -14245,7 +14608,8 @@ Object.assign(window, {
     _renderDetailDeadline, _renderDrillDownTable, _renderReqRow,
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
     _saveAddRow, _selfGuard, _sortArrow, _switchDdTab,
-    _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
+    _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel, _updateInlineRfqBar,
+    togglePriorityLane, _renderNotifActionBar, _classifyIntoLanes, _renderPriorityLanes, _isDeadlineUrgent,
     _updateBulkFollowUpBtn, _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
     _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
