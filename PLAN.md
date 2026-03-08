@@ -1,76 +1,104 @@
-# RFQ Layout Redesign Plan
+# Task Board Feature Plan (Replacing Q&A Sub-Tab)
 
 ## Overview
-Four interconnected changes to simplify the RFQ workflow and reduce tab-switching.
+Replace the Q&A sub-tab in each requisition's drill-down with a Kanban-style task board. Tasks cover sourcing, sales, and general communication — auto-generated from system events plus manual creation.
 
-## Change 1: Merge Open + Sourcing into Unified View
-**What changes:**
-- Remove the separate "Open" and "Sourcing" pill buttons, replace with single "Active" pill
-- Combine sub-tabs from both views: `['parts', 'sightings', 'offers', 'activity', 'quotes', 'qa', 'files']`
-- Keep "Archive" as a separate view (it serves a different purpose)
-- Merge the column sets: use the RFQ (Open) table columns but add Sourcing Score + RFQs Sent + Resp %
-- The drill-down header gets both sets of action buttons (Search All, Log Offer, Add Part, Upload, Paste)
+## Data Model: `RequisitionTask`
 
-**Files:**
-- `app/static/app.js`: `_ddSubTabs()`, `_ddDefaultTab()`, `setMainView()`, `renderReqList()` thead, `_renderReqRow()`, `_renderDdTabPills()`
-- `app/templates/index.html`: Remove "Open"/"Sourcing" pills, replace with "Active"; update mobile pills too
-- `app/static/styles.css`: Minor adjustments
+New table `requisition_tasks`:
+- `id` (PK)
+- `requisition_id` (FK → requisitions, required)
+- `title` (String 255, required) — short task description
+- `description` (Text, nullable) — optional detail/notes
+- `task_type` (String 20) — `sourcing`, `sales`, `general`
+- `status` (String 20, default `todo`) — `todo`, `in_progress`, `done`
+- `priority` (Integer, default 2) — 1=low, 2=medium, 3=high
+- `assigned_to_id` (FK → users, nullable) — single assignee
+- `created_by` (FK → users, nullable)
+- `source` (String 20, default `manual`) — `manual` | `system` | `ai`
+- `source_ref` (String 100, nullable) — e.g. `offer:123`, `rfq:456` for auto-generated
+- `due_at` (DateTime, nullable)
+- `completed_at` (DateTime, nullable)
+- `created_at`, `updated_at` (timestamps)
 
-## Change 2: Split-Pane Parts + Offers
-**What changes:**
-- When the "parts" sub-tab is active, render a split-pane layout: parts table on the left, offers panel on the right
-- Use the existing `.split-panel` CSS classes (already defined in styles.css lines 2103-2106)
-- Left pane (40%): parts table (`_renderDrillDownTable`)
-- Right pane (60%): offers list (`_renderDdOffers`) — or placeholder "No offers yet" if empty
-- On mobile: stack vertically (already handled by existing CSS at line 2383)
-- Remove "offers" as a standalone sub-tab since it's now visible alongside parts
-- Updated sub-tabs become: `['parts', 'sightings', 'activity', 'quotes', 'qa', 'files']`
+Indexes: `(requisition_id, status)`, `(assigned_to_id, status)`
 
-**Files:**
-- `app/static/app.js`: Modify `_renderDdTab()` for 'parts' case to render split pane, update `_ddSubTabs()` to remove standalone 'offers'
+## API Endpoints (`/api/requisitions/{req_id}/tasks`)
 
-## Change 3: RFQ Send as Slide-In Panel (not modal)
-**What changes:**
-- Convert the `#rfqModal` modal into a slide-in panel that appears on the right side of the screen (like a drawer)
-- Give it a persistent class `.rfq-drawer` instead of `.modal-bg`
-- The drawer slides in from the right, stays open while users interact with the main list behind it
-- State is preserved if users click away (drawer just hides, doesn't reset)
-- Add a minimize/restore toggle so users can collapse it to a small bar
-- Keep all existing phases (prepare, ready, preview, results) — just change the container
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/tasks` | List tasks (filter by status, type, assignee) |
+| POST | `/tasks` | Create task |
+| PUT | `/tasks/{id}` | Update task (title, status, assignee, priority, etc.) |
+| PATCH | `/tasks/{id}/status` | Quick status change (drag-drop) |
+| DELETE | `/tasks/{id}` | Delete task |
 
-**Files:**
-- `app/templates/index.html`: Replace `#rfqModal .modal-bg` wrapper with `.rfq-drawer` panel
-- `app/static/styles.css`: Add `.rfq-drawer` styles (slide from right, width: 520px)
-- `app/static/app.js`: Update `ddSendBulkRfq()` to open drawer instead of modal, update close behavior
+## Service Layer
 
-## Change 4: Summary Dashboard per Requisition
-**What changes:**
-- Add a summary stats bar at the top of each drill-down panel (above the sub-tabs)
-- Shows 4-5 key metrics as compact stat cards:
-  - Parts: X total
-  - Sourced: X/Y (with progress bar)
-  - Offers: X received
-  - RFQs: X sent, Y% response rate
-  - Quote: status badge (Draft/Sent/Won)
-- This replaces the need to click through tabs to understand req status at a glance
-- Rendered by a new `_renderDdSummary(reqId)` function
+`app/services/task_service.py`:
+- `create_task()` — CRUD
+- `update_task()` — CRUD
+- `update_task_status()` — status transition + set `completed_at` when → done
+- `delete_task()` — CRUD
+- `get_tasks()` — query by requisition + filters
+- `auto_generate_tasks()` — called from event hooks
 
-**Files:**
-- `app/static/app.js`: New `_renderDdSummary()` function, called from `toggleDrillDown()` and `_openMobileDrillDown()`
-- `app/static/styles.css`: `.dd-summary` stat card styles
+## Auto-Generated Tasks
+
+Hook into existing service functions to create tasks:
+1. **New offer received** → "Review offer from {vendor} for {mpn}" (sourcing)
+2. **RFQ sent, no response after 3 days** → "Follow up on RFQ to {vendor}" (sourcing)
+3. **Quote created** → "Send quote to customer" (sales)
+4. **Quote expires in 2 days** → "Quote expiring: follow up with customer" (sales)
+5. **New requirement added** → "Source {mpn} — find vendors" (sourcing)
+
+Auto-tasks have `source='system'` and `source_ref` pointing to the triggering entity.
+
+## Frontend: Kanban Board UI
+
+Replace `_renderDdQA()` with `_renderDdTasks()`:
+- Three columns: **To Do** | **In Progress** | **Done**
+- Each column is a scrollable card list
+- Cards show: title, type badge (colored), assignee avatar/initials, due date, priority dot
+- System-generated cards have a subtle "auto" indicator
+- Drag-and-drop between columns (using native HTML5 drag API)
+- "+" button at top of To Do column opens inline form (no modal)
+- Click card to expand inline for editing
+- Filter bar: All | Sourcing | Sales | General (reuse existing filter pill style)
+- Column headers show count
+
+Sub-tab rename: `qa` → `tasks`
+
+## Files to Create/Modify
+
+### New files:
+- `app/models/task.py` — RequisitionTask model
+- `app/schemas/task.py` — Pydantic schemas
+- `app/services/task_service.py` — business logic
+- `app/routers/task.py` — API endpoints
+- `alembic/versions/065_requisition_tasks.py` — migration
+
+### Modified files:
+- `app/models/__init__.py` — add RequisitionTask export
+- `app/main.py` — register task router
+- `app/static/app.js` — replace Q&A rendering with Kanban board
+- `app/static/styles.css` — Kanban board CSS
+- `app/templates/index.html` — rename sub-tab label if needed
+
+### Untouched:
+- Knowledge system stays intact (facts, AI insights, auto-capture still work)
+- Knowledge API endpoints unchanged
+- Only the Q&A sub-tab UI is replaced; knowledge entries with `entry_type='question'` still exist in DB
 
 ## Implementation Order
-1. Summary dashboard (smallest, no breaking changes)
-2. Merge Open + Sourcing (medium, changes view model)
-3. Split-pane Parts + Offers (medium, changes drill-down rendering)
-4. RFQ drawer (largest, changes modal → panel)
+1. Model + migration
+2. Schemas + service
+3. Router + register
+4. Frontend Kanban UI
+5. Auto-generation hooks
+6. Commit + push + deploy
 
 ## Testing
-- Existing tests in `tests/test_routers_rfq.py` test backend endpoints — these are unaffected
-- Frontend changes are UI-only, no API contract changes
-- Manual testing checklist:
-  - Verify all sub-tabs load correctly in unified view
-  - Verify split-pane renders parts + offers side by side
-  - Verify RFQ drawer opens, stays open, and sends correctly
-  - Verify summary stats update when data changes
-  - Verify mobile layouts still work (stacked split-pane, mobile drill-down)
+- Unit tests for task CRUD service
+- API endpoint tests for all 5 routes
+- Frontend is manual testing (vanilla JS, no test framework)
