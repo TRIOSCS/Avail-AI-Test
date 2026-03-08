@@ -381,3 +381,41 @@ async def refresh_mpn_insights(
         "generated_at": entries[0].created_at.isoformat() if entries else None,
         "has_expired": False,
     }
+
+
+@sprinkles_router.get("/resurfacing/hints")
+def resurfacing_hints(
+    mpns: str = Query("", description="Comma-separated list of MPNs"),
+    exclude_req: int | None = Query(None, description="Req ID to exclude from cross-req matches"),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Batch MPN hints for cross-customer resurfacing. Pure SQL, sub-50ms."""
+    from app.cache.intel_cache import get_cached, set_cached
+    from app.services.resurfacing_service import get_mpn_hints
+
+    mpn_list = [m.strip() for m in mpns.split(",") if m.strip()] if mpns else []
+    if len(mpn_list) > 50:
+        mpn_list = mpn_list[:50]
+
+    if not mpn_list:
+        return {"hints": {}}
+
+    # Redis cache: 1h TTL
+    cache_key = "resurface:{}:{}".format(",".join(sorted(mpn_list)), exclude_req or 0)
+    try:
+        cached = get_cached(cache_key)
+        if cached is not None:
+            return cached
+    except Exception:
+        pass
+
+    hints = get_mpn_hints(mpns=mpn_list, db=db, exclude_req_id=exclude_req)
+    response = {"hints": hints}
+
+    try:
+        set_cached(cache_key, response, ttl_days=1 / 24)  # 1 hour
+    except Exception:
+        pass
+
+    return response
