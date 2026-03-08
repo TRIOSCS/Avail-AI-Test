@@ -4472,9 +4472,15 @@ function toggleMyTasksSidebar() {
 async function loadMyTasks() {
     var list = document.getElementById('myTasksList');
     if (!list) return;
+    list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>';
     try {
-        var tasks = await apiFetch('/api/tasks/mine');
-        var summary = await apiFetch('/api/tasks/mine/summary');
+        var [tasksRes, summaryRes] = await Promise.allSettled([
+            apiFetch('/api/tasks/mine'),
+            apiFetch('/api/tasks/mine/summary')
+        ]);
+        var tasks = tasksRes.status === 'fulfilled' ? tasksRes.value : [];
+        var summary = summaryRes.status === 'fulfilled' ? summaryRes.value : {};
+        if (Array.isArray(tasks) === false) tasks = [];
 
         // Update badge
         var badge = document.getElementById('myTasksBadge');
