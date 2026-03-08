@@ -223,6 +223,23 @@
     </div>
 </aside>
 
+<!-- My Tasks Sidebar Widget -->
+<div id="myTasksSidebar" class="my-tasks-sidebar">
+    <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
+        <span style="font-size:14px">&#9776;</span>
+        <span id="myTasksBadge" class="my-tasks-badge" style="display:none">0</span>
+    </button>
+    <div class="my-tasks-panel" id="myTasksPanel">
+        <div class="my-tasks-header">
+            <span style="font-weight:700;font-size:13px">My Tasks</span>
+            <button class="btn btn-ghost btn-sm" onclick="toggleMyTasksSidebar()" style="font-size:14px">&times;</button>
+        </div>
+        <div id="myTasksList" class="my-tasks-list">
+            <span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>
+        </div>
+    </div>
+</div>
+
 <!-- Main content -->
 <main class="main">
     <div class="main-scroll">

@@ -3150,10 +3150,10 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'qa', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'tasks', 'files'];
     // Active view: unified tabs combining former Open + Sourcing
-    if (window.__isMobile) return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'buyplans', 'qa'];
-    return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'qa', 'files'];
+    if (window.__isMobile) return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'buyplans', 'tasks'];
+    return ['parts', 'sightings', 'offers', 'activity', 'quotes', 'tasks', 'files'];
 }
 
 function _ddDefaultTab(mainView) {
@@ -3161,7 +3161,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', qa:'Q&A'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', tasks:'Tasks'};
     return map[tab] || tab;
 }
 
@@ -3311,8 +3311,8 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = plans;
                 break;
             }
-            case 'qa':
-                data = await apiFetch(`/api/knowledge?requisition_id=${reqId}`);
+            case 'tasks':
+                data = await apiFetch(`/api/requisitions/${reqId}/tasks`);
                 break;
             case 'files':
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
@@ -3339,7 +3339,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
             case 'offers': _renderMobileOffersList(data, reqId, panel); break;
             case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
             case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
-            case 'qa': _renderDdQA(reqId, data, panel); break;
+            case 'tasks': _renderDdTasks(reqId, data, panel); break;
             case 'files': _renderDdFiles(reqId, data, panel); break;
             default: panel.textContent = '';
         }
@@ -3365,7 +3365,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
-        case 'qa': _renderDdQA(reqId, data, panel); break;
+        case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
         default: panel.textContent = '';
     }
@@ -3992,7 +3992,489 @@ function _populateInsightsBody(body, data) {
 }
 
 // ---------------------------------------------------------------------------
-// Knowledge Ledger: Q&A Tab
+// Pipeline Task Board (replaces Q&A sub-tab)
+// ---------------------------------------------------------------------------
+
+function _renderDdTasks(reqId, tasks, panel) {
+    tasks = tasks || [];
+    var columns = [
+        { id: 'todo', label: 'To Do', color: 'var(--muted)' },
+        { id: 'in_progress', label: 'In Progress', color: 'var(--blue, #3b82f6)' },
+        { id: 'done', label: 'Done', color: 'var(--green, #22c55e)' },
+    ];
+
+    // Filter bar
+    var filterBar = document.createElement('div');
+    filterBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+    var filterGroup = document.createElement('div');
+    filterGroup.style.cssText = 'display:flex;gap:4px';
+    var filterTypes = ['all', 'sourcing', 'sales', 'general'];
+    var filterLabels = { all: 'All', sourcing: 'Sourcing', sales: 'Sales', general: 'General' };
+    for (var fi = 0; fi < filterTypes.length; fi++) {
+        var fbtn = document.createElement('button');
+        fbtn.className = 'btn btn-ghost btn-sm task-filter' + (filterTypes[fi] === 'all' ? ' active' : '');
+        fbtn.textContent = filterLabels[filterTypes[fi]];
+        fbtn.dataset.filter = filterTypes[fi];
+        fbtn.onclick = (function(f, b) {
+            return function() {
+                _filterTasks(reqId, f, b);
+            };
+        })(filterTypes[fi], fbtn);
+        filterGroup.appendChild(fbtn);
+    }
+    filterBar.appendChild(filterGroup);
+
+    var addBtn = document.createElement('button');
+    addBtn.className = 'btn btn-sm';
+    addBtn.textContent = '+ Add Task';
+    addBtn.onclick = function() { _showInlineTaskForm(reqId, panel); };
+    filterBar.appendChild(addBtn);
+
+    panel.textContent = '';
+    panel.appendChild(filterBar);
+
+    // Board container
+    var board = document.createElement('div');
+    board.className = 'task-board';
+    board.id = 'taskBoard-' + reqId;
+
+    for (var ci = 0; ci < columns.length; ci++) {
+        var col = columns[ci];
+        var colTasks = tasks.filter(function(t) { return t.status === col.id; });
+
+        var colDiv = document.createElement('div');
+        colDiv.className = 'task-col';
+        colDiv.dataset.status = col.id;
+        colDiv.ondragover = function(e) { e.preventDefault(); this.classList.add('drag-over'); };
+        colDiv.ondragleave = function() { this.classList.remove('drag-over'); };
+        colDiv.ondrop = (function(status, rId) {
+            return function(e) {
+                e.preventDefault();
+                this.classList.remove('drag-over');
+                var taskId = e.dataTransfer.getData('text/plain');
+                if (taskId) _moveTask(rId, parseInt(taskId), status);
+            };
+        })(col.id, reqId);
+
+        // Column header
+        var header = document.createElement('div');
+        header.className = 'task-col-header';
+        header.innerHTML = '<span class="task-col-dot" style="background:' + col.color + '"></span>' +
+            '<span class="task-col-title">' + col.label + '</span>' +
+            '<span class="task-col-count">' + colTasks.length + '</span>';
+        colDiv.appendChild(header);
+
+        // Cards
+        var cardList = document.createElement('div');
+        cardList.className = 'task-col-cards';
+        for (var ti = 0; ti < colTasks.length; ti++) {
+            cardList.appendChild(_renderTaskCard(colTasks[ti], reqId));
+        }
+        colDiv.appendChild(cardList);
+        board.appendChild(colDiv);
+    }
+
+    panel.appendChild(board);
+}
+
+function _renderTaskCard(task, reqId) {
+    var card = document.createElement('div');
+    card.className = 'task-card';
+    card.draggable = true;
+    card.dataset.taskId = task.id;
+    card.dataset.type = task.task_type;
+    card.ondragstart = function(e) {
+        e.dataTransfer.setData('text/plain', task.id.toString());
+        card.classList.add('dragging');
+    };
+    card.ondragend = function() { card.classList.remove('dragging'); };
+
+    // Priority dot
+    var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
+    var priLabels = { 1: 'Low', 2: 'Med', 3: 'High' };
+
+    // Top row: title + type badge
+    var topRow = document.createElement('div');
+    topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:4px';
+    var titleSpan = document.createElement('span');
+    titleSpan.className = 'task-card-title';
+    titleSpan.textContent = task.title;
+    topRow.appendChild(titleSpan);
+
+    var typeBadge = document.createElement('span');
+    typeBadge.className = 'task-type-badge task-type-' + task.task_type;
+    typeBadge.textContent = task.task_type;
+    topRow.appendChild(typeBadge);
+    card.appendChild(topRow);
+
+    // Risk flag
+    if (task.ai_risk_flag) {
+        var riskDiv = document.createElement('div');
+        riskDiv.className = 'task-risk-flag';
+        riskDiv.textContent = '\u26a0 ' + task.ai_risk_flag;
+        card.appendChild(riskDiv);
+    }
+
+    // Bottom row: priority, assignee, due date, source
+    var bottomRow = document.createElement('div');
+    bottomRow.className = 'task-card-meta';
+
+    var priDot = document.createElement('span');
+    priDot.className = 'task-pri-dot';
+    priDot.style.background = priColors[task.priority] || priColors[2];
+    priDot.title = priLabels[task.priority] || 'Medium';
+    bottomRow.appendChild(priDot);
+
+    if (task.assignee_name) {
+        var initials = task.assignee_name.split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
+        var avatar = document.createElement('span');
+        avatar.className = 'task-avatar';
+        avatar.title = task.assignee_name;
+        avatar.textContent = initials;
+        bottomRow.appendChild(avatar);
+    }
+
+    if (task.due_at) {
+        var dueSpan = document.createElement('span');
+        dueSpan.className = 'task-due';
+        var dueDate = new Date(task.due_at);
+        var now = new Date();
+        if (dueDate < now && task.status !== 'done') dueSpan.classList.add('task-overdue');
+        dueSpan.textContent = _shortDate(task.due_at);
+        bottomRow.appendChild(dueSpan);
+    }
+
+    if (task.source === 'system') {
+        var autoTag = document.createElement('span');
+        autoTag.className = 'task-auto-tag';
+        autoTag.textContent = 'auto';
+        bottomRow.appendChild(autoTag);
+    }
+
+    // Actions (edit / delete)
+    var actionsDiv = document.createElement('span');
+    actionsDiv.style.cssText = 'margin-left:auto;display:flex;gap:2px';
+    var editBtn = document.createElement('button');
+    editBtn.className = 'btn btn-ghost btn-sm';
+    editBtn.style.cssText = 'font-size:10px;padding:1px 4px';
+    editBtn.textContent = '\u270e';
+    editBtn.title = 'Edit';
+    editBtn.onclick = function(e) { e.stopPropagation(); _editTaskInline(reqId, task, card); };
+    actionsDiv.appendChild(editBtn);
+    var delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-ghost btn-sm';
+    delBtn.style.cssText = 'font-size:10px;padding:1px 4px;color:var(--red,#e74c3c)';
+    delBtn.textContent = '\u2715';
+    delBtn.title = 'Delete';
+    delBtn.onclick = function(e) { e.stopPropagation(); _deleteTask(reqId, task.id); };
+    actionsDiv.appendChild(delBtn);
+    bottomRow.appendChild(actionsDiv);
+
+    card.appendChild(bottomRow);
+    return card;
+}
+
+function _shortDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getMonth()] + ' ' + d.getDate();
+}
+
+function _filterTasks(reqId, type, btn) {
+    var board = document.getElementById('taskBoard-' + reqId);
+    if (!board) return;
+    var cards = board.querySelectorAll('.task-card');
+    for (var i = 0; i < cards.length; i++) {
+        cards[i].style.display = (type === 'all' || cards[i].dataset.type === type) ? '' : 'none';
+    }
+    var allBtns = btn.parentNode.querySelectorAll('.task-filter');
+    for (var j = 0; j < allBtns.length; j++) allBtns[j].classList.remove('active');
+    btn.classList.add('active');
+}
+
+async function _moveTask(reqId, taskId, newStatus) {
+    try {
+        await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId + '/status', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus }),
+        });
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+        if (typeof showToast === 'function') showToast('Task updated', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to move task', 'error');
+    }
+}
+
+async function _deleteTask(reqId, taskId) {
+    if (!confirm('Delete this task?')) return;
+    try {
+        await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId, { method: 'DELETE' });
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+        if (typeof showToast === 'function') showToast('Task deleted', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
+    }
+}
+
+function _showInlineTaskForm(reqId, panel) {
+    // Check if form already exists
+    if (document.getElementById('taskForm-' + reqId)) return;
+
+    var form = document.createElement('div');
+    form.id = 'taskForm-' + reqId;
+    form.className = 'task-inline-form';
+
+    form.innerHTML =
+        '<input id="taskTitle-' + reqId + '" type="text" placeholder="Task title..." class="task-input">' +
+        '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
+            '<select id="taskType-' + reqId + '" class="task-select">' +
+                '<option value="sourcing">Sourcing</option>' +
+                '<option value="sales">Sales</option>' +
+                '<option value="general">General</option>' +
+            '</select>' +
+            '<select id="taskPriority-' + reqId + '" class="task-select">' +
+                '<option value="1">Low</option>' +
+                '<option value="2" selected>Medium</option>' +
+                '<option value="3">High</option>' +
+            '</select>' +
+            '<input id="taskDue-' + reqId + '" type="date" class="task-select" style="width:auto">' +
+            '<button class="btn btn-sm" onclick="_submitNewTask(' + reqId + ')">Add</button>' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'taskForm-' + reqId + '\').remove()">Cancel</button>' +
+        '</div>';
+
+    // Insert after filter bar, before board
+    var board = document.getElementById('taskBoard-' + reqId);
+    if (board) panel.insertBefore(form, board);
+    else panel.appendChild(form);
+    document.getElementById('taskTitle-' + reqId).focus();
+}
+
+async function _submitNewTask(reqId) {
+    var titleEl = document.getElementById('taskTitle-' + reqId);
+    var typeEl = document.getElementById('taskType-' + reqId);
+    var priEl = document.getElementById('taskPriority-' + reqId);
+    var dueEl = document.getElementById('taskDue-' + reqId);
+    if (!titleEl || !titleEl.value.trim()) return;
+
+    var body = {
+        title: titleEl.value.trim(),
+        task_type: typeEl.value,
+        priority: parseInt(priEl.value),
+    };
+    if (dueEl.value) body.due_at = new Date(dueEl.value).toISOString();
+
+    try {
+        await apiFetch('/api/requisitions/' + reqId + '/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+        if (typeof showToast === 'function') showToast('Task created', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to create task', 'error');
+    }
+}
+
+function _editTaskInline(reqId, task, cardEl) {
+    cardEl.innerHTML = '';
+    cardEl.draggable = false;
+
+    var titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.value = task.title;
+    titleInput.className = 'task-input';
+    titleInput.style.fontSize = '11px';
+    cardEl.appendChild(titleInput);
+
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:4px;margin-top:4px;align-items:center';
+
+    var typeSelect = document.createElement('select');
+    typeSelect.className = 'task-select';
+    ['sourcing', 'sales', 'general'].forEach(function(t) {
+        var opt = document.createElement('option');
+        opt.value = t; opt.textContent = t;
+        if (t === task.task_type) opt.selected = true;
+        typeSelect.appendChild(opt);
+    });
+    row.appendChild(typeSelect);
+
+    var priSelect = document.createElement('select');
+    priSelect.className = 'task-select';
+    [['1','Low'],['2','Med'],['3','High']].forEach(function(p) {
+        var opt = document.createElement('option');
+        opt.value = p[0]; opt.textContent = p[1];
+        if (parseInt(p[0]) === task.priority) opt.selected = true;
+        priSelect.appendChild(opt);
+    });
+    row.appendChild(priSelect);
+
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-sm';
+    saveBtn.style.fontSize = '10px';
+    saveBtn.textContent = 'Save';
+    saveBtn.onclick = async function() {
+        try {
+            await apiFetch('/api/requisitions/' + reqId + '/tasks/' + task.id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: titleInput.value.trim(),
+                    task_type: typeSelect.value,
+                    priority: parseInt(priSelect.value),
+                }),
+            });
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+            var drow = document.getElementById('d-' + reqId);
+            var panel = drow ? drow.querySelector('.dd-panel') : null;
+            if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to update', 'error');
+        }
+    };
+    row.appendChild(saveBtn);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-ghost btn-sm';
+    cancelBtn.style.fontSize = '10px';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = async function() {
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+        var drow = document.getElementById('d-' + reqId);
+        var panel = drow ? drow.querySelector('.dd-panel') : null;
+        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+    };
+    row.appendChild(cancelBtn);
+    cardEl.appendChild(row);
+    titleInput.focus();
+}
+
+// ---------------------------------------------------------------------------
+// My Tasks Sidebar Widget
+// ---------------------------------------------------------------------------
+
+function toggleMyTasksSidebar() {
+    var sidebar = document.getElementById('myTasksSidebar');
+    if (!sidebar) return;
+    var isOpen = sidebar.classList.toggle('open');
+    if (isOpen) loadMyTasks();
+}
+
+async function loadMyTasks() {
+    var list = document.getElementById('myTasksList');
+    if (!list) return;
+    try {
+        var tasks = await apiFetch('/api/tasks/mine');
+        var summary = await apiFetch('/api/tasks/mine/summary');
+
+        // Update badge
+        var badge = document.getElementById('myTasksBadge');
+        var pending = (summary.todo || 0) + (summary.in_progress || 0);
+        if (badge) {
+            badge.textContent = pending;
+            badge.style.display = pending > 0 ? 'flex' : 'none';
+        }
+
+        if (!tasks.length) {
+            list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">No tasks assigned to you</span>';
+            return;
+        }
+
+        // Group by urgency
+        var now = new Date();
+        var groups = { overdue: [], today: [], upcoming: [], nodate: [] };
+        for (var i = 0; i < tasks.length; i++) {
+            var t = tasks[i];
+            if (!t.due_at) { groups.nodate.push(t); continue; }
+            var due = new Date(t.due_at);
+            if (due < now) { groups.overdue.push(t); }
+            else if (due.toDateString() === now.toDateString()) { groups.today.push(t); }
+            else { groups.upcoming.push(t); }
+        }
+
+        list.innerHTML = '';
+        var sections = [
+            { key: 'overdue', label: 'Overdue', cls: 'overdue' },
+            { key: 'today', label: 'Due Today', cls: 'today' },
+            { key: 'upcoming', label: 'Upcoming', cls: '' },
+            { key: 'nodate', label: 'No Due Date', cls: '' },
+        ];
+        for (var si = 0; si < sections.length; si++) {
+            var sec = sections[si];
+            var items = groups[sec.key];
+            if (!items.length) continue;
+            var header = document.createElement('div');
+            header.className = 'my-task-group-header ' + sec.cls;
+            header.textContent = sec.label + ' (' + items.length + ')';
+            list.appendChild(header);
+            for (var ti = 0; ti < items.length; ti++) {
+                list.appendChild(_renderMyTaskItem(items[ti]));
+            }
+        }
+    } catch (e) {
+        list.innerHTML = '<span style="font-size:11px;color:var(--red);padding:20px;text-align:center;display:block">Failed to load tasks</span>';
+    }
+}
+
+function _renderMyTaskItem(task) {
+    var item = document.createElement('div');
+    item.className = 'my-task-item';
+    if (task.priority === 3) item.classList.add('pri-high');
+    else if (task.priority === 2) item.classList.add('pri-med');
+    else item.classList.add('pri-low');
+
+    item.onclick = function() {
+        // Navigate to the requisition and open tasks tab
+        toggleMyTasksSidebar();
+        expandToSubTab(task.requisition_id, 'tasks');
+    };
+
+    var title = document.createElement('div');
+    title.className = 'my-task-item-title';
+    title.textContent = task.title;
+    item.appendChild(title);
+
+    var meta = document.createElement('div');
+    meta.className = 'my-task-item-meta';
+    var parts = [];
+    if (task.due_at) parts.push(_shortDate(task.due_at));
+    if (task.task_type) parts.push(task.task_type);
+    if (task.ai_risk_flag) parts.push('\u26a0 ' + task.ai_risk_flag);
+    meta.textContent = parts.join(' \u00b7 ');
+    item.appendChild(meta);
+
+    return item;
+}
+
+// Load badge count on page load
+(function() {
+    setTimeout(async function() {
+        try {
+            var summary = await apiFetch('/api/tasks/mine/summary');
+            var badge = document.getElementById('myTasksBadge');
+            var pending = (summary.todo || 0) + (summary.in_progress || 0);
+            if (badge) {
+                badge.textContent = pending;
+                badge.style.display = pending > 0 ? 'flex' : 'none';
+            }
+        } catch(e) { /* silently fail */ }
+    }, 2000);
+})();
+
+// ---------------------------------------------------------------------------
+// Knowledge Ledger: Q&A Tab (legacy — kept for backward compat)
 // ---------------------------------------------------------------------------
 
 function _renderDdQA(reqId, entries, panel) {
@@ -13758,7 +14240,7 @@ Object.assign(window, {
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
     _ddRefreshQuoteTotals, _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
     _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
-    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderDdQA, _renderParsedSummary,
+    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderDdQA, _renderDdTasks, _renderParsedSummary,
     _renderQAEntry, _filterQA, _openAskQuestionModal, _submitQuestion,
     _openAnswerModal, _submitAnswer, _renderInsightsCard, _toggleInsightsCard, _refreshInsights,
     _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,

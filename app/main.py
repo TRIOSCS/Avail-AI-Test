@@ -1027,3 +1027,9 @@ from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
 app.include_router(knowledge_router)
 app.include_router(knowledge_insights_router)
 app.include_router(knowledge_sprinkles_router)
+
+from .routers.task import router as task_router
+from .routers.task import my_tasks_router
+
+app.include_router(task_router)
+app.include_router(my_tasks_router)
