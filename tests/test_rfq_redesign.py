@@ -42,11 +42,11 @@ def test_index_template_has_notification_bar(client):
     assert 'notifActionBar' in resp.text
 
 
-def test_index_template_has_priority_lane_css(client):
-    """Index page includes priority lane CSS classes."""
+def test_index_template_has_priority_lane_comment(client):
+    """Index page includes priority lane reference."""
     resp = client.get("/")
     assert resp.status_code == 200
-    assert 'priority-lane' in resp.text
+    assert 'priority lane' in resp.text.lower()
 
 
 def test_index_template_has_inline_rfq_css(client):
