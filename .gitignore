@@ -38,3 +38,6 @@ app/static/public/*_backup.png
 .env.nc-worker
 .worktrees/
 fix_queue/
+scripts/ux-repair-reports/
+scripts/ux-repair-state/history.jsonl
+scripts/ux-repair-state/failed_patches.json
