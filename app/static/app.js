@@ -857,6 +857,13 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    // Wire scroll-end detection on static table wraps so CSS fade-out hint disappears
+    document.querySelectorAll('.crm-table-wrap').forEach(el => {
+        el.addEventListener('scroll', () => {
+            const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2;
+            el.classList.toggle('scrolled-end', atEnd);
+        });
+    });
     initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
     // Enforce minimum date of today on the BID DUE field
     const _bidDueInput = document.getElementById('nrDeadline');
@@ -1302,6 +1309,10 @@ export function showView(viewId) {
         const isListView = viewId === 'view-list';
         mobileToolbar.style.display = (isSettings || !isListView) ? 'none' : '';
     }
+    // Show intake bar on views where data entry is relevant
+    const intakeViews = ['view-list', 'view-materials', 'view-vendors', 'view-buyplans'];
+    const intakeBar = document.getElementById('intakeBar');
+    if (intakeBar) intakeBar.style.display = intakeViews.includes(viewId) ? '' : 'none';
 }
 
 function showList() {
@@ -2449,6 +2460,55 @@ async function loadDashboard() {
 
         let html = '';
 
+        // ── Nerve Center: Priority Action Feed ──
+        // Unified ranked list of the most urgent items across all categories
+        const _nerveFeed = [];
+        // Overdue/urgent deadlines
+        for (const r of myReqs) {
+            if (!['open','active','sourcing'].includes(r.status)) continue;
+            if (r.deadline) {
+                const dl = r.deadline === 'ASAP' ? null : new Date(r.deadline + 'T12:00:00Z');
+                const daysLeft = dl ? Math.round((dl - now) / 86400000) : -1;
+                if (r.deadline === 'ASAP' || daysLeft <= 0) {
+                    _nerveFeed.push({ priority: 100 - (daysLeft || 0), icon: '\ud83d\udd34', label: r.deadline === 'ASAP' ? 'ASAP' : (daysLeft === 0 ? 'DUE TODAY' : Math.abs(daysLeft) + 'd OVERDUE'), name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
+                } else if (daysLeft <= 2) {
+                    _nerveFeed.push({ priority: 50 + (3 - daysLeft) * 10, icon: '\u26a0\ufe0f', label: daysLeft + 'd left', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
+                }
+            }
+        }
+        // New offers to review
+        for (const r of myReqs) {
+            if (r.has_new_offers && (r.offer_count || 0) > 0) {
+                _nerveFeed.push({ priority: 80, icon: '\ud83d\udce5', label: (r.offer_count || 0) + ' offer' + ((r.offer_count||0) > 1 ? 's' : '') + ' to review', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'offers' });
+            }
+        }
+        // Stale quotes
+        for (const q of quoteList.filter(q => q.status === 'sent' && !q.result)) {
+            const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
+            if (daysSent >= 5) {
+                _nerveFeed.push({ priority: 40 + daysSent, icon: '\ud83d\udcb0', label: daysSent + 'd since quote sent', name: q.quote_number || q.customer_name || 'Quote', action: `goToReq(${q.requisition_id || q.id})`, type: 'quote' });
+            }
+        }
+        // Stale accounts
+        for (const a of attnList.slice(0, 5)) {
+            if ((a.days_since_contact || 0) >= 14) {
+                _nerveFeed.push({ priority: 30, icon: '\ud83d\udce2', label: (a.days_since_contact || 0) + 'd no contact', name: a.company_name, action: `goToCompany(${a.company_id})`, type: 'account' });
+            }
+        }
+
+        _nerveFeed.sort((a, b) => b.priority - a.priority);
+        if (_nerveFeed.length > 0) {
+            html += '<div class="nerve-feed"><div class="nerve-feed-title">Priority Actions</div>';
+            html += _nerveFeed.slice(0, 8).map(item =>
+                `<div class="nerve-feed-item" onclick="${item.action}">
+                    <span class="nerve-feed-icon">${item.icon}</span>
+                    <span class="nerve-feed-name">${esc(item.name)}</span>
+                    <span class="nerve-feed-label nerve-feed-${item.type}">${item.label}</span>
+                </div>`
+            ).join('');
+            html += '</div>';
+        }
+
         // ── Morning Brief ──
         if (brief) {
             const briefText = brief.text || null;
@@ -3143,10 +3203,9 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'tasks', 'files'];
-    if (mainView === 'purchasing') return ['details', 'sightings', 'activity', 'offers', 'tasks', 'files'];
-    // Sales view
-    return ['parts', 'offers', 'quotes', 'tasks', 'files'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'quote', 'activity'];
+    // Consolidated tabs: Sourcing (parts+sightings+offers), Quote (quotes+buyplans+files), Activity (activity+tasks)
+    return ['sourcing', 'quote', 'activity'];
 }
 
 function _ddDefaultTab(mainView) {
@@ -3269,6 +3328,23 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     try {
         let data;
         switch (tabName) {
+            case 'sourcing':
+                // Consolidated tab: load parts, sightings, and offers together
+                {
+                    const [parts, sightings, offersData] = await Promise.all([
+                        _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
+                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`),
+                        _ddTabCache[reqId]?.offers || apiFetch(`/api/requisitions/${reqId}/offers`)
+                    ]);
+                    _ddReqCache[reqId] = parts;
+                    _ddSightingsCache[reqId] = sightings;
+                    if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                    _ddTabCache[reqId].offers = offersData;
+                    if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+                    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+                    data = { parts, sightings, offers: offersData };
+                }
+                break;
             case 'details':
             case 'parts':
                 data = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
@@ -3323,6 +3399,22 @@ function _renderDdTab(reqId, tabName, data, panel) {
         return;
     }
     switch (tabName) {
+        case 'sourcing':
+            // Consolidated Sourcing tab: parts table + sightings + offers in one view
+            if (data && data.parts && data.sightings) {
+                _ddReqCache[reqId] = data.parts;
+                _ddSightingsCache[reqId] = data.sightings;
+            }
+            if (data && data.offers) {
+                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                _ddTabCache[reqId].offers = data.offers;
+            }
+            if (_currentMainView !== 'archive') {
+                _renderSplitPartsOffers(reqId, data?.parts || data, panel);
+            } else {
+                _renderDrillDownTable(reqId, panel);
+            }
+            break;
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts':
             _renderSplitPartsOffers(reqId, data, panel);
@@ -3975,26 +4067,13 @@ function _renderDdTasks(reqId, tasks, panel) {
         { id: 'done', label: 'Done', color: 'var(--green, #22c55e)' },
     ];
 
-    // Filter bar
+    // Simple action bar (no category filters)
     var filterBar = document.createElement('div');
     filterBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
-    var filterGroup = document.createElement('div');
-    filterGroup.style.cssText = 'display:flex;gap:4px';
-    var filterTypes = ['all', 'sourcing', 'sales', 'general'];
-    var filterLabels = { all: 'All', sourcing: 'Sourcing', sales: 'Sales', general: 'General' };
-    for (var fi = 0; fi < filterTypes.length; fi++) {
-        var fbtn = document.createElement('button');
-        fbtn.className = 'btn btn-ghost btn-sm task-filter' + (filterTypes[fi] === 'all' ? ' active' : '');
-        fbtn.textContent = filterLabels[filterTypes[fi]];
-        fbtn.dataset.filter = filterTypes[fi];
-        fbtn.onclick = (function(f, b) {
-            return function() {
-                _filterTasks(reqId, f, b);
-            };
-        })(filterTypes[fi], fbtn);
-        filterGroup.appendChild(fbtn);
-    }
-    filterBar.appendChild(filterGroup);
+    var taskLabel = document.createElement('span');
+    taskLabel.style.cssText = 'font-size:11px;color:var(--muted)';
+    taskLabel.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+    filterBar.appendChild(taskLabel);
 
     var addBtn = document.createElement('button');
     addBtn.className = 'btn btn-sm';
@@ -4051,7 +4130,7 @@ function _renderDdTasks(reqId, tasks, panel) {
 
 function _renderTaskCard(task, reqId) {
     var card = document.createElement('div');
-    card.className = 'task-card';
+    card.className = 'task-card task-card-' + task.task_type;
     card.draggable = true;
     card.dataset.taskId = task.id;
     card.dataset.type = task.task_type;
@@ -4065,18 +4144,21 @@ function _renderTaskCard(task, reqId) {
     var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
     var priLabels = { 1: 'Low', 2: 'Med', 3: 'High' };
 
-    // Top row: title + type badge
+    // Department header with assignee name
+    var deptHeader = document.createElement('div');
+    deptHeader.className = 'task-dept-header task-dept-' + task.task_type;
+    var deptLabel = task.task_type === 'sourcing' ? 'Purchasing' : task.task_type === 'sales' ? 'Sales' : 'General';
+    var assigneeName = task.assignee_name || 'Unassigned';
+    deptHeader.innerHTML = '<span class="task-dept-label">' + deptLabel + '</span><span class="task-dept-assignee">' + esc(assigneeName) + '</span>';
+    card.appendChild(deptHeader);
+
+    // Title row
     var topRow = document.createElement('div');
-    topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:4px';
+    topRow.style.cssText = 'margin-top:6px';
     var titleSpan = document.createElement('span');
     titleSpan.className = 'task-card-title';
     titleSpan.textContent = task.title;
     topRow.appendChild(titleSpan);
-
-    var typeBadge = document.createElement('span');
-    typeBadge.className = 'task-type-badge task-type-' + task.task_type;
-    typeBadge.textContent = task.task_type;
-    topRow.appendChild(typeBadge);
     card.appendChild(topRow);
 
     // Risk flag
@@ -4096,15 +4178,6 @@ function _renderTaskCard(task, reqId) {
     priDot.style.background = priColors[task.priority] || priColors[2];
     priDot.title = priLabels[task.priority] || 'Medium';
     bottomRow.appendChild(priDot);
-
-    if (task.assignee_name) {
-        var initials = task.assignee_name.split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
-        var avatar = document.createElement('span');
-        avatar.className = 'task-avatar';
-        avatar.title = task.assignee_name;
-        avatar.textContent = initials;
-        bottomRow.appendChild(avatar);
-    }
 
     if (task.due_at) {
         var dueSpan = document.createElement('span');
@@ -5282,12 +5355,18 @@ function ddToggleOffer(reqId, offerId, event) {
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
     if (sel.has(offerId)) sel.delete(offerId); else sel.add(offerId);
-    // Re-render to update button and checkboxes
-    const data = _ddTabCache[reqId]?.offers;
-    const drow = document.getElementById('d-' + reqId);
-    if (data && drow) {
-        const panel = drow.querySelector('.dd-panel');
-        if (panel) _renderDdOffers(reqId, data, panel);
+    // Re-render sourcing drilldown (offers are now inline in sourcing tab)
+    const activeTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    if (activeTab === 'sourcing') {
+        _renderSourcingDrillDown(reqId);
+    } else {
+        // Fallback: re-render standalone offers view if still used
+        const data = _ddTabCache[reqId]?.offers;
+        const drow = document.getElementById('d-' + reqId);
+        if (data && drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) _renderDdOffers(reqId, data, panel);
+        }
     }
 }
 
@@ -6603,7 +6682,19 @@ export async function toggleDrillDown(reqId) {
     } else {
         try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
     }
-    if (!opening) { delete _addRowActive[reqId]; return; }
+    if (!opening) {
+        delete _addRowActive[reqId];
+        // Unbind context panel when drill-down closes
+        if (_ctxBoundObject && _ctxBoundObject.type === 'requisition' && _ctxBoundObject.id === reqId) {
+            unbindContextPanel();
+        }
+        return;
+    }
+
+    // Bind context panel to this requisition
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    const ctxLabel = reqInfo ? (reqInfo.customer_display || reqInfo.name || 'Req #' + reqId) : 'Req #' + reqId;
+    bindContextPanel('requisition', reqId, ctxLabel);
 
     // Load default sub-tab
     const defaultTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
@@ -6612,6 +6703,14 @@ export async function toggleDrillDown(reqId) {
     drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === defaultTab));
     const panel = drow.querySelector('.dd-panel');
     if (!panel) return;
+    // Wire up scroll-end detection so CSS fade-out hint disappears at end
+    if (!panel._scrollEndWired) {
+        panel.addEventListener('scroll', () => {
+            const atEnd = panel.scrollLeft + panel.clientWidth >= panel.scrollWidth - 2;
+            panel.classList.toggle('scrolled-end', atEnd);
+        });
+        panel._scrollEndWired = true;
+    }
     await _loadDdSubTab(reqId, defaultTab, panel);
 }
 
@@ -6662,6 +6761,12 @@ function _openMobileDrillDown(reqId) {
                         <span style="font-size:12px"><b>${offers}</b> offers</span>
                         ${dlBadge}
                     </div>
+                    ${renderStatusStrip([
+                        { label: 'Parts', value: total },
+                        { label: 'Sourced', value: r ? (r.sourced_count || 0) + '/' + total : '0' },
+                        { label: 'RFQs', value: r ? (r.rfq_sent_count || 0) : 0 },
+                        { label: 'Offers', value: offers },
+                    ])}
                 </div>
             </div>
             <div class="m-tabs-scroll" id="mobileDdTabs">${pillsHtml}</div>
@@ -7181,28 +7286,17 @@ function _renderDrillDownTable(rfqId, targetPanel) {
 // Renders a side-by-side layout when the "parts" sub-tab is active.
 // Uses existing .split-panel CSS classes. Loads offers data in parallel.
 async function _renderSplitPartsOffers(reqId, partsData, panel) {
-    // Create split layout container
+    // Create split layout: parts on left, combined sightings+offers on right
     panel.innerHTML = `<div class="split-panel" style="max-height:500px">
         <div class="split-panel-left" id="splitParts-${reqId}"></div>
-        <div class="split-panel-right" id="splitOffers-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading offers\u2026</span></div>
+        <div class="split-panel-right" id="splitSourcing-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading sourcing\u2026</span></div>
     </div>`;
     // Render parts into the left pane
     const partsPane = document.getElementById('splitParts-' + reqId);
     if (partsPane) _renderDrillDownTable(reqId, partsPane);
-    // Load and render offers into the right pane
-    const offersPane = document.getElementById('splitOffers-' + reqId);
-    if (!offersPane) return;
-    try {
-        if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-        let offersData = _ddTabCache[reqId].offers;
-        if (!offersData) {
-            offersData = await apiFetch(`/api/requisitions/${reqId}/offers`);
-            _ddTabCache[reqId].offers = offersData;
-        }
-        _renderDdOffers(reqId, offersData, offersPane);
-    } catch(e) {
-        offersPane.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:12px;display:block">No offers yet</span>';
-    }
+    // Render combined sightings + offers into the right pane
+    const sourcingPane = document.getElementById('splitSourcing-' + reqId);
+    if (sourcingPane) _renderSourcingDrillDown(reqId, sourcingPane);
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
@@ -7967,9 +8061,11 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();ddExportSightingsCsv(${reqId})" title="Export sourcing results to CSV">&#x2B07; CSV</button>
             <span id="ddBulkHint-${reqId}" style="font-size:10px;color:var(--muted)">Select vendors to send RFQ</span>
             <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
+            <button class="btn btn-sm" id="ddBuildQuoteSrc-${reqId}" style="display:none;font-size:10px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (0)</button>
         </span>
     </div>`;
 
+    let _groupIdx = 0;
     for (const [rId, group] of groups) {
         const allSightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
@@ -8029,7 +8125,9 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         const targetPriceLabel = groupTargetPrice != null ? ` \u00b7 target $${Number(groupTargetPrice).toFixed(2)}` : '';
 
         const filterNote = hasFilters ? ` <span style="font-size:10px;color:var(--blue)">(${filtered.length} of ${sightings.length} shown)</span>` : '';
-        html += `<div style="margin-bottom:10px">
+        const _grpClass = _groupIdx % 2 === 1 ? 'src-group-alt' : '';
+        _groupIdx++;
+        html += `<div class="src-group ${_grpClass}" style="margin-bottom:10px;padding:8px;border-radius:6px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                 <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})${targetPriceLabel}</span>${filterNote}</span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
@@ -8057,8 +8155,60 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             html += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;margin:6px 0 0 12px;color:var(--blue)">Show all ${filtered.length} sources (${filtered.length - DD_LIMIT} more)</button>`;
         }
 
+        // ── Inline Offers for this requirement group ──
+        const _offData = _ddTabCache[reqId]?.offers;
+        const _offGroups = _offData?.groups || _offData || [];
+        const _myOffGroup = Array.isArray(_offGroups) ? _offGroups.find(og => String(og.requirement_id) === String(rId) || (og.mpn || '').toUpperCase() === label.toUpperCase()) : null;
+        const _myOffers = (_myOffGroup?.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        if (_myOffers.length) {
+            const oSel = _ddSelectedOffers[reqId] || new Set();
+            const oIds = _myOffers.map(o => o.id || o.offer_id);
+            const oAllChecked = oIds.length > 0 && oIds.every(id => oSel.has(id));
+            html += `<div class="inline-offers-section" style="margin-top:8px;border-top:2px solid var(--teal);padding-top:8px;background:rgba(14,116,144,.03);border-radius:0 0 6px 6px;padding:8px">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                    <span style="font-size:11px;font-weight:700;color:var(--teal)">&#x2709; ${_myOffers.length} Offer${_myOffers.length !== 1 ? 's' : ''}</span>
+                    <span style="font-size:10px;color:var(--muted)">${oIds.filter(id => oSel.has(id)).length} selected</span>
+                </div>
+                <table class="dtbl"><thead><tr>
+                    <th style="width:24px"><input type="checkbox" ${oAllChecked ? 'checked' : ''} onchange="event.stopPropagation();_ddToggleGroupInlineOffers(${reqId},[${oIds.join(',')}],this.checked)"></th>
+                    <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Status</th><th>Notes</th><th style="width:60px"></th>
+                </tr></thead><tbody>`;
+            for (const o of _myOffers) {
+                const oid = o.id || o.offer_id;
+                const offeredMpn = o.mpn || o.offered_mpn || '';
+                const isSub = label && offeredMpn && offeredMpn.trim().toUpperCase() !== label.trim().toUpperCase();
+                const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
+                const oChecked = oSel.has(oid) ? 'checked' : '';
+                const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+                const isPending = o.status === 'pending_review';
+                const rowBg = isPending ? 'background:rgba(245,158,11,.06);' : (isSub ? 'background:rgba(14,116,144,.06);' : '');
+                html += `<tr class="ofr-row" style="${rowBg}" data-oid="${oid}">
+                    <td><input type="checkbox" ${oChecked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)"></td>
+                    <td>${esc(o.vendor_name || '')}${isPending ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : ''}</td>
+                    <td class="mono">${subBadge}${esc(offeredMpn || '\u2014')}</td>
+                    <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : '\u2014'}</td>
+                    <td class="mono" style="color:var(--teal)">${price}</td>
+                    <td>${esc(o.lead_time || '\u2014')}</td>
+                    <td>${esc(o.condition || '\u2014')}</td>
+                    <td style="font-size:10px">${esc(o.status || '\u2014')}</td>
+                    <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'notes',this)" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
+                    <td style="white-space:nowrap">${isPending ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddApproveOffer(${reqId},${oid})" title="Approve" style="padding:2px 6px;font-size:10px;color:var(--green)">\u2713</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddRejectOffer(${reqId},${oid})" title="Reject" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button>` : `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button>`}</td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+        }
+
         html += '</div>';
     }
+
+    // Update Build Quote button visibility
+    const _oSelCount = (_ddSelectedOffers[reqId] || new Set()).size;
+    const _bqBtn = document.getElementById('ddBuildQuoteSrc-' + reqId);
+    if (_bqBtn) {
+        _bqBtn.style.display = _oSelCount > 0 ? '' : 'none';
+        _bqBtn.textContent = 'Build Quote (' + _oSelCount + ')';
+    }
+
     dd.innerHTML = html;
 }
 
@@ -8070,6 +8220,15 @@ function ddToggleGroupSightings(reqId, ids, checked) {
     }
     _renderSourcingDrillDown(reqId);
     _updateDdBulkButton(reqId);
+}
+
+function _ddToggleGroupInlineOffers(reqId, ids, checked) {
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
+    for (const id of ids) {
+        if (checked) sel.add(id); else sel.delete(id);
+    }
+    _renderSourcingDrillDown(reqId);
 }
 
 function ddQuickRfq(reqId, vendorName, mpn) {
@@ -8513,6 +8672,8 @@ async function submitLogOffer() {
 
 function renderReqList() {
     _renderBreadcrumb();
+    // Deal board view uses its own renderer
+    if (_currentMainView === 'deals') { _renderDealBoard(); return; }
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
@@ -8559,6 +8720,12 @@ function renderReqList() {
                 case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
                 case 'matches': va = a.proactive_match_count || 0; vb = b.proactive_match_count || 0; break;
                 case 'score': va = a.sourcing_score || 0; vb = b.sourcing_score || 0; break;
+                case 'coverage': {
+                    const ta = a.requirement_count || 0; const tb = b.requirement_count || 0;
+                    va = ta > 0 ? (a.offer_count || 0) / ta : 0;
+                    vb = tb > 0 ? (b.offer_count || 0) / tb : 0;
+                    break;
+                }
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -8613,15 +8780,15 @@ function renderReqList() {
             ${_thIcons}
         </tr></thead>`;
     } else if (v === 'sales') {
-        // Sales view: Customer-focused columns — Quote status, Value, Deadline prominent
+        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Coverage: parts with at least one offer vs total parts">Coverage ${sa('coverage')}</th>
             <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('sales')"${thClass('sales')} style="min-width:80px">Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
@@ -8632,6 +8799,7 @@ function renderReqList() {
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Parts with at least one offer">Coverage ${sa('coverage')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
@@ -8823,10 +8991,23 @@ function _renderReqRow(r) {
         else if (rh < 24) dot = ' <span class="new-offers-dot amber" title="Vendor reply ' + _timeAgo(r.latest_reply_at) + '"></span>';
     }
 
+    // Blocker indicator — stalled requisitions get a small warning chip
+    let blockerChip = '';
+    if (v !== 'archive' && r.status !== 'draft' && r.status !== 'won' && r.status !== 'lost') {
+        const _ageDays = r.created_at ? Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000) : 0;
+        const _oCount = r.offer_count || 0;
+        const _sigs = r.sourcing_signals;
+        if (_ageDays > 5 && _oCount === 0 && total > 0 && (!_sigs || (_sigs.sources && _sigs.sources.level === 'low' && _sigs.rfqs && _sigs.rfqs.level === 'low'))) {
+            blockerChip = ' <span class="blocker-chip" title="Stalled: no offers after 5+ days, low sourcing activity">Stalled</span>';
+        } else if (_ageDays > 3 && _oCount === 0 && (r.rfq_sent_count || 0) === 0 && total > 0) {
+            blockerChip = ' <span class="blocker-chip warn" title="No RFQs sent after 3+ days">No RFQs</span>';
+        }
+    }
+
     // Name cell — editable on active view, read-only on archive
     const statusChip = `<span class="status-chip status-chip-${chipCls}" style="margin-left:6px;font-size:9px;vertical-align:middle">${_statusLabels[r.status] || r.status}</span>`;
     const nameCell = v !== 'archive'
-        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span>${statusChip}</td>`
+        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span>${statusChip}${blockerChip}</td>`
         : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})" title="Click to expand details">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp with absolute tooltip
@@ -8882,12 +9063,22 @@ function _renderReqRow(r) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
 
+        // Coverage: parts with at least one offer vs total parts
+        const _covOffer = r.offer_count || 0;
+        const _covPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
+        let covCell;
+        if (total === 0) covCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _covPct >= 80 ? 'var(--green)' : _covPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            covCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covPct}%</span></div>`;
+        }
+
         dataCells = `
             <td class="mono" style="text-align:right">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
             <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-            <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
 
         // Sales actions: context-aware primary action
@@ -8931,9 +9122,19 @@ function _renderReqRow(r) {
             if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
         }
 
+        // Coverage: offers vs total parts
+        const _srcCovPct = total > 0 ? Math.round((_oCnt / total) * 100) : 0;
+        let srcCovCell;
+        if (total === 0) srcCovCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCovCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovPct}%</span></div>`;
+        }
+
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${srcCovCell}</td>
             <td class="mono" style="font-size:11px">${sent}</td>
             <td style="font-size:11px;white-space:nowrap">${respCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
@@ -8965,6 +9166,35 @@ function _renderReqRow(r) {
         ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
     } else {
         const lastSearch = r.last_searched_at ? _timeAgo(r.last_searched_at) : 'never';
+        // Status strip data — sourcing progress, RFQ coverage, offer status
+        const _ssParts = total;
+        const _ssSourced = sourced;
+        const _ssSent = r.rfq_sent_count || 0;
+        const _ssReplied = r.reply_count || 0;
+        const _ssOffers = r.offer_count || 0;
+        const _ssCovPct = _ssParts > 0 ? Math.round((_ssOffers / _ssParts) * 100) : 0;
+        const statusItems = [
+            { label: 'Parts', value: _ssParts },
+            { label: 'Sourced', value: `${_ssSourced}/${_ssParts}`, color: _ssSourced >= _ssParts && _ssParts > 0 ? 'var(--green)' : _ssSourced > 0 ? 'var(--amber)' : 'var(--muted)' },
+            { label: 'RFQs', value: _ssSent },
+            { label: 'Replies', value: _ssSent > 0 ? `${_ssReplied}/${_ssSent}` : '\u2014', color: _ssReplied > 0 ? 'var(--green)' : 'var(--muted)' },
+            { label: 'Coverage', value: _ssCovPct + '%', color: _ssCovPct >= 80 ? 'var(--green)' : _ssCovPct >= 40 ? 'var(--amber)' : 'var(--red)' },
+        ];
+        const ssHtml = renderStatusStrip(statusItems);
+
+        // Blocker strip — deadline, stalled, missing data
+        const blockers = [];
+        if (r.deadline) {
+            const _d = r.deadline === 'ASAP' ? null : new Date(r.deadline + 'T12:00:00Z');
+            const _now = new Date(); _now.setHours(0,0,0,0);
+            if (r.deadline === 'ASAP') blockers.push({ text: 'ASAP deadline', level: 'warn' });
+            else if (_d && _d < _now) blockers.push({ text: 'OVERDUE: ' + fmtDate(r.deadline), level: 'error' });
+            else if (_d && (_d - _now) / 86400000 <= 2) blockers.push({ text: 'Due in ' + Math.round((_d - _now) / 86400000) + 'd', level: 'warn' });
+        }
+        if (_ssParts > 0 && _ssSourced === 0 && _ssSent === 0) blockers.push({ text: 'Not sourced yet', level: 'info' });
+        if (_ssSent > 0 && _ssReplied === 0) blockers.push({ text: 'No vendor replies', level: 'warn' });
+        const bsHtml = renderBlockerStrip(blockers);
+
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
             <div style="display:flex;gap:4px;align-items:center">
@@ -8975,7 +9205,8 @@ function _renderReqRow(r) {
                 <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
                 <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
-        </div>`;
+        </div>
+        ${ssHtml}${bsHtml}`;
     }
 
     const _urgency = _isDeadlineUrgent(r, new Date());
@@ -9399,7 +9630,7 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on sales/purchasing views, hide on archive
+    // Show status filter pills on sales/sourcing views, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
     if (view === 'sales' || view === 'purchasing') {
@@ -9407,6 +9638,10 @@ function setMainView(view, btn) {
         _serverSearchActive = false;
         loadRequisitions();
         loadFollowUpsPanel();
+    } else if (view === 'deals') {
+        _reqStatusFilter = 'all';
+        _serverSearchActive = false;
+        loadRequisitions().then(() => _renderDealBoard());
     } else if (view === 'active' || view === 'rfq') {
         // Legacy: redirect old view names to sales
         _currentMainView = 'sales';
@@ -9630,6 +9865,94 @@ async function sendFollowUp(contactId, vendorName) {
         } catch (e) { showToast('Failed to send follow-up', 'error'); }
         finally { sendFollowUp._busy = false; }
     });
+}
+
+// ── Deal Board ─────────────────────────────────────────────────────────
+// Renders a kanban-style board grouping requisitions by deal stage.
+// Called by: setMainView('deals')
+// Depends on: _reqListData, renderObjHeader, renderStatusStrip
+function _renderDealBoard() {
+    const el = document.getElementById('reqList');
+    if (!el) return;
+    const data = _reqListData.filter(r => r.status !== 'archived' && r.status !== 'closed');
+
+    // Classify into deal stages
+    const stages = [
+        { key: 'gathering', label: 'Gathering Intel', icon: '\ud83d\udd0d', color: 'var(--blue)', items: [] },
+        { key: 'rfq-out', label: 'RFQs Out', icon: '\ud83d\udce8', color: 'var(--amber)', items: [] },
+        { key: 'offers-in', label: 'Offers In', icon: '\ud83d\udce5', color: 'var(--green)', items: [] },
+        { key: 'quoting', label: 'Quoting', icon: '\ud83d\udcb0', color: 'var(--purple,#8b5cf6)', items: [] },
+        { key: 'closing', label: 'Closing', icon: '\u2705', color: 'var(--green)', items: [] },
+    ];
+
+    for (const r of data) {
+        const total = r.requirement_count || 0;
+        const offers = r.offer_count || 0;
+        const sent = r.rfq_sent_count || 0;
+        const qs = r.quote_status;
+        if (qs === 'sent' || qs === 'revised') stages[4].items.push(r);
+        else if (qs === 'draft' || (offers > 0 && !qs)) stages[3].items.push(r);
+        else if (offers > 0) stages[2].items.push(r);
+        else if (sent > 0) stages[1].items.push(r);
+        else stages[0].items.push(r);
+    }
+
+    // Render board
+    let html = '<div class="deal-board">';
+    for (const stage of stages) {
+        html += `<div class="deal-col">
+            <div class="deal-col-header">
+                <span class="deal-col-icon">${stage.icon}</span>
+                <span class="deal-col-title">${stage.label}</span>
+                <span class="deal-col-count" style="background:${stage.color}">${stage.items.length}</span>
+            </div>
+            <div class="deal-col-body">`;
+        if (stage.items.length === 0) {
+            html += '<div class="deal-empty">No deals here</div>';
+        }
+        for (const r of stage.items) {
+            const total = r.requirement_count || 0;
+            const offers = r.offer_count || 0;
+            const covPct = total > 0 ? Math.round((offers / total) * 100) : 0;
+            const covColor = covPct >= 80 ? 'var(--green)' : covPct >= 40 ? 'var(--amber)' : covPct > 0 ? 'var(--red)' : 'var(--muted)';
+            const cust = r.customer_display || r.name || 'Unknown';
+
+            // Deadline badge
+            let dlBadge = '';
+            if (r.deadline === 'ASAP') dlBadge = '<span class="deal-card-dl asap">ASAP</span>';
+            else if (r.deadline) {
+                const d = new Date(r.deadline + 'T12:00:00Z');
+                const now = new Date(); now.setHours(0,0,0,0);
+                const diff = Math.round((d - now) / 86400000);
+                if (diff < 0) dlBadge = '<span class="deal-card-dl overdue">OVERDUE</span>';
+                else if (diff <= 3) dlBadge = '<span class="deal-card-dl warn">' + fmtDate(r.deadline) + '</span>';
+                else dlBadge = '<span class="deal-card-dl">' + fmtDate(r.deadline) + '</span>';
+            }
+
+            // Value
+            let val = '';
+            if (r.total_target_value > 0) val = '<span class="deal-card-val">' + fmtDollars(r.total_target_value) + '</span>';
+            else if (r.quote_total > 0) val = '<span class="deal-card-val">' + fmtDollars(r.quote_total) + '</span>';
+
+            html += `<div class="deal-card" onclick="toggleDrillDown(${r.id})" title="Click to expand">
+                <div class="deal-card-head">
+                    <span class="deal-card-cust">${esc(cust)}</span>
+                    ${dlBadge}
+                </div>
+                <div class="deal-card-meta">
+                    <span>${total} part${total !== 1 ? 's' : ''}</span>
+                    <span style="color:${covColor};font-weight:600">${covPct}% covered</span>
+                    ${val}
+                </div>
+                <div class="deal-card-bar">
+                    <div class="deal-card-bar-fill" style="width:${covPct}%;background:${covColor}"></div>
+                </div>
+            </div>`;
+        }
+        html += '</div></div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
@@ -12811,22 +13134,38 @@ async function openMaterialPopup(cardId) {
     const priceMin = allPrices.length ? Math.min(...allPrices) : null;
     const priceMax = allPrices.length ? Math.max(...allPrices) : null;
 
-    let html = `<div class="mp-header">
-        <h2 onclick="editMaterialField(${card.id},'display_mpn',this)" style="cursor:pointer" title="Click to edit MPN">${esc(card.display_mpn)}</h2>
-        <div class="mp-header-meta">
-            ${card.manufacturer ? `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="font-weight:600;cursor:pointer" title="Click to edit">${esc(card.manufacturer)}</span> · ` : `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="cursor:pointer;color:var(--muted)" title="Click to add">+ Add manufacturer</span> · `}
-            ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
-            ${window.__isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="margin-left:16px;font-size:9px;color:var(--muted)" title="Admin: permanently delete this material card">Delete</button>` : ''}
-        </div>
-    </div>`;
+    // Object header using shared framework
+    let html = renderObjHeader({
+        title: card.display_mpn,
+        subtitle: card.manufacturer || '',
+        meta: `${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}`,
+        onEdit: `editMaterialField(${card.id},'display_mpn',this)`,
+        actions: window.__isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="font-size:9px;color:var(--muted)" title="Admin: permanently delete this material card">Delete</button>` : '',
+    });
 
-    // Material Card Hub — summary stats
-    html += `<div class="mp-hub">
-        <div class="mp-hub-stat"><span class="mp-hub-val">${offers.length}</span><span class="mp-hub-lbl">Offers</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${sightings.length}</span><span class="mp-hub-lbl">Sightings</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${card.vendor_count || uniqueVendors.size}</span><span class="mp-hub-lbl">Vendors</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '–$' + priceMax.toFixed(2) : '') : '—'}</span><span class="mp-hub-lbl">Price Range</span></div>
-    </div>`;
+    // Status strip with key metrics
+    html += renderStatusStrip([
+        { label: 'Offers', value: offers.length, color: offers.length > 0 ? 'var(--green)' : 'var(--muted)' },
+        { label: 'Sightings', value: sightings.length },
+        { label: 'Vendors', value: card.vendor_count || uniqueVendors.size },
+        { label: 'Price Range', value: priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '\u2013$' + priceMax.toFixed(2) : '') : '\u2014' },
+    ]);
+
+    // AI intelligence card — supply health assessment
+    const _supplyHealth = offers.length >= 3 ? 'Strong' : offers.length >= 1 ? 'Moderate' : sightings.length > 0 ? 'Weak' : 'Unknown';
+    const _supplyConf = offers.length >= 3 ? 0.9 : offers.length >= 1 ? 0.7 : sightings.length > 0 ? 0.4 : 0.1;
+    const _supplyInsight = offers.length >= 3
+        ? `${offers.length} active offers from ${uniqueVendors.size} vendor${uniqueVendors.size !== 1 ? 's' : ''}. Competitive pricing available.`
+        : offers.length >= 1
+        ? `${offers.length} offer${offers.length !== 1 ? 's' : ''} available. Consider sending more RFQs for better coverage.`
+        : sightings.length > 0
+        ? `${sightings.length} sighting${sightings.length !== 1 ? 's' : ''} but no confirmed offers. RFQ outreach recommended.`
+        : 'No supply data. Search or add sightings to build intelligence.';
+    html += renderAiCard({
+        title: 'Supply Intelligence',
+        confidence: _supplyConf,
+        body: `<b>${_supplyHealth}</b> \u2014 ${_supplyInsight}`,
+    });
 
     html += `<div class="mp-section"><div class="mp-label">Description</div><div onclick="editMaterialField(${card.id},'description',this)" style="font-size:12px;cursor:pointer" title="Click to edit">${card.description ? esc(card.description) : '<span style="color:var(--muted)">+ Add description</span>'}</div></div>`;
 
@@ -14483,6 +14822,510 @@ function _showAiModal(title, contentHtml) {
     openModal('aiModal');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// CONTEXT PANEL — cross-app right-side panel for AI summary, thread,
+// tasks, files, history. Replaces single-purpose Tasks sidebar when a
+// specific object (requirement, material, deal) is selected.
+// Called by: toggleContextPanel(), switchCtxTab(), view-specific code
+// Depends on: apiFetch, showToast, esc, fmtRelative
+// ═══════════════════════════════════════════════════════════════════════
+
+let _ctxOpen = false;
+let _ctxActiveTab = 'summary';
+let _ctxBoundObject = null; // { type: 'requisition'|'material'|'offer', id: number, label: string }
+const _ctxTabContent = {}; // { summary: html, thread: html, tasks: html, files: html, history: html }
+
+function toggleContextPanel() {
+    const panel = document.getElementById('ctxPanel');
+    const toggle = document.getElementById('ctxToggle');
+    if (!panel) return;
+    _ctxOpen = !_ctxOpen;
+    panel.classList.toggle('open', _ctxOpen);
+    toggle?.classList.toggle('shifted', _ctxOpen);
+    document.body.classList.toggle('ctx-open', _ctxOpen);
+    // Hide legacy tasks sidebar when context panel is active
+    const tasksSidebar = document.getElementById('myTasksSidebar');
+    if (tasksSidebar && _ctxOpen) {
+        tasksSidebar.style.display = 'none';
+        document.body.classList.remove('tasks-open');
+    } else if (tasksSidebar && !_ctxOpen) {
+        tasksSidebar.style.display = '';
+    }
+}
+
+function switchCtxTab(tabName, btn) {
+    _ctxActiveTab = tabName;
+    const tabs = document.getElementById('ctxTabs');
+    if (tabs) tabs.querySelectorAll('.ctx-tab').forEach(t => t.classList.toggle('active', t.dataset.ctxTab === tabName));
+    const compose = document.getElementById('ctxCompose');
+    if (compose) compose.style.display = (tabName === 'thread') ? '' : 'none';
+    _renderCtxTab(tabName);
+}
+
+function _renderCtxTab(tabName) {
+    const body = document.getElementById('ctxBody');
+    if (!body) return;
+    if (!_ctxBoundObject) {
+        body.innerHTML = '<div class="ctx-empty">Select a requirement, material, or deal to see context here.</div>';
+        return;
+    }
+    // If cached content exists, show it
+    if (_ctxTabContent[tabName]) {
+        body.innerHTML = _ctxTabContent[tabName];
+        return;
+    }
+    // Otherwise show loading and fetch
+    body.innerHTML = '<div class="ctx-empty"><div class="spinner" style="margin:0 auto"></div></div>';
+    _loadCtxTab(tabName);
+}
+
+async function _loadCtxTab(tabName) {
+    const obj = _ctxBoundObject;
+    if (!obj) return;
+    const body = document.getElementById('ctxBody');
+    if (!body) return;
+    try {
+        if (tabName === 'summary') {
+            _ctxTabContent.summary = _buildCtxSummary(obj);
+        } else if (tabName === 'thread') {
+            const activities = await apiFetch(`/api/activities?entity_type=${obj.type}&entity_id=${obj.id}&limit=30`).catch(() => []);
+            _ctxTabContent.thread = _buildCtxThread(Array.isArray(activities) ? activities : (activities?.items || []));
+        } else if (tabName === 'tasks') {
+            if (obj.type === 'requisition') {
+                const tasks = await apiFetch(`/api/requisitions/${obj.id}/tasks`).catch(() => []);
+                _ctxTabContent.tasks = _buildCtxTasks(Array.isArray(tasks) ? tasks : []);
+            } else {
+                _ctxTabContent.tasks = '<div class="ctx-empty">Tasks are available for requirements.</div>';
+            }
+        } else if (tabName === 'files') {
+            if (obj.type === 'requisition') {
+                const files = await apiFetch(`/api/requisition-attachments?requisition_id=${obj.id}`).catch(() => []);
+                _ctxTabContent.files = _buildCtxFiles(Array.isArray(files) ? files : []);
+            } else {
+                _ctxTabContent.files = '<div class="ctx-empty">No files attached.</div>';
+            }
+        } else if (tabName === 'history') {
+            const changes = await apiFetch(`/api/changelog?entity_type=${obj.type}&entity_id=${obj.id}&limit=20`).catch(() => []);
+            _ctxTabContent.history = _buildCtxHistory(Array.isArray(changes) ? changes : []);
+        }
+    } catch (e) {
+        _ctxTabContent[tabName] = '<div class="ctx-empty">Failed to load content.</div>';
+    }
+    // Only render if still on the same tab and object
+    if (_ctxActiveTab === tabName && _ctxBoundObject === obj) {
+        body.innerHTML = _ctxTabContent[tabName] || '<div class="ctx-empty">No content.</div>';
+    }
+}
+
+function _buildCtxSummary(obj) {
+    // Build AI summary card + follow-ups + blockers
+    let html = '';
+    html += `<div class="ctx-section">
+        <div class="ai-card">
+            <div class="ai-card-header">
+                <svg class="ai-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 2.75a4 4 0 0 0-1.09 6.89"/><path d="M12 8v14"/><path d="M5 18a7 7 0 0 1 14 0"/></svg>
+                <span class="ai-card-label">AI Summary</span>
+            </div>
+            <div class="ai-card-body" id="ctxAiSummaryBody">
+                <p style="color:var(--muted);font-style:italic">Generating summary...</p>
+            </div>
+        </div>
+    </div>`;
+    // Follow-ups section
+    html += `<div class="ctx-section">
+        <div class="ctx-section-title">Suggested Next Steps</div>
+        <div id="ctxFollowups">
+            <div class="followup-item">
+                <div class="followup-check" onclick="this.classList.toggle('done')"></div>
+                <div class="followup-body">
+                    <div class="followup-text">Review and respond to pending vendor offers</div>
+                    <div class="followup-meta"><span class="tag">Action</span> AI suggested</div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    // Open questions
+    html += `<div class="ctx-section">
+        <div class="ctx-section-title">Open Questions</div>
+        <div id="ctxQuestions" class="ctx-empty" style="padding:8px 0">No unresolved questions.</div>
+    </div>`;
+    return html;
+}
+
+function _buildCtxThread(activities) {
+    if (!activities.length) return '<div class="ctx-empty">No activity yet. Start a conversation.</div>';
+    let html = '';
+    for (const a of activities) {
+        const initials = (a.user_name || 'U').substring(0, 2).toUpperCase();
+        const tagMap = { question: 'question', decision: 'decision', blocker: 'blocker', note: 'action' };
+        const tag = tagMap[a.activity_type] ? `<span class="thread-item-tag ${tagMap[a.activity_type]}">${a.activity_type}</span>` : '';
+        html += `<div class="thread-item">
+            <div class="thread-item-header">
+                <div class="thread-item-avatar">${esc(initials)}</div>
+                <span class="thread-item-name">${esc(a.user_name || 'System')}</span>
+                <span class="thread-item-time">${a.created_at ? fmtRelative(a.created_at) : ''}</span>
+            </div>
+            <div class="thread-item-body">${tag}${esc(a.subject || a.body || a.notes || '')}</div>
+        </div>`;
+    }
+    return html;
+}
+
+function _buildCtxTasks(tasks) {
+    if (!tasks.length) return '<div class="ctx-empty">No tasks. Tasks from the drill-down will appear here.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Tasks</div>';
+    for (const t of tasks) {
+        const pri = t.priority === 'high' ? 'pri-high' : t.priority === 'medium' ? 'pri-med' : 'pri-low';
+        const done = t.status === 'done' ? 'done' : '';
+        html += `<div class="my-task-item ${pri}" style="margin-bottom:6px">
+            <div class="my-task-item-title" style="${done ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(t.title || t.name || '')}</div>
+            <div class="my-task-item-meta">${t.due_date ? 'Due ' + fmtRelative(t.due_date) : ''} ${t.assignee_name ? '· ' + esc(t.assignee_name) : ''}</div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _buildCtxFiles(files) {
+    if (!files.length) return '<div class="ctx-empty">No files attached.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Files</div>';
+    for (const f of files) {
+        const size = f.file_size ? (f.file_size > 1048576 ? (f.file_size / 1048576).toFixed(1) + ' MB' : (f.file_size / 1024).toFixed(0) + ' KB') : '';
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.filename || f.name || 'file')}</span>
+            <span style="font-size:10px;color:var(--muted)">${size}</span>
+            ${f.url ? `<a href="${esc(f.url)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px">Open</a>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _buildCtxHistory(changes) {
+    if (!changes.length) return '<div class="ctx-empty">No change history recorded.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Change History</div>';
+    for (const c of changes) {
+        html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">
+            <div style="display:flex;justify-content:space-between"><span style="font-weight:500">${esc(c.field_name || c.action || 'change')}</span><span style="color:var(--muted)">${c.created_at ? fmtRelative(c.created_at) : ''}</span></div>
+            <div style="color:var(--muted);margin-top:2px">${c.old_value ? esc(String(c.old_value).substring(0, 50)) + ' → ' : ''}${c.new_value ? esc(String(c.new_value).substring(0, 50)) : ''}</div>
+            ${c.user_name ? `<div style="color:var(--muted);font-size:10px">${esc(c.user_name)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+// Bind context panel to a specific object (requirement, material, etc.)
+function bindContextPanel(type, id, label) {
+    _ctxBoundObject = { type, id, label };
+    // Clear cached tab content
+    Object.keys(_ctxTabContent).forEach(k => delete _ctxTabContent[k]);
+    // Update title
+    const title = document.getElementById('ctxTitle');
+    if (title) title.textContent = label || (type + ' #' + id);
+    // Show toggle button
+    const toggle = document.getElementById('ctxToggle');
+    if (toggle) toggle.style.display = '';
+    // Open panel if not already open
+    if (!_ctxOpen) toggleContextPanel();
+    // Render current tab
+    _renderCtxTab(_ctxActiveTab);
+}
+
+function unbindContextPanel() {
+    _ctxBoundObject = null;
+    Object.keys(_ctxTabContent).forEach(k => delete _ctxTabContent[k]);
+    const body = document.getElementById('ctxBody');
+    if (body) body.innerHTML = '<div class="ctx-empty">Select a requirement, material, or deal to see context here.</div>';
+    const title = document.getElementById('ctxTitle');
+    if (title) title.textContent = 'Context';
+}
+
+// Send message from thread compose
+async function ctxSendMessage() {
+    const input = document.getElementById('ctxComposeInput');
+    if (!input || !input.value.trim() || !_ctxBoundObject) return;
+    const msg = input.value.trim();
+    input.value = '';
+    try {
+        await apiFetch('/api/activities', {
+            method: 'POST',
+            body: { entity_type: _ctxBoundObject.type, entity_id: _ctxBoundObject.id, activity_type: 'note', notes: msg }
+        });
+        showToast('Note added', 'success');
+        // Refresh thread tab
+        delete _ctxTabContent.thread;
+        if (_ctxActiveTab === 'thread') _renderCtxTab('thread');
+    } catch (e) {
+        showToast('Failed to add note', 'error');
+    }
+}
+
+function ctxAttachFile() {
+    showToast('File attachment coming soon', 'info');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// UNIVERSAL INTAKE BAR — paste, upload, or API import of parts/offers.
+// Provides a single shared entry point for getting data into the system.
+// Called by: _intakeInputChange(), _intakePaste(), _intakeUpload(), etc.
+// Depends on: apiFetch, showToast, esc, currentReqId
+// ═══════════════════════════════════════════════════════════════════════
+
+let _intakeParsedRows = [];
+let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
+
+function showIntakeBar() {
+    const bar = document.getElementById('intakeBar');
+    if (bar) bar.style.display = '';
+}
+
+function hideIntakeBar() {
+    const bar = document.getElementById('intakeBar');
+    if (bar) bar.style.display = 'none';
+    _intakeClose();
+}
+
+function _intakeInputChange(value) {
+    // Multi-line paste triggers review
+    if (value.includes('\n') || value.includes('\t')) {
+        _intakeParseText(value);
+    }
+}
+
+function _intakePaste(event) {
+    const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (text.includes('\n') || text.includes('\t')) {
+        event.preventDefault();
+        const input = document.getElementById('intakeInput');
+        if (input) input.value = text;
+        _intakeParseText(text);
+    }
+}
+
+function _intakeParseText(text) {
+    // Parse tab/newline separated data into rows
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length === 0) return;
+    _intakeParsedRows = [];
+    // Detect header row
+    const firstLine = lines[0].toLowerCase();
+    const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
+    const startIdx = hasHeader ? 1 : 0;
+    for (let i = startIdx; i < lines.length; i++) {
+        const cols = lines[i].split('\t');
+        if (cols.length === 0 || !cols[0].trim()) continue;
+        const row = {
+            mpn: cols[0]?.trim() || '',
+            qty: cols[1]?.trim() || '',
+            price: cols[2]?.trim() || '',
+            manufacturer: cols[3]?.trim() || '',
+            confidence: 'high',
+            type: _intakeTargetType,
+            duplicate: false
+        };
+        // Simple confidence heuristic
+        if (!row.mpn || row.mpn.length < 3) row.confidence = 'low';
+        else if (!row.qty && !row.price) row.confidence = 'med';
+        _intakeParsedRows.push(row);
+    }
+    _intakeRenderDrawer();
+}
+
+function _intakeRenderDrawer() {
+    const drawer = document.getElementById('intakeDrawer');
+    const body = document.getElementById('intakeDrawerBody');
+    const titleEl = document.getElementById('intakeDrawerTitle');
+    if (!drawer || !body) return;
+    drawer.classList.add('open');
+    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} items detected`;
+    let html = '';
+    for (let i = 0; i < _intakeParsedRows.length; i++) {
+        const r = _intakeParsedRows[i];
+        const confClass = r.confidence === 'high' ? 'high' : r.confidence === 'med' ? 'med' : 'low';
+        const confPct = r.confidence === 'high' ? '95' : r.confidence === 'med' ? '65' : '30';
+        html += `<div class="intake-row">
+            <div class="intake-row-confidence ${confClass}" title="Confidence: ${r.confidence}">${confPct}%</div>
+            <div class="intake-row-data">
+                <div class="intake-row-mpn">${esc(r.mpn)}</div>
+                <div class="intake-row-detail">Qty: ${esc(r.qty || '—')} · Price: ${esc(r.price || '—')} ${r.manufacturer ? '· ' + esc(r.manufacturer) : ''}</div>
+            </div>
+            <span class="intake-row-tag ${r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer'}">${r.type}</span>
+            ${r.duplicate ? '<span class="intake-row-tag dup">DUP</span>' : ''}
+            <div class="intake-row-actions">
+                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeChangeType(${i},this.value)">
+                    <option value="requirement" ${r.type === 'requirement' ? 'selected' : ''}>Requirement</option>
+                    <option value="sighting" ${r.type === 'sighting' ? 'selected' : ''}>Sighting</option>
+                    <option value="offer" ${r.type === 'offer' ? 'selected' : ''}>Offer</option>
+                </select>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 4px;color:var(--red)" onclick="_intakeRemoveRow(${i})" title="Remove">✕</button>
+            </div>
+        </div>`;
+    }
+    body.innerHTML = html;
+}
+
+function _intakeChangeType(idx, type) {
+    if (_intakeParsedRows[idx]) {
+        _intakeParsedRows[idx].type = type;
+    }
+}
+
+function _intakeRemoveRow(idx) {
+    _intakeParsedRows.splice(idx, 1);
+    _intakeRenderDrawer();
+}
+
+function _intakeClose() {
+    const drawer = document.getElementById('intakeDrawer');
+    if (drawer) drawer.classList.remove('open');
+    _intakeParsedRows = [];
+    const input = document.getElementById('intakeInput');
+    if (input) input.value = '';
+}
+
+async function _intakeConfirm() {
+    if (!_intakeParsedRows.length) return;
+    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement');
+    // For requirements, add them to the current requisition
+    if (reqRows.length && currentReqId) {
+        try {
+            for (const r of reqRows) {
+                await apiFetch(`/api/requisitions/${currentReqId}/requirements`, {
+                    method: 'POST',
+                    body: { primary_mpn: r.mpn, target_qty: r.qty || '1', target_price: r.price ? parseFloat(r.price) : null }
+                });
+            }
+            showToast(`${reqRows.length} requirement(s) added`, 'success');
+        } catch (e) {
+            showToast('Failed to add some requirements', 'error');
+        }
+    } else if (reqRows.length && !currentReqId) {
+        // If on materials view, search for these MPNs instead
+        if (_currentMainView === 'materials' || (document.getElementById('view-materials') && !document.getElementById('view-materials').classList.contains('hidden') && !document.getElementById('view-materials').classList.contains('u-hidden'))) {
+            const mpns = reqRows.map(r => r.mpn).filter(Boolean);
+            if (mpns.length) {
+                const searchBox = document.getElementById('materialSearch');
+                if (searchBox) { searchBox.value = mpns.join(', '); }
+                showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
+                if (typeof loadMaterialList === 'function') loadMaterialList();
+            }
+        } else {
+            showToast('Open a requisition first to add requirements', 'warn');
+        }
+    }
+    // For sightings and offers, log them (placeholder for full implementation)
+    const otherRows = _intakeParsedRows.filter(r => r.type !== 'requirement');
+    if (otherRows.length) {
+        showToast(`${otherRows.length} sighting/offer items logged (intake processing)`, 'info');
+    }
+    _intakeClose();
+    // Refresh requirement list if we added any
+    if (reqRows.length && currentReqId && typeof loadRequirements === 'function') {
+        loadRequirements();
+    }
+}
+
+function _intakeUpload() {
+    const input = document.getElementById('intakeFileInput');
+    if (input) input.click();
+}
+
+function _intakeFileSelected(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        _intakeParseText(text);
+    };
+    // Read as text for CSV/TSV; for Excel, show toast about future support
+    if (file.name.match(/\.(xlsx|xls)$/i)) {
+        showToast('Excel import: use the existing Import Stock feature for now', 'info');
+        input.value = '';
+        return;
+    }
+    reader.readAsText(file);
+    input.value = '';
+}
+
+function _intakeImportApi() {
+    showToast('API import: use Search to pull live availability from supplier APIs', 'info');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHARED PAGE HELPERS — reusable HTML builders for object headers,
+// status strips, blocker strips, AI cards, and action bars.
+// Called by: view-specific rendering functions
+// Depends on: esc
+// ═══════════════════════════════════════════════════════════════════════
+
+function renderObjHeader(opts) {
+    // opts: { icon: svg, title, subtitle, actions: [{label, onclick, cls}] }
+    let actHtml = '';
+    if (opts.actions) {
+        actHtml = opts.actions.map(a =>
+            `<button class="btn ${a.cls || 'btn-ghost btn-sm'}" onclick="${a.onclick || ''}" ${a.title ? 'title="' + esc(a.title) + '"' : ''}>${a.label}</button>`
+        ).join('');
+    }
+    return `<div class="obj-header">
+        ${opts.icon ? `<div class="obj-header-icon">${opts.icon}</div>` : ''}
+        <div class="obj-header-info">
+            <div class="obj-header-title">${esc(opts.title || '')}</div>
+            ${opts.subtitle ? `<div class="obj-header-subtitle">${opts.subtitle}</div>` : ''}
+        </div>
+        <div class="obj-header-actions">${actHtml}</div>
+    </div>`;
+}
+
+function renderStatusStrip(items) {
+    // items: [{ value, label, cls: 'alert'|'warn'|'good'|'' }]
+    return `<div class="status-strip">${items.map(i =>
+        `<div class="status-strip-item ${i.cls || ''}">
+            <div class="status-strip-value">${i.value}</div>
+            <div class="status-strip-label">${esc(i.label)}</div>
+        </div>`
+    ).join('')}</div>`;
+}
+
+function renderBlockerStrip(text, actionLabel, actionOnclick) {
+    if (!text) return '';
+    return `<div class="blocker-strip">
+        <div class="blocker-strip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+        <span class="blocker-strip-text">${esc(text)}</span>
+        ${actionLabel ? `<button class="blocker-strip-action" onclick="${actionOnclick || ''}">${esc(actionLabel)}</button>` : ''}
+    </div>`;
+}
+
+function renderAiCard(opts) {
+    // opts: { label, body (html), confidence: 0-100, actions: [{label, onclick, primary}] }
+    let confHtml = '';
+    if (opts.confidence !== undefined) {
+        const cls = opts.confidence >= 80 ? 'high' : opts.confidence >= 50 ? 'med' : 'low';
+        confHtml = `<span class="ai-card-confidence">
+            <span class="ai-card-confidence-bar"><span class="ai-card-confidence-fill ${cls}" style="width:${opts.confidence}%"></span></span>
+            ${opts.confidence}%
+        </span>`;
+    }
+    let actHtml = '';
+    if (opts.actions) {
+        actHtml = `<div class="ai-card-actions">${opts.actions.map(a =>
+            `<button class="ai-card-action ${a.primary ? 'primary' : ''}" onclick="${a.onclick || ''}">${esc(a.label)}</button>`
+        ).join('')}${confHtml}</div>`;
+    }
+    return `<div class="ai-card">
+        <div class="ai-card-header">
+            <svg class="ai-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 2.75a4 4 0 0 0-1.09 6.89"/><path d="M12 8v14"/><path d="M5 18a7 7 0 0 1 14 0"/></svg>
+            <span class="ai-card-label">${esc(opts.label || 'AI Insight')}</span>
+        </div>
+        <div class="ai-card-body">${opts.body || ''}</div>
+        ${actHtml}
+    </div>`;
+}
+
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
@@ -14577,4 +15420,11 @@ Object.assign(window, {
     _toggleMobileSearch, _showMobileUserMenu,
     // Mobile req list — card redesign
     renderMobileReqList, mobileReqPillTap, _syncMobileReqPills, _renderReqCardMobile,
+    // Context panel
+    toggleContextPanel, switchCtxTab, bindContextPanel, unbindContextPanel, ctxSendMessage, ctxAttachFile,
+    // Universal intake bar
+    showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit: _intakeConfirm,
+    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
+    // Shared page helpers
+    renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
 });

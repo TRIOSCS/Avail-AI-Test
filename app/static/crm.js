@@ -3716,6 +3716,28 @@ function renderBuyPlansList() {
     const statusLabels = {draft:'Draft',pending:'Pending',active:'Active',halted:'Halted',completed:'Completed',cancelled:'Cancelled'};
     const statusBadge = {draft:'b-draft',pending:'b-pend',active:'b-appr',halted:'b-rej',completed:'b-comp',cancelled:'b-canc'};
 
+    // Execution summary — aggregate stats using shared status strip
+    const _bpActive = data.filter(bp => bp.status === 'active').length;
+    const _bpPending = data.filter(bp => bp.status === 'pending').length;
+    const _bpCompleted = data.filter(bp => bp.status === 'completed').length;
+    const _bpHalted = data.filter(bp => bp.status === 'halted').length;
+    const _bpTotalCost = data.reduce((s, bp) => s + (bp.total_cost || 0), 0);
+    const _bpTotalLines = data.reduce((s, bp) => s + (bp.line_count || 0), 0);
+    const summaryHtml = window.renderStatusStrip ? window.renderStatusStrip([
+        { label: 'Active', value: _bpActive, color: 'var(--green)' },
+        { label: 'Pending', value: _bpPending, color: 'var(--amber)' },
+        { label: 'Completed', value: _bpCompleted },
+        { label: 'Halted', value: _bpHalted, color: _bpHalted > 0 ? 'var(--red)' : 'var(--muted)' },
+        { label: 'Total Cost', value: _fmtMoney(_bpTotalCost) },
+        { label: 'Lines', value: _bpTotalLines },
+    ]) : '';
+    // Blocker strip for halted plans
+    const blockers = [];
+    if (_bpHalted > 0) blockers.push({ text: _bpHalted + ' buy plan' + (_bpHalted > 1 ? 's' : '') + ' halted', level: 'error' });
+    const flagged = data.filter(bp => bp.ai_flag_count > 0).length;
+    if (flagged > 0) blockers.push({ text: flagged + ' plan' + (flagged > 1 ? 's' : '') + ' with AI flags', level: 'warn' });
+    const blockerHtml = window.renderBlockerStrip ? window.renderBlockerStrip(blockers) : '';
+
     // Sort
     if (_bpSortCol) {
         data.sort((a, b) => {
@@ -3739,7 +3761,7 @@ function renderBuyPlansList() {
     const thC = (col) => _bpSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_bpSortArrow(col)}</span>`;
 
-    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
+    let html = summaryHtml + blockerHtml + `<div style="padding:0 16px"><table class="tbl"><thead><tr>
         <th onclick="sortBpList('req')"${thC('req')}>Quote ${sa('req')}</th>
         <th onclick="sortBpList('status')"${thC('status')}>Status ${sa('status')}</th>
         <th onclick="sortBpList('customer')"${thC('customer')}>Customer ${sa('customer')}</th>
@@ -4949,12 +4971,25 @@ function renderProactiveStatsBar() {
     const s = _proactiveStats;
     if (!s.total) { el.classList.add('u-hidden'); return; }
     el.classList.remove('u-hidden');
-    el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);border-radius:8px;font-size:12px">
-        <div><span style="font-weight:700;font-size:18px;color:var(--teal)">${s.total}</span> <span style="color:var(--muted)">Matches</span></div>
-        <div><span style="font-weight:700;font-size:18px">${s.avg_score || 0}</span> <span style="color:var(--muted)">Avg Score</span></div>
-        <div><span style="font-weight:700;font-size:18px;color:${_marginColor(s.avg_margin)}">${s.avg_margin != null ? s.avg_margin + '%' : '—'}</span> <span style="color:var(--muted)">Avg Margin</span></div>
-        <div><span style="font-weight:700;font-size:18px;color:var(--green)">${s.high_margin_count}</span> <span style="color:var(--muted)">&gt;30% Margin</span></div>
-    </div>`;
+    // Use shared status strip for consistent styling
+    const stripHtml = window.renderStatusStrip ? window.renderStatusStrip([
+        { label: 'Matches', value: s.total, color: 'var(--teal)' },
+        { label: 'Avg Score', value: s.avg_score || 0 },
+        { label: 'Avg Margin', value: s.avg_margin != null ? s.avg_margin + '%' : '\u2014', color: _marginColor(s.avg_margin) },
+        { label: '>30% Margin', value: s.high_margin_count, color: 'var(--green)' },
+    ]) : '';
+    // AI insight card
+    const _opp = s.total || 0;
+    const _hiMargin = s.high_margin_count || 0;
+    const _aiInsight = _hiMargin > 0
+        ? `${_hiMargin} of ${_opp} matches have >30% margin potential. Prioritize sending these offers first.`
+        : _opp > 0 ? `${_opp} proactive matches found. Review and send to customers.` : '';
+    const aiHtml = _aiInsight && window.renderAiCard ? window.renderAiCard({
+        title: 'Opportunity Insight',
+        confidence: _hiMargin > 3 ? 0.85 : _hiMargin > 0 ? 0.7 : 0.4,
+        body: _aiInsight,
+    }) : '';
+    el.innerHTML = stripHtml + aiHtml;
 }
 
 function _vendorScoreClass(score) {
