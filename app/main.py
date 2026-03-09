@@ -1028,3 +1028,8 @@ from .routers.task import router as task_router
 
 app.include_router(task_router)
 app.include_router(my_tasks_router)
+
+# Strategic Vendors (per-buyer assignments with 39-day TTL)
+from .routers.strategic import router as strategic_router
+
+app.include_router(strategic_router)

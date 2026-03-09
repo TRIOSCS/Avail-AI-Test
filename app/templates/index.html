@@ -57,7 +57,7 @@
         /* Priority Lanes — simple table row separators */
         tr[onclick*="togglePriorityLane"]:hover td{filter:brightness(0.95)}
         /* Notification bar */
-        .notif-action-bar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:linear-gradient(90deg,rgba(59,130,246,.06),rgba(16,185,129,.06));border-bottom:1px solid var(--border);font-size:12px;flex-wrap:wrap}
+        .notif-action-bar{display:flex;align-items:center;gap:12px;padding:5px 16px;background:linear-gradient(90deg,rgba(59,130,246,.06),rgba(16,185,129,.06));border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap}
         .notif-action-bar:empty{display:none}
         .notif-action-item{display:flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:background .15s}
         .notif-action-item:hover{background:rgba(0,0,0,.05)}
@@ -215,6 +215,7 @@
             <div class="sb-group-items">
                 <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Accounts</button>
                 <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span> Vendors</button>
+                <button type="button" class="sb-nav-btn" id="navStrategic" data-tip="My Vendors" onclick="sidebarNav('strategic',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span> My Vendors <span id="strategicBadge" class="sb-badge" style="display:none">0</span></button>
                 <button type="button" class="sb-nav-btn" id="navProspecting" data-tip="Prospecting" onclick="sidebarNav('prospecting',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
                 <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
             </div>
@@ -513,6 +514,34 @@
                 <button class="drawer-close" onclick="closeSuggestedDetail()">&times;</button>
             </div>
             <div class="drawer-body" id="suggestedDetailBody" style="padding:16px"></div>
+        </div>
+    </div>
+
+    <!-- VIEW: Strategic Vendors (My Vendors — 10-slot panel) -->
+    <div id="view-strategic" class="u-hidden" style="flex-direction:column;padding:24px;max-width:900px">
+        <div class="crm-header" style="margin-bottom:16px">
+            <h2>My Strategic Vendors</h2>
+            <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+                <span id="strategicSlots" style="font-size:13px;color:var(--muted)">0/10 slots</span>
+                <button type="button" class="btn btn-primary btn-sm" id="strategicClaimBtn" onclick="openStrategicClaimModal()">+ Claim Vendor</button>
+            </div>
+        </div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:16px">
+            Your top 10 vendor relationships. Vendors auto-expire after 39 days without an offer.
+        </p>
+        <div id="strategicVendorList" class="strategic-vendor-list">
+            <span style="font-size:12px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>
+        </div>
+    </div>
+
+    <!-- Strategic Vendor Claim Modal -->
+    <div id="strategicClaimModal" class="modal-backdrop" style="display:none" onclick="if(event.target===this)closeStrategicClaimModal()">
+        <div class="modal-box" style="max-width:480px">
+            <div class="modal-header"><h3>Claim a Vendor</h3><button class="modal-close" onclick="closeStrategicClaimModal()">&times;</button></div>
+            <div class="modal-body">
+                <input class="sbox" id="strategicClaimSearch" placeholder="Search vendors..." oninput="searchOpenPoolVendors()" style="width:100%;margin-bottom:12px">
+                <div id="strategicClaimResults" style="max-height:300px;overflow-y:auto"></div>
+            </div>
         </div>
     </div>
 
@@ -1239,23 +1268,15 @@
             <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button type="button" class="tab on" onclick="switchSettingsTab('profile',this)">My Profile</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
+            <button type="button" class="tab on" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('tickets',this)">Tickets</button>
             <button type="button" class="tab" onclick="switchSettingsTab('apihealth',this)">API Health</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
-        <div id="settings-profile" class="settings-panel">
-            <p class="empty">Loading profile...</p>
-        </div>
-
-        <div id="settings-users" class="settings-panel hidden">
+        <div id="settings-users" class="settings-panel">
             <div id="adminUsersList"><p class="empty">Loading...</p></div>
             <div class="card s-card" style="margin-top:16px">
                 <h3>Create New User</h3>
@@ -1274,10 +1295,6 @@
             </div>
         </div>
 
-        <div id="settings-health" class="settings-panel hidden">
-            <div id="settingsHealthContent"><p class="empty">Loading...</p></div>
-        </div>
-
         <div id="settings-config" class="settings-panel hidden">
             <div id="settingsConfigContent"><p class="empty">Loading...</p></div>
         </div>
@@ -1286,135 +1303,29 @@
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-teams" class="settings-panel hidden">
-            <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
-            <div id="teamsRoutingContent" style="margin-top:12px"></div>
-            <div id="teamsLogContent" style="margin-top:12px"></div>
-        </div>
-
-        <div id="settings-enrichment" class="settings-panel hidden">
-            <div class="tabs" id="enrichTabs">
-                <button type="button" class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('m365',this)">Inbox Mining</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('credits',this)">Credits</button>
-                <button type="button" class="tab" onclick="switchEnrichTab('gaps',this)">Customer Gaps</button>
-            </div>
-
-            <!-- Review Queue Tab -->
-            <div id="enrichQueuePanel">
-                <div class="s-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
-                    <select id="eqStatusFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
-                        <option value="pending">Pending</option>
-                        <option value="auto_applied">Auto-Applied</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="all">All</option>
-                    </select>
-                    <select id="eqEntityFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
-                        <option value="">All Entities</option>
-                        <option value="vendor">Vendors</option>
-                        <option value="company">Companies</option>
-                    </select>
-                    <button type="button" class="btn btn-sm hidden" onclick="bulkApproveSelected()" id="eqBulkApproveBtn">Approve Selected</button>
-                    <span id="eqCount" class="s-hint u-ml-auto"></span>
-                </div>
-                <div id="enrichQueueList"><p class="empty">Loading...</p></div>
-            </div>
-
-            <!-- Backfill Tab -->
-            <div id="enrichBackfillPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Start Deep Enrichment</h3>
-                    <div class="s-form">
-                        <label><input type="checkbox" id="bfVendors" checked> Vendors</label>
-                        <label><input type="checkbox" id="bfCompanies" checked> Companies</label>
-                        <label><input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining</label>
-                        <label class="s-row">Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button type="button" class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
-                    </div>
-                </div>
-                <div id="bfProgressBox" class="s-card hidden">
-                    <h4 style="margin:0 0 12px">Running Job</h4>
-                    <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px">
-                        <div id="bfProgressBar" style="height:100%;background:var(--teal);transition:width 0.3s;width:0%"></div>
-                    </div>
-                    <span id="bfProgressLabel" class="s-hint"></span>
-                </div>
-
-                <div class="card s-card">
-                    <h3>Backfill from Existing Data</h3>
-                    <p class="s-desc">Recover vendor emails already in the system — activity logs, vendor card imports, and BrokerBin sightings.</p>
-                    <div class="s-row"><button type="button" class="btn" onclick="startEmailBackfill()">Backfill Emails</button> <span id="emailBfStatus" class="s-hint"></span></div>
-                </div>
-
-                <div class="card s-card">
-                    <h3>Scrape Vendor Websites</h3>
-                    <p class="s-desc">Scrape contact pages of vendors with websites but few email contacts.</p>
-                    <div class="s-form">
-                        <label class="s-row">Max vendors: <input type="number" id="scrapeMaxVendors" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button type="button" class="btn" onclick="startWebsiteScrape()">Scrape Websites</button> <span id="scrapeStatus" class="s-hint"></span></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Job History Tab -->
-            <div id="enrichJobsPanel" class="hidden">
-                <div id="enrichJobsList"><p class="empty">Loading...</p></div>
-            </div>
-
-            <!-- M365 Connection Status -->
-            <div id="enrichM365Panel" class="hidden">
-                <div class="card s-card">
-                    <h3>M365 Inbox Mining</h3>
-                    <p class="s-desc">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
-                    <div id="m365UserList"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Credits Tab -->
-            <div id="enrichCreditsPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Monthly Credit Usage</h3>
-                    <p class="s-desc">API credit consumption across enrichment providers. Resets monthly.</p>
-                    <div id="creditUsagePanel"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Customer Gaps Tab -->
-            <div id="enrichGapsPanel" class="hidden">
-                <div class="card s-card">
-                    <h3>Customer Enrichment Gaps</h3>
-                    <p class="s-desc">Accounts needing contact enrichment. Assigned accounts are prioritized.</p>
-                    <div class="s-row" style="margin-bottom:12px">
-                        <button type="button" class="btn" onclick="loadCustomerGaps()">Refresh</button>
-                        <button type="button" class="btn btn-outline" onclick="startCustomerBackfill()">Run Backfill</button>
-                        <span id="gapStatus" class="s-hint"></span>
-                    </div>
-                    <div id="customerGapsList"><p class="empty">Loading...</p></div>
-                </div>
-            </div>
-
-            <!-- Stats Summary -->
-            <div id="enrichStatsPanel" style="margin-top:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap">
-                <div><strong id="esVendors">-</strong><br><small class="s-hint">Vendors Enriched</small></div>
-                <div><strong id="esCompanies">-</strong><br><small class="s-hint">Companies Enriched</small></div>
-                <div><strong id="esPending">-</strong><br><small class="s-hint">Pending Review</small></div>
-                <div><strong id="esAutoApplied">-</strong><br><small class="s-hint">Auto-Applied</small></div>
-                <div><strong id="esActiveJobs">-</strong><br><small class="s-hint">Active Jobs</small></div>
-                <div><strong id="esVendorEmails">-</strong><br><small class="s-hint">Vendor Emails</small></div>
-            </div>
-        </div>
-
         <div id="settings-tickets" class="settings-panel hidden"></div>
 
         <div id="settings-apihealth" class="settings-panel hidden">
-            <div class="vendor-header" style="margin-bottom:12px">
-                <h3 style="margin:0">API Health Monitor</h3>
-                <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+            <div class="tabs" id="apiHealthTabs">
+                <button type="button" class="tab on" onclick="switchApiHealthTab('dashboard',this)">API Health</button>
+                <button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>
             </div>
-            <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+
+            <!-- API Health Dashboard -->
+            <div id="apih-dashboard">
+                <div class="vendor-header" style="margin-bottom:12px">
+                    <h3 style="margin:0">API Health Monitor</h3>
+                    <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
+                </div>
+                <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
+            </div>
+
+            <!-- Teams Integration (consolidated from separate tab) -->
+            <div id="apih-teams" style="display:none">
+                <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
+                <div id="teamsRoutingContent" style="margin-top:12px"></div>
+                <div id="teamsLogContent" style="margin-top:12px"></div>
+            </div>
         </div>
 
         <div id="settings-transfer" class="settings-panel hidden">
