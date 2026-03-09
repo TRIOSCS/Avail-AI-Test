@@ -1323,7 +1323,7 @@ export function showView(viewId) {
         mobileToolbar.style.display = (isSettings || !isListView) ? 'none' : '';
     }
     // Show intake bar on views where data entry is relevant
-    const intakeViews = ['view-list', 'view-materials', 'view-vendors'];
+    const intakeViews = ['view-list', 'view-materials', 'view-vendors', 'view-buyplans'];
     const intakeBar = document.getElementById('intakeBar');
     if (intakeBar) intakeBar.style.display = intakeViews.includes(viewId) ? '' : 'none';
 }
@@ -2472,6 +2472,55 @@ async function loadDashboard() {
         const avgWon = Math.round(teamWon / teamSize * 10) / 10;
 
         let html = '';
+
+        // ── Nerve Center: Priority Action Feed ──
+        // Unified ranked list of the most urgent items across all categories
+        const _nerveFeed = [];
+        // Overdue/urgent deadlines
+        for (const r of myReqs) {
+            if (!['open','active','sourcing'].includes(r.status)) continue;
+            if (r.deadline) {
+                const dl = r.deadline === 'ASAP' ? null : new Date(r.deadline + 'T12:00:00Z');
+                const daysLeft = dl ? Math.round((dl - now) / 86400000) : -1;
+                if (r.deadline === 'ASAP' || daysLeft <= 0) {
+                    _nerveFeed.push({ priority: 100 - (daysLeft || 0), icon: '\ud83d\udd34', label: r.deadline === 'ASAP' ? 'ASAP' : (daysLeft === 0 ? 'DUE TODAY' : Math.abs(daysLeft) + 'd OVERDUE'), name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
+                } else if (daysLeft <= 2) {
+                    _nerveFeed.push({ priority: 50 + (3 - daysLeft) * 10, icon: '\u26a0\ufe0f', label: daysLeft + 'd left', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
+                }
+            }
+        }
+        // New offers to review
+        for (const r of myReqs) {
+            if (r.has_new_offers && (r.offer_count || 0) > 0) {
+                _nerveFeed.push({ priority: 80, icon: '\ud83d\udce5', label: (r.offer_count || 0) + ' offer' + ((r.offer_count||0) > 1 ? 's' : '') + ' to review', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'offers' });
+            }
+        }
+        // Stale quotes
+        for (const q of quoteList.filter(q => q.status === 'sent' && !q.result)) {
+            const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
+            if (daysSent >= 5) {
+                _nerveFeed.push({ priority: 40 + daysSent, icon: '\ud83d\udcb0', label: daysSent + 'd since quote sent', name: q.quote_number || q.customer_name || 'Quote', action: `goToReq(${q.requisition_id || q.id})`, type: 'quote' });
+            }
+        }
+        // Stale accounts
+        for (const a of attnList.slice(0, 5)) {
+            if ((a.days_since_contact || 0) >= 14) {
+                _nerveFeed.push({ priority: 30, icon: '\ud83d\udce2', label: (a.days_since_contact || 0) + 'd no contact', name: a.company_name, action: `goToCompany(${a.company_id})`, type: 'account' });
+            }
+        }
+
+        _nerveFeed.sort((a, b) => b.priority - a.priority);
+        if (_nerveFeed.length > 0) {
+            html += '<div class="nerve-feed"><div class="nerve-feed-title">Priority Actions</div>';
+            html += _nerveFeed.slice(0, 8).map(item =>
+                `<div class="nerve-feed-item" onclick="${item.action}">
+                    <span class="nerve-feed-icon">${item.icon}</span>
+                    <span class="nerve-feed-name">${esc(item.name)}</span>
+                    <span class="nerve-feed-label nerve-feed-${item.type}">${item.label}</span>
+                </div>`
+            ).join('');
+            html += '</div>';
+        }
 
         // ── Morning Brief ──
         if (brief) {
@@ -6800,6 +6849,12 @@ function _openMobileDrillDown(reqId) {
                         <span style="font-size:12px"><b>${offers}</b> offers</span>
                         ${dlBadge}
                     </div>
+                    ${renderStatusStrip([
+                        { label: 'Parts', value: total },
+                        { label: 'Sourced', value: r ? (r.sourced_count || 0) + '/' + total : '0' },
+                        { label: 'RFQs', value: r ? (r.rfq_sent_count || 0) : 0 },
+                        { label: 'Offers', value: offers },
+                    ])}
                 </div>
             </div>
             <div class="m-tabs-scroll" id="mobileDdTabs">${pillsHtml}</div>
@@ -8651,6 +8706,8 @@ async function submitLogOffer() {
 
 function renderReqList() {
     _renderBreadcrumb();
+    // Deal board view uses its own renderer
+    if (_currentMainView === 'deals') { _renderDealBoard(); return; }
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
@@ -8697,6 +8754,12 @@ function renderReqList() {
                 case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
                 case 'matches': va = a.proactive_match_count || 0; vb = b.proactive_match_count || 0; break;
                 case 'score': va = a.sourcing_score || 0; vb = b.sourcing_score || 0; break;
+                case 'coverage': {
+                    const ta = a.requirement_count || 0; const tb = b.requirement_count || 0;
+                    va = ta > 0 ? (a.offer_count || 0) / ta : 0;
+                    vb = tb > 0 ? (b.offer_count || 0) / tb : 0;
+                    break;
+                }
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -8752,15 +8815,15 @@ function renderReqList() {
             ${_thIcons}
         </tr></thead>`;
     } else if (v === 'sales') {
-        // Sales view: Customer-focused columns — Quote status, Value, Deadline prominent
+        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Coverage: parts with at least one offer vs total parts">Coverage ${sa('coverage')}</th>
             <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('sales')"${thClass('sales')} style="min-width:80px">Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
@@ -8771,6 +8834,7 @@ function renderReqList() {
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Parts with at least one offer">Coverage ${sa('coverage')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
@@ -9108,10 +9172,23 @@ function _renderReqRow(r) {
         else if (rh < 24) dot = ' <span class="new-offers-dot amber" title="Vendor reply ' + _timeAgo(r.latest_reply_at) + '"></span>';
     }
 
+    // Blocker indicator — stalled requisitions get a small warning chip
+    let blockerChip = '';
+    if (v !== 'archive' && r.status !== 'draft' && r.status !== 'won' && r.status !== 'lost') {
+        const _ageDays = r.created_at ? Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000) : 0;
+        const _oCount = r.offer_count || 0;
+        const _sigs = r.sourcing_signals;
+        if (_ageDays > 5 && _oCount === 0 && total > 0 && (!_sigs || (_sigs.sources && _sigs.sources.level === 'low' && _sigs.rfqs && _sigs.rfqs.level === 'low'))) {
+            blockerChip = ' <span class="blocker-chip" title="Stalled: no offers after 5+ days, low sourcing activity">Stalled</span>';
+        } else if (_ageDays > 3 && _oCount === 0 && (r.rfq_sent_count || 0) === 0 && total > 0) {
+            blockerChip = ' <span class="blocker-chip warn" title="No RFQs sent after 3+ days">No RFQs</span>';
+        }
+    }
+
     // Name cell — editable on active view, read-only on archive
     const statusChip = `<span class="status-chip status-chip-${chipCls}" style="margin-left:6px;font-size:9px;vertical-align:middle">${_statusLabels[r.status] || r.status}</span>`;
     const nameCell = v !== 'archive'
-        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span>${statusChip}</td>`
+        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)" title="Click to edit customer">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted);cursor:pointer" onclick="event.stopPropagation();editReqName(${r.id},this)" title="Click to edit requisition name">${esc(r.name || '')}</span>${statusChip}${blockerChip}</td>`
         : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})" title="Click to expand details">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp with absolute tooltip
@@ -9167,12 +9244,22 @@ function _renderReqRow(r) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
 
+        // Coverage: parts with at least one offer vs total parts
+        const _covOffer = r.offer_count || 0;
+        const _covPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
+        let covCell;
+        if (total === 0) covCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _covPct >= 80 ? 'var(--green)' : _covPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            covCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covPct}%</span></div>`;
+        }
+
         dataCells = `
             <td class="mono" style="text-align:right">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
             <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-            <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
 
         // Sales actions: context-aware primary action
@@ -9216,9 +9303,19 @@ function _renderReqRow(r) {
             if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
         }
 
+        // Coverage: offers vs total parts
+        const _srcCovPct = total > 0 ? Math.round((_oCnt / total) * 100) : 0;
+        let srcCovCell;
+        if (total === 0) srcCovCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCovCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovPct}%</span></div>`;
+        }
+
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${srcCovCell}</td>
             <td class="mono" style="font-size:11px">${sent}</td>
             <td style="font-size:11px;white-space:nowrap">${respCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
@@ -9240,7 +9337,7 @@ function _renderReqRow(r) {
             srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="View sourcing progress">Sourcing</button>`;
         }
         actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 9;
+        colspan = 10;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -9249,6 +9346,35 @@ function _renderReqRow(r) {
         ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
     } else {
         const lastSearch = r.last_searched_at ? _timeAgo(r.last_searched_at) : 'never';
+        // Status strip data — sourcing progress, RFQ coverage, offer status
+        const _ssParts = total;
+        const _ssSourced = sourced;
+        const _ssSent = r.rfq_sent_count || 0;
+        const _ssReplied = r.reply_count || 0;
+        const _ssOffers = r.offer_count || 0;
+        const _ssCovPct = _ssParts > 0 ? Math.round((_ssOffers / _ssParts) * 100) : 0;
+        const statusItems = [
+            { label: 'Parts', value: _ssParts },
+            { label: 'Sourced', value: `${_ssSourced}/${_ssParts}`, color: _ssSourced >= _ssParts && _ssParts > 0 ? 'var(--green)' : _ssSourced > 0 ? 'var(--amber)' : 'var(--muted)' },
+            { label: 'RFQs', value: _ssSent },
+            { label: 'Replies', value: _ssSent > 0 ? `${_ssReplied}/${_ssSent}` : '\u2014', color: _ssReplied > 0 ? 'var(--green)' : 'var(--muted)' },
+            { label: 'Coverage', value: _ssCovPct + '%', color: _ssCovPct >= 80 ? 'var(--green)' : _ssCovPct >= 40 ? 'var(--amber)' : 'var(--red)' },
+        ];
+        const ssHtml = renderStatusStrip(statusItems);
+
+        // Blocker strip — deadline, stalled, missing data
+        const blockers = [];
+        if (r.deadline) {
+            const _d = r.deadline === 'ASAP' ? null : new Date(r.deadline + 'T12:00:00Z');
+            const _now = new Date(); _now.setHours(0,0,0,0);
+            if (r.deadline === 'ASAP') blockers.push({ text: 'ASAP deadline', level: 'warn' });
+            else if (_d && _d < _now) blockers.push({ text: 'OVERDUE: ' + fmtDate(r.deadline), level: 'error' });
+            else if (_d && (_d - _now) / 86400000 <= 2) blockers.push({ text: 'Due in ' + Math.round((_d - _now) / 86400000) + 'd', level: 'warn' });
+        }
+        if (_ssParts > 0 && _ssSourced === 0 && _ssSent === 0) blockers.push({ text: 'Not sourced yet', level: 'info' });
+        if (_ssSent > 0 && _ssReplied === 0) blockers.push({ text: 'No vendor replies', level: 'warn' });
+        const bsHtml = renderBlockerStrip(blockers);
+
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
             <div style="display:flex;gap:4px;align-items:center">
@@ -9259,7 +9385,8 @@ function _renderReqRow(r) {
                 <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
                 <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
-        </div>`;
+        </div>
+        ${ssHtml}${bsHtml}`;
     }
 
     return `<tr class="${dlClass}" onclick="toggleDrillDown(${r.id})">
@@ -9680,7 +9807,7 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on sales/sourcing views, hide on archive
+    // Show status filter pills on sales/sourcing views, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = (view === 'sales' || view === 'sourcing') ? '' : 'none';
     if (view === 'sales' || view === 'sourcing') {
@@ -9688,6 +9815,10 @@ function setMainView(view, btn) {
         _serverSearchActive = false;
         loadRequisitions();
         loadFollowUpsPanel();
+    } else if (view === 'deals') {
+        _reqStatusFilter = 'all';
+        _serverSearchActive = false;
+        loadRequisitions().then(() => _renderDealBoard());
     } else if (view === 'active' || view === 'rfq') {
         // Legacy: redirect old view names to sales
         _currentMainView = 'sales';
@@ -9913,6 +10044,94 @@ async function sendFollowUp(contactId, vendorName) {
         } catch (e) { showToast('Failed to send follow-up', 'error'); }
         finally { sendFollowUp._busy = false; }
     });
+}
+
+// ── Deal Board ─────────────────────────────────────────────────────────
+// Renders a kanban-style board grouping requisitions by deal stage.
+// Called by: setMainView('deals')
+// Depends on: _reqListData, renderObjHeader, renderStatusStrip
+function _renderDealBoard() {
+    const el = document.getElementById('reqList');
+    if (!el) return;
+    const data = _reqListData.filter(r => r.status !== 'archived' && r.status !== 'closed');
+
+    // Classify into deal stages
+    const stages = [
+        { key: 'gathering', label: 'Gathering Intel', icon: '\ud83d\udd0d', color: 'var(--blue)', items: [] },
+        { key: 'rfq-out', label: 'RFQs Out', icon: '\ud83d\udce8', color: 'var(--amber)', items: [] },
+        { key: 'offers-in', label: 'Offers In', icon: '\ud83d\udce5', color: 'var(--green)', items: [] },
+        { key: 'quoting', label: 'Quoting', icon: '\ud83d\udcb0', color: 'var(--purple,#8b5cf6)', items: [] },
+        { key: 'closing', label: 'Closing', icon: '\u2705', color: 'var(--green)', items: [] },
+    ];
+
+    for (const r of data) {
+        const total = r.requirement_count || 0;
+        const offers = r.offer_count || 0;
+        const sent = r.rfq_sent_count || 0;
+        const qs = r.quote_status;
+        if (qs === 'sent' || qs === 'revised') stages[4].items.push(r);
+        else if (qs === 'draft' || (offers > 0 && !qs)) stages[3].items.push(r);
+        else if (offers > 0) stages[2].items.push(r);
+        else if (sent > 0) stages[1].items.push(r);
+        else stages[0].items.push(r);
+    }
+
+    // Render board
+    let html = '<div class="deal-board">';
+    for (const stage of stages) {
+        html += `<div class="deal-col">
+            <div class="deal-col-header">
+                <span class="deal-col-icon">${stage.icon}</span>
+                <span class="deal-col-title">${stage.label}</span>
+                <span class="deal-col-count" style="background:${stage.color}">${stage.items.length}</span>
+            </div>
+            <div class="deal-col-body">`;
+        if (stage.items.length === 0) {
+            html += '<div class="deal-empty">No deals here</div>';
+        }
+        for (const r of stage.items) {
+            const total = r.requirement_count || 0;
+            const offers = r.offer_count || 0;
+            const covPct = total > 0 ? Math.round((offers / total) * 100) : 0;
+            const covColor = covPct >= 80 ? 'var(--green)' : covPct >= 40 ? 'var(--amber)' : covPct > 0 ? 'var(--red)' : 'var(--muted)';
+            const cust = r.customer_display || r.name || 'Unknown';
+
+            // Deadline badge
+            let dlBadge = '';
+            if (r.deadline === 'ASAP') dlBadge = '<span class="deal-card-dl asap">ASAP</span>';
+            else if (r.deadline) {
+                const d = new Date(r.deadline + 'T12:00:00Z');
+                const now = new Date(); now.setHours(0,0,0,0);
+                const diff = Math.round((d - now) / 86400000);
+                if (diff < 0) dlBadge = '<span class="deal-card-dl overdue">OVERDUE</span>';
+                else if (diff <= 3) dlBadge = '<span class="deal-card-dl warn">' + fmtDate(r.deadline) + '</span>';
+                else dlBadge = '<span class="deal-card-dl">' + fmtDate(r.deadline) + '</span>';
+            }
+
+            // Value
+            let val = '';
+            if (r.total_target_value > 0) val = '<span class="deal-card-val">' + fmtDollars(r.total_target_value) + '</span>';
+            else if (r.quote_total > 0) val = '<span class="deal-card-val">' + fmtDollars(r.quote_total) + '</span>';
+
+            html += `<div class="deal-card" onclick="toggleDrillDown(${r.id})" title="Click to expand">
+                <div class="deal-card-head">
+                    <span class="deal-card-cust">${esc(cust)}</span>
+                    ${dlBadge}
+                </div>
+                <div class="deal-card-meta">
+                    <span>${total} part${total !== 1 ? 's' : ''}</span>
+                    <span style="color:${covColor};font-weight:600">${covPct}% covered</span>
+                    ${val}
+                </div>
+                <div class="deal-card-bar">
+                    <div class="deal-card-bar-fill" style="width:${covPct}%;background:${covColor}"></div>
+                </div>
+            </div>`;
+        }
+        html += '</div></div>';
+    }
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
@@ -13094,22 +13313,38 @@ async function openMaterialPopup(cardId) {
     const priceMin = allPrices.length ? Math.min(...allPrices) : null;
     const priceMax = allPrices.length ? Math.max(...allPrices) : null;
 
-    let html = `<div class="mp-header">
-        <h2 onclick="editMaterialField(${card.id},'display_mpn',this)" style="cursor:pointer" title="Click to edit MPN">${esc(card.display_mpn)}</h2>
-        <div class="mp-header-meta">
-            ${card.manufacturer ? `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="font-weight:600;cursor:pointer" title="Click to edit">${esc(card.manufacturer)}</span> · ` : `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="cursor:pointer;color:var(--muted)" title="Click to add">+ Add manufacturer</span> · `}
-            ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
-            ${window.__isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="margin-left:16px;font-size:9px;color:var(--muted)" title="Admin: permanently delete this material card">Delete</button>` : ''}
-        </div>
-    </div>`;
+    // Object header using shared framework
+    let html = renderObjHeader({
+        title: card.display_mpn,
+        subtitle: card.manufacturer || '',
+        meta: `${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}`,
+        onEdit: `editMaterialField(${card.id},'display_mpn',this)`,
+        actions: window.__isAdmin ? `<button class="btn btn-ghost btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="font-size:9px;color:var(--muted)" title="Admin: permanently delete this material card">Delete</button>` : '',
+    });
 
-    // Material Card Hub — summary stats
-    html += `<div class="mp-hub">
-        <div class="mp-hub-stat"><span class="mp-hub-val">${offers.length}</span><span class="mp-hub-lbl">Offers</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${sightings.length}</span><span class="mp-hub-lbl">Sightings</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${card.vendor_count || uniqueVendors.size}</span><span class="mp-hub-lbl">Vendors</span></div>
-        <div class="mp-hub-stat"><span class="mp-hub-val">${priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '–$' + priceMax.toFixed(2) : '') : '—'}</span><span class="mp-hub-lbl">Price Range</span></div>
-    </div>`;
+    // Status strip with key metrics
+    html += renderStatusStrip([
+        { label: 'Offers', value: offers.length, color: offers.length > 0 ? 'var(--green)' : 'var(--muted)' },
+        { label: 'Sightings', value: sightings.length },
+        { label: 'Vendors', value: card.vendor_count || uniqueVendors.size },
+        { label: 'Price Range', value: priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '\u2013$' + priceMax.toFixed(2) : '') : '\u2014' },
+    ]);
+
+    // AI intelligence card — supply health assessment
+    const _supplyHealth = offers.length >= 3 ? 'Strong' : offers.length >= 1 ? 'Moderate' : sightings.length > 0 ? 'Weak' : 'Unknown';
+    const _supplyConf = offers.length >= 3 ? 0.9 : offers.length >= 1 ? 0.7 : sightings.length > 0 ? 0.4 : 0.1;
+    const _supplyInsight = offers.length >= 3
+        ? `${offers.length} active offers from ${uniqueVendors.size} vendor${uniqueVendors.size !== 1 ? 's' : ''}. Competitive pricing available.`
+        : offers.length >= 1
+        ? `${offers.length} offer${offers.length !== 1 ? 's' : ''} available. Consider sending more RFQs for better coverage.`
+        : sightings.length > 0
+        ? `${sightings.length} sighting${sightings.length !== 1 ? 's' : ''} but no confirmed offers. RFQ outreach recommended.`
+        : 'No supply data. Search or add sightings to build intelligence.';
+    html += renderAiCard({
+        title: 'Supply Intelligence',
+        confidence: _supplyConf,
+        body: `<b>${_supplyHealth}</b> \u2014 ${_supplyInsight}`,
+    });
 
     html += `<div class="mp-section"><div class="mp-label">Description</div><div onclick="editMaterialField(${card.id},'description',this)" style="font-size:12px;cursor:pointer" title="Click to edit">${card.description ? esc(card.description) : '<span style="color:var(--muted)">+ Add description</span>'}</div></div>`;
 
@@ -15149,7 +15384,18 @@ async function _intakeConfirm() {
             showToast('Failed to add some requirements', 'error');
         }
     } else if (reqRows.length && !currentReqId) {
-        showToast('Open a requisition first to add requirements', 'warn');
+        // If on materials view, search for these MPNs instead
+        if (_currentMainView === 'materials' || (document.getElementById('view-materials') && !document.getElementById('view-materials').classList.contains('hidden') && !document.getElementById('view-materials').classList.contains('u-hidden'))) {
+            const mpns = reqRows.map(r => r.mpn).filter(Boolean);
+            if (mpns.length) {
+                const searchBox = document.getElementById('materialSearch');
+                if (searchBox) { searchBox.value = mpns.join(', '); }
+                showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
+                if (typeof loadMaterialList === 'function') loadMaterialList();
+            }
+        } else {
+            showToast('Open a requisition first to add requirements', 'warn');
+        }
     }
     // For sightings and offers, log them (placeholder for full implementation)
     const otherRows = _intakeParsedRows.filter(r => r.type !== 'requirement');

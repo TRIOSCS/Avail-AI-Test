@@ -2978,6 +2978,46 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 .intake-row-tag.offer { background: rgba(161,98,7,.1); color: var(--amber); }
 .intake-row-tag.dup { background: rgba(239,68,68,.08); color: var(--red); }
 
+/* ── Nerve Center Feed ────────────────────────────────────────────────── */
+.nerve-feed { background: var(--white); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+.nerve-feed-title { font-size: 12px; font-weight: 700; color: var(--text); margin-bottom: 8px; text-transform: uppercase; letter-spacing: .5px; }
+.nerve-feed-item { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px; transition: background .1s; }
+.nerve-feed-item:last-child { border-bottom: none; }
+.nerve-feed-item:hover { background: var(--surface); margin: 0 -14px; padding: 6px 14px; }
+.nerve-feed-icon { font-size: 14px; flex-shrink: 0; }
+.nerve-feed-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+.nerve-feed-label { font-size: 10px; padding: 2px 6px; border-radius: 3px; white-space: nowrap; font-weight: 600; margin-left: auto; }
+.nerve-feed-deadline { background: rgba(239,68,68,.1); color: var(--red); }
+.nerve-feed-offers { background: rgba(16,185,129,.1); color: var(--green); }
+.nerve-feed-quote { background: rgba(234,179,8,.1); color: var(--amber); }
+.nerve-feed-account { background: rgba(59,130,246,.1); color: var(--blue); }
+
+/* ── Deal Board ──────────────────────────────────────────────────────── */
+.deal-board { display: flex; gap: 12px; padding: 0 16px 16px; overflow-x: auto; min-height: 300px; }
+.deal-col { flex: 1; min-width: 220px; max-width: 320px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; }
+.deal-col-header { display: flex; align-items: center; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+.deal-col-icon { font-size: 14px; }
+.deal-col-count { font-size: 10px; font-weight: 700; color: #fff; padding: 1px 6px; border-radius: 8px; min-width: 18px; text-align: center; }
+.deal-col-body { padding: 8px; flex: 1; overflow-y: auto; max-height: 600px; display: flex; flex-direction: column; gap: 6px; }
+.deal-card { background: var(--white); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; cursor: pointer; transition: box-shadow .15s; }
+.deal-card:hover { box-shadow: var(--shadow-md); }
+.deal-card-head { display: flex; justify-content: space-between; align-items: center; gap: 4px; margin-bottom: 4px; }
+.deal-card-cust { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.deal-card-dl { font-size: 9px; padding: 1px 5px; border-radius: 3px; white-space: nowrap; background: var(--surface); color: var(--muted); }
+.deal-card-dl.asap { background: rgba(234,179,8,.1); color: var(--amber); font-weight: 600; }
+.deal-card-dl.overdue { background: rgba(239,68,68,.1); color: var(--red); font-weight: 600; }
+.deal-card-dl.warn { background: rgba(234,179,8,.1); color: var(--amber); }
+.deal-card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+.deal-card-val { color: var(--green); font-weight: 600; }
+.deal-card-bar { height: 3px; background: var(--bg3,#e2e8f0); border-radius: 2px; overflow: hidden; }
+.deal-card-bar-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+.deal-empty { font-size: 11px; color: var(--muted); text-align: center; padding: 20px 8px; }
+@media (max-width:768px) { .deal-board { flex-direction: column; } .deal-col { max-width: 100%; } }
+
+/* ── Blocker Chips ────────────────────────────────────────────────────── */
+.blocker-chip { display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle; background: rgba(239,68,68,.1); color: var(--red); }
+.blocker-chip.warn { background: rgba(234,179,8,.1); color: var(--amber); }
+
 /* ── Responsive: Context panel ────────────────────────────────────────── */
 @media (max-width:768px) {
     .ctx-panel { width: 100vw; }
