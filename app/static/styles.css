@@ -3046,3 +3046,19 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
     .intake-drawer { margin: -4px 12px 8px; }
 }
 
+/* ── Part-level expansion ─────────────────────────────────────────── */
+.part-arrow { display:inline-block; font-size:10px; color:var(--muted); transition:transform .15s; cursor:pointer; }
+.part-arrow.open { transform:rotate(90deg); color:var(--teal); }
+.part-row.part-expanded { background:var(--bg2); }
+.part-row.part-expanded td { border-bottom:none; }
+.part-detail-row td { padding:0 !important; }
+.part-detail-panel { padding:8px 16px 12px 36px; background:var(--bg2); border-bottom:1px solid var(--border); }
+.part-detail-tabs { display:flex; gap:2px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:0; }
+.part-tab { background:none; border:none; padding:4px 10px; font-size:10px; font-weight:600;
+  color:var(--muted); cursor:pointer; border-radius:3px 3px 0 0; font-family:inherit;
+  border-bottom:2px solid transparent; transition:all .15s; }
+.part-tab:hover { color:var(--text); }
+.part-tab.on { color:var(--teal); border-bottom-color:var(--teal); }
+.part-detail-content { min-height:30px; }
+.part-note-box:hover { background:var(--bg3) !important; }
+

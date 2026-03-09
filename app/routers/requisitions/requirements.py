@@ -870,3 +870,166 @@ async def import_stock_list(
         logger.exception("Stock import failed for requisition %s", req_id)
         raise HTTPException(500, "Stock import failed — no data was saved")
     return {"imported_rows": imported, "matched_sightings": matched}
+
+
+# ── Part-level endpoints (requirement-scoped) ─────────────────────────
+# Used by the part-number expansion panel in the frontend.
+
+
+@router.get("/api/requirements/{requirement_id}/offers")
+async def list_requirement_offers(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List all offers (active + historical) for a single requirement."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    offers = (
+        db.query(Offer)
+        .filter(Offer.requirement_id == requirement_id)
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": o.id,
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "lead_time": o.lead_time,
+            "condition": o.condition,
+            "source_type": o.source_type,
+            "status": o.status,
+            "notes": o.notes,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "is_historical": bool(getattr(o, "is_historical", False)),
+        }
+        for o in offers
+    ]
+
+
+@router.get("/api/requirements/{requirement_id}/notes")
+async def list_requirement_notes(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the requirement's own notes plus notes from its offers."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    # Gather notes from offers that have non-empty notes
+    offer_notes = (
+        db.query(Offer)
+        .filter(Offer.requirement_id == requirement_id, Offer.notes.isnot(None), Offer.notes != "")
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    return {
+        "requirement_notes": req.notes or "",
+        "notes": [
+            {
+                "vendor_name": o.vendor_name,
+                "note": o.notes,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+                "offer_id": o.id,
+            }
+            for o in offer_notes
+        ],
+    }
+
+
+@router.post("/api/requirements/{requirement_id}/notes")
+async def add_requirement_note(
+    requirement_id: int,
+    body: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Append text to the requirement's notes field."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    new_text = (body.get("text") or "").strip()
+    if not new_text:
+        raise HTTPException(422, "Note text is required")
+    # Append to existing notes with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    entry = f"[{timestamp} {user.email}] {new_text}"
+    req.notes = f"{req.notes}\n{entry}" if req.notes else entry
+    db.commit()
+    return {"ok": True, "notes": req.notes}
+
+
+@router.get("/api/requirements/{requirement_id}/tasks")
+async def list_requirement_tasks(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List tasks linked to a specific requirement via source_ref."""
+    from ...models import RequisitionTask
+
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    tasks = (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.requisition_id == req.requisition_id,
+            RequisitionTask.source_ref == f"requirement:{requirement_id}",
+        )
+        .order_by(RequisitionTask.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": t.description,
+            "status": t.status,
+            "priority": t.priority,
+            "due_date": t.due_at.isoformat() if t.due_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tasks
+    ]
+
+
+@router.post("/api/requirements/{requirement_id}/tasks")
+async def create_requirement_task(
+    requirement_id: int,
+    body: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task linked to a specific requirement."""
+    from ...models import RequisitionTask
+
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "Task title is required")
+    task = RequisitionTask(
+        requisition_id=req.requisition_id,
+        title=title,
+        task_type="general",
+        status="todo",
+        source="manual",
+        source_ref=f"requirement:{requirement_id}",
+        created_by=user.id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }

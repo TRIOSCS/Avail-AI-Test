@@ -319,6 +319,9 @@ let _ddActFilter = {};   // rfqId → 'all'|'email'|'phone'|'notes' for activity
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 var _ddTierState = {};           // tier expand/collapse state: `${reqId}-${rId}-${tier}` → bool
+let _partExpandState = {};       // `${reqId}-${requirementId}` → true if part detail is expanded
+let _partActiveTab = {};         // `${reqId}-${requirementId}` → 'offers'|'notes'|'tasks'
+let _partDetailCache = {};       // `${reqId}-${requirementId}-${tab}` → cached data
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
 function _rebuildSightingIndex() {
@@ -3104,6 +3107,9 @@ export async function loadRequisitions(query = '', append = false) {
             _ddSightingsCache = {};
             _ddSelectedSightings = {};
             _ddTierState = {};
+            _partExpandState = {};
+            _partActiveTab = {};
+            _partDetailCache = {};
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
@@ -3214,9 +3220,9 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'quote', 'activity'];
-    // Consolidated tabs: Sourcing (parts+sightings+offers), Quote (quotes+buyplans+files), Activity (activity+tasks)
-    return ['sourcing', 'quote', 'activity'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'offers', 'quote', 'tasks', 'activity'];
+    // Tabs: Sourcing (parts list), Offers, Quote (quotes+buyplans+files), Tasks, Activity (email timeline)
+    return ['sourcing', 'offers', 'quote', 'tasks', 'activity'];
 }
 
 function _ddDefaultTab(mainView) {
@@ -3351,20 +3357,11 @@ async function _loadDdSubTab(reqId, tabName, panel) {
         let data;
         switch (tabName) {
             case 'sourcing':
-                // Consolidated tab: load parts, sightings, and offers together
+                // Parts list only — sightings available on Sourcing page
                 {
-                    const [parts, sightings, offersData] = await Promise.all([
-                        _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
-                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`),
-                        _ddTabCache[reqId]?.offers || apiFetch(`/api/requisitions/${reqId}/offers`)
-                    ]);
+                    const parts = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
                     _ddReqCache[reqId] = parts;
-                    _ddSightingsCache[reqId] = sightings;
-                    if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-                    _ddTabCache[reqId].offers = offersData;
-                    if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
-                    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
-                    data = { parts, sightings, offers: offersData };
+                    data = { parts };
                 }
                 break;
             case 'details':
@@ -3378,14 +3375,8 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
                 break;
             case 'activity':
-                // Consolidated tab: load activity + tasks together
-                {
-                    const [activityData, tasksData] = await Promise.all([
-                        apiFetch(`/api/requisitions/${reqId}/activity`),
-                        apiFetch(`/api/requisitions/${reqId}/tasks`)
-                    ]);
-                    data = { activity: activityData, tasks: tasksData };
-                }
+                // Activity timeline only — tasks have their own tab
+                data = await apiFetch(`/api/requisitions/${reqId}/activity`);
                 break;
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
@@ -3460,20 +3451,11 @@ function _renderDdTab(reqId, tabName, data, panel) {
     }
     switch (tabName) {
         case 'sourcing':
-            // Consolidated Sourcing tab: parts table + sightings + offers in one view
-            if (data && data.parts && data.sightings) {
+            // Parts list — full width, no sightings
+            if (data && data.parts) {
                 _ddReqCache[reqId] = data.parts;
-                _ddSightingsCache[reqId] = data.sightings;
             }
-            if (data && data.offers) {
-                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-                _ddTabCache[reqId].offers = data.offers;
-            }
-            if (_currentMainView !== 'archive') {
-                _renderSplitPartsOffers(reqId, data?.parts || data, panel);
-            } else {
-                _renderDrillDownTable(reqId, panel);
-            }
+            _renderDrillDownTable(reqId, panel);
             break;
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts':
@@ -3488,21 +3470,11 @@ function _renderDdTab(reqId, tabName, data, panel) {
             _renderSourcingDrillDown(reqId, panel);
             break;
         case 'activity':
-            // Consolidated Activity tab: activity timeline + tasks
-            if (data && data.activity !== undefined) {
-                // Render activity timeline
-                _renderDdActivity(reqId, data.activity, panel);
-                _autoPollReplies(reqId, data.activity, panel);
-                // Append tasks section below activity
-                const tasksSection = document.createElement('div');
-                tasksSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
-                tasksSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Tasks</div>';
-                panel.appendChild(tasksSection);
-                _renderDdTasks(reqId, data.tasks, tasksSection);
-            } else {
-                // Legacy single-data format
-                _renderDdActivity(reqId, data, panel);
-                _autoPollReplies(reqId, data, panel);
+            // Activity timeline only — tasks have their own tab now
+            {
+                const actData = (data && data.activity !== undefined) ? data.activity : data;
+                _renderDdActivity(reqId, actData, panel);
+                _autoPollReplies(reqId, actData, panel);
             }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
@@ -7323,7 +7295,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
-            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
+            <th style="width:20px"></th><th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
         </tr></thead><tbody></tbody></table>`;
         _appendAddRow(rfqId, dd);
         return;
@@ -7332,12 +7304,14 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
+        <th style="width:20px"></th><th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
         const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '—');
-        html += `<tr>
+        const isExpanded = _partExpandState[rfqId + '-' + r.id];
+        html += `<tr class="part-row${isExpanded ? ' part-expanded' : ''}" id="pr-${rfqId}-${r.id}">
+            <td style="padding:2px 4px;cursor:pointer" onclick="event.stopPropagation();togglePartExpand(${rfqId},${r.id})"><span class="part-arrow${isExpanded ? ' open' : ''}" id="pa-${rfqId}-${r.id}">\u25b6</span></td>
             <td style="padding:2px 4px">${_reqBadge(r)}</td>
             <td class="mono dd-edit" data-mpn="${escAttr(r.primary_mpn || '')}" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
@@ -7348,8 +7322,12 @@ function _renderDrillDownTable(rfqId, targetPanel) {
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'firmware')" style="font-size:10px">${esc(r.firmware || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'packaging')" style="font-size:10px">${esc(r.packaging || '—')}</td>
-            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.notes ? 'color:var(--blue);font-weight:600' : ''}">${r.notes ? '📝 ' : ''}${esc(notesTrunc)}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.notes ? 'color:var(--blue);font-weight:600' : ''}">${r.notes ? '\ud83d\udcdd ' : ''}${esc(notesTrunc)}</td>
             <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDrillRow(${rfqId},${r.id})" title="Remove" style="font-size:10px;padding:1px 5px">\u2715</button></td>
+        </tr>`;
+        // Part-level expansion row
+        html += `<tr class="part-detail-row" id="pd-${rfqId}-${r.id}" style="display:${isExpanded ? 'table-row' : 'none'}">
+            <td colspan="13" style="padding:0;border-top:none"><div class="part-detail-panel" id="pdp-${rfqId}-${r.id}"></div></td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -7369,18 +7347,238 @@ function _renderDrillDownTable(rfqId, targetPanel) {
 // Renders a side-by-side layout when the "parts" sub-tab is active.
 // Uses existing .split-panel CSS classes. Loads offers data in parallel.
 async function _renderSplitPartsOffers(reqId, partsData, panel) {
-    // Create split layout: parts on left, combined sightings+offers on right
-    panel.innerHTML = `<div class="split-panel" style="max-height:500px">
-        <div class="split-panel-left" id="splitParts-${reqId}"></div>
-        <div class="split-panel-right" id="splitSourcing-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading sourcing\u2026</span></div>
-    </div>`;
-    // Render parts into the left pane
-    const partsPane = document.getElementById('splitParts-' + reqId);
-    if (partsPane) _renderDrillDownTable(reqId, partsPane);
-    // Render combined sightings + offers into the right pane
-    const sourcingPane = document.getElementById('splitSourcing-' + reqId);
-    if (sourcingPane) _renderSourcingDrillDown(reqId, sourcingPane);
+    // Full-width parts table — sightings removed (available on Sourcing page)
+    _renderDrillDownTable(reqId, panel);
 }
+
+// ── Part-level expand/collapse ──────────────────────────────────────────
+// Toggles the detail panel below a part row showing Offers/Notes/Tasks sub-tabs.
+// Called from the ▶ arrow in each part row.
+async function togglePartExpand(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const isOpen = _partExpandState[key];
+    const detailRow = document.getElementById('pd-' + key);
+    const arrow = document.getElementById('pa-' + key);
+    if (isOpen) {
+        _partExpandState[key] = false;
+        if (detailRow) detailRow.style.display = 'none';
+        if (arrow) arrow.classList.remove('open');
+        const partRow = document.getElementById('pr-' + key);
+        if (partRow) partRow.classList.remove('part-expanded');
+        return;
+    }
+    _partExpandState[key] = true;
+    if (detailRow) detailRow.style.display = 'table-row';
+    if (arrow) arrow.classList.add('open');
+    const partRow = document.getElementById('pr-' + key);
+    if (partRow) partRow.classList.add('part-expanded');
+    if (!_partActiveTab[key]) _partActiveTab[key] = 'offers';
+    const panel = document.getElementById('pdp-' + key);
+    if (panel) _renderPartDetail(reqId, requirementId, panel);
+}
+window.togglePartExpand = togglePartExpand;
+
+// Renders the part-level detail panel with sub-tab pills and content
+async function _renderPartDetail(reqId, requirementId, panel) {
+    const key = reqId + '-' + requirementId;
+    const activeTab = _partActiveTab[key] || 'offers';
+    const tabs = ['offers', 'notes', 'tasks'];
+    const tabLabels = { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' };
+    const pills = tabs.map(t =>
+        `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
+    ).join('');
+    panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><span style="font-size:11px;color:var(--muted)">Loading\u2026</span></div>`;
+    await _loadPartTab(reqId, requirementId, activeTab);
+}
+
+async function _switchPartTab(reqId, requirementId, tabName) {
+    const key = reqId + '-' + requirementId;
+    _partActiveTab[key] = tabName;
+    const panel = document.getElementById('pdp-' + key);
+    if (!panel) return;
+    panel.querySelectorAll('.part-tab').forEach(t => {
+        t.classList.toggle('on', t.textContent === { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' }[tabName]);
+    });
+    await _loadPartTab(reqId, requirementId, tabName);
+}
+window._switchPartTab = _switchPartTab;
+
+async function _loadPartTab(reqId, requirementId, tabName) {
+    const key = reqId + '-' + requirementId;
+    const cacheKey = key + '-' + tabName;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const cached = _partDetailCache[cacheKey];
+    if (cached) { _renderPartTab(reqId, requirementId, tabName, cached, contentEl); return; }
+    contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
+    try {
+        let data;
+        switch (tabName) {
+            case 'offers':
+                data = await apiFetch(`/api/requirements/${requirementId}/offers`);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${requirementId}/notes`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
+                break;
+        }
+        _partDetailCache[cacheKey] = data;
+        _renderPartTab(reqId, requirementId, tabName, data, contentEl);
+    } catch(e) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+    }
+}
+
+function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
+    switch (tabName) {
+        case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
+        case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
+        case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
+        default: contentEl.textContent = '';
+    }
+}
+
+// ── Part-level Offers renderer ──
+// Shows active and historical offers for a single part number
+function _renderPartOffers(reqId, requirementId, data, contentEl) {
+    const offers = Array.isArray(data) ? data : (data?.offers || []);
+    if (!offers.length) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet for this part</span>';
+        return;
+    }
+    let html = `<table class="dtbl" style="font-size:11px"><thead><tr>
+        <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Condition</th><th>Source</th><th>Status</th><th>Date</th><th>Notes</th>
+    </tr></thead><tbody>`;
+    for (const o of offers) {
+        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+        const status = o.status || 'pending';
+        const statusColor = status === 'accepted' ? 'var(--green)' : status === 'rejected' ? 'var(--red)' : 'var(--muted)';
+        const age = o.created_at ? _timeAgo(o.created_at) : '\u2014';
+        const isHistorical = o.is_historical || false;
+        html += `<tr style="${isHistorical ? 'opacity:0.7;font-style:italic' : ''}">
+            <td>${esc(o.vendor_name || '\u2014')}</td>
+            <td class="mono">${esc(o.mpn || '\u2014')}</td>
+            <td class="mono">${o.qty_available != null ? o.qty_available.toLocaleString() : '\u2014'}</td>
+            <td class="mono" style="color:var(--teal)">${price}</td>
+            <td>${esc(o.lead_time || '\u2014')}</td>
+            <td>${esc(o.condition || '\u2014')}</td>
+            <td style="font-size:10px">${esc(o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
+            <td style="color:${statusColor};font-weight:600;font-size:10px">${esc(status)}</td>
+            <td style="font-size:10px;color:var(--muted)">${age}</td>
+            <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    contentEl.innerHTML = html;
+}
+
+// ── Part-level Notes renderer ──
+// Shows notes on the requirement and notes on individual offers
+function _renderPartNotes(reqId, requirementId, data, contentEl) {
+    const notes = Array.isArray(data) ? data : (data?.notes || []);
+    const reqs = _ddReqCache[reqId] || [];
+    const req = reqs.find(x => x.id === requirementId);
+    let html = '';
+    // Requirement-level notes
+    html += `<div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Requirement Notes</div>
+        <div class="part-note-box dd-edit" onclick="event.stopPropagation();editDrillCell(this,${reqId},${requirementId},'notes')" style="min-height:32px;padding:6px 8px;background:var(--bg2);border-radius:4px;font-size:11px;cursor:pointer">${esc(req?.notes || 'Click to add notes\u2026')}</div>
+    </div>`;
+    // Offer notes
+    if (notes.length) {
+        html += '<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Offer Notes</div>';
+        for (const n of notes) {
+            html += `<div style="padding:4px 8px;margin-bottom:4px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--blue);font-size:11px">
+                <span style="font-weight:600">${esc(n.vendor_name || 'Offer')}</span>
+                <span style="color:var(--muted);margin-left:6px">${n.created_at ? _timeAgo(n.created_at) : ''}</span>
+                <div style="margin-top:2px">${esc(n.note || n.notes || n.text || '\u2014')}</div>
+            </div>`;
+        }
+    } else if (!req?.notes) {
+        html += '<span style="font-size:11px;color:var(--muted)">No notes yet</span>';
+    }
+    // Add note button
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartNote(${reqId},${requirementId})">+ Add Note</button>`;
+    contentEl.innerHTML = html;
+}
+
+// ── Part-level Tasks renderer ──
+// Shows tasks linked to this requirement
+function _renderPartTasks(reqId, requirementId, data, contentEl) {
+    const tasks = Array.isArray(data) ? data : (data?.tasks || []);
+    if (!tasks.length) {
+        contentEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">No tasks for this part</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:8px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+        return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+    for (const t of tasks) {
+        const done = t.status === 'done' || t.status === 'completed';
+        const statusIcon = done ? '\u2705' : t.status === 'in_progress' ? '\ud83d\udfe1' : '\u2b1c';
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:4px;font-size:11px${done ? ';opacity:0.6;text-decoration:line-through' : ''}">
+            <span>${statusIcon}</span>
+            <span style="flex:1">${esc(t.title || t.description || '\u2014')}</span>
+            <span style="font-size:10px;color:var(--muted)">${t.due_date ? _timeAgo(t.due_date) : ''}</span>
+        </div>`;
+    }
+    html += '</div>';
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+    contentEl.innerHTML = html;
+}
+
+// Placeholder for adding a note to a part — opens inline input
+function _addPartNote(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.part-note-input');
+    if (existing) { existing.focus(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <button class="btn btn-primary btn-sm" style="font-size:10px;align-self:flex-end" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.previousElementSibling.value)">Save</button>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('textarea').focus();
+}
+window._addPartNote = _addPartNote;
+
+async function _savePartNote(reqId, requirementId, text) {
+    if (!text?.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/notes`, { method: 'POST', body: { text: text.trim() } });
+        delete _partDetailCache[reqId + '-' + requirementId + '-notes'];
+        await _loadPartTab(reqId, requirementId, 'notes');
+    } catch(e) { logCatchError('_savePartNote', e); }
+}
+window._savePartNote = _savePartNote;
+
+// Placeholder for adding a task to a part
+function _addPartTask(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.part-task-input');
+    if (existing) { existing.focus(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<input class="part-task-input" placeholder="Task description\u2026" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+        <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartTask(${reqId},${requirementId},this.previousElementSibling.value)">Add</button>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('input').focus();
+}
+window._addPartTask = _addPartTask;
+
+async function _savePartTask(reqId, requirementId, title) {
+    if (!title?.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/tasks`, { method: 'POST', body: { title: title.trim() } });
+        delete _partDetailCache[reqId + '-' + requirementId + '-tasks'];
+        await _loadPartTab(reqId, requirementId, 'tasks');
+    } catch(e) { logCatchError('_savePartTask', e); }
+}
+window._savePartTask = _savePartTask;
 
 function editDrillCell(td, rfqId, reqId, field) {
     if (td.querySelector('input, select, textarea')) return;
