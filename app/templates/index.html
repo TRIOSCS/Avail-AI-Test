@@ -99,7 +99,7 @@
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
             <button type="button" class="fp on" data-view="sales" onclick="setMainView('sales',this)" title="Sales view — customer focus, quotes, deadlines, dollar values">Sales</button>
-            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Sourcing view — part coverage, sightings, RFQs, vendor responses">Sourcing</button>
+            <button type="button" class="fp" data-view="purchasing" onclick="setMainView('purchasing',this)" title="Purchasing view — part coverage, sightings, RFQs, vendor responses">Purchasing</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
         <div class="search-wrap">
@@ -160,7 +160,7 @@
 <div class="mobile-toolbar" id="mobileToolbar">
     <div class="fpills fpills-sm" id="mobilePills">
         <button type="button" class="fp fp-sm on" data-view="sales" onclick="setMainView('sales',this);_syncMobilePills(this)" title="Sales view">Sales</button>
-        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)" title="Sourcing view">Sourcing</button>
+        <button type="button" class="fp fp-sm" data-view="purchasing" onclick="setMainView('purchasing',this);_syncMobilePills(this)" title="Purchasing view">Purchasing</button>
         <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)" title="Completed RFQs">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
@@ -266,16 +266,13 @@
 <main class="main">
     <div class="main-scroll">
 
-    <!-- Smart notification bar — surfaces urgent items -->
-    <div id="notifActionBar" class="notif-action-bar"></div>
-
-    <!-- VIEW: Requisition List (v8 — role-aware priority lanes) -->
+    <!-- VIEW: Requisition List -->
     <div id="view-list">
         <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>
         <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
         <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
             <button type="button" class="m-tab-pill active" data-view="sales" onclick="mobileReqPillTap('sales',this)">Sales</button>
-            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
+            <button type="button" class="m-tab-pill" data-view="purchasing" onclick="mobileReqPillTap('purchasing',this)">Purchasing</button>
             <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
         </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>

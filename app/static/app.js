@@ -926,19 +926,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === _savedView));
     });
     await loadRequisitions();
-    // ── Onboarding — auto-dismiss old banner, show compact new-layout hint ──
-    // Force dismiss old onboarding for existing users seeing the redesign
-    safeSet('onboardingDismissed', '1');
-    if (!safeGet('v8LayoutSeen')) {
-        const reqList = document.getElementById('reqList');
-        if (reqList) {
-            const hintHtml = `<div id="v8Hint" style="padding:8px 16px;background:#f0f9ff;border-bottom:1px solid #bfdbfe;font-size:12px;color:#1e40af;display:flex;align-items:center;gap:8px">
-                <span>New layout: <b>Sales</b> and <b>Sourcing</b> views show different columns. Reqs are grouped by priority.</span>
-                <button onclick="this.parentElement.remove();safeSet('v8LayoutSeen','1')" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:14px;margin-left:auto">\u2715</button>
-            </div>`;
-            reqList.insertAdjacentHTML('afterbegin', hintHtml);
-        }
-    }
     // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
     if (!initView || initView === 'view-list') {
         var restoreId = initDrillId;
@@ -2989,8 +2976,8 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'sourcing' | 'archive'
-let _laneCollapseState = JSON.parse(localStorage.getItem('avail_lane_collapse') || '{}');  // { lane_key: true/false }
+let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'purchasing' | 'archive'
+if (_currentMainView === 'sourcing') _currentMainView = 'purchasing';  // migrate legacy stored value
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3109,7 +3096,8 @@ function _applyColVisCSS() {
     // Map column keys to 1-based nth-child positions per view
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else colMap = {reqs:3,quote:4,sourced:5,offers:6,sent:7,sales:8,age:9,deadline:10};
+    else if (v === 'sales') colMap = {reqs:3,quote:4,offers:5,deadline:6,sales:7,age:8};
+    else colMap = {reqs:3,sourced:4,sent:5,resp:6,offers:7,sales:8,age:9};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
         if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
@@ -3121,7 +3109,8 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'sourced',l:'Sourced'},{k:'offers',l:'Offers'},{k:'sent',l:'RFQs Sent'},{k:'sales',l:'Sales'},{k:'age',l:'Age'},{k:'deadline',l:'Bid Due'}];
+    else if (v === 'sales') cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'offers',l:'Offers'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
     for (const c of cols) {
@@ -3154,28 +3143,18 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'offers', 'quote', 'activity'];
-    // Consolidated tabs: Sourcing (parts+sightings), Offers, Quote (quotes+buyplans+files), Activity (activity+tasks)
-    return ['sourcing', 'offers', 'quote', 'activity'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['parts', 'offers', 'quotes', 'activity', 'tasks', 'files'];
+    if (mainView === 'purchasing') return ['details', 'sightings', 'activity', 'offers', 'tasks', 'files'];
+    // Sales view
+    return ['parts', 'offers', 'quotes', 'tasks', 'files'];
 }
 
 function _ddDefaultTab(mainView) {
-    // Sales view defaults to quote tab, sourcing view defaults to sourcing tab
-    if (mainView === 'sales') return 'sourcing';
-    if (mainView === 'sourcing') return 'sourcing';
-    return 'sourcing';
+    return mainView === 'purchasing' ? 'sightings' : 'parts';
 }
 
 function _ddTabLabel(tab) {
-    const map = {
-        sourcing: 'Sourcing',
-        offers: 'Offers',
-        quote: 'Quote',
-        activity: 'Activity',
-        // Legacy tab names still supported for backward compatibility
-        details: 'Details', sightings: 'Sightings', parts: 'Parts',
-        quotes: 'Quotes', buyplans: 'Buy Plans', files: 'Files', tasks: 'Tasks'
-    };
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', tasks:'Tasks'};
     return map[tab] || tab;
 }
 
@@ -3222,12 +3201,12 @@ function _renderDdSummary(reqId) {
     else if (qs === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
 
     return `<div class="dd-summary">
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sourcing')"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sourcing')"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'parts')"><span class="dd-stat-val">${total}</span><span class="dd-stat-label">Parts</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'sightings')"><span class="dd-stat-val" style="color:${srcColor}">${sourced}/${total}</span><span class="dd-stat-label">Sourced</span><div class="dd-stat-bar"><div class="dd-stat-bar-fill" style="width:${srcPct}%;background:${srcColor}"></div></div></div>
         <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'offers')"><span class="dd-stat-val">${offers}</span><span class="dd-stat-label">Offers</span></div>
         <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'activity')"><span class="dd-stat-val">${sent}</span><span class="dd-stat-label">RFQs Sent</span></div>
         <div class="dd-stat"><span class="dd-stat-val">${respPct}%</span><span class="dd-stat-label">Response</span></div>
-        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'quote')"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
+        <div class="dd-stat dd-stat-link" onclick="event.stopPropagation();expandToSubTab(${reqId},'quotes')"><span class="dd-stat-val" style="font-size:12px">${qBadge}</span><span class="dd-stat-label">Quote</span></div>
     </div>`;
 }
 
@@ -3244,7 +3223,7 @@ async function ddRefreshTab(reqId) {
     const tabName = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
     // Clear cached data for this tab
     if (_ddTabCache[reqId]) delete _ddTabCache[reqId][tabName];
-    if (tabName === 'parts' || tabName === 'details' || tabName === 'sourcing') { delete _ddReqCache[reqId]; delete _ddSightingsCache[reqId]; }
+    if (tabName === 'parts' || tabName === 'details') { delete _ddReqCache[reqId]; }
     if (tabName === 'sightings') delete _ddSightingsCache[reqId];
     const drow = document.getElementById('d-' + reqId);
     const panel = drow?.querySelector('.dd-panel');
@@ -3290,19 +3269,6 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     try {
         let data;
         switch (tabName) {
-            case 'sourcing':
-                // Consolidated tab: load both parts and sightings
-                {
-                    const [parts, sightings] = await Promise.all([
-                        _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
-                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`)
-                    ]);
-                    _ddReqCache[reqId] = parts;
-                    _ddSightingsCache[reqId] = sightings;
-                    if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
-                    data = { parts, sightings };
-                }
-                break;
             case 'details':
             case 'parts':
                 data = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
@@ -3314,52 +3280,14 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
                 break;
             case 'activity':
-                // Consolidated tab: load activity + tasks together
-                {
-                    const [activityData, tasksData] = await Promise.all([
-                        apiFetch(`/api/requisitions/${reqId}/activity`),
-                        apiFetch(`/api/requisitions/${reqId}/tasks`)
-                    ]);
-                    data = { activity: activityData, tasks: tasksData };
-                }
+                data = await apiFetch(`/api/requisitions/${reqId}/activity`);
                 break;
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
                 break;
-            case 'quote':
-                // Consolidated tab: load quotes + attachments + buy plans
-                {
-                    const quotes = await apiFetch(`/api/requisitions/${reqId}/quotes`);
-                    const files = await apiFetch(`/api/requisitions/${reqId}/attachments`);
-                    const qArr = Array.isArray(quotes) ? quotes : [];
-                    const plans = [];
-                    for (const q of qArr) {
-                        try {
-                            const bp = await apiFetch(`/api/buy-plans/for-quote/${q.id}`);
-                            if (bp) plans.push(bp);
-                        } catch(_) { /* no buy plan for this quote */ }
-                    }
-                    data = { quotes, files, buyplans: plans };
-                }
-                break;
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
-            case 'buyplans': {
-                const quotes = _ddTabCache[reqId]?.quotes || await apiFetch(`/api/requisitions/${reqId}/quotes`);
-                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-                _ddTabCache[reqId].quotes = quotes;
-                const qArr = Array.isArray(quotes) ? quotes : [];
-                const plans = [];
-                for (const q of qArr) {
-                    try {
-                        const bp = await apiFetch(`/api/buy-plans/for-quote/${q.id}`);
-                        if (bp) plans.push(bp);
-                    } catch(_) { /* no buy plan for this quote */ }
-                }
-                data = plans;
-                break;
-            }
             case 'tasks':
                 data = await apiFetch(`/api/requisitions/${reqId}/tasks`);
                 break;
@@ -3395,72 +3323,19 @@ function _renderDdTab(reqId, tabName, data, panel) {
         return;
     }
     switch (tabName) {
-        case 'sourcing':
-            // Consolidated Sourcing tab: parts table + sightings in one view
-            if (data && data.parts && data.sightings) {
-                _ddReqCache[reqId] = data.parts;
-                _ddSightingsCache[reqId] = data.sightings;
-            }
-            if (_currentMainView !== 'archive') {
-                _renderSplitPartsOffers(reqId, data?.parts || data, panel);
-            } else {
-                _renderDrillDownTable(reqId, panel);
-            }
-            break;
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts':
-            if (_currentMainView !== 'archive') {
-                _renderSplitPartsOffers(reqId, data, panel);
-            } else {
-                _renderDrillDownTable(reqId, panel);
-            }
+            _renderSplitPartsOffers(reqId, data, panel);
             break;
         case 'sightings':
             if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
             _renderSourcingDrillDown(reqId, panel);
             break;
         case 'activity':
-            // Consolidated Activity tab: activity timeline + tasks
-            if (data && data.activity !== undefined) {
-                // Render activity timeline
-                _renderDdActivity(reqId, data.activity, panel);
-                _autoPollReplies(reqId, data.activity, panel);
-                // Append tasks section below activity
-                const tasksSection = document.createElement('div');
-                tasksSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
-                tasksSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Tasks</div>';
-                panel.appendChild(tasksSection);
-                _renderDdTasks(reqId, data.tasks, tasksSection);
-            } else {
-                // Legacy single-data format
-                _renderDdActivity(reqId, data, panel);
-                _autoPollReplies(reqId, data, panel);
-            }
+            _renderDdActivity(reqId, data, panel);
+            _autoPollReplies(reqId, data, panel);
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
-        case 'quote':
-            // Consolidated Quote tab: quotes + files + buy plans
-            if (data && data.quotes !== undefined) {
-                _renderDdQuotes(reqId, data.quotes, panel);
-                // Append files section
-                if (data.files && data.files.length > 0) {
-                    const filesSection = document.createElement('div');
-                    filesSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
-                    filesSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Files & Attachments</div>';
-                    panel.appendChild(filesSection);
-                    _renderDdFiles(reqId, data.files, filesSection);
-                }
-                // Append buy plans if any
-                if (data.buyplans && data.buyplans.length > 0) {
-                    const bpSection = document.createElement('div');
-                    bpSection.style.cssText = 'margin-top:16px;border-top:1px solid var(--border);padding-top:12px';
-                    bpSection.innerHTML = '<div style="font-size:12px;font-weight:700;margin-bottom:8px">Buy Plans</div>';
-                    panel.appendChild(bpSection);
-                }
-            } else {
-                _renderDdQuotes(reqId, data, panel);
-            }
-            break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
@@ -4483,6 +4358,8 @@ async function loadMyTasks() {
             apiFetch('/api/tasks/mine/summary')
         ]);
         var tasks = (tasksRes.status === 'fulfilled' && Array.isArray(tasksRes.value)) ? tasksRes.value : [];
+        // Filter out completed auto-generated tasks (noise)
+        tasks = tasks.filter(function(t) { return !(t.source === 'auto' && t.status === 'done'); });
         var summary = (summaryRes.status === 'fulfilled' && summaryRes.value && typeof summaryRes.value === 'object') ? summaryRes.value : {};
 
         // Update badge
@@ -4542,9 +4419,8 @@ function _renderMyTaskItem(task) {
     else item.classList.add('pri-low');
 
     item.onclick = function() {
-        // Navigate to the requisition and open tasks tab
         toggleMyTasksSidebar();
-        expandToSubTab(task.requisition_id, 'activity');
+        expandToSubTab(task.requisition_id, 'tasks');
     };
 
     var title = document.createElement('div');
@@ -4552,13 +4428,29 @@ function _renderMyTaskItem(task) {
     title.textContent = task.title;
     item.appendChild(title);
 
+    var reqName = document.createElement('div');
+    reqName.className = 'my-task-item-req';
+    reqName.textContent = task.requisition_name || 'Req #' + task.requisition_id;
+    item.appendChild(reqName);
+
     var meta = document.createElement('div');
     meta.className = 'my-task-item-meta';
-    var parts = [];
-    if (task.due_at) parts.push(_shortDate(task.due_at));
-    if (task.task_type) parts.push(task.task_type);
-    if (task.ai_risk_flag) parts.push('\u26a0 ' + task.ai_risk_flag);
-    meta.textContent = parts.join(' \u00b7 ');
+    if (task.due_at) {
+        var dateSpan = document.createElement('span');
+        dateSpan.textContent = _shortDate(task.due_at);
+        meta.appendChild(dateSpan);
+    }
+    if (task.task_type && task.task_type !== 'general') {
+        var pill = document.createElement('span');
+        pill.className = 'my-task-type-pill';
+        pill.textContent = task.task_type;
+        meta.appendChild(pill);
+    }
+    if (task.ai_risk_flag) {
+        var risk = document.createElement('span');
+        risk.textContent = '\u26a0 ' + task.ai_risk_flag;
+        meta.appendChild(risk);
+    }
     item.appendChild(meta);
 
     return item;
@@ -8696,11 +8588,10 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'sales' ? 'sales' : v === 'sourcing' ? 'sourcing' : '';
+            const viewLabel = v === 'sales' ? 'sales' : v === 'purchasing' ? 'purchasing' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
-        _renderNotifActionBar();
         return;
     }
 
@@ -8735,15 +8626,16 @@ function renderReqList() {
             ${_thIcons}
         </tr></thead>`;
     } else {
-        // Sourcing view: Part coverage, sightings, RFQs, response rate prominent
+        // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
@@ -8770,10 +8662,6 @@ function renderReqList() {
             if (isOpen) html += g.reqs.map(r => _renderReqRow(r)).join('');
         }
         rowsHtml = html;
-    } else if ((v === 'sales' || v === 'sourcing') && !_reqSortCol && !_serverSearchActive) {
-        // Priority lanes — group reqs by urgency
-        const lanes = _classifyIntoLanes(data, v);
-        rowsHtml = _renderPriorityLanes(lanes, v);
     } else {
         rowsHtml = data.map(r => _renderReqRow(r)).join('');
     }
@@ -8790,14 +8678,12 @@ function renderReqList() {
         renderMobileReqList(data, loadMoreHtml);
         _populateUserFilter();
         _updateToolbarStats();
-        _renderNotifActionBar();
         return;
     } else {
         el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     }
     _populateUserFilter();
     _updateToolbarStats();
-    _renderNotifActionBar();
     _applyColVisCSS();
     // Restore previously open drill-downs (CSS only to avoid content reload flash)
     if (_openDrillIds.length) {
@@ -8824,79 +8710,7 @@ function renderReqList() {
     }
 }
 
-// ── Priority Lane Classification ─────────────────────────────────────────
-// Classifies requisitions into priority lanes based on the current view mode.
-// Called by renderReqList when not doing column sort or server search.
-// Depends on: _laneCollapseState (persisted in localStorage)
-
-function _classifyIntoLanes(data, viewMode) {
-    const now = new Date(); now.setHours(0,0,0,0);
-
-    if (viewMode === 'sales') {
-        // Sales lanes: Needs Action, In Progress, Waiting, New/Draft
-        const needsAction = [];
-        const inProgress = [];
-        const waiting = [];
-        const newDraft = [];
-
-        for (const r of data) {
-            const hasNewOffers = r.has_new_offers && (r.offer_count || 0) > 0;
-            const isOverdue = _isDeadlineUrgent(r, now) === 'overdue';
-            const isDueToday = _isDeadlineUrgent(r, now) === 'today';
-            const isDueSoon = _isDeadlineUrgent(r, now) === 'soon';
-            const hasQuoteDraft = r.quote_status === 'draft';
-            const hasQuoteSent = r.quote_status === 'sent';
-
-            if (hasNewOffers || isOverdue || isDueToday) {
-                needsAction.push(r);
-            } else if (hasQuoteDraft || isDueSoon || (r.status === 'active' && (r.offer_count || 0) > 0)) {
-                inProgress.push(r);
-            } else if (hasQuoteSent || (r.rfq_sent_count || 0) > 0) {
-                waiting.push(r);
-            } else {
-                newDraft.push(r);
-            }
-        }
-
-        return [
-            { key: 'sales-action', label: 'Needs Action', color: 'red', icon: '\ud83d\udd34', items: needsAction },
-            { key: 'sales-progress', label: 'In Progress', color: 'yellow', icon: '\ud83d\udfe1', items: inProgress },
-            { key: 'sales-waiting', label: 'Waiting', color: 'green', icon: '\ud83d\udfe2', items: waiting },
-            { key: 'sales-new', label: 'New / Draft', color: 'gray', icon: '\u26aa', items: newDraft },
-        ];
-    } else {
-        // Sourcing lanes: Unsourced, Sightings Found, Awaiting Responses, Offers In
-        const unsourced = [];
-        const sightingsFound = [];
-        const awaitingResponses = [];
-        const offersIn = [];
-
-        for (const r of data) {
-            const total = r.requirement_count || 0;
-            const sourced = r.sourced_count || 0;
-            const offers = r.offer_count || 0;
-            const sent = r.rfq_sent_count || 0;
-            const pct = total > 0 ? (sourced / total) : 0;
-
-            if (offers > 0) {
-                offersIn.push(r);
-            } else if (sent > 0) {
-                awaitingResponses.push(r);
-            } else if (pct > 0 || (r.status === 'active' && total > 0)) {
-                sightingsFound.push(r);
-            } else {
-                unsourced.push(r);
-            }
-        }
-
-        return [
-            { key: 'src-unsourced', label: 'Unsourced', color: 'red', icon: '\ud83d\udd34', items: unsourced },
-            { key: 'src-sightings', label: 'Sightings Found — Send RFQs', color: 'yellow', icon: '\ud83d\udfe1', items: sightingsFound },
-            { key: 'src-awaiting', label: 'Awaiting Responses', color: 'green', icon: '\ud83d\udfe2', items: awaitingResponses },
-            { key: 'src-offers', label: 'Offers In — Ready to Quote', color: 'gray', icon: '\u2705', items: offersIn },
-        ];
-    }
-}
+// ── Deadline Urgency Helper ───────────────────────────────────────────────
 
 function _isDeadlineUrgent(r, now) {
     if (!r.deadline || r.deadline === 'ASAP') return r.deadline === 'ASAP' ? 'soon' : 'none';
@@ -8906,75 +8720,6 @@ function _isDeadlineUrgent(r, now) {
     if (diff === 0) return 'today';
     if (diff <= 3) return 'soon';
     return 'none';
-}
-
-function _renderPriorityLanes(lanes, viewMode) {
-    const colorMap = { red: '#dc2626', yellow: '#d97706', green: '#059669', gray: '#6b7280' };
-    const bgMap = { red: 'rgba(220,38,38,.06)', yellow: 'rgba(245,158,11,.06)', green: 'rgba(16,185,129,.06)', gray: 'rgba(107,114,128,.04)' };
-    let html = '';
-    for (const lane of lanes) {
-        if (lane.items.length === 0) continue;
-        const isOpen = _laneCollapseState[lane.key] !== false;
-        const chevron = isOpen ? '\u25bc' : '\u25b6';
-        const color = colorMap[lane.color] || '#6b7280';
-        const bg = bgMap[lane.color] || 'transparent';
-        html += `<tr style="cursor:pointer;user-select:none" onclick="togglePriorityLane('${lane.key}')">
-            <td colspan="20" style="padding:6px 12px;background:${bg};border-left:3px solid ${color};font-size:12px;font-weight:600;color:${color}">
-                <span style="margin-right:6px;font-size:10px">${chevron}</span>${lane.label} <span style="font-weight:400;opacity:.7">(${lane.items.length})</span>
-            </td>
-        </tr>`;
-        if (isOpen) {
-            html += lane.items.map(r => _renderReqRow(r)).join('');
-        }
-    }
-    return html;
-}
-
-function togglePriorityLane(key) {
-    const current = _laneCollapseState[key] !== false;
-    _laneCollapseState[key] = !current;
-    try { localStorage.setItem('avail_lane_collapse', JSON.stringify(_laneCollapseState)); } catch(e) {}
-    renderReqList();
-}
-
-// ── Smart Notification Bar ─────────────────────────────────────────────
-// Renders actionable items at the top of the list.
-// Called by renderReqList and setMainView.
-// Depends on: _reqListData, _currentMainView
-
-function _renderNotifActionBar() {
-    const bar = document.getElementById('notifActionBar');
-    if (!bar) return;
-    if (_currentMainView === 'archive') { bar.innerHTML = ''; return; }
-
-    const data = _reqListData;
-    if (!data || !data.length) { bar.innerHTML = ''; return; }
-
-    const now = new Date(); now.setHours(0,0,0,0);
-    let newResponses = 0, dueSoon = 0, unsourced = 0, newOffers = 0;
-
-    for (const r of data) {
-        if (['archived','won','lost','closed'].includes(r.status)) continue;
-        if (r.has_new_offers) newOffers++;
-        if (r.latest_reply_at) {
-            const h = (Date.now() - new Date(r.latest_reply_at).getTime()) / 3600000;
-            if (h < 24) newResponses++;
-        }
-        const urgency = _isDeadlineUrgent(r, now);
-        if (urgency === 'overdue' || urgency === 'today' || urgency === 'soon') dueSoon++;
-        const total = r.requirement_count || 0;
-        const sourced = r.sourced_count || 0;
-        if (total > 0 && sourced === 0 && r.status !== 'draft') unsourced++;
-    }
-
-    const items = [];
-    if (newOffers > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);_toolbarQuickFilter='green';renderReqList()"><span class="notif-dot notif-dot-green"></span><b>${newOffers}</b> new offer${newOffers !== 1 ? 's' : ''} to review</span>`);
-    if (newResponses > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-blue"></span><b>${newResponses}</b> vendor response${newResponses !== 1 ? 's' : ''} today</span>`);
-    if (dueSoon > 0) items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-amber"></span><b>${dueSoon}</b> due soon or overdue</span>`);
-    if (unsourced > 0 && _currentMainView === 'sourcing') items.push(`<span class="notif-action-item" onclick="setStatusFilter('all',null);renderReqList()"><span class="notif-dot notif-dot-red"></span><b>${unsourced}</b> unsourced req${unsourced !== 1 ? 's' : ''}</span>`);
-
-    if (items.length === 0) { bar.innerHTML = ''; return; }
-    bar.innerHTML = items.join('') + '<span class="notif-action-dismiss" onclick="this.parentElement.innerHTML=\'\'" title="Dismiss">&times;</span>';
 }
 
 function setToolbarQuickFilter(key) {
@@ -9150,15 +8895,15 @@ function _renderReqRow(r) {
         if (r.has_new_offers && (r.offer_count || 0) > 0) {
             salesBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
         } else if (r.quote_status === 'draft') {
-            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quote')" title="Finish and send quote">Send Quote</button>`;
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
         } else if (r.quote_status === 'sent') {
             salesBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
         } else if ((r.offer_count || 0) > 0) {
-            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quote')" title="Build a quote from offers">Build Quote</button>`;
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
         } else if (r.status === 'draft') {
             salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source</button>`;
         } else {
-            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="View sourcing progress">Sourcing</button>`;
+            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
         }
         actions = `<td style="white-space:nowrap">${salesBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
         colspan = 9;
@@ -9192,25 +8937,26 @@ function _renderReqRow(r) {
             <td class="mono" style="font-size:11px">${sent}</td>
             <td style="font-size:11px;white-space:nowrap">${respCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
 
-        // Sourcing actions: context-aware primary action
+        // Purchasing actions: context-aware primary action
         let srcBtn;
         if (r.status === 'draft') {
             srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
         } else if (_oCnt > 0 && r.has_new_offers) {
             srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
         } else if (sourced > 0 && sent === 0) {
-            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
         } else if (sent > 0 && _oCnt === 0) {
             srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="RFQs sent, waiting for responses">${replied > 0 ? replied + ' Replies' : 'Awaiting'}</button>`;
         } else if (_oCnt > 0) {
             srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
         } else {
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sourcing')" title="View sourcing progress">Sourcing</button>`;
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
         }
         actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 9;
+        colspan = 10;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -9232,7 +8978,10 @@ function _renderReqRow(r) {
         </div>`;
     }
 
-    return `<tr class="${dlClass}" onclick="toggleDrillDown(${r.id})">
+    const _urgency = _isDeadlineUrgent(r, new Date());
+    const _rowBg = (_urgency === 'overdue' || _urgency === 'today' || _urgency === 'soon')
+        ? 'background:#FEF2F2;border-left:3px solid #FECACA' : 'background:#fff';
+    return `<tr class="rrow${dlClass}" style="${_rowBg}" onclick="toggleDrillDown(${r.id})">
         <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
         ${nameCell}
         ${dataCells}
@@ -9650,10 +9399,10 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on sales/sourcing views, hide on archive
+    // Show status filter pills on sales/purchasing views, hide on archive
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'sales' || view === 'sourcing') ? '' : 'none';
-    if (view === 'sales' || view === 'sourcing') {
+    if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
+    if (view === 'sales' || view === 'purchasing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -9671,8 +9420,6 @@ function setMainView(view, btn) {
         _archivePage = 1;
         loadRequisitions();
     }
-    // Update notification bar
-    _renderNotifActionBar();
 }
 
 // ── Toolbar Controls ────────────────────────────────────────────────────
@@ -9971,7 +9718,7 @@ async function createRequisition() {
         const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
         const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         await loadRequisitions();
-        expandToSubTab(data.id, 'sourcing');
+        expandToSubTab(data.id, 'sightings');
         showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
@@ -10115,11 +9862,11 @@ async function requoteFromList(reqId) {
             }
             showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
             const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
-            if (srcBtn) setMainView('sourcing', srcBtn);
+            if (srcBtn) setMainView('purchasing', srcBtn);
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
-                expandToSubTab(resp.id, 'sourcing');
+                expandToSubTab(resp.id, 'sightings');
             } else {
                 showToast(`Created REQ-${resp.id} — "${reName}"`, 'info');
             }
@@ -14117,7 +13864,7 @@ function _notifClickAction(n) {
         return close + `openVendorPopup(${n.vendor_card_id})`;
     // Requisition-related → navigate to RFQ view then expand drill-down
     if (n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'sourcing')`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'sightings')`;
     // Company-related → go to company
     if (n.company_id)
         return close + `goToCompany(${n.company_id})`;
@@ -14264,8 +14011,8 @@ document.addEventListener('keydown', function(e) {
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="sourcing"]');
-            if (btn) setMainView('sourcing', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
+            if (btn) setMainView('purchasing', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -14792,7 +14539,7 @@ Object.assign(window, {
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
     _saveAddRow, _selfGuard, _sortArrow, _switchDdTab,
     _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel, _updateInlineRfqBar,
-    togglePriorityLane, _renderNotifActionBar, _classifyIntoLanes, _renderPriorityLanes, _isDeadlineUrgent,
+    _isDeadlineUrgent,
     _updateBulkFollowUpBtn, _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
     _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
