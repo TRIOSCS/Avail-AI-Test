@@ -47,6 +47,11 @@ def run_startup_migrations() -> None:
             "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
             "WHERE status = 'resolved' AND resolved_at IS NULL",
         )
+        # TT-960: Fix invalid deadline 2025-02-29 (not a leap year) on req 23446
+        _exec(
+            conn,
+            "UPDATE requisitions SET deadline = NULL WHERE id = 23446 AND deadline = '2025-02-29'",
+        )
         _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()

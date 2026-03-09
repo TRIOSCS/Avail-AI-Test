@@ -11,6 +11,7 @@ Depends on: models, schemas, cache, dependencies, sourcing_score service
 """
 
 import asyncio
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, case, exists, literal, or_, select
@@ -41,6 +42,8 @@ from ...schemas.responses import RequisitionListResponse
 from ...utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["requisitions"])
+
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt):
@@ -458,10 +461,12 @@ async def create_requisition(
 ):
     from . import invalidate_prefix
 
+    safe_name = _HTML_TAG_RE.sub("", body.name).strip() or "Untitled"
+    safe_customer = _HTML_TAG_RE.sub("", body.customer_name).strip() if body.customer_name else body.customer_name
     req = Requisition(
-        name=body.name,
+        name=safe_name,
         customer_site_id=body.customer_site_id,
-        customer_name=body.customer_name,
+        customer_name=safe_customer,
         deadline=body.deadline,
         created_by=user.id,
         status="draft",
@@ -559,7 +564,7 @@ async def update_requisition(
     if not req:
         raise HTTPException(404, "Requisition not found")
     if body.name is not None:
-        req.name = body.name.strip() or req.name
+        req.name = _HTML_TAG_RE.sub("", body.name).strip() or req.name
     if body.customer_site_id is not None:
         req.customer_site_id = body.customer_site_id
     if body.deadline is not None:

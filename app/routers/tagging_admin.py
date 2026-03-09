@@ -505,11 +505,16 @@ async def purge_unknown_tags(_user=Depends(require_user)):
 
 @router.get("/analyze-prefixes")
 async def analyze_prefixes(db: Session = Depends(get_db), _user=Depends(require_user)):
-    """Analyze untagged MPNs to discover missing prefix patterns."""
+    """Analyze untagged MPNs to discover missing prefix patterns (cached 4h)."""
+    from app.cache.decorators import cached_endpoint
     from app.services.tagging_backfill import analyze_untagged_prefixes
 
-    results = analyze_untagged_prefixes(db)
-    return {"ok": True, "candidates": results, "count": len(results)}
+    @cached_endpoint(prefix="analyze_prefixes", ttl_hours=4, key_params=[])
+    def _fetch(db):
+        results = analyze_untagged_prefixes(db)
+        return {"ok": True, "candidates": results, "count": len(results)}
+
+    return _fetch(db=db)
 
 
 @router.post("/boost-cascade")

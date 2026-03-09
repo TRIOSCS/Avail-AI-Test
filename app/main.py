@@ -21,6 +21,7 @@ from .database import get_db
 from .models import (
     ApiSource,
 )
+from .models.config import ApiUsageLog
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -875,6 +876,14 @@ def _seed_api_sources():
                         status = "live"
                 is_active = status == "live"
                 db.add(ApiSource(status=status, is_active=is_active, **src))
+
+        # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
+        if "newark" in existing_map and "element14" in existing_map:
+            old_newark = existing_map["newark"]
+            db.query(ApiUsageLog).filter(ApiUsageLog.source_id == old_newark.id).delete()
+            db.delete(old_newark)
+            del existing_map["newark"]
+            logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
         # Backfill known monthly quotas (only sets if currently NULL)
         quota_map = {

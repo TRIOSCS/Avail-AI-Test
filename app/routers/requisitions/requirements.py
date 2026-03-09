@@ -172,7 +172,14 @@ async def add_requirements(
                 deduped_subs.append(s)
         from ...search_service import resolve_material_card
 
-        mat_card = resolve_material_card(parsed.primary_mpn, db)
+        mat_card = None
+        try:
+            nested = db.begin_nested()
+            mat_card = resolve_material_card(parsed.primary_mpn, db)
+            nested.commit()
+        except Exception:
+            nested.rollback()
+            logger.debug("resolve_material_card failed for %s", parsed.primary_mpn, exc_info=True)
 
         r = Requirement(
             requisition_id=req_id,
@@ -459,8 +466,15 @@ async def update_requirement(
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
         from ...search_service import resolve_material_card
 
-        mat_card = resolve_material_card(data.primary_mpn, db)
-        r.material_card_id = mat_card.id if mat_card else None
+        try:
+            nested = db.begin_nested()
+            mat_card = resolve_material_card(data.primary_mpn, db)
+            r.material_card_id = mat_card.id if mat_card else None
+            nested.commit()
+        except Exception:
+            nested.rollback()
+            r.material_card_id = None
+            logger.debug("resolve_material_card failed for %s", data.primary_mpn, exc_info=True)
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:

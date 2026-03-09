@@ -128,16 +128,21 @@ async def create_quote(
                     "last_quoted_price": last_q_price,
                 }
             )
-    # Resolve material_card_id for line items that don't have one
+    # Resolve material_card_id for line items that don't have one.
+    # Use a savepoint so that failures (e.g. unique constraint violations)
+    # don't poison the outer transaction.
     from ...search_service import resolve_material_card
 
     for li in line_items:
         if not li.get("material_card_id") and li.get("mpn"):
             try:
+                nested = db.begin_nested()
                 card = resolve_material_card(li["mpn"], db)
                 if card:
                     li["material_card_id"] = card.id
+                nested.commit()
             except Exception:
+                nested.rollback()
                 logger.warning(
                     "Failed to resolve material card for MPN=%s during quote creation for req=%d",
                     li.get("mpn"),

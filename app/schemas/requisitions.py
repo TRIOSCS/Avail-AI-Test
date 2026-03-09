@@ -15,9 +15,26 @@ Depends on: pydantic
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field, field_validator
 
 from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
+
+
+def _validate_deadline(v: str | None) -> str | None:
+    """Validate that a deadline string is a real calendar date (rejects e.g. 2025-02-29)."""
+    if v is None or v.strip() == "":
+        return None
+    v = v.strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            datetime.strptime(v, fmt)
+            return v
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid date: '{v}'. Use YYYY-MM-DD format and ensure the date is valid.")
+
 
 # ── Requisitions ─────────────────────────────────────────────────────
 
@@ -27,6 +44,11 @@ class RequisitionCreate(BaseModel):
     customer_name: str | None = None
     customer_site_id: int | None = None
     deadline: str | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def validate_deadline(cls, v: str | None) -> str | None:
+        return _validate_deadline(v)
 
 
 class RequisitionOut(BaseModel):
@@ -38,6 +60,11 @@ class RequisitionUpdate(BaseModel):
     name: str | None = None
     customer_site_id: int | None = None
     deadline: str | None = None
+
+    @field_validator("deadline")
+    @classmethod
+    def validate_deadline(cls, v: str | None) -> str | None:
+        return _validate_deadline(v)
 
 
 class RequisitionArchiveOut(BaseModel):
