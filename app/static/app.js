@@ -3214,9 +3214,9 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'offers', 'quote', 'activity'];
-    // Consolidated tabs: Sourcing (parts+sightings), Offers, Quote (quotes+buyplans+files), Activity (activity+tasks)
-    return ['sourcing', 'offers', 'quote', 'activity'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'quote', 'activity'];
+    // Consolidated tabs: Sourcing (parts+sightings+offers), Quote (quotes+buyplans+files), Activity (activity+tasks)
+    return ['sourcing', 'quote', 'activity'];
 }
 
 function _ddDefaultTab(mainView) {
@@ -3351,16 +3351,20 @@ async function _loadDdSubTab(reqId, tabName, panel) {
         let data;
         switch (tabName) {
             case 'sourcing':
-                // Consolidated tab: load both parts and sightings
+                // Consolidated tab: load parts, sightings, and offers together
                 {
-                    const [parts, sightings] = await Promise.all([
+                    const [parts, sightings, offersData] = await Promise.all([
                         _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
-                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`)
+                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`),
+                        _ddTabCache[reqId]?.offers || apiFetch(`/api/requisitions/${reqId}/offers`)
                     ]);
                     _ddReqCache[reqId] = parts;
                     _ddSightingsCache[reqId] = sightings;
+                    if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                    _ddTabCache[reqId].offers = offersData;
                     if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
-                    data = { parts, sightings };
+                    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+                    data = { parts, sightings, offers: offersData };
                 }
                 break;
             case 'details':
@@ -3456,10 +3460,14 @@ function _renderDdTab(reqId, tabName, data, panel) {
     }
     switch (tabName) {
         case 'sourcing':
-            // Consolidated Sourcing tab: parts table + sightings in one view
+            // Consolidated Sourcing tab: parts table + sightings + offers in one view
             if (data && data.parts && data.sightings) {
                 _ddReqCache[reqId] = data.parts;
                 _ddSightingsCache[reqId] = data.sightings;
+            }
+            if (data && data.offers) {
+                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+                _ddTabCache[reqId].offers = data.offers;
             }
             if (_currentMainView !== 'archive') {
                 _renderSplitPartsOffers(reqId, data?.parts || data, panel);
@@ -4160,26 +4168,13 @@ function _renderDdTasks(reqId, tasks, panel) {
         { id: 'done', label: 'Done', color: 'var(--green, #22c55e)' },
     ];
 
-    // Filter bar
+    // Simple action bar (no category filters)
     var filterBar = document.createElement('div');
     filterBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
-    var filterGroup = document.createElement('div');
-    filterGroup.style.cssText = 'display:flex;gap:4px';
-    var filterTypes = ['all', 'sourcing', 'sales', 'general'];
-    var filterLabels = { all: 'All', sourcing: 'Sourcing', sales: 'Sales', general: 'General' };
-    for (var fi = 0; fi < filterTypes.length; fi++) {
-        var fbtn = document.createElement('button');
-        fbtn.className = 'btn btn-ghost btn-sm task-filter' + (filterTypes[fi] === 'all' ? ' active' : '');
-        fbtn.textContent = filterLabels[filterTypes[fi]];
-        fbtn.dataset.filter = filterTypes[fi];
-        fbtn.onclick = (function(f, b) {
-            return function() {
-                _filterTasks(reqId, f, b);
-            };
-        })(filterTypes[fi], fbtn);
-        filterGroup.appendChild(fbtn);
-    }
-    filterBar.appendChild(filterGroup);
+    var taskLabel = document.createElement('span');
+    taskLabel.style.cssText = 'font-size:11px;color:var(--muted)';
+    taskLabel.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
+    filterBar.appendChild(taskLabel);
 
     var addBtn = document.createElement('button');
     addBtn.className = 'btn btn-sm';
@@ -4236,7 +4231,7 @@ function _renderDdTasks(reqId, tasks, panel) {
 
 function _renderTaskCard(task, reqId) {
     var card = document.createElement('div');
-    card.className = 'task-card';
+    card.className = 'task-card task-card-' + task.task_type;
     card.draggable = true;
     card.dataset.taskId = task.id;
     card.dataset.type = task.task_type;
@@ -4250,18 +4245,21 @@ function _renderTaskCard(task, reqId) {
     var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
     var priLabels = { 1: 'Low', 2: 'Med', 3: 'High' };
 
-    // Top row: title + type badge
+    // Department header with assignee name
+    var deptHeader = document.createElement('div');
+    deptHeader.className = 'task-dept-header task-dept-' + task.task_type;
+    var deptLabel = task.task_type === 'sourcing' ? 'Purchasing' : task.task_type === 'sales' ? 'Sales' : 'General';
+    var assigneeName = task.assignee_name || 'Unassigned';
+    deptHeader.innerHTML = '<span class="task-dept-label">' + deptLabel + '</span><span class="task-dept-assignee">' + esc(assigneeName) + '</span>';
+    card.appendChild(deptHeader);
+
+    // Title row
     var topRow = document.createElement('div');
-    topRow.style.cssText = 'display:flex;justify-content:space-between;align-items:flex-start;gap:4px';
+    topRow.style.cssText = 'margin-top:6px';
     var titleSpan = document.createElement('span');
     titleSpan.className = 'task-card-title';
     titleSpan.textContent = task.title;
     topRow.appendChild(titleSpan);
-
-    var typeBadge = document.createElement('span');
-    typeBadge.className = 'task-type-badge task-type-' + task.task_type;
-    typeBadge.textContent = task.task_type;
-    topRow.appendChild(typeBadge);
     card.appendChild(topRow);
 
     // Risk flag
@@ -4281,15 +4279,6 @@ function _renderTaskCard(task, reqId) {
     priDot.style.background = priColors[task.priority] || priColors[2];
     priDot.title = priLabels[task.priority] || 'Medium';
     bottomRow.appendChild(priDot);
-
-    if (task.assignee_name) {
-        var initials = task.assignee_name.split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
-        var avatar = document.createElement('span');
-        avatar.className = 'task-avatar';
-        avatar.title = task.assignee_name;
-        avatar.textContent = initials;
-        bottomRow.appendChild(avatar);
-    }
 
     if (task.due_at) {
         var dueSpan = document.createElement('span');
@@ -5449,12 +5438,18 @@ function ddToggleOffer(reqId, offerId, event) {
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
     if (sel.has(offerId)) sel.delete(offerId); else sel.add(offerId);
-    // Re-render to update button and checkboxes
-    const data = _ddTabCache[reqId]?.offers;
-    const drow = document.getElementById('d-' + reqId);
-    if (data && drow) {
-        const panel = drow.querySelector('.dd-panel');
-        if (panel) _renderDdOffers(reqId, data, panel);
+    // Re-render sourcing drilldown (offers are now inline in sourcing tab)
+    const activeTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    if (activeTab === 'sourcing') {
+        _renderSourcingDrillDown(reqId);
+    } else {
+        // Fallback: re-render standalone offers view if still used
+        const data = _ddTabCache[reqId]?.offers;
+        const drow = document.getElementById('d-' + reqId);
+        if (data && drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) _renderDdOffers(reqId, data, panel);
+        }
     }
 }
 
@@ -7374,28 +7369,17 @@ function _renderDrillDownTable(rfqId, targetPanel) {
 // Renders a side-by-side layout when the "parts" sub-tab is active.
 // Uses existing .split-panel CSS classes. Loads offers data in parallel.
 async function _renderSplitPartsOffers(reqId, partsData, panel) {
-    // Create split layout container
+    // Create split layout: parts on left, combined sightings+offers on right
     panel.innerHTML = `<div class="split-panel" style="max-height:500px">
         <div class="split-panel-left" id="splitParts-${reqId}"></div>
-        <div class="split-panel-right" id="splitOffers-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading offers\u2026</span></div>
+        <div class="split-panel-right" id="splitSourcing-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading sourcing\u2026</span></div>
     </div>`;
     // Render parts into the left pane
     const partsPane = document.getElementById('splitParts-' + reqId);
     if (partsPane) _renderDrillDownTable(reqId, partsPane);
-    // Load and render offers into the right pane
-    const offersPane = document.getElementById('splitOffers-' + reqId);
-    if (!offersPane) return;
-    try {
-        if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-        let offersData = _ddTabCache[reqId].offers;
-        if (!offersData) {
-            offersData = await apiFetch(`/api/requisitions/${reqId}/offers`);
-            _ddTabCache[reqId].offers = offersData;
-        }
-        _renderDdOffers(reqId, offersData, offersPane);
-    } catch(e) {
-        offersPane.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:12px;display:block">No offers yet</span>';
-    }
+    // Render combined sightings + offers into the right pane
+    const sourcingPane = document.getElementById('splitSourcing-' + reqId);
+    if (sourcingPane) _renderSourcingDrillDown(reqId, sourcingPane);
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
@@ -8160,9 +8144,11 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();ddExportSightingsCsv(${reqId})" title="Export sourcing results to CSV">&#x2B07; CSV</button>
             <span id="ddBulkHint-${reqId}" style="font-size:10px;color:var(--muted)">Select vendors to send RFQ</span>
             <button class="btn btn-primary btn-sm" id="ddBulkRfqBtn-${reqId}" style="display:none;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${reqId})">Prepare RFQ (0)</button>
+            <button class="btn btn-sm" id="ddBuildQuoteSrc-${reqId}" style="display:none;font-size:10px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (0)</button>
         </span>
     </div>`;
 
+    let _groupIdx = 0;
     for (const [rId, group] of groups) {
         const allSightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
@@ -8222,7 +8208,9 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         const targetPriceLabel = groupTargetPrice != null ? ` \u00b7 target $${Number(groupTargetPrice).toFixed(2)}` : '';
 
         const filterNote = hasFilters ? ` <span style="font-size:10px;color:var(--blue)">(${filtered.length} of ${sightings.length} shown)</span>` : '';
-        html += `<div style="margin-bottom:10px">
+        const _grpClass = _groupIdx % 2 === 1 ? 'src-group-alt' : '';
+        _groupIdx++;
+        html += `<div class="src-group ${_grpClass}" style="margin-bottom:10px;padding:8px;border-radius:6px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
                 <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})${targetPriceLabel}</span>${filterNote}</span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
@@ -8250,8 +8238,60 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             html += `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;margin:6px 0 0 12px;color:var(--blue)">Show all ${filtered.length} sources (${filtered.length - DD_LIMIT} more)</button>`;
         }
 
+        // ── Inline Offers for this requirement group ──
+        const _offData = _ddTabCache[reqId]?.offers;
+        const _offGroups = _offData?.groups || _offData || [];
+        const _myOffGroup = Array.isArray(_offGroups) ? _offGroups.find(og => String(og.requirement_id) === String(rId) || (og.mpn || '').toUpperCase() === label.toUpperCase()) : null;
+        const _myOffers = (_myOffGroup?.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        if (_myOffers.length) {
+            const oSel = _ddSelectedOffers[reqId] || new Set();
+            const oIds = _myOffers.map(o => o.id || o.offer_id);
+            const oAllChecked = oIds.length > 0 && oIds.every(id => oSel.has(id));
+            html += `<div class="inline-offers-section" style="margin-top:8px;border-top:2px solid var(--teal);padding-top:8px;background:rgba(14,116,144,.03);border-radius:0 0 6px 6px;padding:8px">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                    <span style="font-size:11px;font-weight:700;color:var(--teal)">&#x2709; ${_myOffers.length} Offer${_myOffers.length !== 1 ? 's' : ''}</span>
+                    <span style="font-size:10px;color:var(--muted)">${oIds.filter(id => oSel.has(id)).length} selected</span>
+                </div>
+                <table class="dtbl"><thead><tr>
+                    <th style="width:24px"><input type="checkbox" ${oAllChecked ? 'checked' : ''} onchange="event.stopPropagation();_ddToggleGroupInlineOffers(${reqId},[${oIds.join(',')}],this.checked)"></th>
+                    <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Status</th><th>Notes</th><th style="width:60px"></th>
+                </tr></thead><tbody>`;
+            for (const o of _myOffers) {
+                const oid = o.id || o.offer_id;
+                const offeredMpn = o.mpn || o.offered_mpn || '';
+                const isSub = label && offeredMpn && offeredMpn.trim().toUpperCase() !== label.trim().toUpperCase();
+                const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
+                const oChecked = oSel.has(oid) ? 'checked' : '';
+                const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+                const isPending = o.status === 'pending_review';
+                const rowBg = isPending ? 'background:rgba(245,158,11,.06);' : (isSub ? 'background:rgba(14,116,144,.06);' : '');
+                html += `<tr class="ofr-row" style="${rowBg}" data-oid="${oid}">
+                    <td><input type="checkbox" ${oChecked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)"></td>
+                    <td>${esc(o.vendor_name || '')}${isPending ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : ''}</td>
+                    <td class="mono">${subBadge}${esc(offeredMpn || '\u2014')}</td>
+                    <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : '\u2014'}</td>
+                    <td class="mono" style="color:var(--teal)">${price}</td>
+                    <td>${esc(o.lead_time || '\u2014')}</td>
+                    <td>${esc(o.condition || '\u2014')}</td>
+                    <td style="font-size:10px">${esc(o.status || '\u2014')}</td>
+                    <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'notes',this)" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
+                    <td style="white-space:nowrap">${isPending ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddApproveOffer(${reqId},${oid})" title="Approve" style="padding:2px 6px;font-size:10px;color:var(--green)">\u2713</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddRejectOffer(${reqId},${oid})" title="Reject" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button>` : `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button>`}</td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+        }
+
         html += '</div>';
     }
+
+    // Update Build Quote button visibility
+    const _oSelCount = (_ddSelectedOffers[reqId] || new Set()).size;
+    const _bqBtn = document.getElementById('ddBuildQuoteSrc-' + reqId);
+    if (_bqBtn) {
+        _bqBtn.style.display = _oSelCount > 0 ? '' : 'none';
+        _bqBtn.textContent = 'Build Quote (' + _oSelCount + ')';
+    }
+
     dd.innerHTML = html;
 }
 
@@ -8263,6 +8303,15 @@ function ddToggleGroupSightings(reqId, ids, checked) {
     }
     _renderSourcingDrillDown(reqId);
     _updateDdBulkButton(reqId);
+}
+
+function _ddToggleGroupInlineOffers(reqId, ids, checked) {
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
+    for (const id of ids) {
+        if (checked) sel.add(id); else sel.delete(id);
+    }
+    _renderSourcingDrillDown(reqId);
 }
 
 function ddQuickRfq(reqId, vendorName, mpn) {
