@@ -1,0 +1,26 @@
+The contacts API endpoints return 404 with the agent key — no bypass available.
+
+## Test Results Summary: CRM Contacts
+
+### Blocker: Not Authenticated
+The browser session cookie was **not pre-set** by the dispatcher. Navigating to `https://app.availai.net/#contacts` shows the login page ("Sign in with Microsoft") instead of the contacts list. I cannot complete OAuth login without credentials, so **all 10 functional tests are blocked**.
+
+### Issues Found (Pre-Auth)
+
+| # | Issue | Severity | Ticket |
+|---|-------|----------|--------|
+| 1 | `/static/manifest.json` returns 404 on every page load, causing PWA manifest errors and service worker registration failure | Medium | TT-20260308-076 |
+
+### Tests Not Executed (Auth Blocked)
+- Test 1: Contacts list loads — **BLOCKED**
+- Test 2: Contact detail view — **BLOCKED**
+- Test 3: Encrypted fields display — **BLOCKED**
+- Test 4: Contact list data integrity — **BLOCKED**
+- Test 5: Contact search/filter — **BLOCKED**
+- Test 6: Contact detail field completeness — **BLOCKED**
+- Test 7: Phone number formatting — **BLOCKED**
+- Test 8: Email links — **BLOCKED**
+- Test 9: Vendor card association — **BLOCKED**
+- Test 10: Duplicate detection UI — **BLOCKED**
+
+**BLOCKED: crm_contacts** — Session cookie not set; cannot authenticate to test contacts functionality. 1 ticket filed for manifest.json 404 found during login page load.

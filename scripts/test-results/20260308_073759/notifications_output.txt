@@ -1,0 +1,29 @@
+The manifest.json returns 200 now (may have been fixed), but the service worker is still 404. That's not specifically a notifications issue though — it's a general PWA issue.
+
+Let me summarize the test results.
+
+---
+
+## Notifications Test Results
+
+### PASS
+- **API endpoints functional**: `/api/notifications` returns proper paginated data with correct fields
+- **Ordering**: Notifications correctly sorted newest-first (reverse chronological)
+- **Data quality**: No null/undefined/NaN/[object Object] in any fields
+- **Unread count accuracy**: Reported `unread_count` matches actual unread items
+- **Mark as read**: `POST /api/notifications/{id}/read` works correctly, decrements count
+- **Mark all read**: `POST /api/notifications/read-all` works correctly
+- **Input validation**: Rejects negative limits, string IDs, SQL injection attempts — all return proper 422 errors
+- **Bell icon in HTML**: Present in desktop toolbar (line 91) with SVG bell shape and badge
+- **Notification panel**: HTML structure exists with dropdown panel
+- **Badge logic**: Correctly hides when count=0, shows when >0
+- **Timestamp formatting**: Uses `toLocaleDateString()` + `toLocaleTimeString()` — human-readable
+- **Close-on-click-outside**: Implemented correctly with event listener cleanup
+
+### ISSUES FILED
+
+| Ticket | Severity | Issue |
+|--------|----------|-------|
+| TT-20260308-087 | **High/Security** | API keys leaked in plaintext in notification bodies (Mouser, OEMSecrets keys visible in `api_source_down` notifications) |
+| TT-20260308-097 | **High/UX** | Badge count includes system notifications (37 unread) but dropdown only loads sales notifications (0 items) — user sees "37" badge but "No notifications" in dropdown |
+| TT-20260308-100 | **Medium/UX** | No notification bell icon in mobile topbar — mobile users cannot access notifications at all (JS references `.mobile-notif-btn` but no such element exists) |

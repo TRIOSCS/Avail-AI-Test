@@ -1,0 +1,30 @@
+Browser was on about:blank after the close. Here's the summary:
+
+---
+
+## Requisitions Test Results
+
+### Tickets Filed (6 issues)
+
+| Ticket | Issue | Severity |
+|--------|-------|----------|
+| TT-20260308-088 | **Status filter on requisitions list does not filter** — all status values return same 31 results | High |
+| TT-20260308-090 | **Sort parameter ignored** — `sort=created_at&order=asc` has no effect | Medium |
+| TT-20260308-091 | **Service worker sw.js returns 404** — causes console errors on every page load | Medium |
+| TT-20260308-094 | **GET /api/requisitions/{id} returns 405** — single requisition detail not fetchable | High |
+| TT-20260308-095 | **Invalid date 2025-02-29 stored** — deadline field accepts impossible dates | Low |
+| TT-20260308-098 | **XSS payloads stored in requisition names** — `<script>` tags not sanitized on input | High |
+
+### Tests Passed
+
+- **Requisition list loads** — 31 requisitions returned with correct structure
+- **Parts endpoint** — correctly returns parts for a requisition (verified 1-part and 6-part reqs)
+- **Offers endpoint** — returns properly structured offer data with readable vendor names, numeric prices, and valid statuses
+- **Pagination** — limit/offset work correctly, no duplicate IDs across pages
+- **Count cross-reference** — requirement_count and offer_count in list match actual part/offer counts in sub-endpoints
+- **Data integrity** — numeric fields are numeric, vendor names are readable (not UUIDs), dates are ISO format
+- **App JS bundle** — loads correctly (453KB) via authenticated path
+
+### Tests Blocked
+
+- **Full browser UI testing** — could not set session cookie in Playwright browser (browser_evaluate and browser_run_code permissions denied), so could not test: drawer opening, tab switching, visual formatting, column sorting UI, filter button clicks, responsive layout

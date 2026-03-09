@@ -1,0 +1,32 @@
+All API endpoints respond correctly. Let me provide the final summary.
+
+---
+
+## Trouble Tickets Test Results
+
+### PASSED
+- **Ticket list API** - Returns paginated results with correct structure (items, total, limit, offset)
+- **Ticket detail API** - Returns complete ticket data with all fields
+- **Status filtering** - All status filters work correctly (submitted, diagnosed, resolved, rejected, fix_queued)
+- **Pagination** - Works properly (941 total tickets, 50 per page, page 2 loads different tickets)
+- **Ticket number format** - All follow TT-YYYYMMDD-NNN format, no duplicates found
+- **Data quality** - No undefined, NaN, or [object Object] values across 100 checked tickets
+- **Timestamps** - Properly formatted ISO 8601, no "Invalid Date" values
+- **Null field handling** - Frontend code properly checks for null before rendering
+- **Similar tickets endpoint** - Works correctly, handles special characters safely
+- **404 handling** - Returns proper error for non-existent tickets
+- **Validation** - Rejects negative offset with 422 error
+- **XSS/SQLi resilience** - Similarity endpoint handles malicious input safely
+- **Risk tier badges** - Properly color-coded (low/green, medium/orange, high/red), null handled with dash
+- **Category labels** - Displayed when present, hidden when null
+
+### ISSUES FILED (4 tickets)
+
+| Ticket | Issue |
+|--------|-------|
+| **TT-20260308-077** | Filter pills missing `rejected` and `fix_queued` statuses — users can't filter to 8+ tickets with these statuses |
+| **TT-20260308-078** | `fix_queued` status missing from STATUS_LABELS/STATUS_COLORS — shows raw string instead of friendly label |
+| **TT-20260308-082** | Source label incorrectly shows "Ticket Form" for `agent` and `playwright` sources (affects 5 tickets) |
+| **TT-20260308-084** | Admin table column order mismatch — "Created" and "Linked" headers are swapped vs data cells |
+
+**Note:** Browser-based testing (Playwright) was blocked by Chrome sandbox restrictions in this environment. All testing was performed via API calls and frontend code review. The 4 issues found are all in the frontend rendering code (`app/static/tickets.js`).

@@ -1,0 +1,26 @@
+## Tagging Test Results
+
+**7 issues found and filed as trouble tickets.**
+
+### What works:
+- Tag listing API (`/api/tags/`) returns proper data with pagination
+- Tag type filtering (`tag_type=brand` / `commodity`) works correctly
+- Tagging status endpoint returns comprehensive statistics with valid data
+- All POST-only admin endpoints properly return 405 for GET requests
+- Commodity tags have 39 well-named categories
+- Brand tags have 2,014 entries with readable names
+- Source distribution shows 12 different tagging sources
+- Data integrity checks pass (coverage % in range, counts consistent)
+- Vendor detail includes tag fields (brand_tags, commodity_tags)
+
+### Issues filed:
+
+| Ticket | Issue |
+|--------|-------|
+| TT-079 | `/api/tags/` has no search/filter parameter — search, q, name params all ignored |
+| TT-080 | "Unknown" is #1 brand tag with 48,660 materials (15.5% of tagged items) |
+| TT-081 | AI-classified tags have 0.33 avg confidence (vs 0.7 visibility threshold) — 101K hidden tags |
+| TT-083 | "Miscellaneous" commodity = 96.3% of all commodity tags, making classification useless |
+| TT-089 | Vendor `commodity_tags` use lowercase slugs ("analog_ic") vs Tag table proper names ("Analog ICs") |
+| TT-092 | Vendor detail `tags` field is always `[]` even when `brand_tags` has data |
+| TT-099 | `analyze-prefixes` endpoint takes 27+ seconds — needs caching or async |
