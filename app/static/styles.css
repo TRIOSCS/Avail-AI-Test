@@ -1717,6 +1717,7 @@ body.tasks-open .toparea { margin-right: 240px; transition: margin-right .2s cub
 .dd-tab:hover { color: var(--text); background: var(--bg, rgba(255,255,255,.03)); }
 .dd-tab.on { color: var(--teal); border-bottom-color: var(--teal); }
 .dd-panel { min-height: 40px; max-height: 55vh; overflow-y: auto; padding: 8px 16px; }
+.dd-panel:has(.rfq-workspace) { max-height: 75vh; overflow: hidden; padding: 0; }
 .dd-tab-refresh{background:none;border:none;padding:3px 6px;font-size:14px;color:var(--muted);cursor:pointer;border-radius:50%;transition:all .2s;margin-left:auto;line-height:1;width:26px;height:26px;display:flex;align-items:center;justify-content:center}
 .dd-tab-refresh:hover{color:var(--teal);background:var(--bg2);transform:rotate(90deg)}
 
@@ -3061,4 +3062,136 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 .part-tab.on { color:var(--teal); border-bottom-color:var(--teal); }
 .part-detail-content { min-height:30px; }
 .part-note-box:hover { background:var(--bg3) !important; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   RFQ WORKSPACE — Part-centric left/right layout
+   Left: requisition part list with chip clusters and steppers
+   Right: persistent part transaction panel with tabs
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Layout container */
+.rfq-workspace { display:flex; gap:0; height:calc(100vh - 160px); min-height:400px; }
+.rfq-left { flex:1; min-width:0; overflow-y:auto; border-right:1px solid var(--border); }
+.rfq-right { width:480px; min-width:380px; max-width:560px; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; }
+.rfq-right.empty { display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; }
+
+/* Left-side part list */
+.rfq-part-list { width:100%; border-collapse:collapse; font-size:12px; }
+.rfq-part-list th { text-align:left; padding:6px 10px; font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.4px; color:var(--muted); border-bottom:1px solid var(--border); background:var(--bg2); position:sticky; top:0; z-index:2; }
+.rfq-part-row { cursor:pointer; transition:background .12s; border-bottom:1px solid var(--card2); }
+.rfq-part-row:hover { background:var(--bg2); }
+.rfq-part-row.active { background:rgba(14,116,144,.06); border-left:3px solid var(--teal); }
+.rfq-part-row td { padding:7px 10px; vertical-align:middle; }
+.rfq-part-row:nth-child(even) { background:rgba(0,0,0,.015); }
+.rfq-part-row.active:nth-child(even) { background:rgba(14,116,144,.06); }
+
+/* MPN cell */
+.rfq-mpn { font-family:'JetBrains Mono',monospace; font-weight:600; font-size:12px; color:var(--text); }
+.rfq-brand { font-size:10px; color:var(--muted); margin-top:1px; }
+
+/* Chip cluster */
+.rfq-chips { display:flex; gap:3px; flex-wrap:wrap; }
+.rfq-chip { font-size:9px; padding:1px 5px; border-radius:3px; font-weight:600; white-space:nowrap; line-height:1.4; }
+.rfq-chip-offer { background:var(--green-light); color:var(--green); }
+.rfq-chip-exact { background:#e0f2fe; color:#0369a1; }
+.rfq-chip-sub { background:var(--amber-light); color:var(--amber); }
+.rfq-chip-hist { background:var(--bg3,#e2e8f0); color:var(--muted); }
+.rfq-chip-task { background:var(--red-light); color:var(--red); }
+.rfq-chip-sel { background:var(--teal-light); color:var(--teal); }
+.rfq-chip-none { background:var(--bg3); color:var(--muted); font-weight:400; }
+
+/* Progress stepper */
+.rfq-stepper { display:flex; gap:2px; align-items:center; }
+.rfq-step { width:8px; height:8px; border-radius:50%; background:var(--bg3,#e2e8f0); transition:background .15s; flex-shrink:0; }
+.rfq-step.done { background:var(--teal); }
+.rfq-step.current { background:var(--blue); box-shadow:0 0 0 2px rgba(59,130,246,.25); }
+.rfq-step.blocked { background:var(--red); }
+.rfq-step-label { font-size:8px; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; margin-left:4px; }
+
+/* Right panel */
+.rfq-panel-header { padding:12px 16px; border-bottom:1px solid var(--border); background:var(--white); flex-shrink:0; }
+.rfq-panel-mpn { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; color:var(--text); }
+.rfq-panel-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:4px; font-size:11px; color:var(--muted); }
+.rfq-panel-flags { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+.rfq-panel-flag { font-size:9px; padding:2px 6px; border-radius:3px; font-weight:600; }
+
+/* Panel tabs */
+.rfq-panel-tabs { display:flex; gap:0; border-bottom:1px solid var(--border); background:var(--white); flex-shrink:0; padding:0 16px; }
+.rfq-panel-tab { background:none; border:none; padding:8px 14px; font-size:11px; font-weight:600;
+  color:var(--muted); cursor:pointer; font-family:inherit; border-bottom:2px solid transparent; transition:all .15s; }
+.rfq-panel-tab:hover { color:var(--text); }
+.rfq-panel-tab.on { color:var(--teal); border-bottom-color:var(--teal); }
+
+/* Panel content */
+.rfq-panel-body { flex:1; overflow-y:auto; padding:12px 16px; }
+
+/* Offers tab */
+.rfq-offer-row { display:flex; align-items:center; gap:8px; padding:8px 10px; border-bottom:1px solid var(--card2);
+  font-size:11px; transition:background .12s; border-radius:4px; margin-bottom:2px; }
+.rfq-offer-row:hover { background:var(--bg2); }
+.rfq-offer-row.selected { background:rgba(14,116,144,.06); border:1px solid var(--teal); }
+.rfq-offer-row.historical { opacity:.85; border-left:2px dashed var(--muted); }
+.rfq-offer-vendor { font-weight:600; min-width:100px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rfq-offer-price { font-family:'JetBrains Mono',monospace; font-weight:600; min-width:70px; text-align:right; }
+.rfq-offer-price.under { color:var(--green); }
+.rfq-offer-price.over { color:var(--red); }
+.rfq-offer-price.near { color:var(--amber); }
+.rfq-offer-detail { font-size:10px; color:var(--muted); min-width:50px; }
+.rfq-offer-flags { display:flex; gap:3px; }
+.rfq-offer-flag { font-size:8px; padding:1px 4px; border-radius:2px; font-weight:700; text-transform:uppercase; }
+.rfq-offer-flag-exact { background:#e0f2fe; color:#0369a1; }
+.rfq-offer-flag-sub { background:var(--amber-light); color:var(--amber); }
+.rfq-offer-flag-hist { background:var(--bg3); color:var(--muted); }
+.rfq-offer-actions { display:flex; gap:4px; margin-left:auto; }
+.rfq-offer-check { accent-color:var(--teal); width:16px; height:16px; cursor:pointer; flex-shrink:0; }
+.rfq-offer-toolbar { display:flex; align-items:center; gap:8px; padding:8px 0; margin-bottom:6px; flex-wrap:wrap; }
+.rfq-offer-sort { font-size:10px; background:var(--white); border:1px solid var(--border); border-radius:4px;
+  padding:3px 8px; cursor:pointer; font-family:inherit; }
+.rfq-offer-sort.on { background:var(--teal-light); border-color:var(--teal); color:var(--teal); }
+.rfq-offer-summary { font-size:10px; color:var(--muted); margin-left:auto; }
+
+/* Tasks tab — linear list, not kanban */
+.rfq-task-item { border:1px solid var(--border); border-radius:6px; margin-bottom:6px; overflow:hidden; }
+.rfq-task-dept { display:flex; justify-content:space-between; align-items:center; padding:4px 10px; font-size:10px; letter-spacing:.3px; }
+.rfq-task-dept-purchasing { background:rgba(14,116,144,.08); color:var(--teal); }
+.rfq-task-dept-sales { background:rgba(59,130,246,.08); color:var(--blue); }
+.rfq-task-dept-general { background:rgba(100,116,139,.08); color:var(--muted); }
+.rfq-task-body { padding:8px 10px; font-size:12px; }
+.rfq-task-title { font-weight:500; line-height:1.3; }
+.rfq-task-meta { display:flex; gap:8px; margin-top:4px; font-size:10px; color:var(--muted); align-items:center; }
+.rfq-task-status { font-size:9px; padding:1px 5px; border-radius:3px; font-weight:600; }
+.rfq-task-status-todo { background:var(--bg3); color:var(--muted); }
+.rfq-task-status-in_progress { background:var(--amber-light); color:var(--amber); }
+.rfq-task-status-done { background:var(--green-light); color:var(--green); }
+
+/* Notes tab */
+.rfq-note-item { padding:8px 10px; border-bottom:1px solid var(--card2); }
+.rfq-note-label { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; margin-bottom:2px; }
+.rfq-note-label-req { color:var(--teal); }
+.rfq-note-label-offer { color:var(--blue); }
+.rfq-note-label-internal { color:var(--muted); }
+.rfq-note-text { font-size:12px; line-height:1.4; white-space:pre-wrap; word-break:break-word; }
+.rfq-note-meta { font-size:10px; color:var(--muted); margin-top:2px; }
+
+/* History tab */
+.rfq-hist-item { display:flex; gap:8px; padding:6px 0; border-bottom:1px solid var(--card2); font-size:11px; }
+.rfq-hist-icon { width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:11px; flex-shrink:0; background:var(--bg3); }
+.rfq-hist-icon-change { background:var(--amber-light); color:var(--amber); }
+.rfq-hist-icon-offer { background:var(--green-light); color:var(--green); }
+.rfq-hist-icon-rfq { background:var(--blue-lt); color:var(--blue); }
+.rfq-hist-icon-task { background:var(--teal-light); color:var(--teal); }
+.rfq-hist-body { flex:1; min-width:0; }
+.rfq-hist-time { font-size:10px; color:var(--muted); }
+
+/* Responsive */
+@media (max-width:1024px) {
+  .rfq-right { width:360px; min-width:300px; }
+}
+@media (max-width:768px) {
+  .rfq-workspace { flex-direction:column; height:auto; }
+  .rfq-left { border-right:none; border-bottom:1px solid var(--border); max-height:40vh; }
+  .rfq-right { width:100%; max-width:100%; min-height:50vh; }
+}
 

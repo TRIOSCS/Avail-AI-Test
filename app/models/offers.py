@@ -68,6 +68,10 @@ class Offer(Base):
     approved_by_id = Column(Integer, ForeignKey("users.id"))
     approved_at = Column(DateTime)
 
+    # Quote candidate selection — sales picks offers for quoting
+    selected_for_quote = Column(Boolean, nullable=False, default=False, server_default="false")
+    selected_at = Column(DateTime)
+
     # v1.3.0: Attribution fields — 14-day TTL with reconfirmation
     expires_at = Column(DateTime)
     reconfirmed_at = Column(DateTime)
