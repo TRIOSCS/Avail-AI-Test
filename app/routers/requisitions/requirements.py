@@ -82,6 +82,8 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
 
     vendor_counts = {}
     offer_counts = {}
+    offer_selected_counts = {}
+    task_counts = {}
     if req.requirements:
         req_ids = [r.id for r in req.requirements]
         rows = (
@@ -111,6 +113,38 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
         for rid, cnt in offer_rows:
             offer_counts[rid] = cnt
 
+        # Count selected-for-quote offers per requirement
+        sel_rows = (
+            db.query(Offer.requirement_id, sqlfunc.count(Offer.id))
+            .filter(
+                Offer.requirement_id.in_(req_ids),
+                Offer.status.in_(["active", "won"]),
+                Offer.selected_for_quote.is_(True),
+            )
+            .group_by(Offer.requirement_id)
+            .all()
+        )
+        for rid, cnt in sel_rows:
+            offer_selected_counts[rid] = cnt
+
+        # Task counts per requirement
+        from ...models import RequisitionTask
+
+        part_refs = [f"requirement:{rid}" for rid in req_ids]
+        task_rows = (
+            db.query(RequisitionTask.source_ref, sqlfunc.count(RequisitionTask.id))
+            .filter(
+                RequisitionTask.requisition_id == req_id,
+                RequisitionTask.source_ref.in_(part_refs),
+                RequisitionTask.status != "done",
+            )
+            .group_by(RequisitionTask.source_ref)
+            .all()
+        )
+        for ref, cnt in task_rows:
+            rid = int(ref.split(":")[1])
+            task_counts[rid] = cnt
+
     contact_count = (db.query(sqlfunc.count(Contact.id)).filter(Contact.requisition_id == req_id).scalar()) or 0
     last_activity_row = db.query(sqlfunc.max(Contact.created_at)).filter(Contact.requisition_id == req_id).scalar()
     hours_since = None
@@ -118,8 +152,29 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
         delta = datetime.now(timezone.utc) - last_activity_row.replace(tzinfo=timezone.utc)
         hours_since = delta.total_seconds() / 3600
 
+    # Determine part-level workflow step for the stepper
+    # Steps: sourcing -> offer -> select -> quote -> buy_plan -> po
+    from ...models import RequisitionTask
+
+    # Check quote status at req level
+    quote_status = getattr(req, "quote_status", None) or ""
+
     results = []
     for r in req.requirements:
+        oc = offer_counts.get(r.id, 0)
+        sc = offer_selected_counts.get(r.id, 0)
+        # Determine step
+        if quote_status in ("sent", "revised", "won"):
+            step = "quoted"
+        elif sc > 0:
+            step = "selected"
+        elif oc > 0:
+            step = "offers"
+        elif vendor_counts.get(r.id, 0) > 0:
+            step = "sourced"
+        else:
+            step = "new"
+
         results.append(
             {
                 "id": r.id,
@@ -128,7 +183,10 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
                 "target_price": float(r.target_price) if r.target_price else None,
                 "substitutes": r.substitutes or [],
                 "sighting_count": vendor_counts.get(r.id, 0),
-                "offer_count": offer_counts.get(r.id, 0),
+                "offer_count": oc,
+                "selected_count": sc,
+                "task_count": task_counts.get(r.id, 0),
+                "step": step,
                 "contact_count": contact_count,
                 "hours_since_activity": round(hours_since, 1) if hours_since is not None else None,
                 "brand": r.brand or "",
@@ -868,3 +926,405 @@ async def import_stock_list(
         logger.exception("Stock import failed for requisition %s", req_id)
         raise HTTPException(500, "Stock import failed — no data was saved")
     return {"imported_rows": imported, "matched_sightings": matched}
+
+
+# ── Part-level endpoints (requirement-scoped) ─────────────────────────
+# Used by the part-number expansion panel in the frontend.
+
+
+@router.get("/api/requirements/{requirement_id}/offers")
+async def list_requirement_offers(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List current + historical offers for a single requirement.
+
+    Returns a unified list mixing current offers (on this requisition) and
+    historical offers (from other requisitions for the same material card).
+    Each row carries is_historical and is_substitute flags for the UI.
+    """
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
+
+    def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
+        age_days = 0
+        if o.created_at:
+            age_days = (datetime.now(timezone.utc) - o.created_at.replace(tzinfo=timezone.utc)).days
+        return {
+            "id": o.id,
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "manufacturer": o.manufacturer,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "currency": o.currency or "USD",
+            "lead_time": o.lead_time,
+            "date_code": o.date_code,
+            "condition": o.condition,
+            "packaging": o.packaging,
+            "firmware": o.firmware,
+            "moq": o.moq,
+            "warranty": o.warranty,
+            "source": o.source,
+            "status": o.status,
+            "notes": o.notes,
+            "selected_for_quote": o.selected_for_quote or False,
+            "selected_at": o.selected_at.isoformat() if o.selected_at else None,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "age_days": age_days,
+            "is_historical": is_historical,
+            "is_substitute": is_substitute,
+            "from_requisition_id": source_req_id,
+            "entered_by": o.entered_by.name if o.entered_by else None,
+        }
+
+    # Current offers on this requirement
+    current = (
+        db.query(Offer)
+        .options(joinedload(Offer.entered_by))
+        .filter(Offer.requirement_id == requirement_id, Offer.status.in_(["active", "won"]))
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    results = [_offer_dict(o) for o in current]
+
+    # Historical offers from other requisitions via material card
+    card_ids = set()
+    if req_item.material_card_id:
+        card_ids.add(req_item.material_card_id)
+    # Also check substitute material cards
+    from ...utils.normalization import normalize_mpn_key
+
+    for sub in req_item.substitutes or []:
+        sub_str = (sub if isinstance(sub, str) else "").strip()
+        if sub_str:
+            sub_key = normalize_mpn_key(sub_str)
+            if sub_key:
+                mc = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn == sub_key).first()
+                if mc:
+                    card_ids.add(mc[0])
+
+    if card_ids:
+        hist_offers = (
+            db.query(Offer)
+            .options(joinedload(Offer.entered_by))
+            .filter(
+                Offer.requisition_id != req_item.requisition_id,
+                Offer.material_card_id.in_(card_ids),
+                Offer.status.in_(["active", "won"]),
+            )
+            .order_by(Offer.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        for ho in hist_offers:
+            is_sub = ho.material_card_id != req_item.material_card_id
+            results.append(_offer_dict(ho, is_historical=True, is_substitute=is_sub, source_req_id=ho.requisition_id))
+
+    return results
+
+
+@router.post("/api/offers/{offer_id}/toggle-quote-selection")
+async def toggle_quote_selection(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle whether an offer is selected for quoting."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    req = get_req_for_user(db, user, offer.requisition_id)
+    if not req:
+        raise HTTPException(403, "Not authorized")
+    offer.selected_for_quote = not offer.selected_for_quote
+    offer.selected_at = datetime.now(timezone.utc) if offer.selected_for_quote else None
+    db.commit()
+    return {"ok": True, "selected_for_quote": offer.selected_for_quote}
+
+
+@router.get("/api/requirements/{requirement_id}/notes")
+async def list_requirement_notes(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the requirement's own notes plus notes from its offers."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    # Gather notes from offers that have non-empty notes
+    offer_notes = (
+        db.query(Offer)
+        .filter(Offer.requirement_id == requirement_id, Offer.notes.isnot(None), Offer.notes != "")
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    return {
+        "requirement_notes": req.notes or "",
+        "notes": [
+            {
+                "vendor_name": o.vendor_name,
+                "note": o.notes,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+                "offer_id": o.id,
+            }
+            for o in offer_notes
+        ],
+    }
+
+
+@router.post("/api/requirements/{requirement_id}/notes")
+async def add_requirement_note(
+    requirement_id: int,
+    body: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Append text to the requirement's notes field."""
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    new_text = (body.get("text") or "").strip()
+    if not new_text:
+        raise HTTPException(422, "Note text is required")
+    # Append to existing notes with timestamp
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+    entry = f"[{timestamp} {user.email}] {new_text}"
+    req.notes = f"{req.notes}\n{entry}" if req.notes else entry
+    db.commit()
+    return {"ok": True, "notes": req.notes}
+
+
+@router.get("/api/requirements/{requirement_id}/tasks")
+async def list_requirement_tasks(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List tasks linked to this requirement or its offers via source_ref.
+
+    Merges part-level tasks (source_ref=requirement:{id}) and offer-level tasks
+    (source_ref=offer:{offer_id} where the offer belongs to this requirement).
+    """
+    from ...models import RequisitionTask
+
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
+
+    # Part-level tasks
+    part_ref = f"requirement:{requirement_id}"
+
+    # Offer-level tasks: find offer IDs for this requirement
+    offer_ids = [
+        oid
+        for (oid,) in db.query(Offer.id).filter(Offer.requirement_id == requirement_id).all()
+    ]
+    offer_refs = [f"offer:{oid}" for oid in offer_ids]
+
+    all_refs = [part_ref] + offer_refs
+    tasks = (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.requisition_id == req_item.requisition_id,
+            RequisitionTask.source_ref.in_(all_refs),
+        )
+        .order_by(RequisitionTask.created_at.desc())
+        .all()
+    )
+
+    # Look up assignee names
+    user_ids = {t.assigned_to_id for t in tasks if t.assigned_to_id}
+    user_ids |= {t.created_by for t in tasks if t.created_by}
+    user_map = {}
+    if user_ids:
+        for u in db.query(User).filter(User.id.in_(user_ids)).all():
+            user_map[u.id] = u.name or u.email
+
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": t.description,
+            "task_type": t.task_type,
+            "status": t.status,
+            "priority": t.priority,
+            "assigned_to": user_map.get(t.assigned_to_id, ""),
+            "created_by_name": user_map.get(t.created_by, ""),
+            "source_ref": t.source_ref,
+            "ai_risk_flag": t.ai_risk_flag,
+            "source": t.source,
+            "due_date": t.due_at.isoformat() if t.due_at else None,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tasks
+    ]
+
+
+@router.post("/api/requirements/{requirement_id}/tasks")
+async def create_requirement_task(
+    requirement_id: int,
+    body: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task linked to a specific requirement."""
+    from ...models import RequisitionTask
+
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "Task title is required")
+    task = RequisitionTask(
+        requisition_id=req.requisition_id,
+        title=title,
+        task_type="general",
+        status="todo",
+        source="manual",
+        source_ref=f"requirement:{requirement_id}",
+        created_by=user.id,
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
+
+
+@router.get("/api/requirements/{requirement_id}/history")
+async def list_requirement_history(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Part-level history timeline: change logs, contacts, offers, tasks.
+
+    Returns a unified timeline of events for the selected part.
+    """
+    from ...models import ActivityLog, RequisitionTask
+
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
+
+    events = []
+
+    # Change log entries for this requirement
+    changes = (
+        db.query(ChangeLog)
+        .filter(ChangeLog.entity_type == "requirement", ChangeLog.entity_id == requirement_id)
+        .order_by(ChangeLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    user_ids = {c.user_id for c in changes if c.user_id}
+    # Offer changes for offers on this requirement
+    offer_ids = [oid for (oid,) in db.query(Offer.id).filter(Offer.requirement_id == requirement_id).all()]
+    offer_changes = []
+    if offer_ids:
+        offer_changes = (
+            db.query(ChangeLog)
+            .filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id.in_(offer_ids))
+            .order_by(ChangeLog.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        user_ids |= {c.user_id for c in offer_changes if c.user_id}
+
+    user_map = {}
+    if user_ids:
+        for u in db.query(User).filter(User.id.in_(user_ids)).all():
+            user_map[u.id] = u.name or u.email
+
+    for c in changes:
+        events.append({
+            "type": "change",
+            "entity": "requirement",
+            "field": c.field_name,
+            "old_value": c.old_value,
+            "new_value": c.new_value,
+            "user": user_map.get(c.user_id, ""),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+    for c in offer_changes:
+        events.append({
+            "type": "change",
+            "entity": "offer",
+            "field": c.field_name,
+            "old_value": c.old_value,
+            "new_value": c.new_value,
+            "user": user_map.get(c.user_id, ""),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+
+    # Offers created for this part
+    offers = (
+        db.query(Offer)
+        .filter(Offer.requirement_id == requirement_id)
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+    for o in offers:
+        events.append({
+            "type": "offer_created",
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "qty_available": o.qty_available,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        })
+
+    # Contacts (RFQs sent) that included this part's MPN
+    mpn = req_item.primary_mpn
+    contacts = (
+        db.query(Contact)
+        .filter(Contact.requisition_id == req_item.requisition_id)
+        .order_by(Contact.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    for ct in contacts:
+        parts = ct.parts_included or []
+        if mpn and mpn in parts:
+            events.append({
+                "type": "rfq_sent",
+                "vendor_name": ct.vendor_name,
+                "contact_type": ct.contact_type,
+                "status": ct.status,
+                "created_at": ct.created_at.isoformat() if ct.created_at else None,
+            })
+
+    # Tasks completed for this part
+    part_ref = f"requirement:{requirement_id}"
+    offer_refs = [f"offer:{oid}" for oid in offer_ids]
+    all_refs = [part_ref] + offer_refs
+    done_tasks = (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.requisition_id == req_item.requisition_id,
+            RequisitionTask.source_ref.in_(all_refs),
+            RequisitionTask.status == "done",
+        )
+        .all()
+    )
+    for t in done_tasks:
+        events.append({
+            "type": "task_done",
+            "title": t.title,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        })
+
+    # Sort all events by created_at descending
+    events.sort(key=lambda e: e.get("created_at") or "", reverse=True)
+    return events

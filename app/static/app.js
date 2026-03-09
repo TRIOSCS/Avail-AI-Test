@@ -319,6 +319,9 @@ let _ddActFilter = {};   // rfqId → 'all'|'email'|'phone'|'notes' for activity
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 var _ddTierState = {};           // tier expand/collapse state: `${reqId}-${rId}-${tier}` → bool
+let _partExpandState = {};       // `${reqId}-${requirementId}` → true if part detail is expanded
+let _partActiveTab = {};         // `${reqId}-${requirementId}` → 'offers'|'notes'|'tasks'
+let _partDetailCache = {};       // `${reqId}-${requirementId}-${tab}` → cached data
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
 function _rebuildSightingIndex() {
@@ -3091,6 +3094,9 @@ export async function loadRequisitions(query = '', append = false) {
             _ddSightingsCache = {};
             _ddSelectedSightings = {};
             _ddTierState = {};
+            _partExpandState = {};
+            _partActiveTab = {};
+            _partDetailCache = {};
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
@@ -3203,17 +3209,27 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['sourcing', 'quote', 'activity'];
-    // Consolidated tabs: Sourcing (parts+sightings+offers), Quote (quotes+buyplans+files), Activity (activity+tasks)
-    return ['sourcing', 'quote', 'activity'];
+    if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['workspace', 'quote', 'activity'];
+    // Unified view: workspace is the primary part-centric view
+    return ['workspace', 'quote', 'activity'];
 }
 
 function _ddDefaultTab(mainView) {
-    return mainView === 'purchasing' ? 'sightings' : 'parts';
+    // All views default to the part-centric workspace
+    return 'workspace';
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', buyplans:'Buy Plans', files:'Files', tasks:'Tasks'};
+    const map = {
+        workspace: 'Parts',
+        sourcing: 'Sourcing',
+        offers: 'Offers',
+        quote: 'Quote',
+        activity: 'Activity',
+        // Legacy tab names still supported for backward compatibility
+        details: 'Details', sightings: 'Sightings', parts: 'Parts',
+        quotes: 'Quotes', buyplans: 'Buy Plans', files: 'Files', tasks: 'Tasks'
+    };
     return map[tab] || tab;
 }
 
@@ -3322,27 +3338,30 @@ async function _switchDdTab(reqId, tabName) {
 async function _loadDdSubTab(reqId, tabName, panel) {
     if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
     const cached = _ddTabCache[reqId][tabName];
+    // Reset panel styles when switching away from workspace
+    if (tabName !== 'workspace') {
+        panel.style.maxHeight = '';
+        panel.style.padding = '';
+    }
     if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
 
     panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
     try {
         let data;
         switch (tabName) {
+            case 'workspace':
+                // Part-centric RFQ workspace — renders its own layout
+                panel.style.maxHeight = 'none';
+                panel.style.padding = '0';
+                await rfqOpenWorkspace(reqId, panel);
+                _ddTabCache[reqId][tabName] = true;
+                return;
             case 'sourcing':
-                // Consolidated tab: load parts, sightings, and offers together
+                // Parts list only — sightings available on Sourcing page
                 {
-                    const [parts, sightings, offersData] = await Promise.all([
-                        _ddReqCache[reqId] || apiFetch(`/api/requisitions/${reqId}/requirements`),
-                        _ddSightingsCache[reqId] || apiFetch(`/api/requisitions/${reqId}/sightings`),
-                        _ddTabCache[reqId]?.offers || apiFetch(`/api/requisitions/${reqId}/offers`)
-                    ]);
+                    const parts = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
                     _ddReqCache[reqId] = parts;
-                    _ddSightingsCache[reqId] = sightings;
-                    if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-                    _ddTabCache[reqId].offers = offersData;
-                    if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
-                    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
-                    data = { parts, sightings, offers: offersData };
+                    data = { parts };
                 }
                 break;
             case 'details':
@@ -3356,6 +3375,7 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
                 break;
             case 'activity':
+                // Activity timeline only — tasks have their own tab
                 data = await apiFetch(`/api/requisitions/${reqId}/activity`);
                 break;
             case 'offers':
@@ -3399,21 +3419,15 @@ function _renderDdTab(reqId, tabName, data, panel) {
         return;
     }
     switch (tabName) {
+        case 'workspace':
+            // Already rendered by rfqOpenWorkspace in _loadDdSubTab
+            return;
         case 'sourcing':
-            // Consolidated Sourcing tab: parts table + sightings + offers in one view
-            if (data && data.parts && data.sightings) {
+            // Parts list — full width, no sightings
+            if (data && data.parts) {
                 _ddReqCache[reqId] = data.parts;
-                _ddSightingsCache[reqId] = data.sightings;
             }
-            if (data && data.offers) {
-                if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
-                _ddTabCache[reqId].offers = data.offers;
-            }
-            if (_currentMainView !== 'archive') {
-                _renderSplitPartsOffers(reqId, data?.parts || data, panel);
-            } else {
-                _renderDrillDownTable(reqId, panel);
-            }
+            _renderDrillDownTable(reqId, panel);
             break;
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts':
@@ -3424,8 +3438,12 @@ function _renderDdTab(reqId, tabName, data, panel) {
             _renderSourcingDrillDown(reqId, panel);
             break;
         case 'activity':
-            _renderDdActivity(reqId, data, panel);
-            _autoPollReplies(reqId, data, panel);
+            // Activity timeline only — tasks have their own tab now
+            {
+                const actData = (data && data.activity !== undefined) ? data.activity : data;
+                _renderDdActivity(reqId, actData, panel);
+                _autoPollReplies(reqId, actData, panel);
+            }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
@@ -7240,7 +7258,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
-            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
+            <th style="width:20px"></th><th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
         </tr></thead><tbody></tbody></table>`;
         _appendAddRow(rfqId, dd);
         return;
@@ -7249,12 +7267,14 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
+        <th style="width:20px"></th><th></th><th>MPN</th><th>Qty</th><th>Target $</th><th title="Substitute part numbers">Subs</th><th>Condition</th><th>Date Codes</th><th title="Firmware version">FW</th><th title="Hardware revision codes">HW</th><th title="Packaging type">Pkg</th><th>Notes</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
         const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '—');
-        html += `<tr>
+        const isExpanded = _partExpandState[rfqId + '-' + r.id];
+        html += `<tr class="part-row${isExpanded ? ' part-expanded' : ''}" id="pr-${rfqId}-${r.id}">
+            <td style="padding:2px 4px;cursor:pointer" onclick="event.stopPropagation();togglePartExpand(${rfqId},${r.id})"><span class="part-arrow${isExpanded ? ' open' : ''}" id="pa-${rfqId}-${r.id}">\u25b6</span></td>
             <td style="padding:2px 4px">${_reqBadge(r)}</td>
             <td class="mono dd-edit" data-mpn="${escAttr(r.primary_mpn || '')}" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
@@ -7265,8 +7285,12 @@ function _renderDrillDownTable(rfqId, targetPanel) {
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'firmware')" style="font-size:10px">${esc(r.firmware || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'packaging')" style="font-size:10px">${esc(r.packaging || '—')}</td>
-            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.notes ? 'color:var(--blue);font-weight:600' : ''}">${r.notes ? '📝 ' : ''}${esc(notesTrunc)}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.notes ? 'color:var(--blue);font-weight:600' : ''}">${r.notes ? '\ud83d\udcdd ' : ''}${esc(notesTrunc)}</td>
             <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDrillRow(${rfqId},${r.id})" title="Remove" style="font-size:10px;padding:1px 5px">\u2715</button></td>
+        </tr>`;
+        // Part-level expansion row
+        html += `<tr class="part-detail-row" id="pd-${rfqId}-${r.id}" style="display:${isExpanded ? 'table-row' : 'none'}">
+            <td colspan="13" style="padding:0;border-top:none"><div class="part-detail-panel" id="pdp-${rfqId}-${r.id}"></div></td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -7286,18 +7310,238 @@ function _renderDrillDownTable(rfqId, targetPanel) {
 // Renders a side-by-side layout when the "parts" sub-tab is active.
 // Uses existing .split-panel CSS classes. Loads offers data in parallel.
 async function _renderSplitPartsOffers(reqId, partsData, panel) {
-    // Create split layout: parts on left, combined sightings+offers on right
-    panel.innerHTML = `<div class="split-panel" style="max-height:500px">
-        <div class="split-panel-left" id="splitParts-${reqId}"></div>
-        <div class="split-panel-right" id="splitSourcing-${reqId}"><span style="font-size:11px;color:var(--muted);padding:12px;display:block">Loading sourcing\u2026</span></div>
-    </div>`;
-    // Render parts into the left pane
-    const partsPane = document.getElementById('splitParts-' + reqId);
-    if (partsPane) _renderDrillDownTable(reqId, partsPane);
-    // Render combined sightings + offers into the right pane
-    const sourcingPane = document.getElementById('splitSourcing-' + reqId);
-    if (sourcingPane) _renderSourcingDrillDown(reqId, sourcingPane);
+    // Full-width parts table — sightings removed (available on Sourcing page)
+    _renderDrillDownTable(reqId, panel);
 }
+
+// ── Part-level expand/collapse ──────────────────────────────────────────
+// Toggles the detail panel below a part row showing Offers/Notes/Tasks sub-tabs.
+// Called from the ▶ arrow in each part row.
+async function togglePartExpand(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const isOpen = _partExpandState[key];
+    const detailRow = document.getElementById('pd-' + key);
+    const arrow = document.getElementById('pa-' + key);
+    if (isOpen) {
+        _partExpandState[key] = false;
+        if (detailRow) detailRow.style.display = 'none';
+        if (arrow) arrow.classList.remove('open');
+        const partRow = document.getElementById('pr-' + key);
+        if (partRow) partRow.classList.remove('part-expanded');
+        return;
+    }
+    _partExpandState[key] = true;
+    if (detailRow) detailRow.style.display = 'table-row';
+    if (arrow) arrow.classList.add('open');
+    const partRow = document.getElementById('pr-' + key);
+    if (partRow) partRow.classList.add('part-expanded');
+    if (!_partActiveTab[key]) _partActiveTab[key] = 'offers';
+    const panel = document.getElementById('pdp-' + key);
+    if (panel) _renderPartDetail(reqId, requirementId, panel);
+}
+window.togglePartExpand = togglePartExpand;
+
+// Renders the part-level detail panel with sub-tab pills and content
+async function _renderPartDetail(reqId, requirementId, panel) {
+    const key = reqId + '-' + requirementId;
+    const activeTab = _partActiveTab[key] || 'offers';
+    const tabs = ['offers', 'notes', 'tasks'];
+    const tabLabels = { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' };
+    const pills = tabs.map(t =>
+        `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
+    ).join('');
+    panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><span style="font-size:11px;color:var(--muted)">Loading\u2026</span></div>`;
+    await _loadPartTab(reqId, requirementId, activeTab);
+}
+
+async function _switchPartTab(reqId, requirementId, tabName) {
+    const key = reqId + '-' + requirementId;
+    _partActiveTab[key] = tabName;
+    const panel = document.getElementById('pdp-' + key);
+    if (!panel) return;
+    panel.querySelectorAll('.part-tab').forEach(t => {
+        t.classList.toggle('on', t.textContent === { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' }[tabName]);
+    });
+    await _loadPartTab(reqId, requirementId, tabName);
+}
+window._switchPartTab = _switchPartTab;
+
+async function _loadPartTab(reqId, requirementId, tabName) {
+    const key = reqId + '-' + requirementId;
+    const cacheKey = key + '-' + tabName;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const cached = _partDetailCache[cacheKey];
+    if (cached) { _renderPartTab(reqId, requirementId, tabName, cached, contentEl); return; }
+    contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
+    try {
+        let data;
+        switch (tabName) {
+            case 'offers':
+                data = await apiFetch(`/api/requirements/${requirementId}/offers`);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${requirementId}/notes`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
+                break;
+        }
+        _partDetailCache[cacheKey] = data;
+        _renderPartTab(reqId, requirementId, tabName, data, contentEl);
+    } catch(e) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+    }
+}
+
+function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
+    switch (tabName) {
+        case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
+        case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
+        case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
+        default: contentEl.textContent = '';
+    }
+}
+
+// ── Part-level Offers renderer ──
+// Shows active and historical offers for a single part number
+function _renderPartOffers(reqId, requirementId, data, contentEl) {
+    const offers = Array.isArray(data) ? data : (data?.offers || []);
+    if (!offers.length) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet for this part</span>';
+        return;
+    }
+    let html = `<table class="dtbl" style="font-size:11px"><thead><tr>
+        <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Condition</th><th>Source</th><th>Status</th><th>Date</th><th>Notes</th>
+    </tr></thead><tbody>`;
+    for (const o of offers) {
+        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+        const status = o.status || 'pending';
+        const statusColor = status === 'accepted' ? 'var(--green)' : status === 'rejected' ? 'var(--red)' : 'var(--muted)';
+        const age = o.created_at ? _timeAgo(o.created_at) : '\u2014';
+        const isHistorical = o.is_historical || false;
+        html += `<tr style="${isHistorical ? 'opacity:0.7;font-style:italic' : ''}">
+            <td>${esc(o.vendor_name || '\u2014')}</td>
+            <td class="mono">${esc(o.mpn || '\u2014')}</td>
+            <td class="mono">${o.qty_available != null ? o.qty_available.toLocaleString() : '\u2014'}</td>
+            <td class="mono" style="color:var(--teal)">${price}</td>
+            <td>${esc(o.lead_time || '\u2014')}</td>
+            <td>${esc(o.condition || '\u2014')}</td>
+            <td style="font-size:10px">${esc(o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
+            <td style="color:${statusColor};font-weight:600;font-size:10px">${esc(status)}</td>
+            <td style="font-size:10px;color:var(--muted)">${age}</td>
+            <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    contentEl.innerHTML = html;
+}
+
+// ── Part-level Notes renderer ──
+// Shows notes on the requirement and notes on individual offers
+function _renderPartNotes(reqId, requirementId, data, contentEl) {
+    const notes = Array.isArray(data) ? data : (data?.notes || []);
+    const reqs = _ddReqCache[reqId] || [];
+    const req = reqs.find(x => x.id === requirementId);
+    let html = '';
+    // Requirement-level notes
+    html += `<div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Requirement Notes</div>
+        <div class="part-note-box dd-edit" onclick="event.stopPropagation();editDrillCell(this,${reqId},${requirementId},'notes')" style="min-height:32px;padding:6px 8px;background:var(--bg2);border-radius:4px;font-size:11px;cursor:pointer">${esc(req?.notes || 'Click to add notes\u2026')}</div>
+    </div>`;
+    // Offer notes
+    if (notes.length) {
+        html += '<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Offer Notes</div>';
+        for (const n of notes) {
+            html += `<div style="padding:4px 8px;margin-bottom:4px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--blue);font-size:11px">
+                <span style="font-weight:600">${esc(n.vendor_name || 'Offer')}</span>
+                <span style="color:var(--muted);margin-left:6px">${n.created_at ? _timeAgo(n.created_at) : ''}</span>
+                <div style="margin-top:2px">${esc(n.note || n.notes || n.text || '\u2014')}</div>
+            </div>`;
+        }
+    } else if (!req?.notes) {
+        html += '<span style="font-size:11px;color:var(--muted)">No notes yet</span>';
+    }
+    // Add note button
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartNote(${reqId},${requirementId})">+ Add Note</button>`;
+    contentEl.innerHTML = html;
+}
+
+// ── Part-level Tasks renderer ──
+// Shows tasks linked to this requirement
+function _renderPartTasks(reqId, requirementId, data, contentEl) {
+    const tasks = Array.isArray(data) ? data : (data?.tasks || []);
+    if (!tasks.length) {
+        contentEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">No tasks for this part</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:8px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+        return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+    for (const t of tasks) {
+        const done = t.status === 'done' || t.status === 'completed';
+        const statusIcon = done ? '\u2705' : t.status === 'in_progress' ? '\ud83d\udfe1' : '\u2b1c';
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:4px;font-size:11px${done ? ';opacity:0.6;text-decoration:line-through' : ''}">
+            <span>${statusIcon}</span>
+            <span style="flex:1">${esc(t.title || t.description || '\u2014')}</span>
+            <span style="font-size:10px;color:var(--muted)">${t.due_date ? _timeAgo(t.due_date) : ''}</span>
+        </div>`;
+    }
+    html += '</div>';
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+    contentEl.innerHTML = html;
+}
+
+// Placeholder for adding a note to a part — opens inline input
+function _addPartNote(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.part-note-input');
+    if (existing) { existing.focus(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <button class="btn btn-primary btn-sm" style="font-size:10px;align-self:flex-end" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.previousElementSibling.value)">Save</button>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('textarea').focus();
+}
+window._addPartNote = _addPartNote;
+
+async function _savePartNote(reqId, requirementId, text) {
+    if (!text?.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/notes`, { method: 'POST', body: { text: text.trim() } });
+        delete _partDetailCache[reqId + '-' + requirementId + '-notes'];
+        await _loadPartTab(reqId, requirementId, 'notes');
+    } catch(e) { logCatchError('_savePartNote', e); }
+}
+window._savePartNote = _savePartNote;
+
+// Placeholder for adding a task to a part
+function _addPartTask(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.part-task-input');
+    if (existing) { existing.focus(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<input class="part-task-input" placeholder="Task description\u2026" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+        <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartTask(${reqId},${requirementId},this.previousElementSibling.value)">Add</button>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('input').focus();
+}
+window._addPartTask = _addPartTask;
+
+async function _savePartTask(reqId, requirementId, title) {
+    if (!title?.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/tasks`, { method: 'POST', body: { title: title.trim() } });
+        delete _partDetailCache[reqId + '-' + requirementId + '-tasks'];
+        await _loadPartTab(reqId, requirementId, 'tasks');
+    } catch(e) { logCatchError('_savePartTask', e); }
+}
+window._savePartTask = _savePartTask;
 
 function editDrillCell(td, rfqId, reqId, field) {
     if (td.querySelector('input, select, textarea')) return;
@@ -9058,7 +9302,6 @@ function _renderReqRow(r) {
         const _rCnt = r.reply_count || 0;
         if (_oCnt > 0) {
             offCell = `<b>${_oCnt}</b>`;
-            if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
         } else if (_rCnt > 0) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
@@ -9119,7 +9362,6 @@ function _renderReqRow(r) {
         const _oCnt = r.offer_count || 0;
         if (_oCnt > 0) {
             offCell = `<b>${_oCnt}</b>`;
-            if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
         }
 
         // Coverage: offers vs total parts
@@ -15327,6 +15569,561 @@ function renderAiCard(opts) {
 }
 
 
+// ══════════════════════════════════════════════════════════════════════
+// RFQ WORKSPACE — Part-centric left/right layout
+// Left: part list with chip clusters + stepper
+// Right: persistent part transaction panel with tabbed views
+// ══════════════════════════════════════════════════════════════════════
+
+let _rfqActiveReqId = null;    // Currently expanded requisition
+let _rfqActivePartId = null;   // Currently selected part (requirement)
+let _rfqPanelTab = 'offers';   // Active right-panel tab
+let _rfqPartsData = [];        // Cached parts list for active req
+let _rfqPanelCache = {};       // { [tabName]: data }
+
+const _rfqSteps = ['sourced','offers','selected','quoted'];
+const _rfqStepLabels = { sourced:'Source', offers:'Offer', selected:'Select', quoted:'Quote' };
+
+function _rfqStepIndex(step) {
+    const map = { new:-1, sourced:0, offers:1, selected:2, quoted:3 };
+    return map[step] ?? -1;
+}
+
+/**
+ * Render the RFQ workspace inside the drill-down panel.
+ * Called when a requisition is expanded in the new unified view.
+ */
+async function rfqOpenWorkspace(reqId, container) {
+    _rfqActiveReqId = reqId;
+    _rfqActivePartId = null;
+    _rfqPanelCache = {};
+
+    container.innerHTML = `<div class="rfq-workspace" id="rfqWorkspace-${reqId}">
+        <div class="rfq-left" id="rfqLeft-${reqId}">
+            <table class="rfq-part-list"><thead><tr>
+                <th>MPN</th><th>Qty</th><th>Target</th><th>Offers</th><th>Progress</th>
+            </tr></thead><tbody id="rfqPartBody-${reqId}"></tbody></table>
+        </div>
+        <div class="rfq-right empty" id="rfqRight-${reqId}">
+            <span>Select a part to view details</span>
+        </div>
+    </div>`;
+
+    // Load parts
+    try {
+        const parts = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        _rfqPartsData = parts || [];
+        _rfqRenderPartList(reqId);
+        // Auto-select first part
+        if (_rfqPartsData.length > 0) {
+            rfqSelectPart(_rfqPartsData[0].id);
+        }
+    } catch(e) {
+        document.getElementById('rfqPartBody-' + reqId).innerHTML =
+            '<tr><td colspan="5" style="color:var(--red);padding:12px">Failed to load parts</td></tr>';
+    }
+}
+
+function _rfqRenderPartList(reqId) {
+    const tbody = document.getElementById('rfqPartBody-' + reqId);
+    if (!tbody) return;
+    if (_rfqPartsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-placeholder">No parts added yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = _rfqPartsData.map(p => _rfqPartRow(p)).join('');
+}
+
+function _rfqPartRow(p) {
+    const active = p.id === _rfqActivePartId ? ' active' : '';
+    const oc = p.offer_count || 0;
+    const sc = p.selected_count || 0;
+    const tc = p.task_count || 0;
+    const sightings = p.sighting_count || 0;
+
+    // Chip cluster
+    let chips = '';
+    if (oc > 0) chips += `<span class="rfq-chip rfq-chip-offer">${oc} Offer${oc>1?'s':''}</span>`;
+    if (sc > 0) chips += `<span class="rfq-chip rfq-chip-sel">${sc} Sel</span>`;
+    if (tc > 0) chips += `<span class="rfq-chip rfq-chip-task">${tc} Task${tc>1?'s':''}</span>`;
+    if (sightings > 0 && oc === 0) chips += `<span class="rfq-chip rfq-chip-hist">${sightings} Source${sightings>1?'s':''}</span>`;
+    if (!chips) chips = '<span class="rfq-chip rfq-chip-none">No data</span>';
+
+    // Progress stepper
+    const si = _rfqStepIndex(p.step || 'new');
+    let stepper = '<div class="rfq-stepper">';
+    _rfqSteps.forEach((s, i) => {
+        let cls = 'rfq-step';
+        if (i < si) cls += ' done';
+        else if (i === si) cls += ' current';
+        stepper += `<div class="${cls}" title="${_rfqStepLabels[s]}"></div>`;
+    });
+    const stepLabel = si >= 0 ? _rfqStepLabels[_rfqSteps[si]] : 'New';
+    stepper += `<span class="rfq-step-label">${stepLabel}</span></div>`;
+
+    const target = p.target_price ? '$' + Number(p.target_price).toFixed(4) : '\u2014';
+
+    return `<tr class="rfq-part-row${active}" onclick="rfqSelectPart(${p.id})" data-part-id="${p.id}">
+        <td><div class="rfq-mpn">${esc(p.primary_mpn)}</div>${p.brand ? '<div class="rfq-brand">' + esc(p.brand) + '</div>' : ''}</td>
+        <td class="mono" style="font-size:11px">${p.target_qty}</td>
+        <td class="mono" style="font-size:11px">${target}</td>
+        <td><div class="rfq-chips">${chips}</div></td>
+        <td>${stepper}</td>
+    </tr>`;
+}
+
+async function rfqSelectPart(partId) {
+    _rfqActivePartId = partId;
+    _rfqPanelCache = {};
+    _rfqPanelTab = 'offers';
+
+    // Update active row highlight
+    const ws = document.getElementById('rfqWorkspace-' + _rfqActiveReqId);
+    if (ws) {
+        ws.querySelectorAll('.rfq-part-row').forEach(r => {
+            r.classList.toggle('active', Number(r.dataset.partId) === partId);
+        });
+    }
+
+    const part = _rfqPartsData.find(p => p.id === partId);
+    if (!part) return;
+
+    const right = document.getElementById('rfqRight-' + _rfqActiveReqId);
+    if (!right) return;
+    right.className = 'rfq-right';
+
+    // Build panel header
+    const target = part.target_price ? '$' + Number(part.target_price).toFixed(4) : '';
+    const stepHtml = _rfqBuildStepper(part.step || 'new');
+
+    let flags = '';
+    if (part.offer_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-offer">Offers Available</span>';
+    if (part.selected_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-sel">' + part.selected_count + ' Selected</span>';
+    if (part.task_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-task">' + part.task_count + ' Open Tasks</span>';
+
+    right.innerHTML = `
+        <div class="rfq-panel-header">
+            <div class="rfq-panel-mpn">${esc(part.primary_mpn)}</div>
+            <div class="rfq-panel-meta">
+                ${part.brand ? '<span>' + esc(part.brand) + '</span>' : ''}
+                <span>Qty: <b>${part.target_qty}</b></span>
+                ${target ? '<span>Target: <b>' + target + '</b></span>' : ''}
+                ${stepHtml}
+            </div>
+            ${flags ? '<div class="rfq-panel-flags">' + flags + '</div>' : ''}
+        </div>
+        <div class="rfq-panel-tabs">
+            <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
+            <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
+            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+        </div>
+        <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
+
+    // Load default tab
+    await _rfqLoadTab('offers');
+}
+
+function _rfqBuildStepper(step) {
+    const si = _rfqStepIndex(step);
+    let html = '<div class="rfq-stepper" style="margin-left:8px">';
+    _rfqSteps.forEach((s, i) => {
+        let cls = 'rfq-step';
+        if (i < si) cls += ' done';
+        else if (i === si) cls += ' current';
+        html += `<div class="${cls}" title="${_rfqStepLabels[s]}"></div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
+async function rfqSwitchTab(tab) {
+    _rfqPanelTab = tab;
+    const right = document.getElementById('rfqRight-' + _rfqActiveReqId);
+    if (right) {
+        right.querySelectorAll('.rfq-panel-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === tab));
+    }
+    await _rfqLoadTab(tab);
+}
+
+async function _rfqLoadTab(tab) {
+    const body = document.getElementById('rfqPanelBody');
+    if (!body) return;
+    const partId = _rfqActivePartId;
+    if (!partId) return;
+
+    // Check cache
+    if (_rfqPanelCache[tab]) {
+        _rfqRenderTab(tab, _rfqPanelCache[tab], body);
+        return;
+    }
+
+    body.innerHTML = '<span class="loading-placeholder">Loading\u2026</span>';
+    try {
+        let data;
+        switch (tab) {
+            case 'offers':
+                data = await apiFetch(`/api/requirements/${partId}/offers`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${partId}/tasks`);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${partId}/notes`);
+                break;
+            case 'history':
+                data = await apiFetch(`/api/requirements/${partId}/history`);
+                break;
+            case 'sightings':
+                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                break;
+        }
+        // Abort if part changed while loading
+        if (_rfqActivePartId !== partId) return;
+        _rfqPanelCache[tab] = data;
+        _rfqRenderTab(tab, data, body);
+    } catch(e) {
+        if (_rfqActivePartId !== partId) return;
+        body.innerHTML = '<span class="error-placeholder">Failed to load</span>';
+    }
+}
+
+function _rfqRenderTab(tab, data, body) {
+    switch (tab) {
+        case 'offers': _rfqRenderOffers(data, body); break;
+        case 'tasks': _rfqRenderTasks(data, body); break;
+        case 'notes': _rfqRenderNotes(data, body); break;
+        case 'history': _rfqRenderHistory(data, body); break;
+        case 'sightings': _rfqRenderSightings(data, body); break;
+        default: body.innerHTML = '';
+    }
+}
+
+// ── OFFERS TAB ────────────────────────────────────────────────────────
+
+function _rfqRenderOffers(offers, body) {
+    if (!offers || offers.length === 0) {
+        body.innerHTML = '<div class="empty-placeholder">No offers yet for this part</div>';
+        return;
+    }
+
+    const part = _rfqPartsData.find(p => p.id === _rfqActivePartId);
+    const targetPrice = part?.target_price;
+
+    // Summary counts
+    const total = offers.length;
+    const exact = offers.filter(o => !o.is_substitute).length;
+    const subs = offers.filter(o => o.is_substitute).length;
+    const hist = offers.filter(o => o.is_historical).length;
+    const selected = offers.filter(o => o.selected_for_quote).length;
+
+    let html = `<div class="rfq-offer-toolbar">
+        <span style="font-size:12px;font-weight:600">${total} Offer${total>1?'s':''}</span>
+        <span class="rfq-chip rfq-chip-exact">${exact} Exact</span>
+        ${subs > 0 ? '<span class="rfq-chip rfq-chip-sub">' + subs + ' Sub</span>' : ''}
+        ${hist > 0 ? '<span class="rfq-chip rfq-chip-hist">' + hist + ' Hist</span>' : ''}
+        ${selected > 0 ? '<span class="rfq-chip rfq-chip-sel">' + selected + ' Selected</span>' : ''}
+        <span class="rfq-offer-summary">${selected > 0 ? selected + ' selected for quote' : ''}</span>
+    </div>`;
+
+    // Offer rows
+    offers.forEach(o => {
+        const selCls = o.selected_for_quote ? ' selected' : '';
+        const histCls = o.is_historical ? ' historical' : '';
+
+        // Price color vs target
+        let priceCls = '';
+        if (targetPrice && o.unit_price) {
+            const ratio = o.unit_price / targetPrice;
+            if (ratio <= 1) priceCls = ' under';
+            else if (ratio <= 1.15) priceCls = ' near';
+            else priceCls = ' over';
+        }
+
+        // Flags
+        let flags = '';
+        if (o.is_substitute) flags += '<span class="rfq-offer-flag rfq-offer-flag-sub">Sub</span>';
+        else flags += '<span class="rfq-offer-flag rfq-offer-flag-exact">Exact</span>';
+        if (o.is_historical) flags += '<span class="rfq-offer-flag rfq-offer-flag-hist">Hist</span>';
+
+        // Age badge
+        let ageBadge = '';
+        if (o.age_days > 14) ageBadge = '<span style="font-size:8px;color:var(--red);font-weight:600">STALE</span>';
+        else if (o.age_days > 7) ageBadge = '<span style="font-size:8px;color:var(--amber);font-weight:600">AGING</span>';
+
+        const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
+        const qty = o.qty_available || '\u2014';
+        const lead = o.lead_time || '\u2014';
+        const cond = o.condition || '';
+
+        html += `<div class="rfq-offer-row${selCls}${histCls}" data-offer-id="${o.id}">
+            <input type="checkbox" class="rfq-offer-check" ${o.selected_for_quote ? 'checked' : ''}
+                onclick="event.stopPropagation();rfqToggleOfferSelection(${o.id})"
+                title="Select for quote">
+            <div class="rfq-offer-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</div>
+            <div class="rfq-offer-flags">${flags}</div>
+            <div class="rfq-offer-price${priceCls}" title="${o.unit_price && targetPrice ? Math.round((o.unit_price/targetPrice-1)*100)+'% vs target' : ''}">${price}</div>
+            <div class="rfq-offer-detail" title="Qty available">${qty}</div>
+            <div class="rfq-offer-detail" title="Lead time">${lead}</div>
+            <div class="rfq-offer-detail" title="Condition">${cond}</div>
+            ${ageBadge}
+            ${o.notes ? '<span style="font-size:10px;color:var(--blue);cursor:pointer" title="' + escAttr(o.notes) + '">\ud83d\udcdd</span>' : ''}
+        </div>`;
+    });
+
+    body.innerHTML = html;
+}
+
+async function rfqToggleOfferSelection(offerId) {
+    try {
+        const res = await apiFetch(`/api/offers/${offerId}/toggle-quote-selection`, { method: 'POST' });
+        // Update cached data
+        if (_rfqPanelCache.offers) {
+            const offer = _rfqPanelCache.offers.find(o => o.id === offerId);
+            if (offer) {
+                offer.selected_for_quote = res.selected_for_quote;
+                offer.selected_at = res.selected_for_quote ? new Date().toISOString() : null;
+            }
+            _rfqRenderOffers(_rfqPanelCache.offers, document.getElementById('rfqPanelBody'));
+        }
+        // Update part list chip cluster
+        if (_rfqActivePartId) {
+            const part = _rfqPartsData.find(p => p.id === _rfqActivePartId);
+            if (part) {
+                part.selected_count = (_rfqPanelCache.offers || []).filter(o => o.selected_for_quote).length;
+                _rfqRenderPartList(_rfqActiveReqId);
+            }
+        }
+    } catch(e) {
+        console.error('Toggle selection failed:', e);
+    }
+}
+
+// ── TASKS TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderTasks(tasks, body) {
+    if (!tasks || tasks.length === 0) {
+        body.innerHTML = `<div class="empty-placeholder">No tasks for this part</div>
+            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqAddTask()">+ Add Task</button>`;
+        return;
+    }
+
+    let html = `<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length>1?'s':''}</span>
+        <button class="btn btn-sm" onclick="rfqAddTask()">+ Add Task</button>
+    </div>`;
+
+    tasks.forEach(t => {
+        const dept = t.task_type || 'general';
+        const deptLabel = dept === 'sourcing' ? 'Purchasing' : dept === 'sales' ? 'Sales' : 'General';
+        const deptCls = dept === 'sourcing' ? 'purchasing' : dept;
+        const statusCls = 'rfq-task-status-' + (t.status || 'todo');
+
+        let dueLine = '';
+        if (t.due_date) {
+            const d = new Date(t.due_date);
+            const now = new Date();
+            const overdue = d < now && t.status !== 'done';
+            dueLine = `<span class="${overdue ? 'task-overdue' : ''}">${overdue ? '\u26a0 ' : ''}Due ${fmtDate(t.due_date)}</span>`;
+        }
+
+        html += `<div class="rfq-task-item">
+            <div class="rfq-task-dept rfq-task-dept-${deptCls}">
+                <span style="font-weight:700;text-transform:uppercase">${deptLabel}</span>
+                <span style="font-weight:500;opacity:.85">${esc(t.assigned_to || t.created_by_name || '')}</span>
+            </div>
+            <div class="rfq-task-body">
+                <div class="rfq-task-title">${esc(t.title)}</div>
+                ${t.ai_risk_flag ? '<div class="task-risk-flag">\u26a0 ' + esc(t.ai_risk_flag) + '</div>' : ''}
+                <div class="rfq-task-meta">
+                    <span class="rfq-task-status ${statusCls}">${(t.status || 'todo').replace('_',' ')}</span>
+                    ${dueLine}
+                    ${t.source === 'ai' || t.source === 'system' ? '<span class="task-auto-tag">auto</span>' : ''}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    body.innerHTML = html;
+}
+
+async function rfqAddTask() {
+    const title = prompt('Task title:');
+    if (!title || !title.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${_rfqActivePartId}/tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title.trim() }),
+        });
+        delete _rfqPanelCache.tasks;
+        await _rfqLoadTab('tasks');
+        // Update part chip cluster
+        const part = _rfqPartsData.find(p => p.id === _rfqActivePartId);
+        if (part) {
+            part.task_count = (part.task_count || 0) + 1;
+            _rfqRenderPartList(_rfqActiveReqId);
+        }
+    } catch(e) {
+        console.error('Add task failed:', e);
+    }
+}
+
+// ── NOTES TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderNotes(data, body) {
+    if (!data) { body.innerHTML = '<div class="empty-placeholder">No notes</div>'; return; }
+
+    let html = '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
+    html += '<span style="font-size:12px;font-weight:600">Notes</span>';
+    html += '<button class="btn btn-sm" onclick="rfqAddNote()">+ Add Note</button></div>';
+
+    let hasNotes = false;
+
+    // Requirement notes (may contain multiple timestamped entries)
+    if (data.requirement_notes) {
+        hasNotes = true;
+        const lines = data.requirement_notes.split('\n').filter(l => l.trim());
+        lines.forEach(line => {
+            html += `<div class="rfq-note-item">
+                <div class="rfq-note-label rfq-note-label-req">Requirement Note</div>
+                <div class="rfq-note-text">${esc(line)}</div>
+            </div>`;
+        });
+    }
+
+    // Offer notes
+    if (data.notes && data.notes.length > 0) {
+        hasNotes = true;
+        data.notes.forEach(n => {
+            html += `<div class="rfq-note-item">
+                <div class="rfq-note-label rfq-note-label-offer">Offer Note \u2014 ${esc(n.vendor_name)}</div>
+                <div class="rfq-note-text">${esc(n.note)}</div>
+                <div class="rfq-note-meta">${n.created_at ? fmtDateTime(n.created_at) : ''}</div>
+            </div>`;
+        });
+    }
+
+    if (!hasNotes) html += '<div class="empty-placeholder">No notes yet</div>';
+    body.innerHTML = html;
+}
+
+async function rfqAddNote() {
+    const text = prompt('Add note:');
+    if (!text || !text.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${_rfqActivePartId}/notes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text.trim() }),
+        });
+        delete _rfqPanelCache.notes;
+        await _rfqLoadTab('notes');
+    } catch(e) {
+        console.error('Add note failed:', e);
+    }
+}
+
+// ── HISTORY TAB ───────────────────────────────────────────────────────
+
+function _rfqRenderHistory(events, body) {
+    if (!events || events.length === 0) {
+        body.innerHTML = '<div class="empty-placeholder">No history events</div>';
+        return;
+    }
+
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">History Timeline</div>';
+
+    events.forEach(ev => {
+        let icon = '', iconCls = '', text = '';
+        const time = ev.created_at ? `<div class="rfq-hist-time">${fmtDateTime(ev.created_at)}</div>` : '';
+
+        switch (ev.type) {
+            case 'change':
+                icon = '\u270f\ufe0f';
+                iconCls = 'rfq-hist-icon-change';
+                text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity)} <b>${esc(ev.field)}</b>`;
+                if (ev.old_value || ev.new_value) {
+                    text += `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(ev.old_value || '\u2014')} \u2192 ${esc(ev.new_value || '\u2014')}</div>`;
+                }
+                break;
+            case 'offer_created':
+                icon = '\ud83d\udcb0';
+                iconCls = 'rfq-hist-icon-offer';
+                text = `Offer from <b>${esc(ev.vendor_name)}</b>`;
+                if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
+                if (ev.qty_available) text += ` \u00d7 ${ev.qty_available}`;
+                break;
+            case 'rfq_sent':
+                icon = '\u2709\ufe0f';
+                iconCls = 'rfq-hist-icon-rfq';
+                text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name)}</b>`;
+                if (ev.status && ev.status !== 'sent') text += ` \u2014 ${ev.status}`;
+                break;
+            case 'task_done':
+                icon = '\u2705';
+                iconCls = 'rfq-hist-icon-task';
+                text = `Task completed: <b>${esc(ev.title)}</b>`;
+                break;
+            default:
+                icon = '\u2022';
+                text = JSON.stringify(ev);
+        }
+
+        html += `<div class="rfq-hist-item">
+            <div class="rfq-hist-icon ${iconCls}">${icon}</div>
+            <div class="rfq-hist-body">${text}${time}</div>
+        </div>`;
+    });
+
+    body.innerHTML = html;
+}
+
+// ── SIGHTINGS TAB ─────────────────────────────────────────────────────
+
+function _rfqRenderSightings(data, body) {
+    if (!data) { body.innerHTML = '<div class="empty-placeholder">No sightings data</div>'; return; }
+
+    // Filter sightings to current part only
+    const partId = _rfqActivePartId;
+    const partData = data[String(partId)];
+    if (!partData || !partData.sightings || partData.sightings.length === 0) {
+        body.innerHTML = '<div class="empty-placeholder">No sightings for this part. Run a search to find sources.</div>';
+        return;
+    }
+
+    const sightings = partData.sightings;
+    let html = `<div style="font-size:12px;font-weight:600;margin-bottom:8px">${sightings.length} Source${sightings.length>1?'s':''} Found</div>`;
+
+    // Compact sightings table
+    html += '<table class="dtbl" style="font-size:10px"><thead><tr>';
+    html += '<th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Cond</th><th>Lead</th><th>Source</th>';
+    html += '</tr></thead><tbody>';
+
+    sightings.slice(0, 100).forEach(s => {
+        const price = s.unit_price ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
+        const histFlag = s.is_historical || s.is_material_history ? ' <span style="font-size:8px;color:var(--muted);font-weight:600">HIST</span>' : '';
+        html += `<tr>
+            <td style="font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.vendor_name || '')}</td>
+            <td class="mono">${esc(s.mpn_matched || '')}</td>
+            <td class="mono">${s.qty_available || '\u2014'}</td>
+            <td class="mono">${price}</td>
+            <td>${esc(s.condition || '')}</td>
+            <td>${s.lead_time || s.lead_time_days ? (s.lead_time_days || '') + 'd' : '\u2014'}</td>
+            <td>${esc(s.source_type || '')}${histFlag}</td>
+        </tr>`;
+    });
+
+    html += '</tbody></table>';
+    if (sightings.length > 100) {
+        html += `<div style="font-size:10px;color:var(--muted);margin-top:4px">${sightings.length - 100} more sources not shown</div>`;
+    }
+
+    body.innerHTML = html;
+}
+
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
@@ -15428,4 +16225,6 @@ Object.assign(window, {
     _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
+    // RFQ workspace — part-centric layout
+    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
 });
