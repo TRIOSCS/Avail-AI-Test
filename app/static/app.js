@@ -15185,6 +15185,7 @@ function _intakeClose() {
     if (input) input.value = '';
 }
 
+const _intakeSubmit = () => _intakeConfirm();
 async function _intakeConfirm() {
     if (!_intakeParsedRows.length) return;
     const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement');
@@ -15423,7 +15424,7 @@ Object.assign(window, {
     // Context panel
     toggleContextPanel, switchCtxTab, bindContextPanel, unbindContextPanel, ctxSendMessage, ctxAttachFile,
     // Universal intake bar
-    showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit: _intakeConfirm,
+    showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit,
     _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
