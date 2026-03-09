@@ -857,6 +857,13 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    // Wire scroll-end detection on static table wraps so CSS fade-out hint disappears
+    document.querySelectorAll('.crm-table-wrap').forEach(el => {
+        el.addEventListener('scroll', () => {
+            const atEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2;
+            el.classList.toggle('scrolled-end', atEnd);
+        });
+    });
     initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
     // Enforce minimum date of today on the BID DUE field
     const _bidDueInput = document.getElementById('nrDeadline');
@@ -6719,6 +6726,14 @@ export async function toggleDrillDown(reqId) {
     drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === defaultTab));
     const panel = drow.querySelector('.dd-panel');
     if (!panel) return;
+    // Wire up scroll-end detection so CSS fade-out hint disappears at end
+    if (!panel._scrollEndWired) {
+        panel.addEventListener('scroll', () => {
+            const atEnd = panel.scrollLeft + panel.clientWidth >= panel.scrollWidth - 2;
+            panel.classList.toggle('scrolled-end', atEnd);
+        });
+        panel._scrollEndWired = true;
+    }
     await _loadDdSubTab(reqId, defaultTab, panel);
 }
 

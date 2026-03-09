@@ -338,3 +338,29 @@ class TestTasksSidebarRight:
         """loadMyTasks uses Promise.allSettled for resilience."""
         assert "Promise.allSettled" in app_js
         assert "Array.isArray(tasksRes.value)" in app_js
+
+
+# ── Scroll-End Detection ────────────────────────────────────────────────
+
+class TestScrollEndDetection:
+    """Verify scroll-end detection wires up for CSS fade-out hint removal."""
+
+    def test_scrolled_end_css_class_defined(self, styles_css):
+        """CSS defines .scrolled-end to remove mask-image."""
+        assert "scrolled-end" in styles_css
+        assert "mask-image:none" in styles_css
+
+    def test_dd_panel_scroll_listener_wired(self, app_js):
+        """dd-panel gets scroll listener for scrolled-end class toggle."""
+        assert "_scrollEndWired" in app_js
+        assert "scrolled-end" in app_js
+
+    def test_crm_table_wrap_scroll_listener(self, app_js):
+        """crm-table-wrap elements get scroll listeners on DOMContentLoaded."""
+        assert "crm-table-wrap" in app_js
+        assert "scrollLeft" in app_js
+
+    def test_scroll_end_calculation(self, app_js):
+        """Scroll-end detection uses scrollLeft + clientWidth >= scrollWidth."""
+        assert "scrollWidth" in app_js
+        assert "clientWidth" in app_js
