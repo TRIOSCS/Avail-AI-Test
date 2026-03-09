@@ -16,6 +16,7 @@ Depends on: app.models.config (ApiSource, ApiUsageLog), app.routers.sources (_ge
 Called by: app.scheduler (health_check_ping, health_check_deep jobs)
 """
 
+import re
 import time
 from datetime import datetime, timezone
 
@@ -27,6 +28,49 @@ from ..models.config import ApiSource, ApiUsageLog
 # Quota warning thresholds (percentage of monthly_quota)
 QUOTA_WARN_THRESHOLD = 80
 QUOTA_CRITICAL_THRESHOLD = 95
+
+# Regex patterns for common API key formats in error messages/URLs
+_API_KEY_RE = re.compile(
+    r"""(?x)
+    (?:api[_-]?key|apikey|token|secret|authorization|bearer|key|password|passwd)
+    \s*[=:]\s*
+    (['"]?)([A-Za-z0-9\-_./+]{8,})(\1)
+    """,
+    re.IGNORECASE,
+)
+_BARE_KEY_RE = re.compile(r"[A-Za-z0-9\-_]{20,}")
+
+
+def _redact_api_keys(text: str | None) -> str | None:
+    """Redact potential API keys from notification text to prevent key leakage."""
+    if not text:
+        return text
+    # Redact named key patterns (api_key=xxx, token=xxx, etc.)
+    def _mask_named(m):
+        prefix = m.group(0)[: m.start(2) - m.start(0)]
+        key = m.group(2)
+        quote = m.group(1) or ""
+        if len(key) <= 4:
+            return m.group(0)
+        masked = key[:3] + "***" + key[-3:]
+        return f"{prefix}{quote}{masked}{quote}"
+
+    result = _API_KEY_RE.sub(_mask_named, text)
+    # Redact long bare tokens that look like API keys in URLs
+    def _mask_bare(m):
+        key = m.group(0)
+        # Skip things that are clearly not keys (common words, hex hashes, etc.)
+        if len(key) > 100:
+            return key
+        return key[:3] + "***" + key[-3:]
+
+    # Only apply bare key masking to URL query parameters
+    if "?" in result or "&" in result:
+        parts = result.split("?", 1)
+        if len(parts) == 2:
+            parts[1] = _BARE_KEY_RE.sub(_mask_bare, parts[1])
+            result = "?".join(parts)
+    return result
 
 # Known good MPN for testing — universally available across all distributors
 DEEP_TEST_MPN = "LM317"
@@ -60,11 +104,12 @@ def _check_status_transition(
 ):
     """Fire notification when a source transitions from live to error."""
     if old_status == "live" and new_status == "error":
+        safe_error = _redact_api_keys(error_msg) if error_msg else "unknown"
         _notify_admins(
             db,
             event_type="api_source_down",
             title=f"API down: {source.display_name or source.name}",
-            body=f"{source.display_name or source.name} changed from live → error. Last error: {error_msg or 'unknown'}",
+            body=f"{source.display_name or source.name} changed from live → error. Last error: {safe_error}",
         )
         logger.warning("Source {} transitioned live → error, admin notification sent", source.name)
 
@@ -121,6 +166,18 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
         source.avg_response_ms = elapsed_ms
         source.calls_this_month = (source.calls_this_month or 0) + 1
         _check_quota_threshold(source, db)
+
+        # Log ping to ApiUsageLog so dashboard recent_checks reflects all checks
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="ping",
+            status_code=200,
+            response_ms=elapsed_ms,
+            success=True,
+            check_type="ping",
+        )
+        db.add(log)
         db.flush()
 
         return {"success": True, "elapsed_ms": elapsed_ms, "error": None}
@@ -135,6 +192,18 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
         source.last_ping_at = now
         source.error_count_24h = (source.error_count_24h or 0) + 1
         _check_status_transition(source, old_status, "error", db, error_msg)
+
+        # Log failed ping to ApiUsageLog
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="ping",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="ping",
+        )
+        db.add(log)
         db.flush()
 
         logger.warning("Health ping failed for {}: {}", source.name, error_msg)

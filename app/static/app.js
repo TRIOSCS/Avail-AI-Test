@@ -13948,11 +13948,8 @@ async function loadNotificationBadge() {
     const badge = document.getElementById('notifBadge');
     if (!badge) return;
     try {
-        const [salesData, sysData] = await Promise.all([
-            apiFetch('/api/sales/notifications/count').catch(() => ({count: 0})),
-            apiFetch('/api/notifications/unread-count').catch(() => ({count: 0})),
-        ]);
-        const count = (salesData.count || 0) + (sysData.count || 0);
+        const salesData = await apiFetch('/api/sales/notifications/count').catch(() => ({count: 0}));
+        const count = salesData.count || 0;
         badge.textContent = count;
         badge.style.display = count > 0 ? 'flex' : 'none';
     } catch { badge.style.display = 'none'; }

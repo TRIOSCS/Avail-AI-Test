@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ..http_client import http_redirect
 from ..models import VendorCard, VendorReview
 from ..services.credential_service import get_credential_cached
+from ..services.specialty_detector import commodity_slug_to_display
 from ..services.vendor_analysis_service import _analyze_vendor_materials
 from ..vendor_utils import normalize_vendor_name
 
@@ -207,15 +208,30 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
 
 
 def _load_entity_tags(entity_type: str, entity_id: int, db: Session) -> list[dict]:
-    """Load visible tags for any entity. Shared by vendor + company detail."""
+    """Load tags for any entity. Prefers visible tags, falls back to all tags.
+
+    Shared by vendor + company detail.
+    """
     from ..models.tags import EntityTag
 
+    # Try visible tags first
     tags = (
         db.query(EntityTag)
         .filter(EntityTag.entity_type == entity_type, EntityTag.entity_id == entity_id, EntityTag.is_visible.is_(True))
         .order_by(EntityTag.interaction_count.desc())
         .all()
     )
+
+    # Fall back to all tags if none are visible (strict two-gate threshold not yet met)
+    if not tags:
+        tags = (
+            db.query(EntityTag)
+            .filter(EntityTag.entity_type == entity_type, EntityTag.entity_id == entity_id)
+            .order_by(EntityTag.interaction_count.desc())
+            .limit(20)
+            .all()
+        )
+
     return [
         {
             "tag_name": et.tag.name,
@@ -345,7 +361,9 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         "response_velocity_hours": card.response_velocity_hours,
         "last_contact_at": card.last_contact_at.isoformat() if card.last_contact_at else None,
         "brand_tags": card.brand_tags or [],
-        "commodity_tags": card.commodity_tags or [],
+        "commodity_tags": [
+            commodity_slug_to_display(t) for t in (card.commodity_tags or [])
+        ],
         "material_tags_updated_at": card.material_tags_updated_at.isoformat()
         if card.material_tags_updated_at
         else None,

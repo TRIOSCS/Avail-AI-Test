@@ -76,6 +76,8 @@ async def requisition_counts(
 async def list_requisitions(
     q: str = "",
     status: str = "",
+    sort: str = Query("created_at", description="Column to sort by"),
+    order: str = Query("desc", description="Sort direction: asc or desc"),
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -84,14 +86,14 @@ async def list_requisitions(
     """List requisitions with filtering, search, and sourcing scores."""
     from ...cache.decorators import cached_endpoint
 
-    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "limit", "offset"])
-    def _fetch(q, status, limit, offset, user, db):
-        return _build_requisition_list(q, status, limit, offset, user, db)
+    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "sort", "order", "limit", "offset"])
+    def _fetch(q, status, sort, order, limit, offset, user, db):
+        return _build_requisition_list(q, status, sort, order, limit, offset, user, db)
 
-    return _fetch(q=q, status=status, limit=limit, offset=offset, user=user, db=db)
+    return _fetch(q=q, status=status, sort=sort, order=order, limit=limit, offset=offset, user=user, db=db)
 
 
-def _build_requisition_list(q, status, limit, offset, user, db):
+def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     """Build the requisitions list response (extracted for caching)."""
     # Single query with subquery counts — avoids N+1 lazy loads
     req_count_sq = (
@@ -331,10 +333,24 @@ def _build_requisition_list(q, status, limit, offset, user, db):
         )
     elif status == "archive":
         query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
+    elif status:
+        query = query.filter(Requisition.status == status)
     else:
         query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
 
-    rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
+    # Resolve sort column — whitelist to prevent SQL injection
+    allowed_sorts = {
+        "created_at": Requisition.created_at,
+        "name": Requisition.name,
+        "status": Requisition.status,
+        "customer_name": Requisition.customer_name,
+        "deadline": Requisition.deadline,
+        "updated_at": Requisition.updated_at,
+    }
+    sort_col = allowed_sorts.get(sort, Requisition.created_at)
+    sort_expr = sort_col.asc() if order.lower() == "asc" else sort_col.desc()
+
+    rows = query.order_by(sort_expr).offset(offset).limit(limit).all()
     total = (offset + len(rows)) if q.strip() else query.count()
     creator_names = {}
     creator_ids = {r.created_by for r, *_ in rows if r.created_by}
@@ -390,6 +406,32 @@ def _build_requisition_list(q, status, limit, offset, user, db):
         "total": total,
         "limit": limit,
         "offset": offset,
+    }
+
+
+@router.get("/api/requisitions/{req_id}")
+async def get_requisition(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get a single requisition by ID."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    return {
+        "id": req.id,
+        "name": req.name,
+        "status": req.status,
+        "customer_name": req.customer_name,
+        "customer_site_id": req.customer_site_id,
+        "created_by": req.created_by,
+        "created_at": req.created_at.isoformat() if req.created_at else None,
+        "updated_at": req.updated_at.isoformat() if req.updated_at else None,
+        "deadline": req.deadline,
+        "cloned_from_id": req.cloned_from_id,
+        "last_searched_at": req.last_searched_at.isoformat() if req.last_searched_at else None,
+        "requirement_count": len(req.requirements) if req.requirements else 0,
     }
 
 

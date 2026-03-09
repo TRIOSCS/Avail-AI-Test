@@ -18,18 +18,21 @@ router = APIRouter(prefix="/api/tags", tags=["tags"])
 @router.get("/")
 async def list_tags(
     tag_type: str | None = Query(None, description="Filter by 'brand' or 'commodity'"),
+    q: str | None = Query(None, description="Search tags by name (case-insensitive)"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
     _user=Depends(require_user),
 ):
-    """List all tags, optionally filtered by type."""
-    q = db.query(Tag)
+    """List all tags, optionally filtered by type and/or name search."""
+    query = db.query(Tag)
     if tag_type:
-        q = q.filter(Tag.tag_type == tag_type)
+        query = query.filter(Tag.tag_type == tag_type)
+    if q:
+        query = query.filter(Tag.name.ilike(f"%{q}%"))
 
-    total = q.count()
-    tags = q.order_by(Tag.name).offset(offset).limit(limit).all()
+    total = query.count()
+    tags = query.order_by(Tag.name).offset(offset).limit(limit).all()
 
     return {
         "items": [

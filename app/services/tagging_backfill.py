@@ -300,57 +300,65 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
 
 
 def purge_unknown_tags(db: Session, batch_size: int = 1000) -> dict:
-    """Purge 'Unknown' brand junk tags (confidence <= 0.30) that block reprocessing.
+    """Purge junk tags that block reprocessing: 'Unknown' brand and 'Miscellaneous' commodity.
 
-    These tags were created by early AI classification runs and prevent prefix/sighting
-    backfill from reprocessing those cards. Deletes MaterialTag rows and the 'Unknown'
-    Tag row if no references remain.
+    These tags were created by AI classification fallback paths and prevent prefix/sighting
+    backfill from reprocessing those cards. Deletes low-confidence MaterialTag rows and
+    the junk Tag rows if no references remain.
 
     Called by: app.routers.tagging_admin
-    Returns: {total_purged, tag_deleted}
+    Returns: {total_purged, tags_deleted}
     """
     from app.models.tags import Tag
 
-    # Find the "Unknown" brand tag
-    unknown_tag = db.query(Tag).filter(Tag.name == "Unknown", Tag.tag_type == "brand").first()
-    if not unknown_tag:
-        logger.info("Purge: no 'Unknown' brand tag found — nothing to do")
-        return {"total_purged": 0, "tag_deleted": False}
+    # Junk tags to purge: (name, tag_type)
+    junk_tags = [
+        ("Unknown", "brand"),
+        ("Miscellaneous", "commodity"),
+    ]
 
     total_purged = 0
+    tags_deleted = []
 
-    while True:
-        # Batch delete MaterialTag rows referencing the Unknown brand tag at low confidence
-        mt_ids = (
-            db.query(MaterialTag.id)
-            .filter(
-                MaterialTag.tag_id == unknown_tag.id,
-                MaterialTag.confidence <= 0.30,
+    for tag_name, tag_type in junk_tags:
+        junk_tag = db.query(Tag).filter(Tag.name == tag_name, Tag.tag_type == tag_type).first()
+        if not junk_tag:
+            logger.info(f"Purge: no '{tag_name}' {tag_type} tag found — skipping")
+            continue
+
+        tag_purged = 0
+        while True:
+            mt_ids = (
+                db.query(MaterialTag.id)
+                .filter(
+                    MaterialTag.tag_id == junk_tag.id,
+                    MaterialTag.confidence <= 0.30,
+                )
+                .limit(batch_size)
+                .all()
             )
-            .limit(batch_size)
-            .all()
-        )
 
-        if not mt_ids:
-            break
+            if not mt_ids:
+                break
 
-        ids = [row.id for row in mt_ids]
-        deleted = db.query(MaterialTag).filter(MaterialTag.id.in_(ids)).delete(synchronize_session="fetch")
-        db.commit()
-        total_purged += deleted
-        logger.info(f"Purge: deleted {total_purged} 'Unknown' junk tags so far")
+            ids = [row.id for row in mt_ids]
+            deleted = db.query(MaterialTag).filter(MaterialTag.id.in_(ids)).delete(synchronize_session="fetch")
+            db.commit()
+            tag_purged += deleted
+            logger.info(f"Purge: deleted {tag_purged} '{tag_name}' {tag_type} junk tags so far")
 
-    # Check if any MaterialTags still reference the Unknown tag
-    remaining = db.query(func.count(MaterialTag.id)).filter(MaterialTag.tag_id == unknown_tag.id).scalar() or 0
-    tag_deleted = False
-    if remaining == 0:
-        db.delete(unknown_tag)
-        db.commit()
-        tag_deleted = True
-        logger.info("Purge: deleted orphaned 'Unknown' brand Tag row")
+        total_purged += tag_purged
 
-    logger.info(f"Purge complete: {total_purged} junk tags removed, tag_deleted={tag_deleted}")
-    return {"total_purged": total_purged, "tag_deleted": tag_deleted}
+        # Check if any MaterialTags still reference the junk tag
+        remaining = db.query(func.count(MaterialTag.id)).filter(MaterialTag.tag_id == junk_tag.id).scalar() or 0
+        if remaining == 0:
+            db.delete(junk_tag)
+            db.commit()
+            tags_deleted.append(f"{tag_name}:{tag_type}")
+            logger.info(f"Purge: deleted orphaned '{tag_name}' {tag_type} Tag row")
+
+    logger.info(f"Purge complete: {total_purged} junk tags removed, tags_deleted={tags_deleted}")
+    return {"total_purged": total_purged, "tag_deleted": len(tags_deleted) > 0, "tags_deleted": tags_deleted}
 
 
 def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:

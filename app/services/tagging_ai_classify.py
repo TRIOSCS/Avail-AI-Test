@@ -116,7 +116,7 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
             }
         )
 
-        commodity_tag = get_or_create_commodity_tag(category, db)
+        commodity_tag = get_or_create_commodity_tag(category, db) if category and category != "Miscellaneous" else None
         if commodity_tag:  # pragma: no cover
             tags_to_apply.append(
                 {

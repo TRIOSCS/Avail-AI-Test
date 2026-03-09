@@ -167,6 +167,41 @@ COMMODITY_MAP = {
     "power_supplies": ["power supply", "psu", "ups", "inverter", "converter", "charger"],
 }
 
+# Slug → display name mapping for commodity tags stored on VendorCard/Company
+COMMODITY_DISPLAY_NAMES: dict[str, str] = {
+    "memory": "Memory",
+    "storage": "Storage",
+    "flash": "Flash",
+    "processors": "Processors",
+    "gpu": "GPUs",
+    "fpga": "FPGAs & PLDs",
+    "microcontrollers": "Microcontrollers",
+    "analog_ic": "Analog ICs",
+    "power_ic": "Power Management ICs",
+    "logic_ic": "Logic ICs",
+    "capacitors": "Capacitors",
+    "resistors": "Resistors",
+    "inductors": "Inductors",
+    "connectors": "Connectors",
+    "cables": "Cables & Wire",
+    "rf": "RF & Wireless",
+    "leds": "LEDs & Optoelectronics",
+    "sensors": "Sensors",
+    "relays": "Relays",
+    "motors": "Motors & Actuators",
+    "servers": "Servers & Systems",
+    "networking": "Networking",
+    "power_supplies": "Power Supplies",
+}
+
+
+def commodity_slug_to_display(slug: str) -> str:
+    """Convert a commodity slug (e.g. 'capacitors') to display name (e.g. 'Capacitors').
+
+    Falls back to title-casing the slug with underscores replaced by spaces.
+    """
+    return COMMODITY_DISPLAY_NAMES.get(slug, slug.replace("_", " ").title())
+
 # Flatten keywords for quick lookup
 _COMMODITY_KEYWORDS = {}
 for category, keywords in COMMODITY_MAP.items():
