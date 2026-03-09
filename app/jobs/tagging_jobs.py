@@ -121,12 +121,14 @@ async def _job_connector_enrichment():  # pragma: no cover
 @_traced_job
 async def _job_internal_boost():
     """Cross-check and boost tag confidence using internal data (no API calls). Every 4h."""
+    import asyncio
+
     from ..database import SessionLocal
     from ..services.enrichment import boost_confidence_internal
 
     db = SessionLocal()
     try:
-        result = boost_confidence_internal(db)
+        result = await asyncio.to_thread(boost_confidence_internal, db)
         logger.info(f"Internal confidence boost: {result}")
     except Exception:
         db.rollback()
@@ -138,12 +140,14 @@ async def _job_internal_boost():
 @_traced_job
 async def _job_prefix_backfill():
     """Run prefix lookup on untagged cards. Every 2h."""
+    import asyncio
+
     from ..database import SessionLocal
     from ..services.tagging_backfill import run_prefix_backfill
 
     db = SessionLocal()
     try:
-        result = run_prefix_backfill(db)
+        result = await asyncio.to_thread(run_prefix_backfill, db)
         logger.info(f"Prefix backfill: {result}")
     except Exception:
         db.rollback()
@@ -155,12 +159,14 @@ async def _job_prefix_backfill():
 @_traced_job
 async def _job_sighting_mining():
     """Mine sighting manufacturer data for untagged cards. Every 2h."""
+    import asyncio
+
     from ..database import SessionLocal
     from ..services.tagging_backfill import backfill_manufacturer_from_sightings
 
     db = SessionLocal()
     try:
-        result = backfill_manufacturer_from_sightings(db)
+        result = await asyncio.to_thread(backfill_manufacturer_from_sightings, db)
         logger.info(f"Sighting mining: {result}")
     except Exception:
         db.rollback()
