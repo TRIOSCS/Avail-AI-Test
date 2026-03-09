@@ -247,7 +247,7 @@
     </div>
 </aside>
 
-<!-- My Tasks Sidebar Widget (right side, open by default) -->
+<!-- My Tasks Sidebar Widget (right side, open by default) — legacy, hidden when context panel is active -->
 <div id="myTasksSidebar" class="my-tasks-sidebar">
     <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
@@ -262,12 +262,68 @@
     </div>
 </div>
 
+<!-- Context Panel — cross-app right-side panel for summary, thread, tasks, files, history -->
+<button id="ctxToggle" class="ctx-toggle" onclick="toggleContextPanel()" title="Context Panel" style="display:none">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="15" y1="9" x2="21" y2="9"/><line x1="15" y1="15" x2="21" y2="15"/></svg>
+    <span id="ctxToggleBadge" class="ctx-toggle-badge" style="display:none">0</span>
+</button>
+<aside id="ctxPanel" class="ctx-panel" role="complementary" aria-label="Context panel">
+    <div class="ctx-header">
+        <span class="ctx-header-title" id="ctxTitle">Context</span>
+        <button class="ctx-header-close" onclick="toggleContextPanel()" title="Close">&times;</button>
+    </div>
+    <div class="ctx-tabs" id="ctxTabs">
+        <button class="ctx-tab active" data-ctx-tab="summary" onclick="switchCtxTab('summary',this)">Summary</button>
+        <button class="ctx-tab" data-ctx-tab="thread" onclick="switchCtxTab('thread',this)">Thread</button>
+        <button class="ctx-tab" data-ctx-tab="tasks" onclick="switchCtxTab('tasks',this)">Tasks <span id="ctxTaskBadge" class="ctx-tab-badge" style="display:none">0</span></button>
+        <button class="ctx-tab" data-ctx-tab="files" onclick="switchCtxTab('files',this)">Files</button>
+        <button class="ctx-tab" data-ctx-tab="history" onclick="switchCtxTab('history',this)">History</button>
+    </div>
+    <div class="ctx-body" id="ctxBody">
+        <div class="ctx-empty" id="ctxPlaceholder">Select a requirement, material, or deal to see context here.</div>
+    </div>
+    <div class="thread-compose" id="ctxCompose" style="display:none">
+        <textarea class="thread-compose-input" id="ctxComposeInput" placeholder="Add a note or ask a question..." rows="2"></textarea>
+        <div class="thread-compose-bar">
+            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="ctxAttachFile()">Attach</button>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary btn-sm" style="font-size:11px" onclick="ctxSendMessage()">Send</button>
+        </div>
+    </div>
+</aside>
+
 <!-- Main content -->
 <main class="main">
     <div class="main-scroll">
 
     <!-- Smart notification bar — surfaces urgent items -->
     <div id="notifActionBar" class="notif-action-bar"></div>
+
+    <!-- Universal Intake Bar — paste parts, upload files, import data -->
+    <div class="intake-bar" id="intakeBar" style="display:none">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <input class="intake-bar-input" id="intakeInput" placeholder="Paste part numbers, vendor offers, or data..." oninput="_intakeInputChange(this.value)" onpaste="_intakePaste(event)" onkeydown="if(event.key==='Enter')_intakeSubmit()">
+        <div class="intake-bar-divider"></div>
+        <button class="intake-bar-btn" onclick="_intakeUpload()" title="Upload CSV/Excel">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload
+        </button>
+        <button class="intake-bar-btn" onclick="_intakeImportApi()" title="Import from API">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+            API
+        </button>
+        <input type="file" id="intakeFileInput" accept=".csv,.xlsx,.xls,.tsv,.txt" class="u-hidden" onchange="_intakeFileSelected(this)">
+    </div>
+    <!-- Intake AI Review Drawer — shows parsed preview of pasted/uploaded data -->
+    <div class="intake-drawer" id="intakeDrawer">
+        <div class="intake-drawer-header">
+            <span class="intake-drawer-title" id="intakeDrawerTitle">AI Review — 0 items detected</span>
+            <span style="flex:1"></span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="_intakeClose()">Cancel</button>
+            <button class="btn btn-primary btn-sm" style="font-size:10px" id="intakeConfirmBtn" onclick="_intakeConfirm()">Confirm &amp; Add</button>
+        </div>
+        <div class="intake-drawer-body" id="intakeDrawerBody"></div>
+    </div>
 
     <!-- VIEW: Requisition List (v8 — role-aware priority lanes) -->
     <div id="view-list">

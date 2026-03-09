@@ -1322,6 +1322,10 @@ export function showView(viewId) {
         const isListView = viewId === 'view-list';
         mobileToolbar.style.display = (isSettings || !isListView) ? 'none' : '';
     }
+    // Show intake bar on views where data entry is relevant
+    const intakeViews = ['view-list', 'view-materials', 'view-vendors'];
+    const intakeBar = document.getElementById('intakeBar');
+    if (intakeBar) intakeBar.style.display = intakeViews.includes(viewId) ? '' : 'none';
 }
 
 function showList() {
@@ -6717,7 +6721,19 @@ export async function toggleDrillDown(reqId) {
     } else {
         try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
     }
-    if (!opening) { delete _addRowActive[reqId]; return; }
+    if (!opening) {
+        delete _addRowActive[reqId];
+        // Unbind context panel when drill-down closes
+        if (_ctxBoundObject && _ctxBoundObject.type === 'requisition' && _ctxBoundObject.id === reqId) {
+            unbindContextPanel();
+        }
+        return;
+    }
+
+    // Bind context panel to this requisition
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    const ctxLabel = reqInfo ? (reqInfo.customer_display || reqInfo.name || 'Req #' + reqId) : 'Req #' + reqId;
+    bindContextPanel('requisition', reqId, ctxLabel);
 
     // Load default sub-tab
     const defaultTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
@@ -14753,6 +14769,499 @@ function _showAiModal(title, contentHtml) {
     openModal('aiModal');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// CONTEXT PANEL — cross-app right-side panel for AI summary, thread,
+// tasks, files, history. Replaces single-purpose Tasks sidebar when a
+// specific object (requirement, material, deal) is selected.
+// Called by: toggleContextPanel(), switchCtxTab(), view-specific code
+// Depends on: apiFetch, showToast, esc, fmtRelative
+// ═══════════════════════════════════════════════════════════════════════
+
+let _ctxOpen = false;
+let _ctxActiveTab = 'summary';
+let _ctxBoundObject = null; // { type: 'requisition'|'material'|'offer', id: number, label: string }
+const _ctxTabContent = {}; // { summary: html, thread: html, tasks: html, files: html, history: html }
+
+function toggleContextPanel() {
+    const panel = document.getElementById('ctxPanel');
+    const toggle = document.getElementById('ctxToggle');
+    if (!panel) return;
+    _ctxOpen = !_ctxOpen;
+    panel.classList.toggle('open', _ctxOpen);
+    toggle?.classList.toggle('shifted', _ctxOpen);
+    document.body.classList.toggle('ctx-open', _ctxOpen);
+    // Hide legacy tasks sidebar when context panel is active
+    const tasksSidebar = document.getElementById('myTasksSidebar');
+    if (tasksSidebar && _ctxOpen) {
+        tasksSidebar.style.display = 'none';
+        document.body.classList.remove('tasks-open');
+    } else if (tasksSidebar && !_ctxOpen) {
+        tasksSidebar.style.display = '';
+    }
+}
+
+function switchCtxTab(tabName, btn) {
+    _ctxActiveTab = tabName;
+    const tabs = document.getElementById('ctxTabs');
+    if (tabs) tabs.querySelectorAll('.ctx-tab').forEach(t => t.classList.toggle('active', t.dataset.ctxTab === tabName));
+    const compose = document.getElementById('ctxCompose');
+    if (compose) compose.style.display = (tabName === 'thread') ? '' : 'none';
+    _renderCtxTab(tabName);
+}
+
+function _renderCtxTab(tabName) {
+    const body = document.getElementById('ctxBody');
+    if (!body) return;
+    if (!_ctxBoundObject) {
+        body.innerHTML = '<div class="ctx-empty">Select a requirement, material, or deal to see context here.</div>';
+        return;
+    }
+    // If cached content exists, show it
+    if (_ctxTabContent[tabName]) {
+        body.innerHTML = _ctxTabContent[tabName];
+        return;
+    }
+    // Otherwise show loading and fetch
+    body.innerHTML = '<div class="ctx-empty"><div class="spinner" style="margin:0 auto"></div></div>';
+    _loadCtxTab(tabName);
+}
+
+async function _loadCtxTab(tabName) {
+    const obj = _ctxBoundObject;
+    if (!obj) return;
+    const body = document.getElementById('ctxBody');
+    if (!body) return;
+    try {
+        if (tabName === 'summary') {
+            _ctxTabContent.summary = _buildCtxSummary(obj);
+        } else if (tabName === 'thread') {
+            const activities = await apiFetch(`/api/activities?entity_type=${obj.type}&entity_id=${obj.id}&limit=30`).catch(() => []);
+            _ctxTabContent.thread = _buildCtxThread(Array.isArray(activities) ? activities : (activities?.items || []));
+        } else if (tabName === 'tasks') {
+            if (obj.type === 'requisition') {
+                const tasks = await apiFetch(`/api/requisitions/${obj.id}/tasks`).catch(() => []);
+                _ctxTabContent.tasks = _buildCtxTasks(Array.isArray(tasks) ? tasks : []);
+            } else {
+                _ctxTabContent.tasks = '<div class="ctx-empty">Tasks are available for requirements.</div>';
+            }
+        } else if (tabName === 'files') {
+            if (obj.type === 'requisition') {
+                const files = await apiFetch(`/api/requisition-attachments?requisition_id=${obj.id}`).catch(() => []);
+                _ctxTabContent.files = _buildCtxFiles(Array.isArray(files) ? files : []);
+            } else {
+                _ctxTabContent.files = '<div class="ctx-empty">No files attached.</div>';
+            }
+        } else if (tabName === 'history') {
+            const changes = await apiFetch(`/api/changelog?entity_type=${obj.type}&entity_id=${obj.id}&limit=20`).catch(() => []);
+            _ctxTabContent.history = _buildCtxHistory(Array.isArray(changes) ? changes : []);
+        }
+    } catch (e) {
+        _ctxTabContent[tabName] = '<div class="ctx-empty">Failed to load content.</div>';
+    }
+    // Only render if still on the same tab and object
+    if (_ctxActiveTab === tabName && _ctxBoundObject === obj) {
+        body.innerHTML = _ctxTabContent[tabName] || '<div class="ctx-empty">No content.</div>';
+    }
+}
+
+function _buildCtxSummary(obj) {
+    // Build AI summary card + follow-ups + blockers
+    let html = '';
+    html += `<div class="ctx-section">
+        <div class="ai-card">
+            <div class="ai-card-header">
+                <svg class="ai-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 2.75a4 4 0 0 0-1.09 6.89"/><path d="M12 8v14"/><path d="M5 18a7 7 0 0 1 14 0"/></svg>
+                <span class="ai-card-label">AI Summary</span>
+            </div>
+            <div class="ai-card-body" id="ctxAiSummaryBody">
+                <p style="color:var(--muted);font-style:italic">Generating summary...</p>
+            </div>
+        </div>
+    </div>`;
+    // Follow-ups section
+    html += `<div class="ctx-section">
+        <div class="ctx-section-title">Suggested Next Steps</div>
+        <div id="ctxFollowups">
+            <div class="followup-item">
+                <div class="followup-check" onclick="this.classList.toggle('done')"></div>
+                <div class="followup-body">
+                    <div class="followup-text">Review and respond to pending vendor offers</div>
+                    <div class="followup-meta"><span class="tag">Action</span> AI suggested</div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    // Open questions
+    html += `<div class="ctx-section">
+        <div class="ctx-section-title">Open Questions</div>
+        <div id="ctxQuestions" class="ctx-empty" style="padding:8px 0">No unresolved questions.</div>
+    </div>`;
+    return html;
+}
+
+function _buildCtxThread(activities) {
+    if (!activities.length) return '<div class="ctx-empty">No activity yet. Start a conversation.</div>';
+    let html = '';
+    for (const a of activities) {
+        const initials = (a.user_name || 'U').substring(0, 2).toUpperCase();
+        const tagMap = { question: 'question', decision: 'decision', blocker: 'blocker', note: 'action' };
+        const tag = tagMap[a.activity_type] ? `<span class="thread-item-tag ${tagMap[a.activity_type]}">${a.activity_type}</span>` : '';
+        html += `<div class="thread-item">
+            <div class="thread-item-header">
+                <div class="thread-item-avatar">${esc(initials)}</div>
+                <span class="thread-item-name">${esc(a.user_name || 'System')}</span>
+                <span class="thread-item-time">${a.created_at ? fmtRelative(a.created_at) : ''}</span>
+            </div>
+            <div class="thread-item-body">${tag}${esc(a.subject || a.body || a.notes || '')}</div>
+        </div>`;
+    }
+    return html;
+}
+
+function _buildCtxTasks(tasks) {
+    if (!tasks.length) return '<div class="ctx-empty">No tasks. Tasks from the drill-down will appear here.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Tasks</div>';
+    for (const t of tasks) {
+        const pri = t.priority === 'high' ? 'pri-high' : t.priority === 'medium' ? 'pri-med' : 'pri-low';
+        const done = t.status === 'done' ? 'done' : '';
+        html += `<div class="my-task-item ${pri}" style="margin-bottom:6px">
+            <div class="my-task-item-title" style="${done ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(t.title || t.name || '')}</div>
+            <div class="my-task-item-meta">${t.due_date ? 'Due ' + fmtRelative(t.due_date) : ''} ${t.assignee_name ? '· ' + esc(t.assignee_name) : ''}</div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _buildCtxFiles(files) {
+    if (!files.length) return '<div class="ctx-empty">No files attached.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Files</div>';
+    for (const f of files) {
+        const size = f.file_size ? (f.file_size > 1048576 ? (f.file_size / 1048576).toFixed(1) + ' MB' : (f.file_size / 1024).toFixed(0) + ' KB') : '';
+        html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.filename || f.name || 'file')}</span>
+            <span style="font-size:10px;color:var(--muted)">${size}</span>
+            ${f.url ? `<a href="${esc(f.url)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px">Open</a>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _buildCtxHistory(changes) {
+    if (!changes.length) return '<div class="ctx-empty">No change history recorded.</div>';
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Change History</div>';
+    for (const c of changes) {
+        html += `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:11px">
+            <div style="display:flex;justify-content:space-between"><span style="font-weight:500">${esc(c.field_name || c.action || 'change')}</span><span style="color:var(--muted)">${c.created_at ? fmtRelative(c.created_at) : ''}</span></div>
+            <div style="color:var(--muted);margin-top:2px">${c.old_value ? esc(String(c.old_value).substring(0, 50)) + ' → ' : ''}${c.new_value ? esc(String(c.new_value).substring(0, 50)) : ''}</div>
+            ${c.user_name ? `<div style="color:var(--muted);font-size:10px">${esc(c.user_name)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+// Bind context panel to a specific object (requirement, material, etc.)
+function bindContextPanel(type, id, label) {
+    _ctxBoundObject = { type, id, label };
+    // Clear cached tab content
+    Object.keys(_ctxTabContent).forEach(k => delete _ctxTabContent[k]);
+    // Update title
+    const title = document.getElementById('ctxTitle');
+    if (title) title.textContent = label || (type + ' #' + id);
+    // Show toggle button
+    const toggle = document.getElementById('ctxToggle');
+    if (toggle) toggle.style.display = '';
+    // Open panel if not already open
+    if (!_ctxOpen) toggleContextPanel();
+    // Render current tab
+    _renderCtxTab(_ctxActiveTab);
+}
+
+function unbindContextPanel() {
+    _ctxBoundObject = null;
+    Object.keys(_ctxTabContent).forEach(k => delete _ctxTabContent[k]);
+    const body = document.getElementById('ctxBody');
+    if (body) body.innerHTML = '<div class="ctx-empty">Select a requirement, material, or deal to see context here.</div>';
+    const title = document.getElementById('ctxTitle');
+    if (title) title.textContent = 'Context';
+}
+
+// Send message from thread compose
+async function ctxSendMessage() {
+    const input = document.getElementById('ctxComposeInput');
+    if (!input || !input.value.trim() || !_ctxBoundObject) return;
+    const msg = input.value.trim();
+    input.value = '';
+    try {
+        await apiFetch('/api/activities', {
+            method: 'POST',
+            body: { entity_type: _ctxBoundObject.type, entity_id: _ctxBoundObject.id, activity_type: 'note', notes: msg }
+        });
+        showToast('Note added', 'success');
+        // Refresh thread tab
+        delete _ctxTabContent.thread;
+        if (_ctxActiveTab === 'thread') _renderCtxTab('thread');
+    } catch (e) {
+        showToast('Failed to add note', 'error');
+    }
+}
+
+function ctxAttachFile() {
+    showToast('File attachment coming soon', 'info');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// UNIVERSAL INTAKE BAR — paste, upload, or API import of parts/offers.
+// Provides a single shared entry point for getting data into the system.
+// Called by: _intakeInputChange(), _intakePaste(), _intakeUpload(), etc.
+// Depends on: apiFetch, showToast, esc, currentReqId
+// ═══════════════════════════════════════════════════════════════════════
+
+let _intakeParsedRows = [];
+let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
+
+function showIntakeBar() {
+    const bar = document.getElementById('intakeBar');
+    if (bar) bar.style.display = '';
+}
+
+function hideIntakeBar() {
+    const bar = document.getElementById('intakeBar');
+    if (bar) bar.style.display = 'none';
+    _intakeClose();
+}
+
+function _intakeInputChange(value) {
+    // Multi-line paste triggers review
+    if (value.includes('\n') || value.includes('\t')) {
+        _intakeParseText(value);
+    }
+}
+
+function _intakePaste(event) {
+    const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (text.includes('\n') || text.includes('\t')) {
+        event.preventDefault();
+        const input = document.getElementById('intakeInput');
+        if (input) input.value = text;
+        _intakeParseText(text);
+    }
+}
+
+function _intakeParseText(text) {
+    // Parse tab/newline separated data into rows
+    const lines = text.trim().split('\n').filter(l => l.trim());
+    if (lines.length === 0) return;
+    _intakeParsedRows = [];
+    // Detect header row
+    const firstLine = lines[0].toLowerCase();
+    const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
+    const startIdx = hasHeader ? 1 : 0;
+    for (let i = startIdx; i < lines.length; i++) {
+        const cols = lines[i].split('\t');
+        if (cols.length === 0 || !cols[0].trim()) continue;
+        const row = {
+            mpn: cols[0]?.trim() || '',
+            qty: cols[1]?.trim() || '',
+            price: cols[2]?.trim() || '',
+            manufacturer: cols[3]?.trim() || '',
+            confidence: 'high',
+            type: _intakeTargetType,
+            duplicate: false
+        };
+        // Simple confidence heuristic
+        if (!row.mpn || row.mpn.length < 3) row.confidence = 'low';
+        else if (!row.qty && !row.price) row.confidence = 'med';
+        _intakeParsedRows.push(row);
+    }
+    _intakeRenderDrawer();
+}
+
+function _intakeRenderDrawer() {
+    const drawer = document.getElementById('intakeDrawer');
+    const body = document.getElementById('intakeDrawerBody');
+    const titleEl = document.getElementById('intakeDrawerTitle');
+    if (!drawer || !body) return;
+    drawer.classList.add('open');
+    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} items detected`;
+    let html = '';
+    for (let i = 0; i < _intakeParsedRows.length; i++) {
+        const r = _intakeParsedRows[i];
+        const confClass = r.confidence === 'high' ? 'high' : r.confidence === 'med' ? 'med' : 'low';
+        const confPct = r.confidence === 'high' ? '95' : r.confidence === 'med' ? '65' : '30';
+        html += `<div class="intake-row">
+            <div class="intake-row-confidence ${confClass}" title="Confidence: ${r.confidence}">${confPct}%</div>
+            <div class="intake-row-data">
+                <div class="intake-row-mpn">${esc(r.mpn)}</div>
+                <div class="intake-row-detail">Qty: ${esc(r.qty || '—')} · Price: ${esc(r.price || '—')} ${r.manufacturer ? '· ' + esc(r.manufacturer) : ''}</div>
+            </div>
+            <span class="intake-row-tag ${r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer'}">${r.type}</span>
+            ${r.duplicate ? '<span class="intake-row-tag dup">DUP</span>' : ''}
+            <div class="intake-row-actions">
+                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeChangeType(${i},this.value)">
+                    <option value="requirement" ${r.type === 'requirement' ? 'selected' : ''}>Requirement</option>
+                    <option value="sighting" ${r.type === 'sighting' ? 'selected' : ''}>Sighting</option>
+                    <option value="offer" ${r.type === 'offer' ? 'selected' : ''}>Offer</option>
+                </select>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 4px;color:var(--red)" onclick="_intakeRemoveRow(${i})" title="Remove">✕</button>
+            </div>
+        </div>`;
+    }
+    body.innerHTML = html;
+}
+
+function _intakeChangeType(idx, type) {
+    if (_intakeParsedRows[idx]) {
+        _intakeParsedRows[idx].type = type;
+    }
+}
+
+function _intakeRemoveRow(idx) {
+    _intakeParsedRows.splice(idx, 1);
+    _intakeRenderDrawer();
+}
+
+function _intakeClose() {
+    const drawer = document.getElementById('intakeDrawer');
+    if (drawer) drawer.classList.remove('open');
+    _intakeParsedRows = [];
+    const input = document.getElementById('intakeInput');
+    if (input) input.value = '';
+}
+
+async function _intakeConfirm() {
+    if (!_intakeParsedRows.length) return;
+    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement');
+    // For requirements, add them to the current requisition
+    if (reqRows.length && currentReqId) {
+        try {
+            for (const r of reqRows) {
+                await apiFetch(`/api/requisitions/${currentReqId}/requirements`, {
+                    method: 'POST',
+                    body: { primary_mpn: r.mpn, target_qty: r.qty || '1', target_price: r.price ? parseFloat(r.price) : null }
+                });
+            }
+            showToast(`${reqRows.length} requirement(s) added`, 'success');
+        } catch (e) {
+            showToast('Failed to add some requirements', 'error');
+        }
+    } else if (reqRows.length && !currentReqId) {
+        showToast('Open a requisition first to add requirements', 'warn');
+    }
+    // For sightings and offers, log them (placeholder for full implementation)
+    const otherRows = _intakeParsedRows.filter(r => r.type !== 'requirement');
+    if (otherRows.length) {
+        showToast(`${otherRows.length} sighting/offer items logged (intake processing)`, 'info');
+    }
+    _intakeClose();
+    // Refresh requirement list if we added any
+    if (reqRows.length && currentReqId && typeof loadRequirements === 'function') {
+        loadRequirements();
+    }
+}
+
+function _intakeUpload() {
+    const input = document.getElementById('intakeFileInput');
+    if (input) input.click();
+}
+
+function _intakeFileSelected(input) {
+    if (!input.files || !input.files[0]) return;
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        _intakeParseText(text);
+    };
+    // Read as text for CSV/TSV; for Excel, show toast about future support
+    if (file.name.match(/\.(xlsx|xls)$/i)) {
+        showToast('Excel import: use the existing Import Stock feature for now', 'info');
+        input.value = '';
+        return;
+    }
+    reader.readAsText(file);
+    input.value = '';
+}
+
+function _intakeImportApi() {
+    showToast('API import: use Search to pull live availability from supplier APIs', 'info');
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+// SHARED PAGE HELPERS — reusable HTML builders for object headers,
+// status strips, blocker strips, AI cards, and action bars.
+// Called by: view-specific rendering functions
+// Depends on: esc
+// ═══════════════════════════════════════════════════════════════════════
+
+function renderObjHeader(opts) {
+    // opts: { icon: svg, title, subtitle, actions: [{label, onclick, cls}] }
+    let actHtml = '';
+    if (opts.actions) {
+        actHtml = opts.actions.map(a =>
+            `<button class="btn ${a.cls || 'btn-ghost btn-sm'}" onclick="${a.onclick || ''}" ${a.title ? 'title="' + esc(a.title) + '"' : ''}>${a.label}</button>`
+        ).join('');
+    }
+    return `<div class="obj-header">
+        ${opts.icon ? `<div class="obj-header-icon">${opts.icon}</div>` : ''}
+        <div class="obj-header-info">
+            <div class="obj-header-title">${esc(opts.title || '')}</div>
+            ${opts.subtitle ? `<div class="obj-header-subtitle">${opts.subtitle}</div>` : ''}
+        </div>
+        <div class="obj-header-actions">${actHtml}</div>
+    </div>`;
+}
+
+function renderStatusStrip(items) {
+    // items: [{ value, label, cls: 'alert'|'warn'|'good'|'' }]
+    return `<div class="status-strip">${items.map(i =>
+        `<div class="status-strip-item ${i.cls || ''}">
+            <div class="status-strip-value">${i.value}</div>
+            <div class="status-strip-label">${esc(i.label)}</div>
+        </div>`
+    ).join('')}</div>`;
+}
+
+function renderBlockerStrip(text, actionLabel, actionOnclick) {
+    if (!text) return '';
+    return `<div class="blocker-strip">
+        <div class="blocker-strip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+        <span class="blocker-strip-text">${esc(text)}</span>
+        ${actionLabel ? `<button class="blocker-strip-action" onclick="${actionOnclick || ''}">${esc(actionLabel)}</button>` : ''}
+    </div>`;
+}
+
+function renderAiCard(opts) {
+    // opts: { label, body (html), confidence: 0-100, actions: [{label, onclick, primary}] }
+    let confHtml = '';
+    if (opts.confidence !== undefined) {
+        const cls = opts.confidence >= 80 ? 'high' : opts.confidence >= 50 ? 'med' : 'low';
+        confHtml = `<span class="ai-card-confidence">
+            <span class="ai-card-confidence-bar"><span class="ai-card-confidence-fill ${cls}" style="width:${opts.confidence}%"></span></span>
+            ${opts.confidence}%
+        </span>`;
+    }
+    let actHtml = '';
+    if (opts.actions) {
+        actHtml = `<div class="ai-card-actions">${opts.actions.map(a =>
+            `<button class="ai-card-action ${a.primary ? 'primary' : ''}" onclick="${a.onclick || ''}">${esc(a.label)}</button>`
+        ).join('')}${confHtml}</div>`;
+    }
+    return `<div class="ai-card">
+        <div class="ai-card-header">
+            <svg class="ai-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 2.75a4 4 0 0 0-1.09 6.89"/><path d="M12 8v14"/><path d="M5 18a7 7 0 0 1 14 0"/></svg>
+            <span class="ai-card-label">${esc(opts.label || 'AI Insight')}</span>
+        </div>
+        <div class="ai-card-body">${opts.body || ''}</div>
+        ${actHtml}
+    </div>`;
+}
+
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
@@ -14847,4 +15356,11 @@ Object.assign(window, {
     _toggleMobileSearch, _showMobileUserMenu,
     // Mobile req list — card redesign
     renderMobileReqList, mobileReqPillTap, _syncMobileReqPills, _renderReqCardMobile,
+    // Context panel
+    toggleContextPanel, switchCtxTab, bindContextPanel, unbindContextPanel, ctxSendMessage, ctxAttachFile,
+    // Universal intake bar
+    showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit: _intakeConfirm,
+    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
+    // Shared page helpers
+    renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
 });
