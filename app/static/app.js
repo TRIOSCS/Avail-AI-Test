@@ -4273,18 +4273,19 @@ async function _moveTask(reqId, taskId, newStatus) {
     }
 }
 
-async function _deleteTask(reqId, taskId) {
-    if (!confirm('Delete this task?')) return;
-    try {
-        await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId, { method: 'DELETE' });
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
-        var drow = document.getElementById('d-' + reqId);
-        var panel = drow ? drow.querySelector('.dd-panel') : null;
-        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-        if (typeof showToast === 'function') showToast('Task deleted', 'success');
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
-    }
+function _deleteTask(reqId, taskId) {
+    confirmAction('Delete Task', 'Are you sure you want to delete this task?', async function() {
+        try {
+            await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId, { method: 'DELETE' });
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+            var drow = document.getElementById('d-' + reqId);
+            var panel = drow ? drow.querySelector('.dd-panel') : null;
+            if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+            if (typeof showToast === 'function') showToast('Task deleted', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
+        }
+    }, { confirmLabel: 'Delete', danger: true });
 }
 
 function _showInlineTaskForm(reqId, panel) {
@@ -12543,6 +12544,8 @@ async function saveVendorContact() {
         label: _v('vcLabel').trim() || 'Sales',
     };
     if (!body.email) { showToast('Email is required', 'error'); return; }
+    if (window.isValidEmail && !window.isValidEmail(body.email)) { showToast('Invalid email format', 'error'); return; }
+    if (body.phone && window.isValidPhone && !window.isValidPhone(body.phone)) { showToast('Invalid phone number', 'error'); return; }
     try {
         const url = contactId
             ? `/api/vendors/${cardId}/contacts/${contactId}`

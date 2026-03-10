@@ -341,3 +341,108 @@ class TestEmailValidation:
     def test_isValidEmail_exported(self, crm_js: str) -> None:
         """isValidEmail is exposed to window scope."""
         assert "isValidEmail," in crm_js.split("Object.assign(window")[1]
+
+
+# ── Stale Modal Data Prevention ────────────────────────────────────────
+
+
+class TestStaleModalPrevention:
+    """Verify modals clear fields on open to prevent stale data."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_vendor_modal_clears_fields(self, crm_js: str) -> None:
+        """openNewVendorModal should clear all vendor contact fields."""
+        idx = crm_js.index("function openNewVendorModal()")
+        chunk = crm_js[idx:idx + 500]
+        assert "vcFullName" in chunk
+        assert "vcEmail" in chunk
+        assert "vcPhone" in chunk
+        assert "vcCardId" in chunk
+
+    def test_vendor_modal_resets_hidden_ids(self, crm_js: str) -> None:
+        """openNewVendorModal should reset hidden card/contact IDs."""
+        idx = crm_js.index("function openNewVendorModal()")
+        chunk = crm_js[idx:idx + 500]
+        assert "'vcCardId', 'value', ''" in chunk
+        assert "'vcContactId', 'value', ''" in chunk
+
+
+# ── Phone Validation ──────────────────────────────────────────────────
+
+
+class TestPhoneValidation:
+    """Verify phone format validation is applied."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    def test_isValidPhone_defined(self, crm_js: str) -> None:
+        """isValidPhone helper function exists."""
+        assert "function isValidPhone(phone)" in crm_js
+
+    def test_site_contact_validates_phone(self, crm_js: str) -> None:
+        """saveSiteContact validates phone format."""
+        assert "isValidPhone(data.phone)" in crm_js
+
+    def test_vendor_contact_validates_phone(self, app_js: str) -> None:
+        """saveVendorContact validates phone format."""
+        assert "isValidPhone(body.phone)" in app_js
+
+    def test_vendor_contact_validates_email(self, app_js: str) -> None:
+        """saveVendorContact validates email format."""
+        assert "isValidEmail(body.email)" in app_js
+
+    def test_isValidPhone_exported(self, crm_js: str) -> None:
+        """isValidPhone is exposed to window scope."""
+        assert "isValidPhone," in crm_js.split("Object.assign(window")[1]
+
+
+# ── Phone Input Type ──────────────────────────────────────────────────
+
+
+class TestPhoneInputType:
+    """Verify phone inputs have type=tel for mobile UX."""
+
+    @pytest.fixture
+    def template_html(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "templates" / "index.html"
+        return path.read_text()
+
+    def test_ec_phone_has_type_tel(self, template_html: str) -> None:
+        """Edit company phone input should have type=tel."""
+        assert 'id="ecPhone" type="tel"' in template_html
+
+
+# ── Styled Delete Confirmation ─────────────────────────────────────────
+
+
+class TestStyledDeleteConfirmation:
+    """Verify destructive actions use styled modals, not browser confirm()."""
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    def test_no_browser_confirm_in_delete_task(self, app_js: str) -> None:
+        """_deleteTask should NOT use browser confirm()."""
+        idx = app_js.index("function _deleteTask(")
+        chunk = app_js[idx:idx + 800]
+        assert "confirm(" not in chunk
+
+    def test_uses_confirmAction(self, app_js: str) -> None:
+        """_deleteTask should use confirmAction styled modal."""
+        idx = app_js.index("function _deleteTask(")
+        chunk = app_js[idx:idx + 800]
+        assert "confirmAction(" in chunk

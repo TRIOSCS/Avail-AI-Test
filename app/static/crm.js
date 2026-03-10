@@ -46,6 +46,11 @@ function marginColor(pct) {
 function isValidEmail(email) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
+// Basic phone check — at least 7 digits after stripping non-digits
+function isValidPhone(phone) {
+    const digits = phone.replace(/\D/g, '');
+    return digits.length >= 7;
+}
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
@@ -1660,7 +1665,12 @@ function openNewCompanyModal() {
 }
 
 function openNewVendorModal() {
-    openModal('vendorContactModal');
+    // Clear all fields to prevent stale data from previous add/edit
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('vcCardId', 'value', ''); _s('vcContactId', 'value', '');
+    ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _s('vcLabel', 'value', 'Sales');
+    openModal('vendorContactModal', 'vcEmail');
     const titleEl = document.getElementById('vendorContactModalTitle');
     if (titleEl) titleEl.textContent = 'Add New Vendor';
 }
@@ -4882,6 +4892,7 @@ async function saveSiteContact() {
     };
     if (!data.full_name) { showToast('Name is required', 'error'); return; }
     if (data.email && !isValidEmail(data.email)) { showToast('Invalid email format', 'error'); return; }
+    if (data.phone && !isValidPhone(data.phone)) { showToast('Invalid phone number', 'error'); return; }
     try {
         const url = contactId
             ? '/api/sites/' + siteId + '/contacts/' + contactId
@@ -8632,7 +8643,7 @@ Object.assign(window, {
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
-    calcMarginPct, isValidEmail, marginColor,
+    calcMarginPct, isValidEmail, isValidPhone, marginColor,
     applyMarkup, approveBuyPlan, approveBuyPlanV3,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, confirmPOV3,
