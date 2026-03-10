@@ -185,21 +185,21 @@ class TestAppJsQuoteTerms:
         path = Path(__file__).parent.parent / "app" / "static" / "app.js"
         return path.read_text()
 
-    def test_ddq_terms_is_select(self, app_js: str) -> None:
-        """ddqTerms should be a <select> element."""
-        assert "select id=\"ddqTerms-" in app_js or '<select id="ddqTerms' in app_js
+    def test_ddq_terms_uses_helper(self, app_js: str) -> None:
+        """ddqTerms should use _termsSelectHtml helper for rendering."""
+        assert "_termsSelectHtml('ddqTerms-'" in app_js or "_termsSelectHtml(\"ddqTerms-\"" in app_js
 
-    def test_ddq_ship_is_select(self, app_js: str) -> None:
-        """ddqShip should be a <select> element."""
-        assert "select id=\"ddqShip-" in app_js or '<select id="ddqShip' in app_js
+    def test_ddq_ship_uses_helper(self, app_js: str) -> None:
+        """ddqShip should use _termsSelectHtml helper for rendering."""
+        assert "_termsSelectHtml('ddqShip-'" in app_js or "_termsSelectHtml(\"ddqShip-\"" in app_js
 
-    def test_data_init_val_for_custom_values(self, app_js: str) -> None:
-        """Selects use data-init-val for setting values after render."""
-        assert "data-init-val" in app_js
+    def test_wire_terms_select_for_drafts(self, app_js: str) -> None:
+        """Draft quotes wire up _wireTermsSelect for payment/shipping."""
+        assert "_wireTermsSelect(" in app_js
 
-    def test_custom_value_injection(self, app_js: str) -> None:
-        """After innerHTML, custom values are injected as options."""
-        assert "querySelectorAll('select[data-init-val]')" in app_js
+    def test_terms_select_html_helper_defined(self, app_js: str) -> None:
+        """_termsSelectHtml helper function exists."""
+        assert "_termsSelectHtml" in app_js
 
 
 # ── Bulk Owner Dropdown ────────────────────────────────────────────────

@@ -142,18 +142,8 @@ def test_buyer_vendor_emails_with_data():
     assert item["priority"] == "high"
 
 
-def test_sales_deals_at_risk_includes_red_only():
-    """Only requisitions with risk_level=red appear in deals_at_risk."""
-    now = datetime.now(timezone.utc)
-
-    req_mock = MagicMock()
-    req_mock.id = 10
-    req_mock.name = "Risky Deal"
-    req_mock.created_at = now
-    req_mock.status = "open"
-
-    # Build a mock db where every .all() returns [req_mock] so deals_at_risk
-    # picks it up regardless of call ordering.
+def test_sales_deals_at_risk_is_placeholder():
+    """deals_at_risk section is a placeholder returning empty items."""
     db = MagicMock()
     query_mock = MagicMock()
     db.query.return_value = query_mock
@@ -162,17 +152,14 @@ def test_sales_deals_at_risk_includes_red_only():
     query_mock.distinct.return_value = query_mock
     query_mock.join.return_value = query_mock
     query_mock.limit.return_value = query_mock
-    query_mock.all.return_value = [req_mock]
+    query_mock.all.return_value = []
     query_mock.scalar.return_value = 0
 
     result = generate_briefing(db, user_id=1, role="sales")
 
     risk_section = next(s for s in result["sections"] if s["name"] == "deals_at_risk")
-    assert risk_section["count"] >= 1
-    # Find the item for our specific req
-    risk_items = [i for i in risk_section["items"] if i["entity_id"] == 10]
-    assert len(risk_items) == 1
-    assert risk_items[0]["priority"] == "high"
+    assert risk_section["count"] == 0
+    assert risk_section["items"] == []
 
 
 def test_section_error_returns_empty():

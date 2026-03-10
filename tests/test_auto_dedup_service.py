@@ -697,13 +697,12 @@ class TestDedupVendorsCoverageGaps:
 
         assert merged == 0
 
-    def test_cap_at_20_breaks_both_loops(self, db_session):
-        """Lines 117 and 119: both inner and outer loops break at 20 merges."""
+    def test_cap_at_50_breaks_both_loops(self, db_session):
+        """Lines 114 and 116: both inner and outer loops break at 50 merges."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        # Create >40 vendor pairs that will auto-merge (score>=98)
-        # "corp000 electronics inc" vs "corp000 electronics in" = score 98
-        for i in range(25):
+        # Create >50 vendor pairs that will auto-merge (score>=98)
+        for i in range(55):
             _make_vendor(
                 db_session,
                 f"Corp{i:03d} Electronics Inc",
@@ -719,4 +718,4 @@ class TestDedupVendorsCoverageGaps:
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
-        assert merged == 20
+        assert merged == 50
