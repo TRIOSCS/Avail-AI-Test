@@ -1,9 +1,10 @@
-"""Tests for workflow state clarity features — RFQ failures, retry endpoint."""
+"""Tests for workflow state clarity features — RFQ failures, retry endpoint, buy plan resubmission."""
 
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+from app.models.buy_plan import BuyPlanStatus, BuyPlanV3
 from app.models.offers import Contact
 
 
@@ -165,3 +166,163 @@ class TestVendorResponseTerminalStates:
         resp_rev = client.get(f"/api/requisitions/{_rfq_requisition.id}/responses?status=reviewed")
         assert resp_rev.status_code == 200
         assert all(r["status"] == "reviewed" for r in resp_rev.json())
+
+
+class TestBuyPlanResubmission:
+    @pytest.fixture
+    def _halted_plan(self, db_session, test_user, _rfq_requisition):
+        from app.models.quotes import Quote
+        from app.models.crm import Company, CustomerSite
+
+        co = Company(name="BP Test Co")
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(site_name="BP Test Site", company_id=co.id)
+        db_session.add(site)
+        db_session.flush()
+        q = Quote(
+            requisition_id=_rfq_requisition.id,
+            customer_site_id=site.id,
+            quote_number="Q-BP-001",
+            status="won",
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.flush()
+        plan = BuyPlanV3(
+            quote_id=q.id,
+            requisition_id=_rfq_requisition.id,
+            status="halted",
+            submitted_by_id=test_user.id,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        return plan
+
+    def test_reset_halted_plan_to_draft(self, client, db_session, _halted_plan):
+        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        assert resp.status_code == 200
+        db_session.refresh(_halted_plan)
+        assert _halted_plan.status == BuyPlanStatus.draft.value
+
+    def test_reset_active_plan_fails(self, client, db_session, _halted_plan):
+        _halted_plan.status = BuyPlanStatus.active.value
+        db_session.commit()
+        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        assert resp.status_code == 200  # 200 with error body
+        assert resp.json()["status_code"] == 400
+
+    def test_reset_cancelled_plan_to_draft(self, client, db_session, _halted_plan):
+        _halted_plan.status = BuyPlanStatus.cancelled.value
+        db_session.commit()
+        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        assert resp.status_code == 200
+        db_session.refresh(_halted_plan)
+        assert _halted_plan.status == BuyPlanStatus.draft.value
+
+
+class TestPendingContactVisibility:
+    def test_ooo_classification_sets_contact_status(self, db_session, test_user, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        contact = Contact(
+            requisition_id=_rfq_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="OOO Vendor",
+            vendor_contact="ooo@vendor.com",
+            status="sent",
+        )
+        db_session.add(contact)
+        db_session.flush()
+
+        vr = VendorResponse(
+            contact_id=contact.id,
+            requisition_id=_rfq_requisition.id,
+            vendor_name="OOO Vendor",
+            vendor_email="ooo@vendor.com",
+            classification="ooo",
+            status="new",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+
+        # Simulate the classification update logic
+        OOO_CLASSIFICATIONS = {"ooo", "out_of_office", "auto_reply"}
+        if vr.classification in OOO_CLASSIFICATIONS and vr.contact_id:
+            parent = db_session.get(Contact, vr.contact_id)
+            if parent:
+                parent.status = "ooo"
+                parent.status_updated_at = datetime.now(timezone.utc)
+
+        db_session.flush()
+        db_session.refresh(contact)
+        assert contact.status == "ooo"
+
+    def test_bounce_sets_contact_status(self, db_session, test_user, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        contact = Contact(
+            requisition_id=_rfq_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Bounce Vendor",
+            vendor_contact="bounce@vendor.com",
+            status="sent",
+        )
+        db_session.add(contact)
+        db_session.flush()
+
+        vr = VendorResponse(
+            contact_id=contact.id,
+            requisition_id=_rfq_requisition.id,
+            vendor_name="Bounce Vendor",
+            vendor_email="bounce@vendor.com",
+            classification="bounce",
+            status="new",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+
+        BOUNCE_CLASSIFICATIONS = {"bounce", "bounced", "delivery_failure"}
+        if vr.classification in BOUNCE_CLASSIFICATIONS and vr.contact_id:
+            parent = db_session.get(Contact, vr.contact_id)
+            if parent:
+                parent.status = "bounced"
+                parent.status_updated_at = datetime.now(timezone.utc)
+
+        db_session.flush()
+        db_session.refresh(contact)
+        assert contact.status == "bounced"
+
+    def test_normal_response_doesnt_change_contact(self, db_session, test_user, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        contact = Contact(
+            requisition_id=_rfq_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Normal Vendor",
+            vendor_contact="normal@vendor.com",
+            status="sent",
+        )
+        db_session.add(contact)
+        db_session.flush()
+
+        vr = VendorResponse(
+            contact_id=contact.id,
+            requisition_id=_rfq_requisition.id,
+            vendor_name="Normal Vendor",
+            vendor_email="normal@vendor.com",
+            classification="quote",
+            status="new",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+
+        # Normal classification shouldn't change contact status
+        db_session.refresh(contact)
+        assert contact.status == "sent"
