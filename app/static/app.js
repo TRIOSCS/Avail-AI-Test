@@ -6632,7 +6632,6 @@ async function ddMarkQuoteResult(reqId, result) {
                 const markResult = await apiFetch('/api/quotes/' + q.id + '/result', {
                     method: 'POST', body: { result, reason }
                 });
-                showToast('Quote marked as ' + result, 'success');
                 notifyStatusChange(markResult);
                 const reqInfo = _reqListData.find(r => r.id === reqId);
                 if (reqInfo) reqInfo.quote_status = result;
@@ -6644,6 +6643,16 @@ async function ddMarkQuoteResult(reqId, result) {
                     if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
                 }
                 if (window._refreshCustPipeline) window._refreshCustPipeline();
+                showToast('Quote marked as lost', 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+                    try {
+                        await apiFetch('/api/quotes/' + q.id + '/result', {
+                            method: 'POST', body: { result: 'sent', reason: '' }
+                        });
+                        showToast('Reverted to sent', 'success');
+                        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+                        loadRequisitions();
+                    } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+                }}});
             } catch (e) {
                 showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
             }
@@ -9411,9 +9420,19 @@ async function _batchArchiveSelected() {
         const data = await apiFetch('/api/requisitions/batch-archive', {
             method: 'PUT', body: { ids }
         });
-        showToast(`Archived ${data.archived_count} requisition${data.archived_count !== 1 ? 's' : ''}`, 'success');
+        const cnt = data.archived_count;
         _batchSelectedReqs.clear();
         loadRequisitions();
+        showToast(`Archived ${cnt} requisition${cnt !== 1 ? 's' : ''}`, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+            try {
+                // Unarchive each by toggling archive back
+                for (const id of ids) {
+                    await apiFetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
+                }
+                showToast(`Restored ${ids.length} requisition${ids.length !== 1 ? 's' : ''}`, 'success');
+                loadRequisitions();
+            } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+        }}});
     } catch (e) {
         showToast('Batch archive failed: ' + e.message, 'error');
     }
@@ -10590,7 +10609,6 @@ async function archiveFromList(reqId) {
         try {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
-            showToast(wasRestored ? 'Restored to active' : 'Archived');
             _reqListData = _reqListData.filter(r => r.id !== reqId);
             const drow = document.getElementById('d-' + reqId);
             if (drow) drow.remove();
@@ -10600,6 +10618,14 @@ async function archiveFromList(reqId) {
             if (row) row.remove();
             _updateToolbarStats();
             renderReqList();
+            const msg = wasRestored ? 'Restored to active' : 'Archived';
+            showToast(msg, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+                try {
+                    await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+                    showToast('Undone', 'success');
+                    loadRequisitions();
+                } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+            }}});
         } catch (e) { showToast('Couldn\'t restore — ' + friendlyError(e, 'please try again'), 'error'); }
         return;
     }
@@ -10637,10 +10663,8 @@ async function _archiveWithOutcome(reqId, outcome) {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({outcome})
             });
-            showToast('Marked as ' + outcome + ' and archived');
         } else {
             await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
-            showToast('Archived');
         }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
         const drow = document.getElementById('d-' + reqId);
@@ -10651,6 +10675,14 @@ async function _archiveWithOutcome(reqId, outcome) {
         if (row) row.remove();
         _updateToolbarStats();
         renderReqList();
+        const label = outcome ? 'Marked as ' + outcome + ' and archived' : 'Archived';
+        showToast(label, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+            try {
+                await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+                showToast('Restored', 'success');
+                loadRequisitions();
+            } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+        }}});
     } catch (e) { showToast('Couldn\'t archive — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
