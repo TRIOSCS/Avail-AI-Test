@@ -3118,8 +3118,8 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 
 /* Layout container */
 .rfq-workspace { display:flex; gap:0; height:calc(100vh - 160px); min-height:400px; }
-.rfq-left { flex:1; min-width:0; overflow-y:auto; border-right:1px solid var(--border); }
-.rfq-right { width:480px; min-width:380px; max-width:560px; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; }
+.rfq-left { flex:1; min-width:0; max-width:420px; overflow-y:auto; border-right:1px solid var(--border); }
+.rfq-right { flex:2; min-width:0; display:flex; flex-direction:column; background:var(--surface); overflow:hidden; }
 .rfq-right.empty { display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:12px; }
 
 /* Left-side part list */
@@ -3187,6 +3187,12 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 .rfq-ocard-price.over { color:var(--red); }
 .rfq-ocard-price.near { color:var(--amber); }
 
+.rfq-ocard-mpn-line { font-size:11px; margin-top:4px; color:var(--fg2); }
+.rfq-ocard-mpn { font-family:'JetBrains Mono',monospace; font-weight:600; font-size:11px; color:var(--text); }
+.rfq-ocard-mfr { font-size:11px; color:var(--muted); }
+.rfq-ocard-chip-status { background:var(--amber-bg,#fff8e1); color:var(--amber,#f59e0b); font-weight:600; }
+.rfq-ocard-chip-expiring { background:#fff8e1; color:#d97706; font-weight:600; }
+.rfq-ocard-chip-expired { background:#fee2e2; color:#dc2626; font-weight:600; }
 .rfq-ocard-details { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
 .rfq-ocard-chip { font-size:11px; padding:2px 7px; border-radius:3px; background:var(--bg2); color:var(--fg2);
   white-space:nowrap; line-height:1.4; }
@@ -3248,7 +3254,8 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 
 /* Responsive */
 @media (max-width:1024px) {
-  .rfq-right { width:360px; min-width:300px; }
+  .rfq-left { max-width:320px; }
+  .rfq-right { flex:2; min-width:0; }
 }
 @media (max-width:768px) {
   .rfq-workspace { flex-direction:column; height:auto; }

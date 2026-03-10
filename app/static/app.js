@@ -16276,7 +16276,16 @@ function _rfqRenderOffers(offers, body) {
         const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
         const currency = o.currency && o.currency !== 'USD' ? ' ' + esc(o.currency) : '';
 
-        // Detail chips — only show what's available
+        // MPN + manufacturer line (show when offered MPN differs or manufacturer exists)
+        let mpnLine = '';
+        if (o.mpn || o.manufacturer) {
+            const mpnParts = [];
+            if (o.mpn) mpnParts.push('<span class="rfq-ocard-mpn">' + esc(o.mpn) + '</span>');
+            if (o.manufacturer) mpnParts.push('<span class="rfq-ocard-mfr">' + esc(o.manufacturer) + '</span>');
+            mpnLine = '<div class="rfq-ocard-mpn-line">' + mpnParts.join(' &middot; ') + '</div>';
+        }
+
+        // Detail chips — show all available offer info
         let details = [];
         if (o.qty_available) details.push('<span class="rfq-ocard-chip" title="Qty available"><b>' + Number(o.qty_available).toLocaleString() + '</b> avail</span>');
         if (o.condition) details.push('<span class="rfq-ocard-chip" title="Condition">' + esc(o.condition) + '</span>');
@@ -16287,8 +16296,18 @@ function _rfqRenderOffers(offers, body) {
         if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">' + esc(o.warranty) + '</span>');
         if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">' + esc(o.country_of_origin) + '</span>');
         if (o.firmware) details.push('<span class="rfq-ocard-chip" title="Firmware">FW: ' + esc(o.firmware) + '</span>');
+        if (o.hardware_code) details.push('<span class="rfq-ocard-chip" title="Hardware code">HW: ' + esc(o.hardware_code) + '</span>');
+        if (o.valid_until) details.push('<span class="rfq-ocard-chip" title="Valid until">Valid: ' + esc(o.valid_until) + '</span>');
+        if (o.status && o.status !== 'active') details.push('<span class="rfq-ocard-chip rfq-ocard-chip-status" title="Offer status">' + esc(o.status.toUpperCase()) + '</span>');
+        if (o.expires_at) {
+            const expDate = new Date(o.expires_at);
+            const expDays = Math.round((expDate - Date.now()) / 86400000);
+            if (expDays <= 3 && expDays >= 0) details.push('<span class="rfq-ocard-chip rfq-ocard-chip-expiring" title="Expires ' + expDate.toLocaleDateString() + '">Expires ' + (expDays === 0 ? 'today' : 'in ' + expDays + 'd') + '</span>');
+            else if (expDays < 0) details.push('<span class="rfq-ocard-chip rfq-ocard-chip-expired" title="Expired ' + expDate.toLocaleDateString() + '">Expired</span>');
+        }
+        if (o.attribution_status && o.attribution_status !== 'active') details.push('<span class="rfq-ocard-chip" title="Attribution">' + esc(o.attribution_status) + '</span>');
 
-        // Meta line — source, age, entered by
+        // Meta line — source, age, entered by, historical source
         let meta = [];
         if (o.source && o.source !== 'manual') meta.push('via ' + esc(o.source));
         if (o.entered_by) meta.push('by ' + esc(o.entered_by));
@@ -16299,6 +16318,8 @@ function _rfqRenderOffers(offers, body) {
             else if (o.age_days < 30) meta.push(o.age_days + 'd ago');
             else meta.push(d.toLocaleDateString());
         }
+        if (o.from_requisition_id) meta.push('from RFQ #' + o.from_requisition_id);
+        if (o.selected_at) meta.push('selected ' + new Date(o.selected_at).toLocaleDateString());
 
         html += `<div class="rfq-ocard${selCls}${histCls}" data-offer-id="${o.id}">
             <div class="rfq-ocard-top">
@@ -16310,6 +16331,7 @@ function _rfqRenderOffers(offers, body) {
                 ${ageBadge}
                 <div class="rfq-ocard-price${priceCls}" title="${priceTooltip}">${price}${currency}</div>
             </div>
+            ${mpnLine}
             <div class="rfq-ocard-details">${details.join('')}</div>
             ${meta.length || o.notes ? '<div class="rfq-ocard-meta">' + meta.join(' \u00b7 ') + (o.notes ? ' <span class="rfq-ocard-note" title="' + escAttr(o.notes) + '">\ud83d\udcdd ' + esc(o.notes.length > 40 ? o.notes.slice(0, 40) + '\u2026' : o.notes) + '</span>' : '') + '</div>' : ''}
         </div>`;
