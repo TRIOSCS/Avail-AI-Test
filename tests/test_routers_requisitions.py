@@ -503,6 +503,48 @@ def test_bulk_archive(client, db_session, test_user):
     assert data["archived_count"] >= 2
 
 
+def test_batch_archive_by_ids(client, db_session, test_user):
+    """PUT /api/requisitions/batch-archive archives specific reqs by ID."""
+    from app.models import Requisition
+
+    r1 = Requisition(name="BA-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="BA-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r3 = Requisition(name="BA-3", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add_all([r1, r2, r3])
+    db_session.commit()
+
+    resp = client.put("/api/requisitions/batch-archive", json={"ids": [r1.id, r2.id]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["archived_count"] == 2
+    # r3 should still be open
+    db_session.refresh(r3)
+    assert r3.status == "open"
+
+
+def test_batch_assign(client, db_session, test_user):
+    """PUT /api/requisitions/batch-assign assigns owner to specific reqs."""
+    from app.models import Requisition
+
+    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add_all([r1, r2])
+    db_session.commit()
+
+    resp = client.put("/api/requisitions/batch-assign", json={"ids": [r1.id, r2.id], "owner_id": test_user.id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["assigned_count"] == 2
+
+
+def test_batch_assign_invalid_user(client):
+    """PUT /api/requisitions/batch-assign with invalid user returns 404."""
+    resp = client.put("/api/requisitions/batch-assign", json={"ids": [1], "owner_id": 99999})
+    assert resp.status_code == 404
+
+
 def test_dismiss_new_offers(client, db_session, test_requisition):
     """POST /api/requisitions/{id}/dismiss-new-offers clears offers_viewed_at."""
     resp = client.post(f"/api/requisitions/{test_requisition.id}/dismiss-new-offers")

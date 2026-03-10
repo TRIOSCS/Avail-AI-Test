@@ -36,6 +36,22 @@ def _validate_deadline(v: str | None) -> str | None:
     raise ValueError(f"Invalid date: '{v}'. Use YYYY-MM-DD format and ensure the date is valid.")
 
 
+# ── Batch Operations ─────────────────────────────────────────────────
+
+
+class BatchArchiveByIds(BaseModel):
+    """Archive specific requisitions by ID list."""
+
+    ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+class BatchAssign(BaseModel):
+    """Assign an owner to specific requisitions."""
+
+    ids: list[int] = Field(..., min_length=1, max_length=200)
+    owner_id: int
+
+
 # ── Requisitions ─────────────────────────────────────────────────────
 
 

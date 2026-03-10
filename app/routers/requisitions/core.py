@@ -34,6 +34,8 @@ from ...models import (
     VendorResponse,
 )
 from ...schemas.requisitions import (
+    BatchArchiveByIds,
+    BatchAssign,
     RequisitionCreate,
     RequisitionOut,
     RequisitionUpdate,
@@ -551,6 +553,51 @@ async def bulk_archive(user: User = Depends(require_user), db: Session = Depends
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
+
+
+@router.put("/api/requisitions/batch-archive")
+async def batch_archive_by_ids(
+    payload: BatchArchiveByIds,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Archive specific requisitions by ID list."""
+    from . import invalidate_prefix
+
+    count = (
+        db.query(Requisition)
+        .filter(
+            Requisition.id.in_(payload.ids),
+            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+        )
+        .update({"status": "archived"}, synchronize_session="fetch")
+    )
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"ok": True, "archived_count": count}
+
+
+@router.put("/api/requisitions/batch-assign")
+async def batch_assign(
+    payload: BatchAssign,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assign owner to specific requisitions by ID list."""
+    from . import invalidate_prefix
+
+    # Verify the target user exists
+    target = db.query(User).filter(User.id == payload.owner_id).first()
+    if not target:
+        raise HTTPException(404, "Target user not found")
+    count = (
+        db.query(Requisition)
+        .filter(Requisition.id.in_(payload.ids))
+        .update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
+    )
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}
 
 
 @router.post("/api/requisitions/{req_id}/dismiss-new-offers")

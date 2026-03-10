@@ -9162,7 +9162,7 @@ function renderReqList() {
     } else if (v === 'sales') {
         // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
         thead = `<thead><tr>
-            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Coverage: parts with at least one offer vs total parts">Coverage ${sa('coverage')}</th>
@@ -9175,7 +9175,7 @@ function renderReqList() {
     } else {
         // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
         thead = `<thead><tr>
-            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
@@ -9314,6 +9314,73 @@ function _updateToolbarStats() {
     if (el) el.innerHTML = html;
     const mel = document.getElementById('mobileToolbarStats');
     if (mel) mel.innerHTML = html;
+}
+
+// ── Batch Selection State ──────────────────────────────────────────────
+// Tracks selected requisition IDs for batch archive/assign operations.
+// Called by: checkbox onclick in _renderReqRow, batch action bar buttons
+// Depends on: apiFetch, showToast, renderReqList
+const _batchSelectedReqs = new Set();
+
+function _toggleBatchSelect(reqId, checkbox) {
+    if (checkbox.checked) _batchSelectedReqs.add(reqId);
+    else _batchSelectedReqs.delete(reqId);
+    _updateBatchActionBar();
+}
+
+function _toggleBatchSelectAll(selectAllCb) {
+    const checkboxes = document.querySelectorAll('.batch-req-cb');
+    checkboxes.forEach(cb => {
+        const id = parseInt(cb.dataset.reqId);
+        cb.checked = selectAllCb.checked;
+        if (selectAllCb.checked) _batchSelectedReqs.add(id);
+        else _batchSelectedReqs.delete(id);
+    });
+    _updateBatchActionBar();
+}
+
+function _updateBatchActionBar() {
+    const count = _batchSelectedReqs.size;
+    let bar = document.getElementById('batchActionBar');
+    if (count === 0) {
+        if (bar) bar.remove();
+        return;
+    }
+    const html = `<div id="batchActionBar" class="rfq-inline-bar" style="position:sticky;bottom:0;z-index:100;background:var(--bg1);border-top:2px solid var(--teal);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px">
+        <strong>${count} selected</strong>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-sm" onclick="_clearBatchSelection()">Clear</button>
+        <button class="btn btn-sm" style="background:var(--amber-light);color:#92400e" onclick="_batchArchiveSelected()">Archive (${count})</button>
+    </div>`;
+    if (bar) {
+        bar.outerHTML = html;
+    } else {
+        const reqList = document.getElementById('reqList');
+        if (reqList) reqList.insertAdjacentHTML('afterend', html);
+    }
+}
+
+function _clearBatchSelection() {
+    _batchSelectedReqs.clear();
+    document.querySelectorAll('.batch-req-cb').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('batchSelectAll');
+    if (selectAll) selectAll.checked = false;
+    _updateBatchActionBar();
+}
+
+async function _batchArchiveSelected() {
+    const ids = [..._batchSelectedReqs];
+    if (!ids.length) return;
+    try {
+        const data = await apiFetch('/api/requisitions/batch-archive', {
+            method: 'PUT', body: { ids }
+        });
+        showToast(`Archived ${data.archived_count} requisition${data.archived_count !== 1 ? 's' : ''}`, 'success');
+        _batchSelectedReqs.clear();
+        loadRequisitions();
+    } catch (e) {
+        showToast('Batch archive failed: ' + e.message, 'error');
+    }
 }
 
 function _renderReqRow(r) {
@@ -9598,8 +9665,9 @@ function _renderReqRow(r) {
     const _urgency = _isDeadlineUrgent(r, new Date());
     const _rowBg = (_urgency === 'overdue' || _urgency === 'today' || _urgency === 'soon')
         ? 'background:#FEF2F2;border-left:3px solid #FECACA' : 'background:#fff';
+    const batchChecked = _batchSelectedReqs.has(r.id) ? ' checked' : '';
     return `<tr class="rrow${dlClass}" style="${_rowBg}" onclick="toggleDrillDown(${r.id})">
-        <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
+        <td><input type="checkbox" class="batch-req-cb" data-req-id="${r.id}"${batchChecked} onclick="event.stopPropagation();_toggleBatchSelect(${r.id},this)" style="margin-right:4px;vertical-align:middle"><button class="ea" id="a-${r.id}">\u25b6</button></td>
         ${nameCell}
         ${dataCells}
         ${actions}
