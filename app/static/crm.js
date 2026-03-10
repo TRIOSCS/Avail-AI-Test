@@ -31,6 +31,22 @@ function fmtCurrency(n) {
     return sign + '$' + v.toFixed(4);
 }
 
+// ── Margin Calculation (single source of truth) ──────────────────────
+// Gross margin % = (sell - cost) / sell × 100; returns 0 if sell ≤ 0
+function calcMarginPct(sell, cost) {
+    return sell > 0 ? ((sell - cost) / sell * 100) : 0;
+}
+// Margin color thresholds used across quote & buy plan views
+function marginColor(pct) {
+    return pct >= 20 ? 'var(--green)' : pct >= 10 ? 'var(--amber)' : 'var(--red)';
+}
+
+// ── Email Validation ─────────────────────────────────────────────────
+// Basic RFC-ish email check — rejects obvious garbage without being overly strict
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
 const _debouncedUpdateBpTotals = debounce(() => updateBpTotals(), 150);
@@ -568,9 +584,34 @@ function _updateCustBulkBar() {
 }
 
 async function bulkAssignOwner() {
-    promptInput('Assign Owner', 'Enter user ID', async function(name) {
-        const ownerId = parseInt(name);
-        if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
+    // Build a user dropdown instead of raw ID prompt
+    let users = _userListCache;
+    if (!users) {
+        try { users = await apiFetch('/api/users/list'); _userListCache = users; }
+        catch (e) { users = []; }
+    }
+    const options = (users || []).map(u => '<option value="' + u.id + '">' + esc(u.name) + ' (' + u.role + ')</option>').join('');
+    const id = '_bulkOwnerModal';
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'modal-bg open';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = '<div style="background:var(--white,#fff);border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25)">'
+        + '<h3 style="margin:0 0 8px;font-size:16px">Assign Owner</h3>'
+        + '<label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px">Select account owner</label>'
+        + '<select id="_bulkOwnerSelect" style="width:100%;margin-bottom:16px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px"><option value="">— Select —</option>' + options + '</select>'
+        + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+        + '<button class="btn" onclick="document.getElementById(\'' + id + '\').remove()">Cancel</button>'
+        + '<button class="btn btn-primary" id="_bulkOwnerSubmit">Assign</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('_bulkOwnerSubmit').onclick = async function() {
+        const ownerId = parseInt(document.getElementById('_bulkOwnerSelect').value);
+        if (isNaN(ownerId)) { showToast('Select an owner', 'error'); return; }
+        overlay.remove();
         for (const cid of _custSelectedIds) {
             try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
             catch (e) { console.error('bulk assign error', cid, e); }
@@ -578,7 +619,7 @@ async function bulkAssignOwner() {
         showToast(_custSelectedIds.size + ' accounts updated', 'success');
         clearCustSelection();
         loadCustomers();
-    });
+    };
 }
 
 function bulkExportAccounts() {
@@ -2445,7 +2486,7 @@ function updateQuoteLine(idx, field, value) {
     if (field === 'sell_price') {
         item.sell_price = parseFloat(value) || 0;
         const cost = item.cost_price || 0;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        item.margin_pct = calcMarginPct(item.sell_price, cost);
         const mEl = document.getElementById('qm-' + idx);
         if (mEl) {
             const mPct = item.margin_pct;
@@ -2472,7 +2513,7 @@ function refreshQuoteTotals() {
     });
     crmQuote.subtotal = totalSell;
     crmQuote.total_cost = totalCost;
-    crmQuote.total_margin_pct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    crmQuote.total_margin_pct = calcMarginPct(totalSell, totalCost);
     const totalsEl = document.querySelector('.quote-totals');
     if (totalsEl) {
         const gp = totalSell - totalCost;
@@ -2489,7 +2530,7 @@ function applyMarkup() {
     const pct = parseFloat(document.getElementById('quickMarkup')?.value) || 0;
     crmQuote.line_items.forEach(item => {
         item.sell_price = pct >= 100 ? 0 : Math.round((item.cost_price || 0) / (1 - pct / 100) * 10000) / 10000;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - (item.cost_price||0)) / item.sell_price * 100) : 0;
+        item.margin_pct = calcMarginPct(item.sell_price, item.cost_price || 0);
     });
     renderQuote();
 }
@@ -2592,6 +2633,7 @@ async function confirmSendQuote() {
         toEmail = document.getElementById('sqManualEmail')?.value?.trim() || '';
         toName = '';
         if (!toEmail) { showToast('Enter an email address', 'error'); return; }
+        if (!isValidEmail(toEmail)) { showToast('Invalid email format', 'error'); return; }
     } else {
         toEmail = sel.value;
         toName = sel.options[sel.selectedIndex].dataset.name || '';
@@ -4839,6 +4881,7 @@ async function saveSiteContact() {
         is_primary: document.getElementById('scPrimary')?.checked || false,
     };
     if (!data.full_name) { showToast('Name is required', 'error'); return; }
+    if (data.email && !isValidEmail(data.email)) { showToast('Invalid email format', 'error'); return; }
     try {
         const url = contactId
             ? '/api/sites/' + siteId + '/contacts/' + contactId
@@ -4927,7 +4970,7 @@ async function saveLogCall() {
         phone: _v('lcPhone').trim() || null,
         contact_name: _v('lcContactName').trim() || null,
         direction: _v('lcDirection'),
-        duration_seconds: parseInt(_v('lcDuration')) || null,
+        duration_seconds: ((parseInt(_v('lcDurMin')) || 0) * 60 + (parseInt(_v('lcDurSec')) || 0)) || null,
         notes: _v('lcNotes').trim() || null,
     };
     try {
@@ -5392,13 +5435,13 @@ function updateProactivePreview() {
         const targetQty = match ? (match.target_qty || 0) : 0;
         const availQty = match ? (match.qty_available || 0) : 0;
         const qty = targetQty > 0 ? Math.min(availQty, targetQty) : availQty;
-        const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
+        const margin = calcMarginPct(sell, cost).toFixed(1);
         const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
         if (marginEl) marginEl.textContent = margin + '%';
         totalSell += sell * qty;
         totalCost += cost * qty;
     });
-    const totalMargin = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100).toFixed(1) : '0.0';
+    const totalMargin = calcMarginPct(totalSell, totalCost).toFixed(1);
     const previewEl = document.getElementById('psPreview');
     if (previewEl) previewEl.innerHTML = `Revenue: <strong>$${totalSell.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong> · Margin: <strong>${totalMargin}%</strong> · Profit: <strong>$${(totalSell - totalCost).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>`;
 }
@@ -8109,7 +8152,7 @@ function _mqUpdateTotals() {
         totalCost += price * qty;
     }
     var totalSell = totalCost * (1 + markup / 100);
-    var marginPct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    var marginPct = calcMarginPct(totalSell, totalCost);
 
     var costEl = document.getElementById('mqCostTotal');
     var sellEl = document.getElementById('mqSellTotal');
@@ -8589,6 +8632,7 @@ Object.assign(window, {
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
+    calcMarginPct, isValidEmail, marginColor,
     applyMarkup, approveBuyPlan, approveBuyPlanV3,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, confirmPOV3,

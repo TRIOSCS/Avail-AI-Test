@@ -5506,11 +5506,11 @@ function ddBuildQuote(reqId) {
             const idx = inp.dataset.idx;
             const cost = parseFloat(inp.dataset.cost) || 0;
             const sell = parseFloat(inp.value) || 0;
-            const margin = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+            const margin = window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
             const cell = document.querySelector(`.bq-margin-cell[data-idx="${idx}"]`);
             if (cell) {
                 cell.textContent = margin.toFixed(1) + '%';
-                cell.style.color = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+                cell.style.color = window.marginColor ? window.marginColor(margin) : (margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)');
             }
             ddUpdateBqTotals();
         });
@@ -5570,7 +5570,7 @@ async function ddConfirmBuildQuote(reqId) {
                 const sell = parseFloat(inp.value) || 0;
                 const cost = lines[i].cost_price || 0;
                 lines[i].sell_price = sell;
-                lines[i].margin_pct = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+                lines[i].margin_pct = window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
                 const lead = document.querySelector(`.bq-lead[data-idx="${i}"]`);
                 const cond = document.querySelector(`.bq-cond[data-idx="${i}"]`);
                 const dc = document.querySelector(`.bq-dc[data-idx="${i}"]`);
@@ -5877,8 +5877,8 @@ function _renderQuoteDetail(reqId, q, container) {
             const cost = l.cost_price || l.unit_cost || 0;
             const sell = l.sell_price || l.unit_sell || 0;
             const qty = l.qty || 0;
-            const margin = l.margin_pct != null ? l.margin_pct : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
-            const marginColor = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+            const margin = l.margin_pct != null ? l.margin_pct : (window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0));
+            const marginClr = window.marginColor ? window.marginColor(margin) : (margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)');
             const target = l.target_price != null ? fmtPrice(l.target_price) : '\u2014';
             totalCost += cost * qty;
             totalRev += sell * qty;
@@ -5906,7 +5906,7 @@ function _renderQuoteDetail(reqId, q, container) {
                 <td class="mono">${qty.toLocaleString()}</td>
                 ${isDraft ? `<td class="mono">${fmtPrice(cost)}</td><td style="font-size:10px;color:var(--muted)">${target}</td>` : ''}
                 <td class="mono" style="color:var(--teal)">${sellCell}</td>
-                ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
+                ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginClr};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
                 <td>${leadCell}</td>
                 <td>${condCell}</td>
                 <td>${dcCell}</td>
@@ -6008,7 +6008,7 @@ function ddUpdateQuoteLine(reqId, idx, value) {
     if (!item) return;
     item.sell_price = parseFloat(value) || 0;
     const cost = item.cost_price || item.unit_cost || 0;
-    item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+    item.margin_pct = window.calcMarginPct ? window.calcMarginPct(item.sell_price, cost) : (item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0);
     // Update margin cell
     const mCell = document.querySelector(`.ddq-margin[data-req="${reqId}"][data-idx="${idx}"]`);
     if (mCell) {
@@ -6026,7 +6026,7 @@ function ddApplyQuoteMarkup(reqId) {
     lines.forEach(item => {
         const cost = item.cost_price || item.unit_cost || 0;
         item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 100) / 100;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        item.margin_pct = window.calcMarginPct ? window.calcMarginPct(item.sell_price, cost) : (item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0);
     });
     // Re-render the expanded detail panel
     const detailRow = document.getElementById('ddqDetail-' + q.id);
@@ -12652,12 +12652,12 @@ function placeVendorCall(cardId, vendorName, reqId, phone) {
 async function saveVendorLogCall() {
     const _v = id => document.getElementById(id)?.value || '';
     const cardId = _v('vlcCardId');
-    const dur = parseInt(_v('vlcDuration'));
+    const durSec = (parseInt(_v('vlcDurMin')) || 0) * 60 + (parseInt(_v('vlcDurSec')) || 0);
     const data = {
         phone: _v('vlcPhone').trim() || null,
         contact_name: _v('vlcContactName').trim() || null,
         direction: _v('vlcDirection'),
-        duration_seconds: isNaN(dur) ? null : dur,
+        duration_seconds: durSec || null,
         notes: _v('vlcNotes').trim() || null,
     };
     if (window._vlcReqId) data.requisition_id = window._vlcReqId;

@@ -5,9 +5,13 @@ Covers:
  - Q1: Auto-name requisition (frontend logic verified via template presence)
  - Q3: Sticky vendor on mobile offer form (sessionStorage pattern)
  - Q5: Payment terms dropdown (template + schema compatibility)
+ - Bulk owner dropdown (replaces raw ID prompt)
+ - Call duration mm:ss formatter (replaces raw seconds)
+ - Centralized margin calculation helper
+ - Email format validation
 
 Called by: pytest
-Depends on: app/schemas/crm.py, app/templates/index.html, app/static/crm.js
+Depends on: app/schemas/crm.py, app/templates/index.html, app/static/crm.js, app/static/app.js
 """
 
 import re
@@ -196,3 +200,144 @@ class TestAppJsQuoteTerms:
     def test_custom_value_injection(self, app_js: str) -> None:
         """After innerHTML, custom values are injected as options."""
         assert "querySelectorAll('select[data-init-val]')" in app_js
+
+
+# ── Bulk Owner Dropdown ────────────────────────────────────────────────
+
+
+class TestBulkOwnerDropdown:
+    """Verify bulk owner assign uses a dropdown, not a raw ID prompt."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_no_prompt_input_for_owner(self, crm_js: str) -> None:
+        """bulkAssignOwner should NOT use promptInput."""
+        # Extract just the function body
+        idx = crm_js.index("async function bulkAssignOwner()")
+        chunk = crm_js[idx:idx + 2000]
+        assert "promptInput" not in chunk
+
+    def test_uses_select_dropdown(self, crm_js: str) -> None:
+        """bulkAssignOwner should create a <select> for user selection."""
+        idx = crm_js.index("async function bulkAssignOwner()")
+        chunk = crm_js[idx:idx + 2000]
+        assert "_bulkOwnerSelect" in chunk
+
+    def test_fetches_user_list(self, crm_js: str) -> None:
+        """bulkAssignOwner should use the cached user list."""
+        idx = crm_js.index("async function bulkAssignOwner()")
+        chunk = crm_js[idx:idx + 2000]
+        assert "_userListCache" in chunk
+
+
+# ── Call Duration Formatter ────────────────────────────────────────────
+
+
+class TestCallDurationFormatter:
+    """Verify duration inputs use min/sec instead of raw seconds."""
+
+    @pytest.fixture
+    def template_html(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "templates" / "index.html"
+        return path.read_text()
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    def test_no_raw_seconds_input(self, template_html: str) -> None:
+        """Template should not have raw seconds input for duration."""
+        assert 'id="lcDuration"' not in template_html
+        assert 'id="vlcDuration"' not in template_html
+
+    def test_min_sec_inputs_present(self, template_html: str) -> None:
+        """Template should have min + sec split inputs."""
+        assert 'id="lcDurMin"' in template_html
+        assert 'id="lcDurSec"' in template_html
+        assert 'id="vlcDurMin"' in template_html
+        assert 'id="vlcDurSec"' in template_html
+
+    def test_crm_js_reads_min_sec(self, crm_js: str) -> None:
+        """CRM JS should convert min/sec to total seconds."""
+        assert "lcDurMin" in crm_js
+        assert "lcDurSec" in crm_js
+
+    def test_app_js_reads_min_sec(self, app_js: str) -> None:
+        """App JS should convert min/sec for vendor log call."""
+        assert "vlcDurMin" in app_js
+        assert "vlcDurSec" in app_js
+
+
+# ── Centralized Margin Calculation ─────────────────────────────────────
+
+
+class TestCentralizedMargin:
+    """Verify margin calculation uses a shared helper."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    def test_calcMarginPct_defined(self, crm_js: str) -> None:
+        """calcMarginPct helper function exists."""
+        assert "function calcMarginPct(sell, cost)" in crm_js
+
+    def test_marginColor_defined(self, crm_js: str) -> None:
+        """marginColor helper function exists."""
+        assert "function marginColor(pct)" in crm_js
+
+    def test_calcMarginPct_exported(self, crm_js: str) -> None:
+        """calcMarginPct is exposed to window scope."""
+        assert "calcMarginPct," in crm_js.split("Object.assign(window")[1]
+
+    def test_crm_uses_helper(self, crm_js: str) -> None:
+        """CRM JS should use calcMarginPct instead of inline formula."""
+        assert "calcMarginPct(item.sell_price, cost)" in crm_js
+        assert "calcMarginPct(totalSell, totalCost)" in crm_js
+
+    def test_app_js_uses_helper(self, app_js: str) -> None:
+        """App JS should reference window.calcMarginPct."""
+        assert "window.calcMarginPct" in app_js
+
+
+# ── Email Validation ───────────────────────────────────────────────────
+
+
+class TestEmailValidation:
+    """Verify email format validation is added."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_isValidEmail_defined(self, crm_js: str) -> None:
+        """isValidEmail helper function exists."""
+        assert "function isValidEmail(email)" in crm_js
+
+    def test_quote_send_validates_email(self, crm_js: str) -> None:
+        """confirmSendQuote validates email format."""
+        assert "isValidEmail(toEmail)" in crm_js
+
+    def test_site_contact_validates_email(self, crm_js: str) -> None:
+        """saveSiteContact validates email format."""
+        assert "isValidEmail(data.email)" in crm_js
+
+    def test_isValidEmail_exported(self, crm_js: str) -> None:
+        """isValidEmail is exposed to window scope."""
+        assert "isValidEmail," in crm_js.split("Object.assign(window")[1]
