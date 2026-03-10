@@ -15533,11 +15533,24 @@ function renderStatusStrip(items) {
     ).join('')}</div>`;
 }
 
-function renderBlockerStrip(text, actionLabel, actionOnclick) {
-    if (!text) return '';
+function renderBlockerStrip(blockers, actionLabel, actionOnclick) {
+    if (!blockers) return '';
+    // Support both array of {text, level} objects and plain string
+    if (Array.isArray(blockers)) {
+        if (blockers.length === 0) return '';
+        return blockers.map(b => {
+            const lvl = b.level || 'info';
+            const iconColor = lvl === 'error' ? 'var(--red)' : lvl === 'warn' ? 'var(--amber)' : 'var(--muted)';
+            return `<div class="blocker-strip" style="--blocker-color:${iconColor}">
+                <div class="blocker-strip-icon" style="color:${iconColor}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+                <span class="blocker-strip-text">${esc(b.text || '')}</span>
+            </div>`;
+        }).join('');
+    }
+    // Legacy: plain string
     return `<div class="blocker-strip">
         <div class="blocker-strip-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
-        <span class="blocker-strip-text">${esc(text)}</span>
+        <span class="blocker-strip-text">${esc(blockers)}</span>
         ${actionLabel ? `<button class="blocker-strip-action" onclick="${actionOnclick || ''}">${esc(actionLabel)}</button>` : ''}
     </div>`;
 }
@@ -15857,6 +15870,12 @@ function _rfqRenderOffers(offers, body) {
         const lead = o.lead_time || '\u2014';
         const cond = o.condition || '';
 
+        const dateCode = o.date_code || '';
+        const pkg = o.packaging || '';
+        const moq = o.moq ? o.moq.toLocaleString() : '';
+        const warranty = o.warranty || '';
+        const origin = o.country_of_origin || '';
+
         html += `<div class="rfq-offer-row${selCls}${histCls}" data-offer-id="${o.id}">
             <input type="checkbox" class="rfq-offer-check" ${o.selected_for_quote ? 'checked' : ''}
                 onclick="event.stopPropagation();rfqToggleOfferSelection(${o.id})"
@@ -15864,9 +15883,14 @@ function _rfqRenderOffers(offers, body) {
             <div class="rfq-offer-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</div>
             <div class="rfq-offer-flags">${flags}</div>
             <div class="rfq-offer-price${priceCls}" title="${o.unit_price && targetPrice ? Math.round((o.unit_price/targetPrice-1)*100)+'% vs target' : ''}">${price}</div>
-            <div class="rfq-offer-detail" title="Qty available">${qty}</div>
-            <div class="rfq-offer-detail" title="Lead time">${lead}</div>
-            <div class="rfq-offer-detail" title="Condition">${cond}</div>
+            <div class="rfq-offer-field" title="Qty available">${qty}</div>
+            <div class="rfq-offer-field" title="Lead time">${lead}</div>
+            <div class="rfq-offer-field" title="Condition">${cond}</div>
+            ${dateCode ? '<div class="rfq-offer-field" title="Date code">' + esc(dateCode) + '</div>' : ''}
+            ${pkg ? '<div class="rfq-offer-field" title="Packaging">' + esc(pkg) + '</div>' : ''}
+            ${moq ? '<div class="rfq-offer-field" title="MOQ">' + esc(moq) + '</div>' : ''}
+            ${warranty ? '<div class="rfq-offer-field" title="Warranty">' + esc(warranty) + '</div>' : ''}
+            ${origin ? '<div class="rfq-offer-field" title="Country of origin">' + esc(origin) + '</div>' : ''}
             ${ageBadge}
             ${o.notes ? '<span style="font-size:10px;color:var(--blue);cursor:pointer" title="' + escAttr(o.notes) + '">\ud83d\udcdd</span>' : ''}
         </div>`;
