@@ -15607,7 +15607,7 @@ async function rfqOpenWorkspace(reqId, container) {
     container.innerHTML = `<div class="rfq-workspace" id="rfqWorkspace-${reqId}">
         <div class="rfq-left" id="rfqLeft-${reqId}">
             <table class="rfq-part-list"><thead><tr>
-                <th>MPN</th><th>Qty</th><th>Target</th><th>Offers</th><th>Progress</th>
+                <th>MPN</th><th>Qty</th><th>Target</th><th>Status</th><th>Signals</th><th>Progress</th>
             </tr></thead><tbody id="rfqPartBody-${reqId}"></tbody></table>
         </div>
         <div class="rfq-right empty" id="rfqRight-${reqId}">
@@ -15626,7 +15626,7 @@ async function rfqOpenWorkspace(reqId, container) {
         }
     } catch(e) {
         document.getElementById('rfqPartBody-' + reqId).innerHTML =
-            '<tr><td colspan="5" style="color:var(--red);padding:12px">Failed to load parts</td></tr>';
+            '<tr><td colspan="6" style="color:var(--red);padding:12px">Failed to load parts</td></tr>';
     }
 }
 
@@ -15634,11 +15634,21 @@ function _rfqRenderPartList(reqId) {
     const tbody = document.getElementById('rfqPartBody-' + reqId);
     if (!tbody) return;
     if (_rfqPartsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-placeholder">No parts added yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-placeholder">No parts added yet</td></tr>';
         return;
     }
     tbody.innerHTML = _rfqPartsData.map(p => _rfqPartRow(p)).join('');
 }
+
+// Sourcing status → display pill mapping
+const _rfqStatusMap = {
+    open: { label: 'Open', cls: 'rfq-status-open' },
+    sourcing: { label: 'Sourcing', cls: 'rfq-status-sourcing' },
+    offered: { label: 'Offered', cls: 'rfq-status-offered' },
+    quoted: { label: 'Quoted', cls: 'rfq-status-quoted' },
+    won: { label: 'Won', cls: 'rfq-status-won' },
+    lost: { label: 'Lost', cls: 'rfq-status-lost' },
+};
 
 function _rfqPartRow(p) {
     const active = p.id === _rfqActivePartId ? ' active' : '';
@@ -15647,13 +15657,26 @@ function _rfqPartRow(p) {
     const tc = p.task_count || 0;
     const sightings = p.sighting_count || 0;
 
-    // Chip cluster
+    // Chip cluster — offers / selected / tasks / sources
     let chips = '';
     if (oc > 0) chips += `<span class="rfq-chip rfq-chip-offer">${oc} Offer${oc>1?'s':''}</span>`;
     if (sc > 0) chips += `<span class="rfq-chip rfq-chip-sel">${sc} Sel</span>`;
     if (tc > 0) chips += `<span class="rfq-chip rfq-chip-task">${tc} Task${tc>1?'s':''}</span>`;
     if (sightings > 0 && oc === 0) chips += `<span class="rfq-chip rfq-chip-hist">${sightings} Source${sightings>1?'s':''}</span>`;
-    if (!chips) chips = '<span class="rfq-chip rfq-chip-none">No data</span>';
+
+    // Subtle indicator icons for metadata presence
+    let indicators = '';
+    if (p.condition) indicators += `<span class="rfq-indicator" title="Condition: ${escAttr(p.condition)}">C</span>`;
+    if (p.packaging) indicators += `<span class="rfq-indicator" title="Packaging: ${escAttr(p.packaging)}">P</span>`;
+    if (p.substitutes && p.substitutes.length > 0) indicators += `<span class="rfq-indicator rfq-ind-sub" title="${p.substitutes.length} substitute${p.substitutes.length>1?'s':''}">S</span>`;
+    if (p.notes || p.sale_notes) indicators += `<span class="rfq-indicator rfq-ind-note" title="Has notes">N</span>`;
+    if (p.date_codes) indicators += `<span class="rfq-indicator" title="Date code: ${escAttr(p.date_codes)}">D</span>`;
+
+    if (!chips && !indicators) chips = '<span class="rfq-chip rfq-chip-none">No data</span>';
+
+    // Sourcing status pill
+    const st = _rfqStatusMap[p.sourcing_status || 'open'] || _rfqStatusMap.open;
+    const statusPill = `<span class="rfq-status-pill ${st.cls}">${st.label}</span>`;
 
     // Progress stepper
     const si = _rfqStepIndex(p.step || 'new');
@@ -15673,7 +15696,8 @@ function _rfqPartRow(p) {
         <td><div class="rfq-mpn">${esc(p.primary_mpn)}</div>${p.brand ? '<div class="rfq-brand">' + esc(p.brand) + '</div>' : ''}</td>
         <td class="mono" style="font-size:11px">${p.target_qty}</td>
         <td class="mono" style="font-size:11px">${target}</td>
-        <td><div class="rfq-chips">${chips}</div></td>
+        <td>${statusPill}</td>
+        <td><div class="rfq-chips">${chips}</div>${indicators ? '<div class="rfq-indicators">' + indicators + '</div>' : ''}</td>
         <td>${stepper}</td>
     </tr>`;
 }
@@ -15702,21 +15726,54 @@ async function rfqSelectPart(partId) {
     const target = part.target_price ? '$' + Number(part.target_price).toFixed(4) : '';
     const stepHtml = _rfqBuildStepper(part.step || 'new');
 
+    // Sourcing status badge
+    const st = _rfqStatusMap[part.sourcing_status || 'open'] || _rfqStatusMap.open;
+
+    // Flag chips — offers / selected / tasks
     let flags = '';
     if (part.offer_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-offer">Offers Available</span>';
     if (part.selected_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-sel">' + part.selected_count + ' Selected</span>';
     if (part.task_count > 0) flags += '<span class="rfq-panel-flag rfq-chip-task">' + part.task_count + ' Open Tasks</span>';
 
+    // Structured detail chips — condition, packaging, date codes, firmware, hardware
+    let detailChips = '';
+    if (part.condition) detailChips += `<span class="rfq-hdr-chip" title="Condition">${esc(part.condition)}</span>`;
+    if (part.packaging) detailChips += `<span class="rfq-hdr-chip" title="Packaging">${esc(part.packaging)}</span>`;
+    if (part.date_codes) detailChips += `<span class="rfq-hdr-chip" title="Date Code">DC: ${esc(part.date_codes)}</span>`;
+    if (part.firmware) detailChips += `<span class="rfq-hdr-chip" title="Firmware">FW: ${esc(part.firmware)}</span>`;
+    if (part.hardware_codes) detailChips += `<span class="rfq-hdr-chip" title="Hardware">HW: ${esc(part.hardware_codes)}</span>`;
+
+    // Substitutes summary
+    let subsHtml = '';
+    if (part.substitutes && part.substitutes.length > 0) {
+        const subsList = part.substitutes.slice(0, 5).map(s => `<span class="rfq-sub-chip">${esc(s)}</span>`).join('');
+        const moreCount = part.substitutes.length > 5 ? ` <span class="rfq-sub-more">+${part.substitutes.length - 5} more</span>` : '';
+        subsHtml = `<div class="rfq-panel-subs"><span class="rfq-panel-subs-label">Substitutes:</span>${subsList}${moreCount}</div>`;
+    }
+
+    // Sale notes inline preview
+    let saleNotesHtml = '';
+    if (part.sale_notes) {
+        const preview = part.sale_notes.length > 120 ? part.sale_notes.slice(0, 120) + '\u2026' : part.sale_notes;
+        saleNotesHtml = `<div class="rfq-panel-sale-notes" title="${escAttr(part.sale_notes)}"><span class="rfq-panel-sale-notes-label">Sales Notes:</span> ${esc(preview)}</div>`;
+    }
+
     right.innerHTML = `
         <div class="rfq-panel-header">
-            <div class="rfq-panel-mpn">${esc(part.primary_mpn)}</div>
+            <div class="rfq-panel-top-row">
+                <div class="rfq-panel-mpn">${esc(part.primary_mpn)}</div>
+                <span class="rfq-status-pill ${st.cls}" style="margin-left:auto">${st.label}</span>
+            </div>
             <div class="rfq-panel-meta">
                 ${part.brand ? '<span>' + esc(part.brand) + '</span>' : ''}
                 <span>Qty: <b>${part.target_qty}</b></span>
                 ${target ? '<span>Target: <b>' + target + '</b></span>' : ''}
                 ${stepHtml}
             </div>
+            ${detailChips ? '<div class="rfq-panel-detail-chips">' + detailChips + '</div>' : ''}
             ${flags ? '<div class="rfq-panel-flags">' + flags + '</div>' : ''}
+            ${subsHtml}
+            ${saleNotesHtml}
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
@@ -15862,7 +15919,7 @@ function _rfqRenderOffers(offers, body) {
         const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
         const currency = o.currency && o.currency !== 'USD' ? ' ' + esc(o.currency) : '';
 
-        // Detail chips — only show what's available
+        // Detail chips — primary operational fields from legacy availability view
         let details = [];
         if (o.qty_available) details.push('<span class="rfq-ocard-chip" title="Qty available"><b>' + Number(o.qty_available).toLocaleString() + '</b> avail</span>');
         if (o.condition) details.push('<span class="rfq-ocard-chip" title="Condition">' + esc(o.condition) + '</span>');
@@ -15870,11 +15927,18 @@ function _rfqRenderOffers(offers, body) {
         if (o.date_code) details.push('<span class="rfq-ocard-chip" title="Date code">DC: ' + esc(o.date_code) + '</span>');
         if (o.packaging) details.push('<span class="rfq-ocard-chip" title="Packaging">' + esc(o.packaging) + '</span>');
         if (o.moq) details.push('<span class="rfq-ocard-chip" title="MOQ">MOQ: ' + o.moq.toLocaleString() + '</span>');
-        if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">' + esc(o.warranty) + '</span>');
-        if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">' + esc(o.country_of_origin) + '</span>');
+        if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">WR: ' + esc(o.warranty) + '</span>');
+        if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">COO: ' + esc(o.country_of_origin) + '</span>');
         if (o.firmware) details.push('<span class="rfq-ocard-chip" title="Firmware">FW: ' + esc(o.firmware) + '</span>');
+        if (o.manufacturer) details.push('<span class="rfq-ocard-chip" title="Manufacturer">MFR: ' + esc(o.manufacturer) + '</span>');
 
-        // Meta line — source, age, entered by
+        // MPN line — show offered MPN if it differs from the requirement MPN (sub material visibility)
+        let mpnLine = '';
+        if (o.mpn && part && o.mpn.toUpperCase() !== (part.primary_mpn || '').toUpperCase()) {
+            mpnLine = `<div class="rfq-ocard-mpn" title="Offered MPN">${esc(o.mpn)}</div>`;
+        }
+
+        // Meta line — source, age, entered by, created date
         let meta = [];
         if (o.source && o.source !== 'manual') meta.push('via ' + esc(o.source));
         if (o.entered_by) meta.push('by ' + esc(o.entered_by));
@@ -15885,6 +15949,7 @@ function _rfqRenderOffers(offers, body) {
             else if (o.age_days < 30) meta.push(o.age_days + 'd ago');
             else meta.push(d.toLocaleDateString());
         }
+        if (o.from_requisition_id && o.is_historical) meta.push('from Req #' + o.from_requisition_id);
 
         html += `<div class="rfq-ocard${selCls}${histCls}" data-offer-id="${o.id}">
             <div class="rfq-ocard-top">
@@ -15896,6 +15961,7 @@ function _rfqRenderOffers(offers, body) {
                 ${ageBadge}
                 <div class="rfq-ocard-price${priceCls}" title="${priceTooltip}">${price}${currency}</div>
             </div>
+            ${mpnLine}
             <div class="rfq-ocard-details">${details.join('')}</div>
             ${meta.length || o.notes ? '<div class="rfq-ocard-meta">' + meta.join(' \u00b7 ') + (o.notes ? ' <span class="rfq-ocard-note" title="' + escAttr(o.notes) + '">\ud83d\udcdd ' + esc(o.notes.length > 40 ? o.notes.slice(0, 40) + '\u2026' : o.notes) + '</span>' : '') + '</div>' : ''}
         </div>`;
@@ -16004,25 +16070,40 @@ async function rfqAddTask() {
 function _rfqRenderNotes(data, body) {
     if (!data) { body.innerHTML = '<div class="empty-placeholder">No notes</div>'; return; }
 
+    // Also pull sale_notes from the current part data
+    const part = _rfqPartsData.find(p => p.id === _rfqActivePartId);
+
     let html = '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
     html += '<span style="font-size:12px;font-weight:600">Notes</span>';
     html += '<button class="btn btn-sm" onclick="rfqAddNote()">+ Add Note</button></div>';
 
     let hasNotes = false;
 
-    // Requirement notes (may contain multiple timestamped entries)
-    if (data.requirement_notes) {
+    // Sales notes — from requirement sale_notes field (legacy "sales notes")
+    if (part && part.sale_notes) {
         hasNotes = true;
-        const lines = data.requirement_notes.split('\n').filter(l => l.trim());
+        const lines = part.sale_notes.split('\n').filter(l => l.trim());
         lines.forEach(line => {
             html += `<div class="rfq-note-item">
-                <div class="rfq-note-label rfq-note-label-req">Requirement Note</div>
+                <div class="rfq-note-label rfq-note-label-sales">Sales Note</div>
                 <div class="rfq-note-text">${esc(line)}</div>
             </div>`;
         });
     }
 
-    // Offer notes
+    // Requirement notes (internal sourcing notes, may contain multiple timestamped entries)
+    if (data.requirement_notes) {
+        hasNotes = true;
+        const lines = data.requirement_notes.split('\n').filter(l => l.trim());
+        lines.forEach(line => {
+            html += `<div class="rfq-note-item">
+                <div class="rfq-note-label rfq-note-label-req">Sourcing Note</div>
+                <div class="rfq-note-text">${esc(line)}</div>
+            </div>`;
+        });
+    }
+
+    // Offer notes — vendor-specific notes on offers
     if (data.notes && data.notes.length > 0) {
         hasNotes = true;
         data.notes.forEach(n => {
@@ -16125,26 +16206,32 @@ function _rfqRenderSightings(data, body) {
     const sightings = partData.sightings;
     let html = `<div style="font-size:12px;font-weight:600;margin-bottom:8px">${sightings.length} Source${sightings.length>1?'s':''} Found</div>`;
 
-    // Compact sightings table
-    html += '<table class="dtbl" style="font-size:10px"><thead><tr>';
-    html += '<th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Cond</th><th>Lead</th><th>Source</th>';
+    // Expanded sightings table — includes legacy availability fields
+    html += '<div class="rfq-sightings-scroll"><table class="dtbl rfq-sightings-tbl" style="font-size:10px"><thead><tr>';
+    html += '<th>Vendor</th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Cond</th><th>Pkg</th><th>DC</th><th>Lead</th><th>Source</th><th>Date</th>';
     html += '</tr></thead><tbody>';
 
     sightings.slice(0, 100).forEach(s => {
         const price = s.unit_price ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
-        const histFlag = s.is_historical || s.is_material_history ? ' <span style="font-size:8px;color:var(--muted);font-weight:600">HIST</span>' : '';
+        const histFlag = s.is_historical || s.is_material_history ? ' <span class="rfq-sight-hist">HIST</span>' : '';
+        const created = s.created_at ? new Date(s.created_at).toLocaleDateString() : '\u2014';
+        const leadTime = s.lead_time || (s.lead_time_days ? s.lead_time_days + 'd' : '\u2014');
         html += `<tr>
-            <td style="font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.vendor_name || '')}</td>
+            <td class="rfq-sight-vendor" title="${escAttr(s.vendor_name || '')}">${esc(s.vendor_name || '')}</td>
             <td class="mono">${esc(s.mpn_matched || '')}</td>
-            <td class="mono">${s.qty_available || '\u2014'}</td>
+            <td title="${escAttr(s.manufacturer || '')}">${esc((s.manufacturer || '').slice(0, 12))}</td>
+            <td class="mono">${s.qty_available ? Number(s.qty_available).toLocaleString() : '\u2014'}</td>
             <td class="mono">${price}</td>
             <td>${esc(s.condition || '')}</td>
-            <td>${s.lead_time || s.lead_time_days ? (s.lead_time_days || '') + 'd' : '\u2014'}</td>
+            <td>${esc(s.packaging || '')}</td>
+            <td>${esc(s.date_code || '')}</td>
+            <td>${esc(leadTime)}</td>
             <td>${esc(s.source_type || '')}${histFlag}</td>
+            <td style="white-space:nowrap">${created}</td>
         </tr>`;
     });
 
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     if (sightings.length > 100) {
         html += `<div style="font-size:10px;color:var(--muted);margin-top:4px">${sightings.length - 100} more sources not shown</div>`;
     }

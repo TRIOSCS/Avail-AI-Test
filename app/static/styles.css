@@ -3246,6 +3246,59 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 .rfq-hist-body { flex:1; min-width:0; }
 .rfq-hist-time { font-size:10px; color:var(--muted); }
 
+/* Sourcing status pills — left-side scan and panel header */
+.rfq-status-pill { font-size:9px; padding:2px 6px; border-radius:3px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.3px; white-space:nowrap; line-height:1.4; }
+.rfq-status-open { background:var(--bg3,#e2e8f0); color:var(--muted); }
+.rfq-status-sourcing { background:var(--blue-lt,#dbeafe); color:var(--blue,#2563eb); }
+.rfq-status-offered { background:var(--green-light); color:var(--green); }
+.rfq-status-quoted { background:var(--teal-light); color:var(--teal); }
+.rfq-status-won { background:rgba(16,185,129,.12); color:#059669; }
+.rfq-status-lost { background:var(--red-light); color:var(--red); }
+
+/* Left-side metadata indicators — subtle letter badges */
+.rfq-indicators { display:flex; gap:2px; margin-top:3px; }
+.rfq-indicator { font-size:8px; font-weight:700; width:14px; height:14px; border-radius:50%;
+  display:inline-flex; align-items:center; justify-content:center; background:var(--bg3,#e2e8f0);
+  color:var(--muted); cursor:help; line-height:1; }
+.rfq-ind-sub { background:var(--amber-light); color:var(--amber); }
+.rfq-ind-note { background:var(--blue-lt,#dbeafe); color:var(--blue); }
+
+/* Panel header — top row with MPN + status */
+.rfq-panel-top-row { display:flex; align-items:center; gap:8px; }
+
+/* Panel header — detail chips (condition, packaging, DC, FW, HW) */
+.rfq-panel-detail-chips { display:flex; gap:4px; flex-wrap:wrap; margin-top:6px; }
+.rfq-hdr-chip { font-size:10px; padding:2px 7px; border-radius:3px; background:var(--bg2);
+  color:var(--fg2,var(--text)); font-weight:500; white-space:nowrap; }
+
+/* Panel header — substitutes */
+.rfq-panel-subs { display:flex; align-items:center; gap:4px; flex-wrap:wrap; margin-top:6px; font-size:10px; }
+.rfq-panel-subs-label { font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.3px; font-size:9px; }
+.rfq-sub-chip { font-family:'JetBrains Mono',monospace; font-size:10px; padding:1px 5px; border-radius:3px;
+  background:var(--amber-light); color:var(--amber); font-weight:600; }
+.rfq-sub-more { font-size:9px; color:var(--muted); }
+
+/* Panel header — sale notes inline preview */
+.rfq-panel-sale-notes { font-size:11px; color:var(--text); margin-top:6px; line-height:1.4;
+  padding:6px 8px; background:rgba(59,130,246,.04); border-left:2px solid var(--blue); border-radius:0 3px 3px 0; }
+.rfq-panel-sale-notes-label { font-size:9px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.3px; color:var(--blue); margin-right:4px; }
+
+/* Notes tab — sales note label */
+.rfq-note-label-sales { color:#7c3aed; }
+
+/* Offer card — offered MPN line (visible when sub material) */
+.rfq-ocard-mpn { font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--amber);
+  font-weight:600; margin-top:2px; }
+
+/* Sightings tab — scrollable wider table */
+.rfq-sightings-scroll { overflow-x:auto; margin:0 -16px; padding:0 16px; }
+.rfq-sightings-tbl { min-width:700px; }
+.rfq-sightings-tbl th { position:sticky; top:0; z-index:1; }
+.rfq-sight-vendor { font-weight:600; max-width:100px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rfq-sight-hist { font-size:8px; color:var(--muted); font-weight:600; }
+
 /* Responsive */
 @media (max-width:1024px) {
   .rfq-right { width:360px; min-width:300px; }
