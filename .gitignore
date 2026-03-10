@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.hypothesis/
 uploads/
 *.egg-info/
 dist/
