@@ -25,27 +25,41 @@ class UTCDateTime(TypeDecorator):
         return value
 
 
-_connect_args = {"connect_timeout": 10}
-if settings.database_url.startswith("postgresql"):
-    _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+_is_sqlite = settings.database_url.startswith("sqlite")
 
-engine = create_engine(
-    settings.database_url,
-    pool_size=15,
-    max_overflow=30,
-    pool_timeout=10,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    connect_args=_connect_args,
-)
+if _is_sqlite:
+    from sqlalchemy.pool import StaticPool
+
+    engine = create_engine(
+        settings.database_url,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+else:
+    _connect_args = {"connect_timeout": 10}
+    if settings.database_url.startswith("postgresql"):
+        _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+
+    engine = create_engine(
+        settings.database_url,
+        pool_size=15,
+        max_overflow=30,
+        pool_timeout=10,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+        connect_args=_connect_args,
+    )
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
-@event.listens_for(engine, "connect")
-def _set_timezone(dbapi_conn, connection_record):
-    cursor = dbapi_conn.cursor()
-    cursor.execute("SET timezone = 'UTC'")
-    cursor.close()
+if not _is_sqlite:
+
+    @event.listens_for(engine, "connect")
+    def _set_timezone(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("SET timezone = 'UTC'")
+        cursor.close()
 
 
 @event.listens_for(SessionLocal, "loaded_as_persistent")

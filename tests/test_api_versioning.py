@@ -3,19 +3,14 @@ test_api_versioning.py — Tests for API version prefix middleware.
 
 Verifies that /api/v1/... paths are rewritten to /api/... internally,
 old /api/... paths still work, and X-API-Version header is set.
+
+Called by: pytest
+Depends on: conftest.py client fixture (uses test DB + auth overrides)
 """
 
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
-
-
-@pytest.fixture()
-def client():
-    from app.main import app
-
-    return TestClient(app)
 
 
 class TestApiVersionMiddleware:

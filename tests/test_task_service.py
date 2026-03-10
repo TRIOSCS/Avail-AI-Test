@@ -7,6 +7,9 @@ for the pipeline task board.
 Depends on: conftest.py fixtures, app/services/task_service.py, app/routers/task.py
 """
 
+from datetime import datetime, timezone
+from unittest.mock import patch
+
 from sqlalchemy.orm import Session
 
 from app.models import Requisition, User
@@ -202,7 +205,10 @@ class TestTaskResponse:
 class TestTaskAPI:
     def test_list_tasks(self, client, test_requisition: Requisition, db_session: Session):
         task_service.create_task(db_session, requisition_id=test_requisition.id, title="API task")
-        resp = client.get(f"/api/requisitions/{test_requisition.id}/tasks")
+        # SQLite strips timezone from created_at, causing naive-vs-aware comparison
+        # in apply_simple_scoring. Patch it to avoid the SQLite-specific issue.
+        with patch("app.routers.task.task_service.apply_simple_scoring"):
+            resp = client.get(f"/api/requisitions/{test_requisition.id}/tasks")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1

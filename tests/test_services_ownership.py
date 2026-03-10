@@ -549,26 +549,15 @@ class TestSendWarningAlert:
         with (
             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
             patch("app.utils.graph_client.GraphClient") as mock_gc_class,
-            patch(
-                "app.services.ownership_service.send_ownership_warning",
-                new_callable=AsyncMock,
-                side_effect=Exception("Teams error"),
-            )
-            if False
-            else patch(
-                "app.services.teams.send_ownership_warning",
-                new_callable=AsyncMock,
-                side_effect=Exception("Teams error"),
-            ),
         ):
             mock_gc = mock_gc_class.return_value
             mock_gc.post_json = AsyncMock(side_effect=Exception("Graph error"))
-            # Should not raise
+            # Should not raise — error is caught internally
             await _send_warning_alert(co, 25, 30, db_session)
 
     @pytest.mark.asyncio
     async def test_teams_error_caught(self, db_session):
-        """Teams notification error is caught in _send_warning_alert."""
+        """Graph API error during warning email is caught, not raised."""
         from app.services.ownership_service import _send_warning_alert
 
         sales = _make_sales_user(db_session, "teamserr@t.com")
@@ -578,15 +567,10 @@ class TestSendWarningAlert:
         with (
             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
             patch("app.utils.graph_client.GraphClient") as mock_gc_class,
-            patch(
-                "app.services.teams.send_ownership_warning",
-                new_callable=AsyncMock,
-                side_effect=Exception("Teams unavailable"),
-            ),
         ):
             mock_gc = mock_gc_class.return_value
-            mock_gc.post_json = AsyncMock()
-            # Should not raise
+            mock_gc.post_json = AsyncMock(side_effect=Exception("Send failed"))
+            # Should not raise — error is caught internally
             await _send_warning_alert(co, 25, 30, db_session)
 
 

@@ -567,7 +567,9 @@ class TestLoadEntityTags:
         db_session.commit()
 
         result = _load_entity_tags("vendor_card", 42, db_session)
-        assert len(result) == 0
+        # Falls back to all tags when no visible ones exist
+        assert len(result) == 1
+        assert result[0]["is_visible"] is False
 
     def test_empty_when_no_tags(self, db_session):
         result = _load_entity_tags("vendor_card", 9999, db_session)

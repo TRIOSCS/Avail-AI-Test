@@ -1,11 +1,14 @@
-"""Test agent coordination endpoints (active-areas + similar check).
+"""Test trouble ticket endpoints (simplified CRUD).
+
+The active-areas and similar-check endpoints were removed during
+simplification. These tests verify the existing simplified ticket
+CRUD endpoints.
 
 Called by: pytest
-Depends on: app/routers/trouble_tickets.py, conftest fixtures
+Depends on: app/routers/error_reports.py, conftest fixtures
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,84 +37,73 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
     app.dependency_overrides.clear()
 
 
-def test_active_areas_empty(admin_client):
-    resp = admin_client.get("/api/trouble-tickets/active-areas")
-    assert resp.status_code == 200
-    assert resp.json()["areas"] == []
-
-
-def test_active_areas_returns_tested_areas(admin_client, db_session):
-    t = TroubleTicket(
-        ticket_number="TT-20260306-090",
-        submitted_by=1,
-        title="Search broken",
-        description="Search is not working",
-        source="playwright",
-        tested_area="search",
-        status="submitted",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(t)
-    db_session.commit()
-    resp = admin_client.get("/api/trouble-tickets/active-areas")
-    assert "search" in resp.json()["areas"]
-
-
-def test_active_areas_excludes_non_agent_sources(admin_client, db_session):
-    """Tickets from ticket_form source should not appear in active areas."""
-    t = TroubleTicket(
-        ticket_number="TT-20260306-091",
-        submitted_by=1,
-        title="Manual report",
-        description="User filed manually",
-        source="ticket_form",
-        tested_area="dashboard",
-        status="submitted",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(t)
-    db_session.commit()
-    resp = admin_client.get("/api/trouble-tickets/active-areas")
-    assert resp.json()["areas"] == []
-
-
-def test_similar_check_no_matches(admin_client):
-    """With no open tickets, similar returns empty matches."""
-    with patch(
-        "app.services.ticket_consolidation.find_similar_ticket",
-        new_callable=AsyncMock,
-        return_value=None,
-    ):
-        resp = admin_client.get(
-            "/api/trouble-tickets/similar",
-            params={"title": "Something broke"},
-        )
-    assert resp.status_code == 200
-    assert resp.json()["matches"] == []
-
-
-def test_similar_check_requires_title(admin_client):
-    """Title parameter is required and must be at least 3 chars."""
-    resp = admin_client.get("/api/trouble-tickets/similar", params={"title": "ab"})
-    assert resp.status_code == 422
-
-
-def test_create_ticket_with_agent_fields(admin_client):
-    """Agent fields (tested_area etc.) are accepted on creation."""
+def test_create_ticket(admin_client):
+    """Submit a trouble ticket via POST."""
     resp = admin_client.post(
         "/api/trouble-tickets",
-        json={
-            "title": "Agent found broken search",
-            "description": "Playwright detected error on search page",
-            "source": "playwright",
-            "tested_area": "search",
-            "dom_snapshot": "<html>...</html>",
-            "network_errors": [{"url": "/api/search", "status": 500}],
-            "performance_timings": {"ttfb": 1200},
-            "reproduction_steps": ["Navigate to search", "Enter MPN", "Click search"],
-        },
+        json={"message": "Something is broken on the search page"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["ok"] is True
     assert "id" in data
+    assert data["status"] == "created"
+
+
+def test_list_tickets_empty(admin_client):
+    """List returns empty when no report_button tickets exist."""
+    resp = admin_client.get("/api/trouble-tickets")
+    assert resp.status_code == 200
+    assert resp.json()["items"] == []
+
+
+def test_list_tickets_with_data(admin_client, db_session):
+    """List returns tickets created via the report button."""
+    t = TroubleTicket(
+        ticket_number="TT-COORD-001",
+        submitted_by=1,
+        title="Test ticket",
+        description="Test description",
+        source="report_button",
+        status="submitted",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(t)
+    db_session.commit()
+    resp = admin_client.get("/api/trouble-tickets")
+    assert resp.status_code == 200
+    assert len(resp.json()["items"]) >= 1
+
+
+def test_get_ticket_by_id(admin_client, db_session):
+    """Get a single ticket by ID."""
+    t = TroubleTicket(
+        ticket_number="TT-COORD-002",
+        submitted_by=1,
+        title="Detail test",
+        description="Detail description",
+        source="report_button",
+        status="submitted",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(t)
+    db_session.commit()
+    db_session.refresh(t)
+
+    resp = admin_client.get(f"/api/trouble-tickets/{t.id}")
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Detail test"
+
+
+def test_get_ticket_not_found(admin_client):
+    """Non-existent ticket returns 404."""
+    resp = admin_client.get("/api/trouble-tickets/99999")
+    assert resp.status_code == 404
+
+
+def test_create_ticket_validates_message(admin_client):
+    """Empty message should be rejected."""
+    resp = admin_client.post(
+        "/api/trouble-tickets",
+        json={"message": ""},
+    )
+    assert resp.status_code == 422

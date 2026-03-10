@@ -190,7 +190,8 @@ class TestDedupVendors:
             _make_vendor(db_session, f"Vendor{i} Cor", normalized_name=f"vendor{i} cor", sighting_count=50)
         db_session.commit()
 
-        merged = _dedup_vendors(db_session)
+        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True):
+            merged = _dedup_vendors(db_session)
         assert merged <= 20
 
     def test_merge_failure_continues(self, db_session):
@@ -692,7 +693,8 @@ class TestDedupVendorsCoverageGaps:
         _make_vendor(db_session, "Fail Merge Cor", normalized_name="fail merge cor", sighting_count=10)
         db_session.commit()
 
-        with patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge exploded")):
+        with patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=True), \
+             patch("app.services.vendor_merge_service.merge_vendor_cards", side_effect=RuntimeError("merge exploded")):
             merged = _dedup_vendors(db_session)
 
         assert merged == 0
@@ -718,5 +720,7 @@ class TestDedupVendorsCoverageGaps:
             )
         db_session.commit()
 
-        merged = _dedup_vendors(db_session)
+        with patch("app.services.vendor_merge_service.merge_vendor_cards", return_value={"ok": True}), \
+             patch("app.services.auto_dedup_service._ai_confirm_vendor_merge", return_value=False):
+            merged = _dedup_vendors(db_session)
         assert merged == 20

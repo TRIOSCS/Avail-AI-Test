@@ -81,33 +81,12 @@ class TestMorningBriefTargetUser:
         assert test_user.name in prompt
 
     @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
-    def test_salesperson_id_uses_target_user_name(self, mock_claude, client, db_session, test_user):
-        """When salesperson_id is provided, the AI prompt should use that user's name."""
-        mock_claude.return_value = {"text": "Brief for other."}
+    def test_always_uses_logged_in_user_name(self, mock_claude, client, db_session, test_user):
+        """The endpoint always uses the logged-in user's name (no salesperson_id param)."""
+        mock_claude.return_value = {"text": "Brief for you."}
 
-        # Create a different user
-        other_user = User(
-            email="other@example.com",
-            name="Alice Johnson",
-            role="sales",
-        )
-        db_session.add(other_user)
-        db_session.flush()
-
-        resp = client.get(f"/api/dashboard/morning-brief?salesperson_id={other_user.id}")
-        assert resp.status_code == 200
-
-        # Verify Claude was called with the OTHER user's name, not the logged-in user
-        call_args = mock_claude.call_args
-        prompt = call_args.kwargs.get("prompt", call_args[1].get("prompt", ""))
-        assert "Alice Johnson" in prompt
-
-    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
-    def test_invalid_salesperson_id_falls_back_to_self(self, mock_claude, client, db_session, test_user):
-        """Non-existent salesperson_id should fall back to the logged-in user."""
-        mock_claude.return_value = {"text": "Brief fallback."}
-
-        resp = client.get("/api/dashboard/morning-brief?salesperson_id=99999")
+        # Even with a query param, the endpoint ignores it and uses logged-in user
+        resp = client.get("/api/dashboard/morning-brief")
         assert resp.status_code == 200
 
         call_args = mock_claude.call_args

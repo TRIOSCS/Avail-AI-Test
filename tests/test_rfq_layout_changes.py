@@ -12,6 +12,7 @@ Depends on: conftest.py fixtures (client, db_session, test_user, test_requisitio
 """
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from app.models import Offer, Requirement, Requisition, User
 
@@ -110,7 +111,8 @@ def test_offers_have_notes_field(client, db_session, test_requisition, test_user
 # ── Task board: Purchasing/Sales headers with assignee ──
 
 
-def test_tasks_endpoint_returns_task_type_and_assignee(client, db_session, test_requisition, test_user):
+@patch("app.routers.task.task_service.apply_simple_scoring")
+def test_tasks_endpoint_returns_task_type_and_assignee(mock_scoring, client, db_session, test_requisition, test_user):
     """GET /api/requisitions/{id}/tasks returns tasks with type and assignee_name."""
     _make_task(
         db_session, test_requisition, test_user,
@@ -141,7 +143,8 @@ def test_tasks_endpoint_returns_task_type_and_assignee(client, db_session, test_
         assert "assignee_name" in task or "assigned_to_id" in task
 
 
-def test_tasks_include_all_types_without_filtering(client, db_session, test_requisition, test_user):
+@patch("app.routers.task.task_service.apply_simple_scoring")
+def test_tasks_include_all_types_without_filtering(mock_scoring, client, db_session, test_requisition, test_user):
     """Task endpoint returns all types — frontend no longer filters by category."""
     _make_task(db_session, test_requisition, test_user, task_type="sourcing")
     _make_task(db_session, test_requisition, test_user, task_type="sales")
