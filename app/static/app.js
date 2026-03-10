@@ -15840,59 +15840,71 @@ function _rfqRenderOffers(offers, body) {
         <span class="rfq-offer-summary">${selected > 0 ? selected + ' selected for quote' : ''}</span>
     </div>`;
 
-    // Offer rows
+    // Offer cards — structured multi-line layout
     offers.forEach(o => {
         const selCls = o.selected_for_quote ? ' selected' : '';
         const histCls = o.is_historical ? ' historical' : '';
 
         // Price color vs target
         let priceCls = '';
+        let priceTooltip = '';
         if (targetPrice && o.unit_price) {
-            const ratio = o.unit_price / targetPrice;
-            if (ratio <= 1) priceCls = ' under';
-            else if (ratio <= 1.15) priceCls = ' near';
-            else priceCls = ' over';
+            const pct = Math.round((o.unit_price / targetPrice - 1) * 100);
+            if (pct <= 0) { priceCls = ' under'; priceTooltip = pct + '% vs target'; }
+            else if (pct <= 15) { priceCls = ' near'; priceTooltip = '+' + pct + '% vs target'; }
+            else { priceCls = ' over'; priceTooltip = '+' + pct + '% vs target'; }
         }
 
         // Flags
         let flags = '';
-        if (o.is_substitute) flags += '<span class="rfq-offer-flag rfq-offer-flag-sub">Sub</span>';
-        else flags += '<span class="rfq-offer-flag rfq-offer-flag-exact">Exact</span>';
-        if (o.is_historical) flags += '<span class="rfq-offer-flag rfq-offer-flag-hist">Hist</span>';
+        if (o.is_substitute) flags += '<span class="rfq-offer-flag rfq-offer-flag-sub">SUB</span>';
+        else flags += '<span class="rfq-offer-flag rfq-offer-flag-exact">EXACT</span>';
+        if (o.is_historical) flags += '<span class="rfq-offer-flag rfq-offer-flag-hist">HIST</span>';
 
         // Age badge
         let ageBadge = '';
-        if (o.age_days > 14) ageBadge = '<span style="font-size:8px;color:var(--red);font-weight:600">STALE</span>';
-        else if (o.age_days > 7) ageBadge = '<span style="font-size:8px;color:var(--amber);font-weight:600">AGING</span>';
+        if (o.age_days > 14) ageBadge = '<span class="rfq-offer-age rfq-offer-age-stale">STALE</span>';
+        else if (o.age_days > 7) ageBadge = '<span class="rfq-offer-age rfq-offer-age-aging">AGING</span>';
 
         const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
-        const qty = o.qty_available || '\u2014';
-        const lead = o.lead_time || '\u2014';
-        const cond = o.condition || '';
+        const currency = o.currency && o.currency !== 'USD' ? ' ' + esc(o.currency) : '';
 
-        const dateCode = o.date_code || '';
-        const pkg = o.packaging || '';
-        const moq = o.moq ? o.moq.toLocaleString() : '';
-        const warranty = o.warranty || '';
-        const origin = o.country_of_origin || '';
+        // Detail chips — only show what's available
+        let details = [];
+        if (o.qty_available) details.push('<span class="rfq-ocard-chip" title="Qty available"><b>' + Number(o.qty_available).toLocaleString() + '</b> avail</span>');
+        if (o.condition) details.push('<span class="rfq-ocard-chip" title="Condition">' + esc(o.condition) + '</span>');
+        if (o.lead_time) details.push('<span class="rfq-ocard-chip" title="Lead time">' + esc(o.lead_time) + '</span>');
+        if (o.date_code) details.push('<span class="rfq-ocard-chip" title="Date code">DC: ' + esc(o.date_code) + '</span>');
+        if (o.packaging) details.push('<span class="rfq-ocard-chip" title="Packaging">' + esc(o.packaging) + '</span>');
+        if (o.moq) details.push('<span class="rfq-ocard-chip" title="MOQ">MOQ: ' + o.moq.toLocaleString() + '</span>');
+        if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">' + esc(o.warranty) + '</span>');
+        if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">' + esc(o.country_of_origin) + '</span>');
+        if (o.firmware) details.push('<span class="rfq-ocard-chip" title="Firmware">FW: ' + esc(o.firmware) + '</span>');
 
-        html += `<div class="rfq-offer-row${selCls}${histCls}" data-offer-id="${o.id}">
-            <input type="checkbox" class="rfq-offer-check" ${o.selected_for_quote ? 'checked' : ''}
-                onclick="event.stopPropagation();rfqToggleOfferSelection(${o.id})"
-                title="Select for quote">
-            <div class="rfq-offer-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</div>
-            <div class="rfq-offer-flags">${flags}</div>
-            <div class="rfq-offer-price${priceCls}" title="${o.unit_price && targetPrice ? Math.round((o.unit_price/targetPrice-1)*100)+'% vs target' : ''}">${price}</div>
-            <div class="rfq-offer-field" title="Qty available">${qty}</div>
-            <div class="rfq-offer-field" title="Lead time">${lead}</div>
-            <div class="rfq-offer-field" title="Condition">${cond}</div>
-            ${dateCode ? '<div class="rfq-offer-field" title="Date code">' + esc(dateCode) + '</div>' : ''}
-            ${pkg ? '<div class="rfq-offer-field" title="Packaging">' + esc(pkg) + '</div>' : ''}
-            ${moq ? '<div class="rfq-offer-field" title="MOQ">' + esc(moq) + '</div>' : ''}
-            ${warranty ? '<div class="rfq-offer-field" title="Warranty">' + esc(warranty) + '</div>' : ''}
-            ${origin ? '<div class="rfq-offer-field" title="Country of origin">' + esc(origin) + '</div>' : ''}
-            ${ageBadge}
-            ${o.notes ? '<span style="font-size:10px;color:var(--blue);cursor:pointer" title="' + escAttr(o.notes) + '">\ud83d\udcdd</span>' : ''}
+        // Meta line — source, age, entered by
+        let meta = [];
+        if (o.source && o.source !== 'manual') meta.push('via ' + esc(o.source));
+        if (o.entered_by) meta.push('by ' + esc(o.entered_by));
+        if (o.created_at) {
+            const d = new Date(o.created_at);
+            if (o.age_days === 0) meta.push('today');
+            else if (o.age_days === 1) meta.push('yesterday');
+            else if (o.age_days < 30) meta.push(o.age_days + 'd ago');
+            else meta.push(d.toLocaleDateString());
+        }
+
+        html += `<div class="rfq-ocard${selCls}${histCls}" data-offer-id="${o.id}">
+            <div class="rfq-ocard-top">
+                <input type="checkbox" class="rfq-offer-check" ${o.selected_for_quote ? 'checked' : ''}
+                    onclick="event.stopPropagation();rfqToggleOfferSelection(${o.id})"
+                    title="Select for quote">
+                <div class="rfq-ocard-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</div>
+                <div class="rfq-offer-flags">${flags}</div>
+                ${ageBadge}
+                <div class="rfq-ocard-price${priceCls}" title="${priceTooltip}">${price}${currency}</div>
+            </div>
+            <div class="rfq-ocard-details">${details.join('')}</div>
+            ${meta.length || o.notes ? '<div class="rfq-ocard-meta">' + meta.join(' \u00b7 ') + (o.notes ? ' <span class="rfq-ocard-note" title="' + escAttr(o.notes) + '">\ud83d\udcdd ' + esc(o.notes.length > 40 ? o.notes.slice(0, 40) + '\u2026' : o.notes) + '</span>' : '') + '</div>' : ''}
         </div>`;
     });
 

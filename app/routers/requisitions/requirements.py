@@ -968,6 +968,8 @@ async def list_requirement_offers(
             "firmware": o.firmware,
             "moq": o.moq,
             "warranty": o.warranty,
+            "country_of_origin": o.country_of_origin,
+            "firmware": o.firmware,
             "source": o.source,
             "status": o.status,
             "notes": o.notes,

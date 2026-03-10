@@ -55,6 +55,41 @@ def test_list_requirement_offers_with_data(client, test_requisition, db_session)
     assert float(data[0]["unit_price"]) == 0.85
 
 
+def test_list_requirement_offers_includes_extended_fields(client, test_requisition, db_session):
+    """GET /api/requirements/{id}/offers returns country_of_origin, firmware, source, entered_by."""
+    from app.models import Offer, Requirement
+
+    req = db_session.query(Requirement).filter(
+        Requirement.requisition_id == test_requisition.id
+    ).first()
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=req.id,
+        vendor_name="Mouser Electronics",
+        mpn="STM32F407VGT6",
+        qty_available=1000,
+        unit_price=8.25,
+        status="active",
+        country_of_origin="CN",
+        firmware="v2.1",
+        source="email",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(offer)
+    db_session.commit()
+
+    resp = client.get(f"/api/requirements/{req.id}/offers")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    row = next(r for r in data if r["vendor_name"] == "Mouser Electronics")
+    assert row["country_of_origin"] == "CN"
+    assert row["firmware"] == "v2.1"
+    assert row["source"] == "email"
+    assert "created_at" in row
+    assert "age_days" in row
+
+
 def test_list_requirement_offers_404(client):
     """GET /api/requirements/99999/offers returns 404 for nonexistent requirement."""
     resp = client.get("/api/requirements/99999/offers")
