@@ -878,10 +878,10 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     vr.needs_action = classification["needs_action"]
     vr.action_hint = classification["action_hint"]
 
-    # Auto-create draft Offer records from parsed emails.
-    # Only auto-create at high confidence (>=0.8).  Medium confidence
-    # (0.5-0.8) marks the VendorResponse for human review instead.
-    if db and vr.confidence and vr.confidence >= 0.8 and vr.requisition_id:
+    # Auto-create Offer records from parsed emails.
+    # High confidence (>=0.8) → T5, auto-active.
+    # Medium confidence (0.5-0.8) → T4, pending_review (review queue).
+    if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
         try:
             from .services.response_parser import extract_draft_offers
 
@@ -928,6 +928,8 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                     if card:
                         card_id = card.id
 
+                from .evidence_tiers import tier_for_parsed_offer
+
                 offer = Offer(
                     requisition_id=vr.requisition_id,
                     requirement_id=mpn_to_req_id.get(mpn_key),
@@ -946,8 +948,10 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                     moq=draft.get("moq"),
                     notes=draft.get("notes"),
                     source="email_parse",
-                    status="pending_review",
+                    status="active" if vr.confidence >= 0.8 else "pending_review",
                     vendor_response_id=vr.id,
+                    evidence_tier=tier_for_parsed_offer(vr.confidence),
+                    parse_confidence=vr.confidence,
                 )
                 db.add(offer)
                 db.flush()

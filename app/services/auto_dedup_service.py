@@ -111,9 +111,9 @@ def _dedup_vendors(db: Session) -> int:
                     logger.exception("Failed to merge vendors %d -> %d", remove_id, keep_id)
                     db.rollback()
 
-            if merged >= 20:  # Cap merges per run
+            if merged >= 50:  # Cap merges per run
                 break
-        if merged >= 20:
+        if merged >= 50:
             break
 
     return merged

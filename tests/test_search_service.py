@@ -960,7 +960,11 @@ class TestSaveSightings:
         assert s.vendor_name == "Arrow Electronics"
         assert s.vendor_name_normalized == "arrow electronics"
         assert s.confidence == 0.8  # 4 / 5.0
-        assert s.score == 100.0  # is_authorized => 100
+        # v2 multi-factor score: authorized trust=95, price/qty/freshness/completeness all contribute
+        assert s.score > 80.0  # authorized vendors score high
+        assert s.evidence_tier == "T1"  # authorized + nexar
+        assert s.score_components is not None
+        assert s.score_components["trust"] == 95.0
 
     def test_vendor_name_normalized_populated(self, db_session):
         """Sighting creation populates vendor_name_normalized."""
@@ -1114,8 +1118,9 @@ class TestSaveSightings:
         ]
         result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
         assert len(result) == 1
-        # score_sighting(75.0, False) => 75.0
-        assert result[0].score == 75.0
+        # v2 multi-factor score uses vendor_score=75.0 for trust component
+        assert result[0].score_components["trust"] == 75.0
+        assert result[0].score > 0  # weighted sum is positive
 
     def test_normalization_of_fields(self, db_session):
         """Various normalization paths: qty as int/float, price as int/float, confidence > 1."""

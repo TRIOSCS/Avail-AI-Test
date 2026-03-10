@@ -31,7 +31,7 @@ from .models import (
     Requirement,
     Sighting,
 )
-from .scoring import score_sighting
+from .scoring import score_sighting, score_sighting_v2
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -581,6 +581,9 @@ def _save_sightings(
         raw_conf = r.get("confidence", 0) or 0
         norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
 
+        from .evidence_tiers import tier_for_sighting
+
+        is_auth = r.get("is_authorized", False)
         s = Sighting(
             requirement_id=req.id,
             vendor_name=clean_vendor,
@@ -594,7 +597,7 @@ def _save_sightings(
             currency=clean_currency,
             moq=r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
             source_type=r.get("source_type"),
-            is_authorized=r.get("is_authorized", False),
+            is_authorized=is_auth,
             confidence=norm_conf,
             condition=clean_condition,
             packaging=clean_packaging,
@@ -602,12 +605,36 @@ def _save_sightings(
             lead_time_days=clean_lead_time_days,
             lead_time=r.get("lead_time"),
             raw_data=r,
+            evidence_tier=tier_for_sighting(r.get("source_type"), is_auth),
             created_at=datetime.now(timezone.utc),
         )
         norm_name = normalize_vendor_name(clean_vendor)
         s.score = score_sighting(vendor_score_map.get(norm_name), s.is_authorized)
         db.add(s)
         sightings.append(s)
+
+    # PR 3: Compute multi-factor v2 scores with median price context
+    prices = [s.unit_price for s in sightings if s.unit_price and s.unit_price > 0]
+    median_price = sorted(prices)[len(prices) // 2] if prices else None
+    target_qty = req.target_qty if req.target_qty else None
+    for s in sightings:
+        norm_name = s.vendor_name_normalized or ""
+        v2_total, v2_comp = score_sighting_v2(
+            vendor_score=vendor_score_map.get(norm_name),
+            is_authorized=s.is_authorized,
+            unit_price=s.unit_price,
+            median_price=median_price,
+            qty_available=s.qty_available,
+            target_qty=target_qty,
+            age_hours=0.0,  # Fresh search results are age=0
+            has_price=s.unit_price is not None,
+            has_qty=s.qty_available is not None,
+            has_lead_time=s.lead_time_days is not None,
+            has_condition=s.condition is not None,
+        )
+        s.score = v2_total
+        s.score_components = v2_comp
+
     try:
         db.commit()
     except Exception as e:  # pragma: no cover
@@ -1109,6 +1136,8 @@ def sighting_to_dict(s: Sighting) -> dict:
         "packaging": s.packaging,
         "lead_time_days": s.lead_time_days,
         "lead_time": s.lead_time,
+        "evidence_tier": getattr(s, "evidence_tier", None),
+        "score_components": getattr(s, "score_components", None),
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "is_stale": (
             datetime.now(timezone.utc)
