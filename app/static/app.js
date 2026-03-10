@@ -12546,7 +12546,8 @@ async function saveVendorContact() {
     if (!body.email) { showToast('Email is required', 'error'); return; }
     if (window.isValidEmail && !window.isValidEmail(body.email)) { showToast('Invalid email format', 'error'); return; }
     if (body.phone && window.isValidPhone && !window.isValidPhone(body.phone)) { showToast('Invalid phone number', 'error'); return; }
-    try {
+    var btn = document.querySelector('#vendorContactModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const url = contactId
             ? `/api/vendors/${cardId}/contacts/${contactId}`
             : `/api/vendors/${cardId}/contacts`;
@@ -12554,7 +12555,7 @@ async function saveVendorContact() {
         closeModal('vendorContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
         loadVendorContacts(parseInt(cardId));
-    } catch(e) { showToast('Failed to save contact', 'error'); }
+    });
 }
 
 async function deleteVendorContact(cardId, contactId, name) {
@@ -12664,17 +12665,17 @@ async function saveVendorLogCall() {
         notes: _v('vlcNotes').trim() || null,
     };
     if (window._vlcReqId) data.requisition_id = window._vlcReqId;
-    try {
+    var btn = document.querySelector('#vendorLogCallModal .btn-primary');
+    await guardBtn(btn, 'Logging…', async () => {
         await apiFetch('/api/vendors/' + cardId + '/activities/call', { method: 'POST', body: data });
         closeModal('vendorLogCallModal');
         showToast('Call logged', 'success');
-        // Invalidate activity cache for any open drill-down
         if (currentReqId && _ddTabCache[currentReqId]) delete _ddTabCache[currentReqId].activity;
         if (window._vlcReqId) { loadActivity(); }
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlcReqId = null;
-    } catch(e) { console.error('saveVendorLogCall:', e); showToast('Couldn\'t log call — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 function openVendorLogNoteModal(cardId, vendorName, reqId) {
@@ -12695,7 +12696,8 @@ async function saveVendorLogNote() {
         notes: notes,
     };
     if (window._vlnReqId) data.requisition_id = window._vlnReqId;
-    try {
+    var btn = document.querySelector('#vendorLogNoteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/vendors/' + cardId + '/activities/note', { method: 'POST', body: data });
         closeModal('vendorLogNoteModal');
         showToast('Note added', 'success');
@@ -12704,7 +12706,7 @@ async function saveVendorLogNote() {
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlnReqId = null;
-    } catch(e) { console.error('saveVendorLogNote:', e); showToast('Couldn\'t add note — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 // ── Confirmed Quotes ─────────────────────────────────────────────────

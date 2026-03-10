@@ -446,3 +446,121 @@ class TestStyledDeleteConfirmation:
         idx = app_js.index("function _deleteTask(")
         chunk = app_js[idx:idx + 800]
         assert "confirmAction(" in chunk
+
+
+# ── guardBtn() Loading States ──────────────────────────────────────────
+
+
+class TestGuardBtnProtection:
+    """Verify all save functions use guardBtn() to prevent double-submit."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    @pytest.mark.parametrize("func_name", [
+        "saveEditCompany",
+        "saveSiteContact",
+        "saveLogCall",
+        "saveLogNote",
+        "addSite",
+    ])
+    def test_crm_save_uses_guardBtn(self, crm_js: str, func_name: str) -> None:
+        """CRM save functions should use guardBtn()."""
+        idx = crm_js.index(f"function {func_name}(")
+        chunk = crm_js[idx:idx + 2000]
+        assert "guardBtn(" in chunk, f"{func_name} missing guardBtn()"
+
+    @pytest.mark.parametrize("func_name", [
+        "saveVendorContact",
+        "saveVendorLogCall",
+        "saveVendorLogNote",
+    ])
+    def test_app_save_uses_guardBtn(self, app_js: str, func_name: str) -> None:
+        """App save functions should use guardBtn()."""
+        idx = app_js.index(f"function {func_name}(")
+        chunk = app_js[idx:idx + 2000]
+        assert "guardBtn(" in chunk, f"{func_name} missing guardBtn()"
+
+
+# ── Required Field Indicators ─────────────────────────────────────────
+
+
+class TestRequiredFieldIndicators:
+    """Verify required fields use consistent red asterisk pattern."""
+
+    @pytest.fixture
+    def template_html(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "templates" / "index.html"
+        return path.read_text()
+
+    RED_ASTERISK = '<span style="color:var(--red)">*</span>'
+
+    @pytest.mark.parametrize("field_label", [
+        "Company Name",   # newCompanyModal
+        "Name",           # newReqModal
+        "Site Name",      # addSiteModal
+        "Phone",          # logCallModal
+        "Note",           # logNoteModal + vendorLogNoteModal
+        "Email",          # vendorContactModal
+    ])
+    def test_required_field_has_red_asterisk(self, template_html: str, field_label: str) -> None:
+        """Required fields should use the red asterisk <span> pattern."""
+        pattern = f"{field_label} {self.RED_ASTERISK}"
+        assert pattern in template_html, f"Missing red asterisk for: {field_label}"
+
+    def test_no_inline_asterisk_pattern(self, template_html: str) -> None:
+        """No labels should use inline 'Label *' pattern without styling."""
+        # These old patterns should be replaced with styled spans
+        for old_pattern in ['>Phone *<', '>Name *<', '>Note *<', '>Email *<']:
+            assert old_pattern not in template_html, f"Found unstyled asterisk: {old_pattern}"
+
+
+# ── Enter Key Handlers ────────────────────────────────────────────────
+
+
+class TestEnterKeyHandlers:
+    """Verify primary form fields have Enter key submit handlers."""
+
+    @pytest.fixture
+    def template_html(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "templates" / "index.html"
+        return path.read_text()
+
+    def test_edit_company_enter_handler(self, template_html: str) -> None:
+        """ecName should have Enter key handler to save."""
+        assert 'id="ecName"' in template_html
+        # Find the line with ecName and check for onkeydown
+        idx = template_html.index('id="ecName"')
+        chunk = template_html[idx - 200:idx + 200]
+        assert "saveEditCompany()" in chunk
+
+    def test_add_site_enter_handler(self, template_html: str) -> None:
+        """asSiteName should have Enter key handler to save."""
+        idx = template_html.index('id="asSiteName"')
+        chunk = template_html[idx - 200:idx + 200]
+        assert "addSite()" in chunk
+
+    def test_log_note_ctrl_enter(self, template_html: str) -> None:
+        """lnNotes textarea should support Ctrl+Enter to save."""
+        idx = template_html.index('id="lnNotes"')
+        chunk = template_html[idx - 200:idx + 400]
+        assert "ctrlKey" in chunk or "metaKey" in chunk
+
+    def test_vendor_log_note_ctrl_enter(self, template_html: str) -> None:
+        """vlnNotes textarea should support Ctrl+Enter to save."""
+        idx = template_html.index('id="vlnNotes"')
+        chunk = template_html[idx - 200:idx + 400]
+        assert "ctrlKey" in chunk or "metaKey" in chunk
+
+    def test_edit_company_name_required(self, template_html: str) -> None:
+        """ecName should have required attribute."""
+        idx = template_html.index('id="ecName"')
+        chunk = template_html[idx - 200:idx + 200]
+        assert "required" in chunk

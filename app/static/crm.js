@@ -1776,7 +1776,8 @@ async function saveEditCompany() {
     var name = _v('ecName').trim();
     if (!name) { showToast('Company name is required', 'error'); return; }
     var ownerVal = _v('ecOwner');
-    try {
+    var btn = document.querySelector('#editCompanyModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/companies/' + id, {
             method: 'PUT',
             body: {
@@ -1805,7 +1806,7 @@ async function saveEditCompany() {
         showToast('Company updated', 'success');
         invalidateCompanyCache();
         loadCustomers();
-    } catch (e) { showToast('Couldn\'t update company — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 function openAddSiteModal(companyId, companyName) {
@@ -1841,7 +1842,8 @@ async function addSite() {
         notes: _v('asSiteNotes').trim() || null,
     };
     if (!data.site_name) return;
-    try {
+    var btn = document.querySelector('#addSiteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const editId = document.getElementById('asSiteCompanyId')?.dataset?.editSiteId;
         if (editId) {
             await apiFetch('/api/sites/' + editId, { method: 'PUT', body: data });
@@ -1857,7 +1859,7 @@ async function addSite() {
         const asSN = document.getElementById('asSiteNotes'); if (asSN) asSN.value = '';
         loadCustomers();
         loadSiteOptions();
-    } catch (e) { showToast('Failed to save site', 'error'); }
+    });
 }
 
 // Set a <select> value, adding a custom <option> if the value isn't in the list
@@ -4893,7 +4895,8 @@ async function saveSiteContact() {
     if (!data.full_name) { showToast('Name is required', 'error'); return; }
     if (data.email && !isValidEmail(data.email)) { showToast('Invalid email format', 'error'); return; }
     if (data.phone && !isValidPhone(data.phone)) { showToast('Invalid phone number', 'error'); return; }
-    try {
+    var btn = document.querySelector('#siteContactModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const url = contactId
             ? '/api/sites/' + siteId + '/contacts/' + contactId
             : '/api/sites/' + siteId + '/contacts';
@@ -4902,10 +4905,9 @@ async function saveSiteContact() {
         });
         closeModal('siteContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
-        // Refresh the site detail panel
         const panel = document.getElementById('siteDetail-' + siteId);
         if (panel) { panel.style.display = 'none'; toggleSiteDetail(parseInt(siteId)); }
-    } catch (e) { console.error('saveSiteContact:', e); showToast('Error saving contact', 'error'); }
+    });
 }
 
 async function deleteSiteContact(siteId, contactId, name) {
@@ -4984,20 +4986,20 @@ async function saveLogCall() {
         duration_seconds: ((parseInt(_v('lcDurMin')) || 0) * 60 + (parseInt(_v('lcDurSec')) || 0)) || null,
         notes: _v('lcNotes').trim() || null,
     };
-    try {
+    var btn = document.querySelector('#logCallModal .btn-primary');
+    await guardBtn(btn, 'Logging…', async () => {
         await apiFetch('/api/companies/' + companyId + '/activities/call', {
             method: 'POST', body: data
         });
         closeModal('logCallModal');
         showToast('Call logged', 'success');
-        // Invalidate RFQ activity cache if viewing a requisition
         if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
         const healthEl = document.getElementById('actHealth-' + companyId);
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
-    } catch(e) { console.error('saveLogCall:', e); showToast('Error logging call', 'error'); }
+    });
 }
 
 function openLogNoteModal(companyId, companyName) {
@@ -5016,20 +5018,20 @@ async function saveLogNote() {
         contact_name: _v('lnContactName').trim() || null,
         notes: notes,
     };
-    try {
+    var btn = document.querySelector('#logNoteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/companies/' + companyId + '/activities/note', {
             method: 'POST', body: data
         });
         closeModal('logNoteModal');
         showToast('Note added', 'success');
-        // Invalidate RFQ activity cache if viewing a requisition
         if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
         const healthEl = document.getElementById('actHealth-' + companyId);
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
-    } catch(e) { console.error('saveLogNote:', e); showToast('Error adding note', 'error'); }
+    });
 }
 
 // ── Proactive Offers ──────────────────────────────────────────────────
