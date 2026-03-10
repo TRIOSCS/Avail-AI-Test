@@ -137,6 +137,13 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         .scalar_subquery()
         .label("latest_reply_at")
     )
+    latest_rfq_sent_sq = (
+        select(sqlfunc.max(Contact.created_at))
+        .where(Contact.requisition_id == Requisition.id, Contact.status == "sent")
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("latest_rfq_sent_at")
+    )
     latest_offer_sq = (
         select(sqlfunc.max(Offer.created_at))
         .where(Offer.requisition_id == Requisition.id)
@@ -305,6 +312,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         proactive_match_count_sq,
         call_count_sq,
         email_activity_count_sq,
+        latest_rfq_sent_sq,
     ).options(
         joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
     )
@@ -385,6 +393,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
                 "last_searched_at": r.last_searched_at.isoformat() if r.last_searched_at else None,
                 "sourced_count": sourced_cnt or 0,
                 "rfq_sent_count": rfq_sent or 0,
+                "latest_rfq_sent_at": latest_rfq_sent.isoformat() if latest_rfq_sent else None,
                 "cloned_from_id": r.cloned_from_id,
                 "deadline": r.deadline,
                 "needs_review_count": needs_rev or 0,
@@ -404,7 +413,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
                 "sourcing_color": _sc_color,
                 "sourcing_signals": _sc_signals,
             }
-            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt in rows
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt, latest_rfq_sent in rows
             for _sc, _sc_color, _sc_signals in [
                 _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)
             ]

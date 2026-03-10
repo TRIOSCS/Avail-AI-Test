@@ -9497,7 +9497,12 @@ function _renderReqRow(r) {
         let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
         if (_oCnt > 0) {
-            offCell = `<b>${_oCnt}</b>`;
+            let qsBadge = '';
+            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
+            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
+            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
+            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
+            offCell = `<b>${_oCnt}</b>${qsBadge}`;
         }
 
         // Coverage: offers vs total parts
@@ -9528,7 +9533,10 @@ function _renderReqRow(r) {
         } else if (sourced > 0 && sent === 0) {
             srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
         } else if (sent > 0 && _oCnt === 0) {
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="RFQs sent, waiting for responses">${replied > 0 ? replied + ' Replies' : 'Awaiting'}</button>`;
+            const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
+            const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
+            const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
         } else if (_oCnt > 0) {
             srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
         } else {
