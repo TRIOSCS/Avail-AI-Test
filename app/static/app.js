@@ -5040,16 +5040,26 @@ function _renderDdOffers(reqId, data, panel) {
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
 
-    // Summary bar
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    // Summary bar + prominent Build Quote CTA
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
         <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}${pendingCount > 0 ? ` &middot; <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">${pendingCount} pending review</span>` : ''}</span>
-        <span style="display:flex;gap:6px">`;
+        <span style="display:flex;gap:6px;align-items:center">`;
     if (sel.size >= 2) {
         html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
     }
-    html += `<button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
+    if (sel.size === 0) {
+        html += `<span style="font-size:11px;color:var(--muted);margin-right:4px">Select offers to quote &rarr;</span>`;
+    }
+    html += `<button class="btn btn-primary" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.4;pointer-events:none;font-size:13px;padding:6px 16px"' : 'style="font-size:13px;padding:6px 16px;font-weight:700;box-shadow:0 2px 8px rgba(14,116,144,.3);animation:bqPulse 2s ease-in-out infinite"'} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote${sel.size > 0 ? ` (${sel.size})` : ''}</button>
         </span>
     </div>`;
+    // Sticky bottom bar when offers are selected
+    if (sel.size > 0) {
+        html += `<div id="ddBuildQuoteBar-${reqId}" style="position:sticky;bottom:0;z-index:10;background:var(--bg1);border-top:2px solid var(--teal);padding:8px 12px;margin:8px -8px -8px;display:flex;justify-content:space-between;align-items:center;border-radius:0 0 8px 8px">
+            <span style="font-size:12px;font-weight:600"><b>${sel.size}</b> offer${sel.size !== 1 ? 's' : ''} selected</span>
+            <button class="btn btn-primary" style="font-size:14px;padding:8px 24px;font-weight:700;box-shadow:0 2px 8px rgba(14,116,144,.3)" onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote &rarr;</button>
+        </div>`;
+    }
 
     // Grouped layout
     const grpArr = Array.isArray(groups) ? groups : [];
