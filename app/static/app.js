@@ -387,6 +387,13 @@ export async function apiFetch(url, opts = {}) {
                     throw lastErr;
                 }
                 if (res.status === 409) throw lastErr;
+                // Rate limit: extract retry-after and surface to caller
+                if (res.status === 429) {
+                    const retryAfter = parseInt(res.headers.get('retry-after') || '60', 10);
+                    lastErr.retryAfter = retryAfter;
+                    lastErr.isRateLimit = true;
+                    throw lastErr;
+                }
                 if (res.status >= 500 && attempt < maxRetries) continue;
                 throw lastErr;
             }
@@ -2983,7 +2990,14 @@ function promptInput(title, label, onSubmit, opts) {
 window.confirmAction = confirmAction;
 window.promptInput = promptInput;
 
-export function showToast(msg, type = 'info', duration = 3000) {
+export function showToast(msg, type = 'info', durationOrOpts = 3000) {
+    // Support: showToast(msg, type, duration) or showToast(msg, type, { duration, action: { label, fn } })
+    let duration = typeof durationOrOpts === 'number' ? durationOrOpts : (durationOrOpts?.duration ?? 3000);
+    const action = typeof durationOrOpts === 'object' ? durationOrOpts?.action : null;
+
+    // Error toasts with no explicit duration persist longer (10s) so user can read/act
+    if (type === 'error' && typeof durationOrOpts !== 'number' && !durationOrOpts?.duration) duration = 10000;
+
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
@@ -2996,13 +3010,35 @@ export function showToast(msg, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
-    toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:340px;opacity:0;transition:opacity .2s`;
+    toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:400px;opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px`;
     // Safe: all callers use esc() for user-controlled values before passing to showToast
-    toast.innerHTML = msg;
+    let html = `<span style="flex:1">${msg}</span>`;
+    if (action && action.label) {
+        html += `<button class="toast-action-btn" style="background:none;border:1px solid ${colors[type]||colors.info};color:${colors[type]||colors.info};padding:2px 8px;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap">${esc(action.label)}</button>`;
+    }
+    html += `<button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 2px;line-height:1" title="Dismiss">\u00d7</button>`;
+    toast.innerHTML = html;
+    // Wire action button
+    if (action && action.fn) {
+        const actionBtn = toast.querySelector('.toast-action-btn');
+        if (actionBtn) actionBtn.addEventListener('click', () => { toast.remove(); action.fn(); });
+    }
+    // Wire dismiss button
+    toast.querySelector('button:last-child').addEventListener('click', () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); });
     container.appendChild(toast);
     requestAnimationFrame(() => toast.style.opacity = '1');
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+    if (duration > 0) {
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+    }
 }
+
+// Dismiss all toasts on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const container = document.getElementById('toastContainer');
+        if (container) container.querySelectorAll('[role]').forEach(t => { t.style.opacity = '0'; setTimeout(() => t.remove(), 200); });
+    }
+});
 
 const _statusLabels = {draft:'Draft',active:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
 function updateDetailStatus(status) {
@@ -3122,7 +3158,7 @@ export async function loadRequisitions(query = '', append = false) {
         }
     } catch (e) {
         if (e.name === 'AbortError') return;
-        logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
+        logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error', { action: { label: 'Retry', fn: () => loadRequisitions() } });
     } finally {
         if (thisSeq === _reqSearchSeq) {
             document.querySelectorAll('.search-btn').forEach(el => el.classList.remove('loading'));
@@ -3592,7 +3628,7 @@ async function checkForReplies(reqId, btn) {
         if (panel) await _loadDdSubTab(reqId, 'activity', panel);
         showToast('Inbox checked for replies', 'info');
     } catch (e) {
-        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error', { action: { label: 'Retry', fn: () => checkForReplies() } });
     } finally {
         btn.disabled = false;
         btn.innerHTML = origText;
@@ -5104,6 +5140,13 @@ function _renderDdOffers(reqId, data, panel) {
             const offerAgeDays = o.created_at ? Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000) : 0;
             const staleBadge = offerAgeDays > 14 ? ' <span class="badge" style="background:var(--red-light);color:var(--red);font-size:8px">STALE</span>' : offerAgeDays > 7 ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:8px">AGING</span>' : '';
             const quotedBadge = o.quoted_on ? ` <span class="badge b-quoted">${esc(o.quoted_on)}</span>` : '';
+            // Parse confidence badge for email-parsed offers
+            let confBadge = '';
+            if (o.parse_confidence != null) {
+                const cc = o.parse_confidence >= 80 ? 'var(--green)' : o.parse_confidence >= 50 ? 'var(--amber)' : 'var(--red)';
+                const cl = o.parse_confidence >= 80 ? 'High' : o.parse_confidence >= 50 ? 'Review' : 'Low';
+                confBadge = ` <span class="badge" style="background:${cc}15;color:${cc};font-size:8px;padding:1px 4px" title="AI parse confidence: ${o.parse_confidence}%">${cl} ${o.parse_confidence}%</span>`;
+            }
 
             // Edited-by info
             let editedInfo = '';
@@ -5114,7 +5157,7 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${editedInfo}</td>
                 <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
@@ -5425,6 +5468,127 @@ function ddToggleGroupOffers(reqId, groupIdx, checked) {
 
 
 
+// ── Payment/Shipping Terms Presets ─────────────────────────────────────
+// Shared preset lists for payment and shipping terms dropdowns.
+// Used by: Build Quote modal, inline draft quote editor, ddShowCopyFromQuote
+const _PAYMENT_TERMS = ['Net 30', 'Net 45', 'Net 60', 'COD', 'Prepaid', 'CIA'];
+const _SHIPPING_TERMS = ['FOB Origin', 'FOB Destination', 'CIF', 'DDP', 'EXW', 'DAP'];
+
+function _termsSelectHtml(id, currentVal, presets) {
+    const isCustom = currentVal && !presets.includes(currentVal);
+    let html = `<select id="${id}" style="width:120px;padding:2px 4px">`;
+    for (const p of presets) {
+        html += `<option value="${escAttr(p)}"${p === currentVal ? ' selected' : ''}>${esc(p)}</option>`;
+    }
+    html += `<option value="__custom"${isCustom ? ' selected' : ''}>Other\u2026</option></select>`;
+    return html;
+}
+
+function _wireTermsSelect(selectId, customId) {
+    const sel = document.getElementById(selectId);
+    const custom = document.getElementById(customId);
+    if (!sel || !custom) return;
+    // If current value is custom, show the custom input pre-filled
+    if (sel.value === '__custom') {
+        custom.style.display = '';
+    }
+    sel.addEventListener('change', function() {
+        if (this.value === '__custom') {
+            custom.style.display = '';
+            custom.focus();
+        } else {
+            custom.style.display = 'none';
+            custom.value = '';
+        }
+    });
+}
+
+function _getTermsValue(selectId, customId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return '';
+    if (sel.value === '__custom') {
+        return document.getElementById(customId)?.value || '';
+    }
+    return sel.value;
+}
+
+async function ddShowCopyFromQuote(prefix) {
+    try {
+        const data = await apiFetch('/api/quotes/recent-terms');
+        if (!data || !data.length) { showToast('No recent quotes found', 'info'); return; }
+        // Build a small dropdown overlay near the button
+        const btnId = prefix === 'bq' ? 'bqCopyPrevBtn' : null;
+        let listHtml = '<div class="copy-terms-dropdown" style="position:absolute;z-index:9999;background:var(--bg1);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:220px;max-height:200px;overflow-y:auto">';
+        for (const q of data) {
+            const label = esc((q.customer_name || 'Unknown') + ' — ' + (q.quote_number || 'Draft'));
+            const terms = [q.payment_terms, q.shipping_terms].filter(Boolean).join(' / ') || 'No terms';
+            listHtml += `<div class="copy-terms-item" style="padding:6px 12px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--border)" onclick="_applyCopiedTerms('${prefix}',${JSON.stringify(q).replace(/'/g, "\\'")})" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''"><strong>${label}</strong><br><span style="color:var(--muted)">${esc(terms)}</span></div>`;
+        }
+        listHtml += '</div>';
+        // Remove any existing dropdown
+        document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+        const btn = btnId ? document.getElementById(btnId) : null;
+        if (btn) {
+            btn.style.position = 'relative';
+            btn.insertAdjacentHTML('afterend', listHtml);
+        } else {
+            document.body.insertAdjacentHTML('beforeend', listHtml);
+        }
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', function _closeCopy(e) {
+                if (!e.target.closest('.copy-terms-dropdown')) {
+                    document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+                    document.removeEventListener('click', _closeCopy);
+                }
+            });
+        }, 100);
+    } catch (e) {
+        showToast('Could not load recent quotes', 'error');
+    }
+}
+
+function _applyCopiedTerms(prefix, q) {
+    document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+    const termsSelId = prefix === 'bq' ? 'bqTerms' : null;
+    const shipSelId = prefix === 'bq' ? 'bqShip' : null;
+    const notesId = prefix === 'bq' ? 'bqNotes' : null;
+    const validId = prefix === 'bq' ? 'bqValid' : null;
+
+    // Set payment terms
+    if (termsSelId && q.payment_terms) {
+        _setTermsSelect(termsSelId, termsSelId + 'Custom', q.payment_terms, _PAYMENT_TERMS);
+    }
+    // Set shipping terms
+    if (shipSelId && q.shipping_terms) {
+        _setTermsSelect(shipSelId, shipSelId + 'Custom', q.shipping_terms, _SHIPPING_TERMS);
+    }
+    // Set notes
+    if (notesId && q.notes) {
+        const notesEl = document.getElementById(notesId);
+        if (notesEl) notesEl.value = q.notes;
+    }
+    // Set validity
+    if (validId && q.validity_days) {
+        const validEl = document.getElementById(validId);
+        if (validEl) validEl.value = q.validity_days;
+    }
+    showToast('Terms copied from ' + (q.quote_number || 'recent quote'), 'success');
+}
+
+function _setTermsSelect(selectId, customId, value, presets) {
+    const sel = document.getElementById(selectId);
+    const custom = document.getElementById(customId);
+    if (!sel) return;
+    if (presets.includes(value)) {
+        sel.value = value;
+        if (custom) { custom.style.display = 'none'; custom.value = ''; }
+    } else {
+        sel.value = '__custom';
+        if (custom) { custom.style.display = ''; custom.value = value; }
+    }
+}
+
 function ddBuildQuote(reqId) {
     const sel = _ddSelectedOffers[reqId];
     if (!sel || sel.size === 0) return;
@@ -5487,10 +5651,13 @@ function ddBuildQuote(reqId) {
                 </tr></tfoot>
             </table>
             </div>
-            <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12px">
-                <label>Payment Terms <input id="bqTerms" value="Net 30" placeholder="Net 30" style="width:100px;padding:4px 6px"></label>
-                <label>Shipping <input id="bqShip" value="FOB Origin" placeholder="FOB Origin" style="width:100px;padding:4px 6px"></label>
+            <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12px;align-items:end">
+                <label>Payment Terms <select id="bqTerms" style="width:120px;padding:4px 6px"><option value="Net 30" selected>Net 30</option><option value="Net 45">Net 45</option><option value="Net 60">Net 60</option><option value="COD">COD</option><option value="Prepaid">Prepaid</option><option value="CIA">CIA</option><option value="__custom">Other…</option></select></label>
+                <input id="bqTermsCustom" style="width:100px;padding:4px 6px;display:none" placeholder="Custom terms">
+                <label>Shipping <select id="bqShip" style="width:120px;padding:4px 6px"><option value="FOB Origin" selected>FOB Origin</option><option value="FOB Destination">FOB Destination</option><option value="CIF">CIF</option><option value="DDP">DDP</option><option value="EXW">EXW</option><option value="DAP">DAP</option><option value="__custom">Other…</option></select></label>
+                <input id="bqShipCustom" style="width:100px;padding:4px 6px;display:none" placeholder="Custom shipping">
                 <label>Valid <input id="bqValid" type="number" value="7" style="width:50px;padding:4px 6px"> days</label>
+                <button class="btn btn-ghost btn-sm" id="bqCopyPrevBtn" onclick="ddShowCopyFromQuote('bq')" title="Copy terms from a recent quote" style="font-size:11px">Copy from recent…</button>
             </div>
             <div style="margin-top:8px"><label style="font-size:12px">Notes<br><textarea id="bqNotes" rows="2" style="width:100%;font-size:11px;padding:4px" placeholder="Special instructions, terms, etc."></textarea></label></div>
             <div class="mactions" style="margin-top:12px">
@@ -5500,6 +5667,10 @@ function ddBuildQuote(reqId) {
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+
+    // Wire up payment/shipping custom selects
+    _wireTermsSelect('bqTerms', 'bqTermsCustom');
+    _wireTermsSelect('bqShip', 'bqShipCustom');
 
     // Wire up per-line sell price inputs
     document.querySelectorAll('.bq-sell').forEach(inp => {
@@ -5586,8 +5757,8 @@ async function ddConfirmBuildQuote(reqId) {
         await apiFetch('/api/quotes/' + quote.id, {
             method: 'PUT', body: {
                 line_items: lines,
-                payment_terms: document.getElementById('bqTerms')?.value || '',
-                shipping_terms: document.getElementById('bqShip')?.value || '',
+                payment_terms: _getTermsValue('bqTerms', 'bqTermsCustom'),
+                shipping_terms: _getTermsValue('bqShip', 'bqShipCustom'),
                 validity_days: parseInt(document.getElementById('bqValid')?.value) || 7,
                 notes: document.getElementById('bqNotes')?.value || '',
             }
@@ -5944,15 +6115,11 @@ function _renderQuoteDetail(reqId, q, container) {
 
     // ── Terms ──
     if (isDraft) {
-        html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
-            <label>Payment <select id="ddqTerms-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.payment_terms||'')}">
-                <option value="">—</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
-                <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
-            </select></label>
-            <label>Shipping <select id="ddqShip-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.shipping_terms||'')}">
-                <option value="">—</option><option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
-                <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
-            </select></label>
+        html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap;align-items:end">
+            <label>Payment ${_termsSelectHtml('ddqTerms-' + reqId, q.payment_terms || '', _PAYMENT_TERMS)}</label>
+            <input id="ddqTermsCustom-${reqId}" style="width:90px;padding:2px 4px;display:none" placeholder="Custom">
+            <label>Shipping ${_termsSelectHtml('ddqShip-' + reqId, q.shipping_terms || '', _SHIPPING_TERMS)}</label>
+            <input id="ddqShipCustom-${reqId}" style="width:90px;padding:2px 4px;display:none" placeholder="Custom">
             <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
         </div>
         <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
@@ -5978,18 +6145,12 @@ function _renderQuoteDetail(reqId, q, container) {
     html += `</div>`; // close content
     html += `</div>`; // close outer container
     container.innerHTML = html;
-    // Set dropdown values for payment/shipping terms (handles custom values)
-    container.querySelectorAll('select[data-init-val]').forEach(sel => {
-        const v = sel.dataset.initVal;
-        if (!v) return;
-        sel.value = v;
-        if (sel.value !== v) {
-            const opt = document.createElement('option');
-            opt.value = v; opt.textContent = v;
-            sel.appendChild(opt);
-            sel.value = v;
-        }
-    });
+
+    // Wire up payment/shipping selects for draft quotes
+    if (isDraft) {
+        _wireTermsSelect('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId);
+        _wireTermsSelect('ddqShip-' + reqId, 'ddqShipCustom-' + reqId);
+    }
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
@@ -6070,8 +6231,8 @@ async function ddSaveQuoteDraft(reqId) {
         await apiFetch('/api/quotes/' + q.id, {
             method: 'PUT', body: {
                 line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
+                payment_terms: _getTermsValue('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId),
+                shipping_terms: _getTermsValue('ddqShip-' + reqId, 'ddqShipCustom-' + reqId),
                 validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
             }
@@ -6100,8 +6261,8 @@ async function ddSendQuote(reqId) {
         await apiFetch('/api/quotes/' + q.id, {
             method: 'PUT', body: {
                 line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || q.payment_terms || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || q.shipping_terms || '',
+                payment_terms: _getTermsValue('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId) || q.payment_terms || '',
+                shipping_terms: _getTermsValue('ddqShip-' + reqId, 'ddqShipCustom-' + reqId) || q.shipping_terms || '',
                 validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || q.validity_days || 7,
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || q.notes || '',
             }
@@ -6472,7 +6633,6 @@ async function ddMarkQuoteResult(reqId, result) {
                 const markResult = await apiFetch('/api/quotes/' + q.id + '/result', {
                     method: 'POST', body: { result, reason }
                 });
-                showToast('Quote marked as ' + result, 'success');
                 notifyStatusChange(markResult);
                 const reqInfo = _reqListData.find(r => r.id === reqId);
                 if (reqInfo) reqInfo.quote_status = result;
@@ -6484,6 +6644,16 @@ async function ddMarkQuoteResult(reqId, result) {
                     if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
                 }
                 if (window._refreshCustPipeline) window._refreshCustPipeline();
+                showToast('Quote marked as lost', 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+                    try {
+                        await apiFetch('/api/quotes/' + q.id + '/result', {
+                            method: 'POST', body: { result: 'sent', reason: '' }
+                        });
+                        showToast('Reverted to sent', 'success');
+                        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+                        loadRequisitions();
+                    } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+                }}});
             } catch (e) {
                 showToast(friendlyError(e, 'Something went wrong — please try again'), 'error');
             }
@@ -9071,7 +9241,7 @@ function renderReqList() {
     } else if (v === 'sales') {
         // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
         thead = `<thead><tr>
-            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Coverage: parts with at least one offer vs total parts">Coverage ${sa('coverage')}</th>
@@ -9084,7 +9254,7 @@ function renderReqList() {
     } else {
         // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
         thead = `<thead><tr>
-            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Sourcing progress">Sourced ${sa('sourced')}</th>
@@ -9223,6 +9393,83 @@ function _updateToolbarStats() {
     if (el) el.innerHTML = html;
     const mel = document.getElementById('mobileToolbarStats');
     if (mel) mel.innerHTML = html;
+}
+
+// ── Batch Selection State ──────────────────────────────────────────────
+// Tracks selected requisition IDs for batch archive/assign operations.
+// Called by: checkbox onclick in _renderReqRow, batch action bar buttons
+// Depends on: apiFetch, showToast, renderReqList
+const _batchSelectedReqs = new Set();
+
+function _toggleBatchSelect(reqId, checkbox) {
+    if (checkbox.checked) _batchSelectedReqs.add(reqId);
+    else _batchSelectedReqs.delete(reqId);
+    _updateBatchActionBar();
+}
+
+function _toggleBatchSelectAll(selectAllCb) {
+    const checkboxes = document.querySelectorAll('.batch-req-cb');
+    checkboxes.forEach(cb => {
+        const id = parseInt(cb.dataset.reqId);
+        cb.checked = selectAllCb.checked;
+        if (selectAllCb.checked) _batchSelectedReqs.add(id);
+        else _batchSelectedReqs.delete(id);
+    });
+    _updateBatchActionBar();
+}
+
+function _updateBatchActionBar() {
+    const count = _batchSelectedReqs.size;
+    let bar = document.getElementById('batchActionBar');
+    if (count === 0) {
+        if (bar) bar.remove();
+        return;
+    }
+    const html = `<div id="batchActionBar" class="rfq-inline-bar" style="position:sticky;bottom:0;z-index:100;background:var(--bg1);border-top:2px solid var(--teal);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px">
+        <strong>${count} selected</strong>
+        <span style="flex:1"></span>
+        <button class="btn btn-ghost btn-sm" onclick="_clearBatchSelection()">Clear</button>
+        <button class="btn btn-sm" style="background:var(--amber-light);color:#92400e" onclick="_batchArchiveSelected()">Archive (${count})</button>
+    </div>`;
+    if (bar) {
+        bar.outerHTML = html;
+    } else {
+        const reqList = document.getElementById('reqList');
+        if (reqList) reqList.insertAdjacentHTML('afterend', html);
+    }
+}
+
+function _clearBatchSelection() {
+    _batchSelectedReqs.clear();
+    document.querySelectorAll('.batch-req-cb').forEach(cb => cb.checked = false);
+    const selectAll = document.getElementById('batchSelectAll');
+    if (selectAll) selectAll.checked = false;
+    _updateBatchActionBar();
+}
+
+async function _batchArchiveSelected() {
+    const ids = [..._batchSelectedReqs];
+    if (!ids.length) return;
+    try {
+        const data = await apiFetch('/api/requisitions/batch-archive', {
+            method: 'PUT', body: { ids }
+        });
+        const cnt = data.archived_count;
+        _batchSelectedReqs.clear();
+        loadRequisitions();
+        showToast(`Archived ${cnt} requisition${cnt !== 1 ? 's' : ''}`, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+            try {
+                // Unarchive each by toggling archive back
+                for (const id of ids) {
+                    await apiFetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
+                }
+                showToast(`Restored ${ids.length} requisition${ids.length !== 1 ? 's' : ''}`, 'success');
+                loadRequisitions();
+            } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+        }}});
+    } catch (e) {
+        showToast('Batch archive failed: ' + e.message, 'error');
+    }
 }
 
 function _renderReqRow(r) {
@@ -9406,7 +9653,12 @@ function _renderReqRow(r) {
         let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
         if (_oCnt > 0) {
-            offCell = `<b>${_oCnt}</b>`;
+            let qsBadge = '';
+            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
+            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
+            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
+            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
+            offCell = `<b>${_oCnt}</b>${qsBadge}`;
         }
 
         // Coverage: offers vs total parts
@@ -9437,7 +9689,10 @@ function _renderReqRow(r) {
         } else if (sourced > 0 && sent === 0) {
             srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
         } else if (sent > 0 && _oCnt === 0) {
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="RFQs sent, waiting for responses">${replied > 0 ? replied + ' Replies' : 'Awaiting'}</button>`;
+            const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
+            const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
+            const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
         } else if (_oCnt > 0) {
             srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
         } else {
@@ -9499,8 +9754,9 @@ function _renderReqRow(r) {
     const _urgency = _isDeadlineUrgent(r, new Date());
     const _rowBg = (_urgency === 'overdue' || _urgency === 'today' || _urgency === 'soon')
         ? 'background:#FEF2F2;border-left:3px solid #FECACA' : 'background:#fff';
+    const batchChecked = _batchSelectedReqs.has(r.id) ? ' checked' : '';
     return `<tr class="rrow${dlClass}" style="${_rowBg}" onclick="toggleDrillDown(${r.id})">
-        <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
+        <td><input type="checkbox" class="batch-req-cb" data-req-id="${r.id}"${batchChecked} onclick="event.stopPropagation();_toggleBatchSelect(${r.id},this)" style="margin-right:4px;vertical-align:middle"><button class="ea" id="a-${r.id}">\u25b6</button></td>
         ${nameCell}
         ${dataCells}
         ${actions}
@@ -10387,7 +10643,6 @@ async function archiveFromList(reqId) {
         try {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
-            showToast(wasRestored ? 'Restored to active' : 'Archived');
             _reqListData = _reqListData.filter(r => r.id !== reqId);
             const drow = document.getElementById('d-' + reqId);
             if (drow) drow.remove();
@@ -10397,6 +10652,14 @@ async function archiveFromList(reqId) {
             if (row) row.remove();
             _updateToolbarStats();
             renderReqList();
+            const msg = wasRestored ? 'Restored to active' : 'Archived';
+            showToast(msg, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+                try {
+                    await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+                    showToast('Undone', 'success');
+                    loadRequisitions();
+                } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+            }}});
         } catch (e) { showToast('Couldn\'t restore — ' + friendlyError(e, 'please try again'), 'error'); }
         return;
     }
@@ -10434,10 +10697,8 @@ async function _archiveWithOutcome(reqId, outcome) {
                 method: 'PUT', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({outcome})
             });
-            showToast('Marked as ' + outcome + ' and archived');
         } else {
             await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
-            showToast('Archived');
         }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
         const drow = document.getElementById('d-' + reqId);
@@ -10448,6 +10709,14 @@ async function _archiveWithOutcome(reqId, outcome) {
         if (row) row.remove();
         _updateToolbarStats();
         renderReqList();
+        const label = outcome ? 'Marked as ' + outcome + ' and archived' : 'Archived';
+        showToast(label, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
+            try {
+                await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+                showToast('Restored', 'success');
+                loadRequisitions();
+            } catch (ue) { showToast('Undo failed — ' + friendlyError(ue), 'error'); }
+        }}});
     } catch (e) { showToast('Couldn\'t archive — ' + friendlyError(e, 'please try again'), 'error'); }
 }
 
@@ -11978,8 +12247,18 @@ async function rfqConfirmSend() {
             if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
             renderSources();
             loadActivity();
+
+            // Auto-poll inbox after successful send to catch quick replies
+            if (sent > 0) {
+                _scheduleAutoPoll(currentReqId);
+            }
         } catch (e) {
-            showToast('Send error: ' + e.message, 'error');
+            if (e.isRateLimit) {
+                const secs = e.retryAfter || 60;
+                _showRateLimitCountdown(secs);
+            } else {
+                showToast('Send error: ' + e.message, 'error');
+            }
         }
     });
 }
@@ -12026,9 +12305,79 @@ async function rfqRetryFailed() {
             _rfqShowResults(data.results || []);
             loadActivity();
         } catch (e) {
-            showToast('Retry error: ' + e.message, 'error');
+            if (e.isRateLimit) {
+                _showRateLimitCountdown(e.retryAfter || 60);
+            } else {
+                showToast('Retry error: ' + e.message, 'error');
+            }
         }
     });
+}
+
+// ── Rate-Limit Countdown + Auto Inbox Poll ─────────────────────────────
+// Shows a countdown toast when the user hits the RFQ rate limit (5/min).
+// Called by: rfqConfirmSend on 429 response
+// Depends on: showToast
+
+let _rateLimitTimer = null;
+
+function _showRateLimitCountdown(totalSecs) {
+    if (_rateLimitTimer) clearInterval(_rateLimitTimer);
+    let remaining = totalSecs;
+    const toastId = 'rate-limit-toast';
+    // Remove any existing rate-limit toast
+    document.getElementById(toastId)?.remove();
+    const toast = document.createElement('div');
+    toast.id = toastId;
+    toast.className = 'toast toast-warn';
+    toast.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:10000;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);display:flex;align-items:center;gap:10px';
+    const update = () => {
+        toast.innerHTML = `<span style="font-size:18px">\u23F1</span> Rate limit reached \u2014 retry in <strong>${remaining}s</strong>`;
+    };
+    update();
+    document.body.appendChild(toast);
+    _rateLimitTimer = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(_rateLimitTimer);
+            _rateLimitTimer = null;
+            toast.remove();
+            showToast('Rate limit cleared \u2014 you can send again', 'success');
+        } else {
+            update();
+        }
+    }, 1000);
+}
+
+// Auto-poll inbox 30s and 90s after sending RFQs to catch quick replies
+// Called by: rfqConfirmSend after successful send
+// Depends on: apiFetch, showToast
+let _autoPollTimers = [];
+
+function _scheduleAutoPoll(reqId) {
+    // Clear any prior auto-poll timers
+    _autoPollTimers.forEach(t => clearTimeout(t));
+    _autoPollTimers = [];
+
+    const doPoll = async (label) => {
+        try {
+            const data = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+            const responses = data.responses || [];
+            if (responses.length > 0) {
+                showToast(`Inbox check: ${responses.length} new repl${responses.length === 1 ? 'y' : 'ies'} found`, 'success');
+                // Refresh the drill-down if it's open for this req
+                if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+                if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
+            } else {
+                showToast(`${label}: no new replies yet`, 'info');
+            }
+        } catch {
+            // Silent — don't bother user if auto-poll fails
+        }
+    };
+
+    _autoPollTimers.push(setTimeout(() => doPoll('30s inbox check'), 30000));
+    _autoPollTimers.push(setTimeout(() => doPoll('90s inbox check'), 90000));
 }
 
 // ── Click-to-Call Logging ───────────────────────────────────────────────
@@ -16179,7 +16528,11 @@ function _rfqRenderSightings(data, body) {
     }
 
     const sightings = partData.sightings;
+    const blCount = partData.blacklisted_count || 0;
     let html = `<div style="font-size:12px;font-weight:600;margin-bottom:8px">${sightings.length} Source${sightings.length>1?'s':''} Found</div>`;
+    if (blCount > 0) {
+        html += `<div style="font-size:10px;color:var(--muted);margin-bottom:6px;padding:3px 6px;background:var(--bg-alt);border-radius:4px">🚫 ${blCount} vendor${blCount>1?'s':''} hidden (blacklisted)</div>`;
+    }
 
     // Compact sightings table
     html += '<table class="dtbl" style="font-size:10px"><thead><tr>';

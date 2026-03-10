@@ -56,6 +56,33 @@ async def get_quote(req_id: int, user: User = Depends(require_user), db: Session
     return quote_to_dict(quote, db)
 
 
+@router.get("/api/quotes/recent-terms")
+async def recent_quote_terms(user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Return payment/shipping terms from the 5 most recent quotes for copy-from-quote UX."""
+    quotes = (
+        db.query(Quote)
+        .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
+        .filter(Quote.created_by_id == user.id, Quote.payment_terms.isnot(None))
+        .order_by(Quote.created_at.desc())
+        .limit(5)
+        .all()
+    )
+    results = []
+    for q in quotes:
+        company_name = ""
+        if q.customer_site and q.customer_site.company:
+            company_name = q.customer_site.company.name or ""
+        results.append({
+            "quote_number": q.quote_number,
+            "customer_name": company_name,
+            "payment_terms": q.payment_terms or "",
+            "shipping_terms": q.shipping_terms or "",
+            "validity_days": q.validity_days or 7,
+            "notes": q.notes or "",
+        })
+    return results
+
+
 @router.get("/api/requisitions/{req_id}/quotes")
 async def list_quotes(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """List all quotes (including revisions) for a requisition."""

@@ -881,6 +881,7 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
     }
     for group in results.values():
         enriched = []
+        blacklisted_count = 0
         for s in group.get("sightings", []):
             vname = (s.get("vendor_name") or "").strip()
             if vname.lower() in _GARBAGE_VENDORS:
@@ -888,7 +889,9 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             norm = normalize_vendor_name(vname)
             summary = summary_cache.get(norm, empty_summary)
             if summary.get("is_blacklisted"):
+                blacklisted_count += 1
                 continue  # Skip blacklisted vendors
             s["vendor_card"] = summary
             enriched.append(s)
         group["sightings"] = enriched
+        group["blacklisted_count"] = blacklisted_count

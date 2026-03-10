@@ -26,6 +26,7 @@ from app.models import (
     SyncLog,
     User,
     VendorContact,
+    VendorResponse,
 )
 from app.routers.crm import (
     _preload_last_quoted_prices,
@@ -484,6 +485,32 @@ class TestOffers:
         resp = client.delete(f"/api/offers/{test_offer.id}")
         assert resp.status_code == 200
 
+    def test_offer_parse_confidence(self, client, db_session, test_requisition, test_offer):
+        """Offers linked to a VendorResponse should include parse_confidence."""
+        vr = VendorResponse(
+            requisition_id=test_requisition.id,
+            vendor_name="Test Vendor",
+            vendor_email="test@example.com",
+            confidence=0.85,
+            status="new",
+        )
+        db_session.add(vr)
+        db_session.flush()
+        req_item = test_requisition.requirements[0]
+        test_offer.requirement_id = req_item.id
+        test_offer.vendor_response_id = vr.id
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
+        assert resp.status_code == 200
+        data = resp.json()
+        all_offers = []
+        for g in data.get("groups", []):
+            all_offers.extend(g.get("offers", []))
+        matched = [o for o in all_offers if o.get("id") == test_offer.id]
+        assert len(matched) == 1
+        assert matched[0]["parse_confidence"] == 85
+
 
 class TestQuotes:
     def test_create_quote(self, client, db_session, test_requisition, test_customer_site, test_offer):
@@ -505,6 +532,35 @@ class TestQuotes:
         data = resp.json()
         assert isinstance(data, list)
         assert len(data) >= 1
+
+    def test_recent_quote_terms(self, client, db_session, test_requisition, test_customer_site, test_user):
+        """GET /api/quotes/recent-terms returns terms from user's recent quotes."""
+        q = Quote(
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="Q-2026-RT1",
+            status="sent",
+            line_items=[],
+            payment_terms="Net 45",
+            shipping_terms="CIF",
+            validity_days=14,
+            notes="Rush order",
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+        resp = client.get("/api/quotes/recent-terms")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(r["payment_terms"] == "Net 45" for r in data)
+        assert any(r["shipping_terms"] == "CIF" for r in data)
+
+    def test_recent_quote_terms_empty(self, client):
+        """Returns empty list when user has no quotes."""
+        resp = client.get("/api/quotes/recent-terms")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
 
     def test_delete_draft_quote(self, client, db_session, test_requisition, test_customer_site, test_user):
         q = Quote(
