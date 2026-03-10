@@ -62,6 +62,42 @@ async def log_call(
     )
 
 
+@router.post("/api/contacts/{contact_id}/retry")
+async def retry_failed_rfq(
+    contact_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Re-send a failed RFQ email."""
+    contact = db.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    if contact.status != "failed":
+        return {"error": "Only failed contacts can be retried", "status_code": 400}
+
+    token = await require_fresh_token(request, db)
+    results = await send_batch_rfq(
+        token=token,
+        db=db,
+        user_id=user.id,
+        requisition_id=contact.requisition_id,
+        vendor_groups=[{
+            "vendor_name": contact.vendor_name,
+            "vendor_email": contact.vendor_contact,
+            "parts": contact.parts_included or [],
+            "subject": contact.subject or f"RFQ [ref:{contact.requisition_id}]",
+            "body": contact.details or "",
+        }],
+    )
+    # Mark old contact as superseded
+    contact.status = "retried"
+    contact.status_updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return results[0] if results else {"status": "error", "error": "Retry produced no result"}
+
+
 @router.get("/api/requisitions/{req_id}/contacts")
 async def list_contacts(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     contacts = (

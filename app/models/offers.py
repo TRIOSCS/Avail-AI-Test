@@ -154,6 +154,7 @@ class Contact(Base):
     needs_review = Column(Boolean, default=False)
     parse_result_json = Column(JSON)
     parse_confidence = Column(Float)
+    error_message = Column(String(500))  # Error detail when status="failed"
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="contacts")

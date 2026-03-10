@@ -99,11 +99,29 @@ async def send_batch_rfq(
 
         if isinstance(send_result, Exception):
             logger.error(f"Send error to {email}: {send_result}")
+            failed_contact = Contact(
+                requisition_id=requisition_id,
+                user_id=user_id,
+                contact_type="email",
+                vendor_name=group["vendor_name"],
+                vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
+                vendor_contact=email,
+                parts_included=group.get("parts", []),
+                subject=tagged_subject,
+                details=group["body"],
+                status="failed",
+                error_message=str(send_result)[:500],
+                status_updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(failed_contact)
+            db.flush()
             results.append(
                 {
+                    "id": failed_contact.id,
                     "vendor_name": group["vendor_name"],
                     "vendor_email": email,
-                    "status": "error",
+                    "status": "failed",
                     "error": str(send_result)[:200],
                 }
             )
@@ -111,8 +129,26 @@ async def send_batch_rfq(
 
         if "error" in send_result:
             logger.error(f"Send failed to {email}: {send_result}")
+            failed_contact = Contact(
+                requisition_id=requisition_id,
+                user_id=user_id,
+                contact_type="email",
+                vendor_name=group["vendor_name"],
+                vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
+                vendor_contact=email,
+                parts_included=group.get("parts", []),
+                subject=tagged_subject,
+                details=group["body"],
+                status="failed",
+                error_message=str(send_result.get("detail", ""))[:500],
+                status_updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(failed_contact)
+            db.flush()
             results.append(
                 {
+                    "id": failed_contact.id,
                     "vendor_name": group["vendor_name"],
                     "vendor_email": email,
                     "status": "failed",

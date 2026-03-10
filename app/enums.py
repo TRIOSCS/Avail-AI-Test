@@ -53,6 +53,26 @@ class RequirementSourcingStatus(str, enum.Enum):
     lost = "lost"  # Customer declined / no stock found
 
 
+class ContactStatus(str, enum.Enum):
+    """RFQ outbound contact status."""
+    sent = "sent"
+    failed = "failed"
+    opened = "opened"
+    responded = "responded"
+    quoted = "quoted"
+    declined = "declined"
+    ooo = "ooo"
+    bounced = "bounced"
+    retried = "retried"
+
+
+class VendorResponseStatus(str, enum.Enum):
+    """Vendor response queue status."""
+    new = "new"
+    reviewed = "reviewed"
+    rejected = "rejected"
+
+
 class UserRole(str, enum.Enum):
     buyer = "buyer"
     sales = "sales"
