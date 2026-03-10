@@ -5077,16 +5077,26 @@ function _renderDdOffers(reqId, data, panel) {
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
 
-    // Summary bar
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+    // Summary bar + prominent Build Quote CTA
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
         <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}${pendingCount > 0 ? ` &middot; <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">${pendingCount} pending review</span>` : ''}</span>
-        <span style="display:flex;gap:6px">`;
+        <span style="display:flex;gap:6px;align-items:center">`;
     if (sel.size >= 2) {
         html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
     }
-    html += `<button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
+    if (sel.size === 0) {
+        html += `<span style="font-size:11px;color:var(--muted);margin-right:4px">Select offers to quote &rarr;</span>`;
+    }
+    html += `<button class="btn btn-primary" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.4;pointer-events:none;font-size:13px;padding:6px 16px"' : 'style="font-size:13px;padding:6px 16px;font-weight:700;box-shadow:0 2px 8px rgba(14,116,144,.3);animation:bqPulse 2s ease-in-out infinite"'} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote${sel.size > 0 ? ` (${sel.size})` : ''}</button>
         </span>
     </div>`;
+    // Sticky bottom bar when offers are selected
+    if (sel.size > 0) {
+        html += `<div id="ddBuildQuoteBar-${reqId}" style="position:sticky;bottom:0;z-index:10;background:var(--bg1);border-top:2px solid var(--teal);padding:8px 12px;margin:8px -8px -8px;display:flex;justify-content:space-between;align-items:center;border-radius:0 0 8px 8px">
+            <span style="font-size:12px;font-weight:600"><b>${sel.size}</b> offer${sel.size !== 1 ? 's' : ''} selected</span>
+            <button class="btn btn-primary" style="font-size:14px;padding:8px 24px;font-weight:700;box-shadow:0 2px 8px rgba(14,116,144,.3)" onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote &rarr;</button>
+        </div>`;
+    }
 
     // Grouped layout
     const grpArr = Array.isArray(groups) ? groups : [];
@@ -5116,7 +5126,7 @@ function _renderDdOffers(reqId, data, panel) {
         html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">`;
         html += `<table class="dtbl"><thead><tr>
             <th style="width:28px"><input type="checkbox" onchange="ddToggleGroupOffers(${reqId},${gi},this.checked)" ${groupSelCount === offers.length ? 'checked' : ''}></th>
-            <th>Vendor</th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>MOQ</th><th>Warranty</th><th>Source</th><th>Status</th><th>By</th><th>Notes</th><th style="width:80px"></th>
+            <th>Vendor</th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>FW</th><th>HW</th><th>MOQ</th><th>Warranty</th><th>COO</th><th>Source</th><th>Status</th><th>By</th><th>Notes</th><th style="width:80px"></th>
         </tr></thead><tbody>`;
 
         for (const o of offers) {
@@ -5166,8 +5176,11 @@ function _renderDdOffers(reqId, data, panel) {
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'condition',this)">${esc(o.condition || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'date_code',this)" style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'packaging',this)" style="font-size:10px">${esc(o.packaging || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'firmware',this)" style="font-size:10px">${esc(o.firmware || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'hardware_code',this)" style="font-size:10px">${esc(o.hardware_code || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'moq',this)" style="font-size:10px">${o.moq != null ? Number(o.moq).toLocaleString() : '\u2014'}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'warranty',this)" style="font-size:10px">${esc(o.warranty || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'country_of_origin',this)" style="font-size:10px">${esc(o.country_of_origin || '\u2014')}</td>
                 <td style="font-size:10px">${esc(o.source || '\u2014')}</td>
                 <td style="font-size:10px">${esc(o.status || '\u2014')}</td>
                 <td style="font-size:10px">${esc(o.entered_by || '\u2014')}</td>
@@ -5625,6 +5638,11 @@ function ddBuildQuote(reqId) {
             <td><input type="text" class="bq-cond" data-idx="${i}" value="${escAttr(o.condition || '')}" placeholder="\u2014" style="${inpStyle}"></td>
             <td><input type="text" class="bq-dc" data-idx="${i}" value="${escAttr(o.date_code || '')}" placeholder="\u2014" style="${inpStyle}"></td>
             <td><input type="text" class="bq-pkg" data-idx="${i}" value="${escAttr(o.packaging || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-fw" data-idx="${i}" value="${escAttr(o.firmware || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-hw" data-idx="${i}" value="${escAttr(o.hardware_code || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td class="mono" style="font-size:10px">${o.moq != null ? Number(o.moq).toLocaleString() : '\u2014'}</td>
+            <td style="font-size:10px">${esc(o.warranty || '\u2014')}</td>
+            <td style="font-size:10px">${esc(o.country_of_origin || '\u2014')}</td>
         </tr>`;
     }
 
@@ -5639,7 +5657,7 @@ function ddBuildQuote(reqId) {
             </div>
             <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="dtbl" style="font-size:11px">
-                <thead><tr><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell $</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th></tr></thead>
+                <thead><tr><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell $</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>FW</th><th>HW</th><th>MOQ</th><th>Warranty</th><th>COO</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
                 <tfoot><tr style="font-weight:700">
                     <td colspan="4">Total</td>
@@ -5647,7 +5665,7 @@ function ddBuildQuote(reqId) {
                     <td></td>
                     <td class="mono" id="bqTotalSell" style="color:var(--teal)"></td>
                     <td id="bqTotalMargin"></td>
-                    <td colspan="4"></td>
+                    <td colspan="9"></td>
                 </tr></tfoot>
             </table>
             </div>
@@ -5747,10 +5765,14 @@ async function ddConfirmBuildQuote(reqId) {
                 const cond = document.querySelector(`.bq-cond[data-idx="${i}"]`);
                 const dc = document.querySelector(`.bq-dc[data-idx="${i}"]`);
                 const pkg = document.querySelector(`.bq-pkg[data-idx="${i}"]`);
+                const fw = document.querySelector(`.bq-fw[data-idx="${i}"]`);
+                const hw = document.querySelector(`.bq-hw[data-idx="${i}"]`);
                 if (lead) lines[i].lead_time = lead.value;
                 if (cond) lines[i].condition = cond.value;
                 if (dc) lines[i].date_code = dc.value;
                 if (pkg) lines[i].packaging = pkg.value;
+                if (fw) lines[i].firmware = fw.value;
+                if (hw) lines[i].hardware_code = hw.value;
             }
         });
         // Save line items + terms
@@ -7113,12 +7135,25 @@ function _renderMobileOffersList(data, reqId, panel) {
                 html += '</div>';
             }
             html += '</div>';
-            if (o.condition || o.date_code) {
-                html += '<div style="font-size:11px;color:var(--muted);margin-top:4px">';
-                if (o.condition) html += 'Cond: ' + esc(o.condition);
-                if (o.condition && o.date_code) html += ' | ';
-                if (o.date_code) html += 'DC: ' + esc(o.date_code);
+            // Detail rows
+            const detailPairs = [];
+            if (o.condition) detailPairs.push('Cond: ' + esc(o.condition));
+            if (o.date_code) detailPairs.push('DC: ' + esc(o.date_code));
+            if (o.packaging) detailPairs.push('Pkg: ' + esc(o.packaging));
+            if (o.moq != null) detailPairs.push('MOQ: ' + Number(o.moq).toLocaleString());
+            if (o.firmware) detailPairs.push('FW: ' + esc(o.firmware));
+            if (o.hardware_code) detailPairs.push('HW: ' + esc(o.hardware_code));
+            if (o.warranty) detailPairs.push('Warranty: ' + esc(o.warranty));
+            if (o.country_of_origin) detailPairs.push('COO: ' + esc(o.country_of_origin));
+            if (o.manufacturer) detailPairs.push('Mfr: ' + esc(o.manufacturer));
+            if (o.source) detailPairs.push('Source: ' + esc(o.source));
+            if (detailPairs.length) {
+                html += '<div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.5">';
+                html += detailPairs.join(' | ');
                 html += '</div>';
+            }
+            if (o.notes) {
+                html += '<div style="font-size:10px;color:var(--muted);margin-top:2px;font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + escAttr(o.notes) + '">Note: ' + esc(o.notes) + '</div>';
             }
             // Action chips
             if (isPending) {
