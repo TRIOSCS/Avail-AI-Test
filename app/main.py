@@ -351,10 +351,11 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # One-time nuke: Clear-Site-Data on HTML pages to kill stale SW + caches
+        # One-time nuke: Clear-Site-Data on ALL responses to kill stale SW + caches
+        # The old SW intercepts fetches, so we must send this on static/api too
         # TODO: remove this header after 2026-03-17
         path = request.url.path
-        if not path.startswith("/static/") and not path.startswith("/api/") and not path.startswith("/auth/") and path != "/health":
+        if path != "/health":
             response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
@@ -425,6 +426,25 @@ def _check_backup_freshness() -> str:
         return "stale"
     except (ValueError, OSError):
         return "unknown"
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def root_sw():
+    """Serve self-destruct service worker at root scope to kill any old SW."""
+    from fastapi.responses import Response
+
+    body = (
+        "self.addEventListener('install',function(){self.skipWaiting()});\n"
+        "self.addEventListener('activate',function(e){e.waitUntil("
+        "caches.keys().then(function(n){return Promise.all(n.map(function(k){return caches.delete(k)}))})"
+        ".then(function(){return self.registration.unregister()})"
+        ".then(function(){return self.clients.claim()}))});\n"
+    )
+    return Response(
+        content=body,
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, must-revalidate", "Service-Worker-Allowed": "/"},
+    )
 
 
 @app.get("/health")
