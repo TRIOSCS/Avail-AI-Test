@@ -969,8 +969,20 @@
                 <div class="field u-flex-1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
             </div>
             <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
-            <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
-            <div class="field"><label for="asSiteShipTerms">Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+            <div class="field"><label for="asSitePayTerms">Payment Terms</label>
+                <select id="asSitePayTerms" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+                    <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+                </select>
+            </div>
+            <div class="field"><label for="asSiteShipTerms">Shipping Terms</label>
+                <select id="asSiteShipTerms" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+                    <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+                </select>
+            </div>
             <div class="field"><label for="asSiteType">Site Type</label>
                 <select id="asSiteType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
                     <option value="">—</option>

@@ -1,0 +1,198 @@
+"""
+tests/test_form_friction_fixes.py — Tests for form friction reduction changes.
+
+Covers:
+ - Q1: Auto-name requisition (frontend logic verified via template presence)
+ - Q3: Sticky vendor on mobile offer form (sessionStorage pattern)
+ - Q5: Payment terms dropdown (template + schema compatibility)
+
+Called by: pytest
+Depends on: app/schemas/crm.py, app/templates/index.html, app/static/crm.js
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+from app.schemas.crm import SiteCreate, SiteUpdate
+
+
+# ── Q5: Payment Terms Dropdown ──────────────────────────────────────────
+
+EXPECTED_PAYMENT_OPTIONS = [
+    "Net 15", "Net 30", "Net 45", "Net 60", "Net 90",
+    "COD", "CIA", "2/10 Net 30", "Due on Receipt", "Prepaid",
+]
+
+EXPECTED_SHIPPING_OPTIONS = [
+    "FOB Origin", "FOB Destination", "Prepaid",
+    "Collect", "DDP", "EXW", "FCA", "CIF",
+]
+
+
+class TestPaymentTermsDropdown:
+    """Verify the HTML template has <select> dropdowns for payment/shipping terms."""
+
+    @pytest.fixture
+    def template_html(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "templates" / "index.html"
+        return path.read_text()
+
+    def test_payment_terms_is_select(self, template_html: str) -> None:
+        """asSitePayTerms should be a <select>, not an <input>."""
+        assert '<select id="asSitePayTerms"' in template_html
+        assert '<input id="asSitePayTerms"' not in template_html
+
+    def test_shipping_terms_is_select(self, template_html: str) -> None:
+        """asSiteShipTerms should be a <select>, not an <input>."""
+        assert '<select id="asSiteShipTerms"' in template_html
+        assert '<input id="asSiteShipTerms"' not in template_html
+
+    def test_payment_options_present(self, template_html: str) -> None:
+        """All standard payment term options exist in the template."""
+        for opt in EXPECTED_PAYMENT_OPTIONS:
+            assert f"<option>{opt}</option>" in template_html, f"Missing option: {opt}"
+
+    def test_shipping_options_present(self, template_html: str) -> None:
+        """All standard shipping term options exist in the template."""
+        for opt in EXPECTED_SHIPPING_OPTIONS:
+            assert f"<option>{opt}</option>" in template_html, f"Missing option: {opt}"
+
+    def test_schema_accepts_dropdown_values(self) -> None:
+        """SiteCreate schema accepts all dropdown payment_terms values."""
+        for term in EXPECTED_PAYMENT_OPTIONS:
+            site = SiteCreate(site_name="Test", payment_terms=term)
+            assert site.payment_terms == term
+
+    def test_schema_accepts_custom_value(self) -> None:
+        """Schema still allows custom free-text values (no enum restriction)."""
+        site = SiteCreate(site_name="Test", payment_terms="Custom Terms 123")
+        assert site.payment_terms == "Custom Terms 123"
+
+    def test_schema_accepts_empty_value(self) -> None:
+        """Schema allows empty/null payment_terms."""
+        site = SiteCreate(site_name="Test", payment_terms=None)
+        assert site.payment_terms is None
+
+    def test_site_update_accepts_terms(self) -> None:
+        """SiteUpdate schema accepts payment and shipping terms."""
+        update = SiteUpdate(payment_terms="Net 60", shipping_terms="FOB Destination")
+        assert update.payment_terms == "Net 60"
+        assert update.shipping_terms == "FOB Destination"
+
+
+# ── Q5: Quote Terms Dropdown in CRM JS ─────────────────────────────────
+
+
+class TestQuoteTermsDropdown:
+    """Verify crm.js renders <select> for quote payment/shipping terms."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_quote_terms_is_select(self, crm_js: str) -> None:
+        """qtTerms should be rendered as <select>, not <input>."""
+        assert '<select id="qtTerms"' in crm_js
+        assert 'id="qtTerms" value="' not in crm_js  # no input with value attr
+
+    def test_quote_shipping_is_select(self, crm_js: str) -> None:
+        """qtShip should be rendered as <select>, not <input>."""
+        assert '<select id="qtShip"' in crm_js
+
+    def test_setSelectOrAdd_helper_exists(self, crm_js: str) -> None:
+        """The _setSelectOrAdd helper for custom dropdown values exists."""
+        assert "function _setSelectOrAdd(id, val)" in crm_js
+
+    def test_quote_terms_initialized(self, crm_js: str) -> None:
+        """After rendering, dropdown values are set via _setSelectOrAdd."""
+        assert "_setSelectOrAdd('qtTerms'" in crm_js
+        assert "_setSelectOrAdd('qtShip'" in crm_js
+
+
+# ── Q1: Auto-name Requisitions ──────────────────────────────────────────
+
+
+class TestAutoNameRequisition:
+    """Verify the selectSite function auto-populates requisition name."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_auto_name_logic_in_selectSite(self, crm_js: str) -> None:
+        """selectSite() should contain auto-name logic when name is empty."""
+        # Find the selectSite function
+        match = re.search(r"function selectSite\(.*?\{(.+?)\n\}", crm_js, re.DOTALL)
+        assert match, "selectSite function not found"
+        body = match.group(1)
+        assert "nrName" in body, "Should reference the name input"
+        assert "toLocaleString" in body or "month" in body.lower() or "Mon" in body, \
+            "Should format month for auto-name"
+
+    def test_auto_name_only_when_empty(self, crm_js: str) -> None:
+        """Auto-name should only fire when name field is empty (no overwrite)."""
+        match = re.search(r"function selectSite\(.*?\{(.+?)\n\}", crm_js, re.DOTALL)
+        assert match
+        body = match.group(1)
+        assert "!nrName.value.trim()" in body, \
+            "Should check that name is empty before auto-populating"
+
+
+# ── Q3: Sticky Vendor on Mobile Offer Form ──────────────────────────────
+
+
+class TestStickyVendor:
+    """Verify the mobile offer form remembers the last vendor."""
+
+    @pytest.fixture
+    def crm_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "crm.js"
+        return path.read_text()
+
+    def test_vendor_saved_to_session_storage(self, crm_js: str) -> None:
+        """After offer submit, vendor is saved to sessionStorage."""
+        assert "sessionStorage.setItem('lastOfferVendor'" in crm_js
+
+    def test_vendor_restored_from_session_storage(self, crm_js: str) -> None:
+        """On form open, vendor is read from sessionStorage."""
+        assert "sessionStorage.getItem('lastOfferVendor')" in crm_js
+
+    def test_vendor_card_id_saved(self, crm_js: str) -> None:
+        """Vendor card ID is also persisted for autocomplete resolution."""
+        assert "sessionStorage.setItem('lastOfferVendorCardId'" in crm_js
+        assert "sessionStorage.getItem('lastOfferVendorCardId')" in crm_js
+
+    def test_vendor_prefilled_in_input(self, crm_js: str) -> None:
+        """The moVendor input value is pre-filled from session storage."""
+        assert 'id="moVendor" type="text" placeholder="Vendor name" value="' in crm_js
+
+
+# ── Q5: App.js Quote Terms Dropdown ─────────────────────────────────────
+
+
+class TestAppJsQuoteTerms:
+    """Verify app.js renders <select> for drill-down quote terms."""
+
+    @pytest.fixture
+    def app_js(self) -> str:
+        path = Path(__file__).parent.parent / "app" / "static" / "app.js"
+        return path.read_text()
+
+    def test_ddq_terms_is_select(self, app_js: str) -> None:
+        """ddqTerms should be a <select> element."""
+        assert "select id=\"ddqTerms-" in app_js or '<select id="ddqTerms' in app_js
+
+    def test_ddq_ship_is_select(self, app_js: str) -> None:
+        """ddqShip should be a <select> element."""
+        assert "select id=\"ddqShip-" in app_js or '<select id="ddqShip' in app_js
+
+    def test_data_init_val_for_custom_values(self, app_js: str) -> None:
+        """Selects use data-init-val for setting values after render."""
+        assert "data-init-val" in app_js
+
+    def test_custom_value_injection(self, app_js: str) -> None:
+        """After innerHTML, custom values are injected as options."""
+        assert "querySelectorAll('select[data-init-val]')" in app_js

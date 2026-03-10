@@ -1809,6 +1809,22 @@ async function addSite() {
     } catch (e) { showToast('Failed to save site', 'error'); }
 }
 
+// Set a <select> value, adding a custom <option> if the value isn't in the list
+function _setSelectOrAdd(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Remove any previously injected custom option
+    el.querySelectorAll('option[data-custom]').forEach(o => o.remove());
+    if (!val) { el.value = ''; return; }
+    el.value = val;
+    if (el.value !== val) {
+        const opt = document.createElement('option');
+        opt.value = val; opt.textContent = val; opt.dataset.custom = '1';
+        el.appendChild(opt);
+        el.value = val;
+    }
+}
+
 async function openEditSiteModal(siteId) {
     try {
         const s = await apiFetch('/api/sites/' + siteId);
@@ -1820,7 +1836,7 @@ async function openEditSiteModal(siteId) {
         _s('asSiteAddr1', 'value', s.address_line1 || ''); _s('asSiteAddr2', 'value', s.address_line2 || '');
         _s('asSiteCity', 'value', s.city || ''); _s('asSiteState', 'value', s.state || '');
         _s('asSiteZip', 'value', s.zip || ''); _s('asSiteCountry', 'value', s.country || 'US');
-        _s('asSitePayTerms', 'value', s.payment_terms || ''); _s('asSiteShipTerms', 'value', s.shipping_terms || '');
+        _setSelectOrAdd('asSitePayTerms', s.payment_terms || ''); _setSelectOrAdd('asSiteShipTerms', s.shipping_terms || '');
         _s('asSiteType', 'value', s.site_type || ''); _s('asSiteTimezone', 'value', s.timezone || '');
         _s('asSiteRecvHours', 'value', s.receiving_hours || ''); _s('asSiteCarrierAcct', 'value', s.carrier_account || '');
         _s('asSiteNotes', 'value', s.notes || '');
@@ -2383,8 +2399,14 @@ function renderQuote() {
         <div>Margin: <strong>${Number(q.total_margin_pct||0).toFixed(1)}%</strong></div>
     </div>
     <div class="quote-terms">
-        <label>Terms <input id="qtTerms" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30"></label>
-        <label>Shipping <input id="qtShip" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin"></label>
+        <label>Terms <select id="qtTerms" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+            <option value="">—</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+            <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+        </select></label>
+        <label>Shipping <select id="qtShip" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+            <option value="">—</option><option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+            <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+        </select></label>
         <label>Valid <input id="qtValid" type="number" value="${q.validity_days||7}" style="width:50px"> days</label>
     </div>
     <div class="quote-notes">
@@ -2393,6 +2415,9 @@ function renderQuote() {
     <div class="quote-actions">${statusActions[q.status] || ''}</div>
     <div id="quoteHistorySection"></div>
     <div id="buyPlanSection"></div>`;
+    // Set dropdown values (custom values get injected as options)
+    _setSelectOrAdd('qtTerms', q.payment_terms || '');
+    _setSelectOrAdd('qtShip', q.shipping_terms || '');
     loadQuoteHistory();
 }
 
@@ -4114,6 +4139,14 @@ function selectSite(id, label) {
     if (sel) {
         const lbl = document.getElementById('nrSiteSelectedLabel'); if (lbl) lbl.textContent = label;
         sel.classList.remove('u-hidden');
+    }
+    // Auto-name: if name field is empty, populate with "CompanyName - Mon YYYY"
+    const nrName = document.getElementById('nrName');
+    if (nrName && !nrName.value.trim()) {
+        const companyName = label.split(' — ')[0].split(' - ')[0].trim();
+        const now = new Date();
+        const mon = now.toLocaleString('en-US', { month: 'short' });
+        nrName.value = companyName + ' - ' + mon + ' ' + now.getFullYear();
     }
     // Load contacts for the selected site's company
     loadNrContacts(id);
@@ -8327,7 +8360,10 @@ async function _openMobileOfferForm(reqId) {
         showToast('Failed to load parts', 'error');
     }
 
-    _mobileOfferVendorCardId = null;
+    // Sticky vendor: restore last used vendor from session
+    const _lastVendor = sessionStorage.getItem('lastOfferVendor') || '';
+    const _lastVendorCardId = sessionStorage.getItem('lastOfferVendorCardId');
+    _mobileOfferVendorCardId = _lastVendorCardId ? parseInt(_lastVendorCardId) : null;
 
     // Build part options
     let partOptions = '<option value="">Select part...</option>';
@@ -8359,7 +8395,7 @@ async function _openMobileOfferForm(reqId) {
         + '<div style="margin-bottom:12px">'
         + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Vendor *</label>'
         + '<div style="position:relative">'
-        + '<input id="moVendor" type="text" placeholder="Vendor name"'
+        + '<input id="moVendor" type="text" placeholder="Vendor name" value="' + escAttr(_lastVendor) + '"'
         + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
         + '<div id="moVendorSuggestions" style="position:absolute;left:0;right:0;top:100%;z-index:310;background:var(--white);border:1px solid var(--border);border-radius:0 0 8px 8px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>'
         + '</div>'
@@ -8519,6 +8555,11 @@ async function _submitMobileOffer(reqId) {
         };
 
         await apiFetch('/api/requisitions/' + reqId + '/offers', { method: 'POST', body: body });
+
+        // Sticky vendor: remember for next offer
+        sessionStorage.setItem('lastOfferVendor', vendor);
+        if (_mobileOfferVendorCardId) sessionStorage.setItem('lastOfferVendorCardId', String(_mobileOfferVendorCardId));
+        else sessionStorage.removeItem('lastOfferVendorCardId');
 
         _closeMobileOfferForm();
         showToast('Offer logged', 'success');

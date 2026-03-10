@@ -5944,8 +5944,14 @@ function _renderQuoteDetail(reqId, q, container) {
     // ── Terms ──
     if (isDraft) {
         html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
-            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:100px;padding:2px 4px"></label>
-            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:100px;padding:2px 4px"></label>
+            <label>Payment <select id="ddqTerms-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.payment_terms||'')}">
+                <option value="">—</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+                <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+            </select></label>
+            <label>Shipping <select id="ddqShip-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.shipping_terms||'')}">
+                <option value="">—</option><option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+                <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+            </select></label>
             <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
         </div>
         <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
@@ -5971,6 +5977,18 @@ function _renderQuoteDetail(reqId, q, container) {
     html += `</div>`; // close content
     html += `</div>`; // close outer container
     container.innerHTML = html;
+    // Set dropdown values for payment/shipping terms (handles custom values)
+    container.querySelectorAll('select[data-init-val]').forEach(sel => {
+        const v = sel.dataset.initVal;
+        if (!v) return;
+        sel.value = v;
+        if (sel.value !== v) {
+            const opt = document.createElement('option');
+            opt.value = v; opt.textContent = v;
+            sel.appendChild(opt);
+            sel.value = v;
+        }
+    });
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
