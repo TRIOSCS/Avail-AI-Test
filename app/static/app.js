@@ -2990,7 +2990,14 @@ function promptInput(title, label, onSubmit, opts) {
 window.confirmAction = confirmAction;
 window.promptInput = promptInput;
 
-export function showToast(msg, type = 'info', duration = 3000) {
+export function showToast(msg, type = 'info', durationOrOpts = 3000) {
+    // Support: showToast(msg, type, duration) or showToast(msg, type, { duration, action: { label, fn } })
+    let duration = typeof durationOrOpts === 'number' ? durationOrOpts : (durationOrOpts?.duration ?? 3000);
+    const action = typeof durationOrOpts === 'object' ? durationOrOpts?.action : null;
+
+    // Error toasts with no explicit duration persist longer (10s) so user can read/act
+    if (type === 'error' && typeof durationOrOpts !== 'number' && !durationOrOpts?.duration) duration = 10000;
+
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
@@ -3003,13 +3010,35 @@ export function showToast(msg, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
-    toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:340px;opacity:0;transition:opacity .2s`;
+    toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:400px;opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px`;
     // Safe: all callers use esc() for user-controlled values before passing to showToast
-    toast.innerHTML = msg;
+    let html = `<span style="flex:1">${msg}</span>`;
+    if (action && action.label) {
+        html += `<button class="toast-action-btn" style="background:none;border:1px solid ${colors[type]||colors.info};color:${colors[type]||colors.info};padding:2px 8px;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap">${esc(action.label)}</button>`;
+    }
+    html += `<button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:16px;padding:0 2px;line-height:1" title="Dismiss">\u00d7</button>`;
+    toast.innerHTML = html;
+    // Wire action button
+    if (action && action.fn) {
+        const actionBtn = toast.querySelector('.toast-action-btn');
+        if (actionBtn) actionBtn.addEventListener('click', () => { toast.remove(); action.fn(); });
+    }
+    // Wire dismiss button
+    toast.querySelector('button:last-child').addEventListener('click', () => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 200); });
     container.appendChild(toast);
     requestAnimationFrame(() => toast.style.opacity = '1');
-    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+    if (duration > 0) {
+        setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
+    }
 }
+
+// Dismiss all toasts on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        const container = document.getElementById('toastContainer');
+        if (container) container.querySelectorAll('[role]').forEach(t => { t.style.opacity = '0'; setTimeout(() => t.remove(), 200); });
+    }
+});
 
 const _statusLabels = {draft:'Draft',active:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
 function updateDetailStatus(status) {
@@ -3129,7 +3158,7 @@ export async function loadRequisitions(query = '', append = false) {
         }
     } catch (e) {
         if (e.name === 'AbortError') return;
-        logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
+        logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error', { action: { label: 'Retry', fn: () => loadRequisitions() } });
     } finally {
         if (thisSeq === _reqSearchSeq) {
             document.querySelectorAll('.search-btn').forEach(el => el.classList.remove('loading'));
@@ -3599,7 +3628,7 @@ async function checkForReplies(reqId, btn) {
         if (panel) await _loadDdSubTab(reqId, 'activity', panel);
         showToast('Inbox checked for replies', 'info');
     } catch (e) {
-        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error', { action: { label: 'Retry', fn: () => checkForReplies() } });
     } finally {
         btn.disabled = false;
         btn.innerHTML = origText;
