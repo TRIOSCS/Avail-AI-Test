@@ -60,6 +60,8 @@ class RequisitionUpdate(BaseModel):
     name: str | None = None
     customer_site_id: int | None = None
     deadline: str | None = None
+    urgency: str | None = None
+    opportunity_value: float | None = None
 
     @field_validator("deadline")
     @classmethod

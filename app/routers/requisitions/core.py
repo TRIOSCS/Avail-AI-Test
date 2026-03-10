@@ -397,6 +397,9 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
                 "best_offer_price": float(best_price) if best_price else None,
                 "awaiting_reply_count": await_cnt or 0,
                 "proactive_match_count": pm_cnt or 0,
+                "claimed_by_id": r.claimed_by_id,
+                "urgency": r.urgency or "normal",
+                "opportunity_value": float(r.opportunity_value) if r.opportunity_value else None,
                 "sourcing_score": _sc,
                 "sourcing_color": _sc_color,
                 "sourcing_signals": _sc_signals,
@@ -435,6 +438,10 @@ async def get_requisition(
         "cloned_from_id": req.cloned_from_id,
         "last_searched_at": req.last_searched_at.isoformat() if req.last_searched_at else None,
         "requirement_count": len(req.requirements) if req.requirements else 0,
+        "claimed_by_id": req.claimed_by_id,
+        "claimed_at": req.claimed_at.isoformat() if req.claimed_at else None,
+        "urgency": req.urgency or "normal",
+        "opportunity_value": float(req.opportunity_value) if req.opportunity_value else None,
     }
 
 
@@ -569,6 +576,58 @@ async def update_requisition(
         req.customer_site_id = body.customer_site_id
     if body.deadline is not None:
         req.deadline = body.deadline or None
+    if body.urgency is not None:
+        if body.urgency not in ("normal", "hot", "critical"):
+            raise HTTPException(400, "urgency must be normal, hot, or critical")
+        req.urgency = body.urgency
+    if body.opportunity_value is not None:
+        req.opportunity_value = body.opportunity_value
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "name": req.name}
+
+
+# ── Buyer Claim/Unclaim ─────────────────────────────────────────────────
+
+
+@router.post("/api/requisitions/{req_id}/claim")
+async def claim_requisition_endpoint(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buyer claims a requisition for sourcing. Any unclaimed req is open to any buyer."""
+    if user.role not in ("buyer", "trader", "manager", "admin"):
+        raise HTTPException(403, "Only buyers can claim requisitions")
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    from ...services.requirement_status import claim_requisition
+
+    try:
+        changed = claim_requisition(req, user, db)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    db.commit()
+    return {"ok": True, "claimed": changed, "claimed_by_id": req.claimed_by_id}
+
+
+@router.delete("/api/requisitions/{req_id}/claim")
+async def unclaim_requisition_endpoint(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Release buyer's claim on a requisition. Only the claimer or admin can unclaim."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    if req.claimed_by_id != user.id and user.role != "admin":
+        raise HTTPException(403, "Only the claiming buyer or admin can unclaim")
+
+    from ...services.requirement_status import unclaim_requisition
+
+    changed = unclaim_requisition(req, db, actor=user)
+    db.commit()
+    return {"ok": True, "unclaimed": changed}

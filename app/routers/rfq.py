@@ -107,6 +107,43 @@ async def send_rfq(
         requisition_id=req_id,
         vendor_groups=[g.model_dump() for g in payload.groups],
     )
+
+    # Phase 1: Advance per-part sourcing status to 'sourcing' for all RFQ'd parts
+    try:
+        from ..models import Requirement
+
+        all_parts = set()
+        for g in payload.groups:
+            all_parts.update(g.parts)
+        if all_parts:
+            req_ids = [
+                r.id
+                for r in db.query(Requirement.id)
+                .filter(
+                    Requirement.requisition_id == req_id,
+                    Requirement.primary_mpn.in_(all_parts),
+                )
+                .all()
+            ]
+            if req_ids:
+                from ..services.requirement_status import on_rfq_sent
+
+                on_rfq_sent(req_ids, db, actor=user)
+                db.commit()
+    except Exception:
+        logger.debug("Requirement status update on RFQ send failed", exc_info=True)
+
+    # Phase 1: Auto-claim requisition for the buyer if unclaimed
+    try:
+        req = db.query(Requisition).filter_by(id=req_id).first()
+        if req and req.claimed_by_id is None and user.role in ("buyer", "trader"):
+            from ..services.requirement_status import claim_requisition
+
+            claim_requisition(req, user, db)
+            db.commit()
+    except Exception:
+        logger.debug("Auto-claim on RFQ send failed", exc_info=True)
+
     return {"results": results}
 
 

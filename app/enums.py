@@ -38,6 +38,21 @@ class QuoteStatus(str, enum.Enum):
     revised = "revised"
 
 
+class RequirementSourcingStatus(str, enum.Enum):
+    """Per-part sourcing status within a requisition.
+
+    Tracks where each individual part is in the sourcing → quoting pipeline.
+    Parts within one requisition can be at different stages.
+    """
+
+    open = "open"  # Not yet being sourced
+    sourcing = "sourcing"  # Buyer is actively contacting vendors
+    offered = "offered"  # At least one confirmed offer exists
+    quoted = "quoted"  # Part included in a customer quote
+    won = "won"  # Customer accepted quote for this part
+    lost = "lost"  # Customer declined / no stock found
+
+
 class UserRole(str, enum.Enum):
     buyer = "buyer"
     sales = "sales"

@@ -398,7 +398,56 @@ async def create_offer(
     old_status = req.status
     if req.status in ("active", "sourcing"):
         req.status = "offers"
+
+    # Phase 1: Auto-advance per-part sourcing status when offer is created
+    if offer.requirement_id and offer.status == "active":
+        try:
+            from app.services.requirement_status import on_offer_created
+
+            requirement = db.get(Requirement, offer.requirement_id)
+            if requirement:
+                on_offer_created(requirement, db, actor=user)
+        except Exception as e:
+            logger.debug("Requirement status update failed: {}", e)
+
     db.commit()
+
+    # Phase 1: Notify sales creator that a new offer was entered on their req
+    if req.created_by and req.created_by != user.id:
+        try:
+            existing_notif = (
+                db.query(ActivityLog)
+                .filter(
+                    ActivityLog.user_id == req.created_by,
+                    ActivityLog.activity_type == "new_offer",
+                    ActivityLog.requisition_id == req_id,
+                    ActivityLog.dismissed_at.is_(None),
+                )
+                .first()
+            )
+            offer_count = (
+                db.query(Offer)
+                .filter(Offer.requisition_id == req_id, Offer.status == "active")
+                .count()
+            )
+            new_subj = f"New offer: {offer.vendor_name} — {offer.mpn} (${offer.unit_price or 'TBD'}) · {offer_count} total offers"
+            if existing_notif:
+                existing_notif.subject = new_subj
+                existing_notif.created_at = datetime.now(timezone.utc)
+            else:
+                db.add(
+                    ActivityLog(
+                        user_id=req.created_by,
+                        activity_type="new_offer",
+                        channel="system",
+                        requisition_id=req_id,
+                        contact_name=offer.vendor_name,
+                        subject=new_subj,
+                    )
+                )
+            db.commit()
+        except Exception:
+            logger.debug("New offer notification failed", exc_info=True)
 
     # Auto-capture offer facts into Knowledge Ledger
     try:

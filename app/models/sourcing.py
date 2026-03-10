@@ -30,6 +30,8 @@ class Requisition(Base):
         Index("ix_requisitions_created_at", "created_at"),
         Index("ix_requisitions_name", "name"),
         Index("ix_requisitions_customer_name", "customer_name"),
+        Index("ix_requisitions_claimed_by", "claimed_by_id"),
+        Index("ix_requisitions_urgency", "urgency"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -43,11 +45,20 @@ class Requisition(Base):
     last_searched_at = Column(DateTime)
     offers_viewed_at = Column(DateTime)
 
+    # Buyer claim — which buyer picked up this requisition for sourcing
+    claimed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    claimed_at = Column(DateTime)
+
+    # Sales context — helps buyers prioritize
+    urgency = Column(String(20), default="normal")  # normal | hot | critical
+    opportunity_value = Column(Numeric(12, 2))  # Estimated deal value in USD
+
     # Audit trail
     updated_at = Column(DateTime)
     updated_by_id = Column(Integer, ForeignKey("users.id"))
 
     creator = relationship("User", back_populates="requisitions", foreign_keys=[created_by])
+    claimed_by = relationship("User", foreign_keys=[claimed_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     requirements = relationship("Requirement", back_populates="requisition", cascade="all, delete-orphan")
@@ -78,6 +89,7 @@ class Requirement(Base):
     packaging = Column(String(100))
     condition = Column(String(50))
     sale_notes = Column(Text)
+    sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
@@ -90,6 +102,7 @@ class Requirement(Base):
         Index("ix_req_requisition", "requisition_id"),
         Index("ix_req_primary_mpn", "primary_mpn"),
         Index("ix_requirements_material_card", "material_card_id"),
+        Index("ix_requirements_sourcing_status", "sourcing_status"),
     )
 
 

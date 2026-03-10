@@ -197,6 +197,7 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
                 "condition": r.condition or "",
                 "notes": r.notes or "",
                 "sale_notes": r.sale_notes or "",
+                "sourcing_status": r.sourcing_status or "open",
             }
         )
     return results
