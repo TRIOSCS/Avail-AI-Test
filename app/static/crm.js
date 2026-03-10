@@ -31,6 +31,27 @@ function fmtCurrency(n) {
     return sign + '$' + v.toFixed(4);
 }
 
+// ── Margin Calculation (single source of truth) ──────────────────────
+// Gross margin % = (sell - cost) / sell × 100; returns 0 if sell ≤ 0
+function calcMarginPct(sell, cost) {
+    return sell > 0 ? ((sell - cost) / sell * 100) : 0;
+}
+// Margin color thresholds used across quote & buy plan views
+function marginColor(pct) {
+    return pct >= 20 ? 'var(--green)' : pct >= 10 ? 'var(--amber)' : 'var(--red)';
+}
+
+// ── Email Validation ─────────────────────────────────────────────────
+// Basic RFC-ish email check — rejects obvious garbage without being overly strict
+function isValidEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+// Basic phone check — at least 7 digits after stripping non-digits
+function isValidPhone(phone) {
+    const digits = phone.replace(/\D/g, '');
+    return digits.length >= 7;
+}
+
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
 const _debouncedUpdateBpTotals = debounce(() => updateBpTotals(), 150);
@@ -568,9 +589,34 @@ function _updateCustBulkBar() {
 }
 
 async function bulkAssignOwner() {
-    promptInput('Assign Owner', 'Enter user ID', async function(name) {
-        const ownerId = parseInt(name);
-        if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
+    // Build a user dropdown instead of raw ID prompt
+    let users = _userListCache;
+    if (!users) {
+        try { users = await apiFetch('/api/users/list'); _userListCache = users; }
+        catch (e) { users = []; }
+    }
+    const options = (users || []).map(u => '<option value="' + u.id + '">' + esc(u.name) + ' (' + u.role + ')</option>').join('');
+    const id = '_bulkOwnerModal';
+    const existing = document.getElementById(id);
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = id;
+    overlay.className = 'modal-bg open';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:10000;display:flex;align-items:center;justify-content:center';
+    overlay.innerHTML = '<div style="background:var(--white,#fff);border-radius:10px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.25)">'
+        + '<h3 style="margin:0 0 8px;font-size:16px">Assign Owner</h3>'
+        + '<label style="display:block;font-size:13px;color:var(--text2);margin-bottom:6px">Select account owner</label>'
+        + '<select id="_bulkOwnerSelect" style="width:100%;margin-bottom:16px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:13px"><option value="">— Select —</option>' + options + '</select>'
+        + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+        + '<button class="btn" onclick="document.getElementById(\'' + id + '\').remove()">Cancel</button>'
+        + '<button class="btn btn-primary" id="_bulkOwnerSubmit">Assign</button>'
+        + '</div></div>';
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('_bulkOwnerSubmit').onclick = async function() {
+        const ownerId = parseInt(document.getElementById('_bulkOwnerSelect').value);
+        if (isNaN(ownerId)) { showToast('Select an owner', 'error'); return; }
+        overlay.remove();
         for (const cid of _custSelectedIds) {
             try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
             catch (e) { console.error('bulk assign error', cid, e); }
@@ -578,7 +624,7 @@ async function bulkAssignOwner() {
         showToast(_custSelectedIds.size + ' accounts updated', 'success');
         clearCustSelection();
         loadCustomers();
-    });
+    };
 }
 
 function bulkExportAccounts() {
@@ -1619,7 +1665,12 @@ function openNewCompanyModal() {
 }
 
 function openNewVendorModal() {
-    openModal('vendorContactModal');
+    // Clear all fields to prevent stale data from previous add/edit
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('vcCardId', 'value', ''); _s('vcContactId', 'value', '');
+    ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _s('vcLabel', 'value', 'Sales');
+    openModal('vendorContactModal', 'vcEmail');
     const titleEl = document.getElementById('vendorContactModalTitle');
     if (titleEl) titleEl.textContent = 'Add New Vendor';
 }
@@ -1725,7 +1776,8 @@ async function saveEditCompany() {
     var name = _v('ecName').trim();
     if (!name) { showToast('Company name is required', 'error'); return; }
     var ownerVal = _v('ecOwner');
-    try {
+    var btn = document.querySelector('#editCompanyModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/companies/' + id, {
             method: 'PUT',
             body: {
@@ -1754,7 +1806,7 @@ async function saveEditCompany() {
         showToast('Company updated', 'success');
         invalidateCompanyCache();
         loadCustomers();
-    } catch (e) { showToast('Couldn\'t update company — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 function openAddSiteModal(companyId, companyName) {
@@ -1790,7 +1842,8 @@ async function addSite() {
         notes: _v('asSiteNotes').trim() || null,
     };
     if (!data.site_name) return;
-    try {
+    var btn = document.querySelector('#addSiteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const editId = document.getElementById('asSiteCompanyId')?.dataset?.editSiteId;
         if (editId) {
             await apiFetch('/api/sites/' + editId, { method: 'PUT', body: data });
@@ -1806,7 +1859,23 @@ async function addSite() {
         const asSN = document.getElementById('asSiteNotes'); if (asSN) asSN.value = '';
         loadCustomers();
         loadSiteOptions();
-    } catch (e) { showToast('Failed to save site', 'error'); }
+    });
+}
+
+// Set a <select> value, adding a custom <option> if the value isn't in the list
+function _setSelectOrAdd(id, val) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // Remove any previously injected custom option
+    el.querySelectorAll('option[data-custom]').forEach(o => o.remove());
+    if (!val) { el.value = ''; return; }
+    el.value = val;
+    if (el.value !== val) {
+        const opt = document.createElement('option');
+        opt.value = val; opt.textContent = val; opt.dataset.custom = '1';
+        el.appendChild(opt);
+        el.value = val;
+    }
 }
 
 async function openEditSiteModal(siteId) {
@@ -1820,7 +1889,7 @@ async function openEditSiteModal(siteId) {
         _s('asSiteAddr1', 'value', s.address_line1 || ''); _s('asSiteAddr2', 'value', s.address_line2 || '');
         _s('asSiteCity', 'value', s.city || ''); _s('asSiteState', 'value', s.state || '');
         _s('asSiteZip', 'value', s.zip || ''); _s('asSiteCountry', 'value', s.country || 'US');
-        _s('asSitePayTerms', 'value', s.payment_terms || ''); _s('asSiteShipTerms', 'value', s.shipping_terms || '');
+        _setSelectOrAdd('asSitePayTerms', s.payment_terms || ''); _setSelectOrAdd('asSiteShipTerms', s.shipping_terms || '');
         _s('asSiteType', 'value', s.site_type || ''); _s('asSiteTimezone', 'value', s.timezone || '');
         _s('asSiteRecvHours', 'value', s.receiving_hours || ''); _s('asSiteCarrierAcct', 'value', s.carrier_account || '');
         _s('asSiteNotes', 'value', s.notes || '');
@@ -2383,8 +2452,14 @@ function renderQuote() {
         <div>Margin: <strong>${Number(q.total_margin_pct||0).toFixed(1)}%</strong></div>
     </div>
     <div class="quote-terms">
-        <label>Terms <input id="qtTerms" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30"></label>
-        <label>Shipping <input id="qtShip" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin"></label>
+        <label>Terms <select id="qtTerms" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+            <option value="">—</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+            <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+        </select></label>
+        <label>Shipping <select id="qtShip" style="padding:4px 6px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+            <option value="">—</option><option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+            <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+        </select></label>
         <label>Valid <input id="qtValid" type="number" value="${q.validity_days||7}" style="width:50px"> days</label>
     </div>
     <div class="quote-notes">
@@ -2393,6 +2468,9 @@ function renderQuote() {
     <div class="quote-actions">${statusActions[q.status] || ''}</div>
     <div id="quoteHistorySection"></div>
     <div id="buyPlanSection"></div>`;
+    // Set dropdown values (custom values get injected as options)
+    _setSelectOrAdd('qtTerms', q.payment_terms || '');
+    _setSelectOrAdd('qtShip', q.shipping_terms || '');
     loadQuoteHistory();
 }
 
@@ -2420,7 +2498,7 @@ function updateQuoteLine(idx, field, value) {
     if (field === 'sell_price') {
         item.sell_price = parseFloat(value) || 0;
         const cost = item.cost_price || 0;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        item.margin_pct = calcMarginPct(item.sell_price, cost);
         const mEl = document.getElementById('qm-' + idx);
         if (mEl) {
             const mPct = item.margin_pct;
@@ -2447,7 +2525,7 @@ function refreshQuoteTotals() {
     });
     crmQuote.subtotal = totalSell;
     crmQuote.total_cost = totalCost;
-    crmQuote.total_margin_pct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    crmQuote.total_margin_pct = calcMarginPct(totalSell, totalCost);
     const totalsEl = document.querySelector('.quote-totals');
     if (totalsEl) {
         const gp = totalSell - totalCost;
@@ -2464,7 +2542,7 @@ function applyMarkup() {
     const pct = parseFloat(document.getElementById('quickMarkup')?.value) || 0;
     crmQuote.line_items.forEach(item => {
         item.sell_price = pct >= 100 ? 0 : Math.round((item.cost_price || 0) / (1 - pct / 100) * 10000) / 10000;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - (item.cost_price||0)) / item.sell_price * 100) : 0;
+        item.margin_pct = calcMarginPct(item.sell_price, item.cost_price || 0);
     });
     renderQuote();
 }
@@ -2567,6 +2645,7 @@ async function confirmSendQuote() {
         toEmail = document.getElementById('sqManualEmail')?.value?.trim() || '';
         toName = '';
         if (!toEmail) { showToast('Enter an email address', 'error'); return; }
+        if (!isValidEmail(toEmail)) { showToast('Invalid email format', 'error'); return; }
     } else {
         toEmail = sel.value;
         toName = sel.options[sel.selectedIndex].dataset.name || '';
@@ -4115,6 +4194,14 @@ function selectSite(id, label) {
         const lbl = document.getElementById('nrSiteSelectedLabel'); if (lbl) lbl.textContent = label;
         sel.classList.remove('u-hidden');
     }
+    // Auto-name: if name field is empty, populate with "CompanyName - Mon YYYY"
+    const nrName = document.getElementById('nrName');
+    if (nrName && !nrName.value.trim()) {
+        const companyName = label.split(' — ')[0].split(' - ')[0].trim();
+        const now = new Date();
+        const mon = now.toLocaleString('en-US', { month: 'short' });
+        nrName.value = companyName + ' - ' + mon + ' ' + now.getFullYear();
+    }
     // Load contacts for the selected site's company
     loadNrContacts(id);
 }
@@ -4806,7 +4893,10 @@ async function saveSiteContact() {
         is_primary: document.getElementById('scPrimary')?.checked || false,
     };
     if (!data.full_name) { showToast('Name is required', 'error'); return; }
-    try {
+    if (data.email && !isValidEmail(data.email)) { showToast('Invalid email format', 'error'); return; }
+    if (data.phone && !isValidPhone(data.phone)) { showToast('Invalid phone number', 'error'); return; }
+    var btn = document.querySelector('#siteContactModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const url = contactId
             ? '/api/sites/' + siteId + '/contacts/' + contactId
             : '/api/sites/' + siteId + '/contacts';
@@ -4815,10 +4905,9 @@ async function saveSiteContact() {
         });
         closeModal('siteContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
-        // Refresh the site detail panel
         const panel = document.getElementById('siteDetail-' + siteId);
         if (panel) { panel.style.display = 'none'; toggleSiteDetail(parseInt(siteId)); }
-    } catch (e) { console.error('saveSiteContact:', e); showToast('Error saving contact', 'error'); }
+    });
 }
 
 async function deleteSiteContact(siteId, contactId, name) {
@@ -4894,23 +4983,23 @@ async function saveLogCall() {
         phone: _v('lcPhone').trim() || null,
         contact_name: _v('lcContactName').trim() || null,
         direction: _v('lcDirection'),
-        duration_seconds: parseInt(_v('lcDuration')) || null,
+        duration_seconds: ((parseInt(_v('lcDurMin')) || 0) * 60 + (parseInt(_v('lcDurSec')) || 0)) || null,
         notes: _v('lcNotes').trim() || null,
     };
-    try {
+    var btn = document.querySelector('#logCallModal .btn-primary');
+    await guardBtn(btn, 'Logging…', async () => {
         await apiFetch('/api/companies/' + companyId + '/activities/call', {
             method: 'POST', body: data
         });
         closeModal('logCallModal');
         showToast('Call logged', 'success');
-        // Invalidate RFQ activity cache if viewing a requisition
         if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
         const healthEl = document.getElementById('actHealth-' + companyId);
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
-    } catch(e) { console.error('saveLogCall:', e); showToast('Error logging call', 'error'); }
+    });
 }
 
 function openLogNoteModal(companyId, companyName) {
@@ -4929,20 +5018,20 @@ async function saveLogNote() {
         contact_name: _v('lnContactName').trim() || null,
         notes: notes,
     };
-    try {
+    var btn = document.querySelector('#logNoteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/companies/' + companyId + '/activities/note', {
             method: 'POST', body: data
         });
         closeModal('logNoteModal');
         showToast('Note added', 'success');
-        // Invalidate RFQ activity cache if viewing a requisition
         if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
         const healthEl = document.getElementById('actHealth-' + companyId);
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
-    } catch(e) { console.error('saveLogNote:', e); showToast('Error adding note', 'error'); }
+    });
 }
 
 // ── Proactive Offers ──────────────────────────────────────────────────
@@ -5359,13 +5448,13 @@ function updateProactivePreview() {
         const targetQty = match ? (match.target_qty || 0) : 0;
         const availQty = match ? (match.qty_available || 0) : 0;
         const qty = targetQty > 0 ? Math.min(availQty, targetQty) : availQty;
-        const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
+        const margin = calcMarginPct(sell, cost).toFixed(1);
         const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
         if (marginEl) marginEl.textContent = margin + '%';
         totalSell += sell * qty;
         totalCost += cost * qty;
     });
-    const totalMargin = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100).toFixed(1) : '0.0';
+    const totalMargin = calcMarginPct(totalSell, totalCost).toFixed(1);
     const previewEl = document.getElementById('psPreview');
     if (previewEl) previewEl.innerHTML = `Revenue: <strong>$${totalSell.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong> · Margin: <strong>${totalMargin}%</strong> · Profit: <strong>$${(totalSell - totalCost).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>`;
 }
@@ -8076,7 +8165,7 @@ function _mqUpdateTotals() {
         totalCost += price * qty;
     }
     var totalSell = totalCost * (1 + markup / 100);
-    var marginPct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    var marginPct = calcMarginPct(totalSell, totalCost);
 
     var costEl = document.getElementById('mqCostTotal');
     var sellEl = document.getElementById('mqSellTotal');
@@ -8327,7 +8416,10 @@ async function _openMobileOfferForm(reqId) {
         showToast('Failed to load parts', 'error');
     }
 
-    _mobileOfferVendorCardId = null;
+    // Sticky vendor: restore last used vendor from session
+    const _lastVendor = sessionStorage.getItem('lastOfferVendor') || '';
+    const _lastVendorCardId = sessionStorage.getItem('lastOfferVendorCardId');
+    _mobileOfferVendorCardId = _lastVendorCardId ? parseInt(_lastVendorCardId) : null;
 
     // Build part options
     let partOptions = '<option value="">Select part...</option>';
@@ -8359,7 +8451,7 @@ async function _openMobileOfferForm(reqId) {
         + '<div style="margin-bottom:12px">'
         + '<label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Vendor *</label>'
         + '<div style="position:relative">'
-        + '<input id="moVendor" type="text" placeholder="Vendor name"'
+        + '<input id="moVendor" type="text" placeholder="Vendor name" value="' + escAttr(_lastVendor) + '"'
         + ' style="width:100%;font-size:16px;min-height:44px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--input);box-sizing:border-box;font-family:inherit">'
         + '<div id="moVendorSuggestions" style="position:absolute;left:0;right:0;top:100%;z-index:310;background:var(--white);border:1px solid var(--border);border-radius:0 0 8px 8px;max-height:180px;overflow-y:auto;display:none;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>'
         + '</div>'
@@ -8520,6 +8612,11 @@ async function _submitMobileOffer(reqId) {
 
         await apiFetch('/api/requisitions/' + reqId + '/offers', { method: 'POST', body: body });
 
+        // Sticky vendor: remember for next offer
+        sessionStorage.setItem('lastOfferVendor', vendor);
+        if (_mobileOfferVendorCardId) sessionStorage.setItem('lastOfferVendorCardId', String(_mobileOfferVendorCardId));
+        else sessionStorage.removeItem('lastOfferVendorCardId');
+
         _closeMobileOfferForm();
         showToast('Offer logged', 'success');
 
@@ -8548,6 +8645,7 @@ Object.assign(window, {
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
+    calcMarginPct, isValidEmail, isValidPhone, marginColor,
     applyMarkup, approveBuyPlan, approveBuyPlanV3,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, confirmPOV3,

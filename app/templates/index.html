@@ -837,7 +837,7 @@
         <input type="hidden" id="vcCardId">
         <input type="hidden" id="vcContactId">
         <div class="lo-form">
-            <div class="field"><label for="vcEmail">Email *</label><input id="vcEmail" type="email" placeholder="email@vendor.com" required onkeydown="if(event.key==='Enter')saveVendorContact()"></div>
+            <div class="field"><label for="vcEmail">Email <span style="color:var(--red)">*</span></label><input id="vcEmail" type="email" placeholder="email@vendor.com" required onkeydown="if(event.key==='Enter')saveVendorContact()"></div>
             <div class="field"><label for="vcFullName">Name</label><input id="vcFullName" placeholder="Full name"></div>
             <div class="field"><label for="vcTitle">Job Title</label><input id="vcTitle" placeholder="e.g. Sales Manager"></div>
             <div class="field"><label for="vcPhone">Phone</label><input id="vcPhone" type="tel" placeholder="+1 555-000-0000"></div>
@@ -864,7 +864,7 @@
                     <option value="inbound">Inbound</option>
                 </select>
             </div>
-            <div class="field"><label for="vlcDuration">Duration (seconds)</label><input id="vlcDuration" type="number" placeholder="120" min="0"></div>
+            <div class="field"><label>Duration</label><div style="display:flex;gap:6px;align-items:center"><input id="vlcDurMin" type="number" placeholder="0" min="0" style="width:60px"> <span style="font-size:12px;color:var(--muted)">min</span> <input id="vlcDurSec" type="number" placeholder="0" min="0" max="59" style="width:60px"> <span style="font-size:12px;color:var(--muted)">sec</span></div></div>
             <div class="field"><label for="vlcNotes">Notes</label><textarea id="vlcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
@@ -881,7 +881,7 @@
         <input type="hidden" id="vlnCardId">
         <div class="lo-form">
             <div class="field"><label for="vlnContactName">Contact Name (optional)</label><input id="vlnContactName" placeholder="Related contact name"></div>
-            <div class="field"><label for="vlnNotes">Note *</label><textarea id="vlnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
+            <div class="field"><label for="vlnNotes">Note <span style="color:var(--red)">*</span></label><textarea id="vlnNotes" rows="4" placeholder="Enter note... (Ctrl+Enter to save)" required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))saveVendorLogNote()"></textarea></div>
         </div>
         <div class="mactions">
             <button type="button" class="btn btn-ghost" onclick="closeModal('vendorLogNoteModal')">Cancel</button>
@@ -904,7 +904,7 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" class="u-hidden" style="margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
+        <div class="field"><label for="ncName">Company Name <span style="color:var(--red)">*</span></label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" class="u-hidden" style="margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
         <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
@@ -921,7 +921,7 @@
         <input type="hidden" id="ecId">
         <h2>Edit Company</h2>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div class="field" style="grid-column:1/-1"><label>Company Name</label><input id="ecName"></div>
+            <div class="field" style="grid-column:1/-1"><label>Company Name <span style="color:var(--red)">*</span></label><input id="ecName" required onkeydown="if(event.key==='Enter')saveEditCompany()"></div>
             <div class="field"><label>Account Type</label>
                 <select id="ecAccountType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
                     <option value="">—</option>
@@ -929,7 +929,7 @@
                 </select>
             </div>
             <div class="field"><label>Account Owner</label><select id="ecOwner" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px"></select></div>
-            <div class="field"><label>Phone</label><input id="ecPhone" placeholder="+1 (555) 000-0000"></div>
+            <div class="field"><label>Phone</label><input id="ecPhone" type="tel" placeholder="+1 (555) 000-0000"></div>
             <div class="field"><label>Website</label><input id="ecWebsite" placeholder="company.com"></div>
             <div class="field"><label>Domain</label><input id="ecDomain" placeholder="company.com"></div>
             <div class="field"><label>LinkedIn</label><input id="ecLinkedin" placeholder="linkedin.com/company/..."></div>
@@ -959,7 +959,7 @@
         <input type="hidden" id="asSiteCompanyId">
         <h2>Add Site to <span id="asSiteCompanyName"></span></h2>
         <div class="lo-form">
-            <div class="field"><label for="asSiteName">Site Name</label><input id="asSiteName" placeholder="HQ, West Coast, etc." required></div>
+            <div class="field"><label for="asSiteName">Site Name <span style="color:var(--red)">*</span></label><input id="asSiteName" placeholder="HQ, West Coast, etc." required onkeydown="if(event.key==='Enter')addSite()"></div>
             <div class="field"><label for="asSiteOwner">Owner</label><select id="asSiteOwner"><option value="">— None —</option></select></div>
             <div class="field"><label for="asSiteAddr1">Address Line 1</label><input id="asSiteAddr1" placeholder="123 Main St"></div>
             <div class="field"><label for="asSiteAddr2">Address Line 2</label><input id="asSiteAddr2" placeholder="Suite 200"></div>
@@ -969,8 +969,20 @@
                 <div class="field u-flex-1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
             </div>
             <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
-            <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
-            <div class="field"><label for="asSiteShipTerms">Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+            <div class="field"><label for="asSitePayTerms">Payment Terms</label>
+                <select id="asSitePayTerms" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+                    <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+                </select>
+            </div>
+            <div class="field"><label for="asSiteShipTerms">Shipping Terms</label>
+                <select id="asSiteShipTerms" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+                    <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+                </select>
+            </div>
             <div class="field"><label for="asSiteType">Site Type</label>
                 <select id="asSiteType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
                     <option value="">—</option>
@@ -1150,7 +1162,7 @@
         <input type="hidden" id="scSiteId">
         <input type="hidden" id="scContactId">
         <div class="lo-form">
-            <div class="field"><label for="scFullName">Name *</label><input id="scFullName" placeholder="Full name" required onkeydown="if(event.key==='Enter')saveSiteContact()"></div>
+            <div class="field"><label for="scFullName">Name <span style="color:var(--red)">*</span></label><input id="scFullName" placeholder="Full name" required onkeydown="if(event.key==='Enter')saveSiteContact()"></div>
             <div class="field"><label for="scTitle">Job Title</label><input id="scTitle" placeholder="e.g. Purchasing Manager"></div>
             <div class="field"><label for="scEmail">Email</label><input id="scEmail" type="email" placeholder="email@company.com"></div>
             <div class="field"><label for="scPhone">Phone</label><input id="scPhone" type="tel" placeholder="+1 555-000-0000"></div>
@@ -1170,7 +1182,7 @@
         <h2>Log Phone Call &mdash; <span id="lcCompanyName"></span></h2>
         <input type="hidden" id="lcCompanyId">
         <div class="lo-form">
-            <div class="field"><label for="lcPhone">Phone *</label><input id="lcPhone" type="tel" placeholder="+1 555-000-0000" required onkeydown="if(event.key==='Enter')saveLogCall()"></div>
+            <div class="field"><label for="lcPhone">Phone <span style="color:var(--red)">*</span></label><input id="lcPhone" type="tel" placeholder="+1 555-000-0000" required onkeydown="if(event.key==='Enter')saveLogCall()"></div>
             <div class="field"><label for="lcContactName">Contact Name</label><input id="lcContactName" placeholder="Who did you speak to?"></div>
             <div class="field"><label for="lcDirection">Direction</label>
                 <select id="lcDirection" style="background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;width:100%">
@@ -1178,7 +1190,7 @@
                     <option value="inbound">Inbound</option>
                 </select>
             </div>
-            <div class="field"><label for="lcDuration">Duration (seconds)</label><input id="lcDuration" type="number" placeholder="120" min="0"></div>
+            <div class="field"><label>Duration</label><div style="display:flex;gap:6px;align-items:center"><input id="lcDurMin" type="number" placeholder="0" min="0" style="width:60px"> <span style="font-size:12px;color:var(--muted)">min</span> <input id="lcDurSec" type="number" placeholder="0" min="0" max="59" style="width:60px"> <span style="font-size:12px;color:var(--muted)">sec</span></div></div>
             <div class="field"><label for="lcNotes">Notes</label><textarea id="lcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
@@ -1194,7 +1206,7 @@
         <input type="hidden" id="lnCompanyId">
         <div class="lo-form">
             <div class="field"><label for="lnContactName">Contact Name (optional)</label><input id="lnContactName" placeholder="Related contact name"></div>
-            <div class="field"><label for="lnNotes">Note *</label><textarea id="lnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
+            <div class="field"><label for="lnNotes">Note <span style="color:var(--red)">*</span></label><textarea id="lnNotes" rows="4" placeholder="Enter note... (Ctrl+Enter to save)" required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey))saveLogNote()"></textarea></div>
         </div>
         <div class="mactions">
             <button type="button" class="btn btn-ghost" onclick="closeModal('logNoteModal')">Cancel</button>

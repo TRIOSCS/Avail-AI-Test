@@ -4273,18 +4273,19 @@ async function _moveTask(reqId, taskId, newStatus) {
     }
 }
 
-async function _deleteTask(reqId, taskId) {
-    if (!confirm('Delete this task?')) return;
-    try {
-        await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId, { method: 'DELETE' });
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
-        var drow = document.getElementById('d-' + reqId);
-        var panel = drow ? drow.querySelector('.dd-panel') : null;
-        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-        if (typeof showToast === 'function') showToast('Task deleted', 'success');
-    } catch (e) {
-        if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
-    }
+function _deleteTask(reqId, taskId) {
+    confirmAction('Delete Task', 'Are you sure you want to delete this task?', async function() {
+        try {
+            await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId, { method: 'DELETE' });
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+            var drow = document.getElementById('d-' + reqId);
+            var panel = drow ? drow.querySelector('.dd-panel') : null;
+            if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+            if (typeof showToast === 'function') showToast('Task deleted', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
+        }
+    }, { confirmLabel: 'Delete', danger: true });
 }
 
 function _showInlineTaskForm(reqId, panel) {
@@ -5506,11 +5507,11 @@ function ddBuildQuote(reqId) {
             const idx = inp.dataset.idx;
             const cost = parseFloat(inp.dataset.cost) || 0;
             const sell = parseFloat(inp.value) || 0;
-            const margin = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+            const margin = window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
             const cell = document.querySelector(`.bq-margin-cell[data-idx="${idx}"]`);
             if (cell) {
                 cell.textContent = margin.toFixed(1) + '%';
-                cell.style.color = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+                cell.style.color = window.marginColor ? window.marginColor(margin) : (margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)');
             }
             ddUpdateBqTotals();
         });
@@ -5570,7 +5571,7 @@ async function ddConfirmBuildQuote(reqId) {
                 const sell = parseFloat(inp.value) || 0;
                 const cost = lines[i].cost_price || 0;
                 lines[i].sell_price = sell;
-                lines[i].margin_pct = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+                lines[i].margin_pct = window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
                 const lead = document.querySelector(`.bq-lead[data-idx="${i}"]`);
                 const cond = document.querySelector(`.bq-cond[data-idx="${i}"]`);
                 const dc = document.querySelector(`.bq-dc[data-idx="${i}"]`);
@@ -5877,8 +5878,8 @@ function _renderQuoteDetail(reqId, q, container) {
             const cost = l.cost_price || l.unit_cost || 0;
             const sell = l.sell_price || l.unit_sell || 0;
             const qty = l.qty || 0;
-            const margin = l.margin_pct != null ? l.margin_pct : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
-            const marginColor = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+            const margin = l.margin_pct != null ? l.margin_pct : (window.calcMarginPct ? window.calcMarginPct(sell, cost) : (sell > 0 ? ((sell - cost) / sell * 100) : 0));
+            const marginClr = window.marginColor ? window.marginColor(margin) : (margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)');
             const target = l.target_price != null ? fmtPrice(l.target_price) : '\u2014';
             totalCost += cost * qty;
             totalRev += sell * qty;
@@ -5906,7 +5907,7 @@ function _renderQuoteDetail(reqId, q, container) {
                 <td class="mono">${qty.toLocaleString()}</td>
                 ${isDraft ? `<td class="mono">${fmtPrice(cost)}</td><td style="font-size:10px;color:var(--muted)">${target}</td>` : ''}
                 <td class="mono" style="color:var(--teal)">${sellCell}</td>
-                ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
+                ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginClr};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
                 <td>${leadCell}</td>
                 <td>${condCell}</td>
                 <td>${dcCell}</td>
@@ -5944,8 +5945,14 @@ function _renderQuoteDetail(reqId, q, container) {
     // ── Terms ──
     if (isDraft) {
         html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
-            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:100px;padding:2px 4px"></label>
-            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:100px;padding:2px 4px"></label>
+            <label>Payment <select id="ddqTerms-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.payment_terms||'')}">
+                <option value="">—</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option><option>Net 90</option>
+                <option>COD</option><option>CIA</option><option>2/10 Net 30</option><option>Due on Receipt</option><option>Prepaid</option>
+            </select></label>
+            <label>Shipping <select id="ddqShip-${reqId}" style="width:110px;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:4px" data-init-val="${escAttr(q.shipping_terms||'')}">
+                <option value="">—</option><option>FOB Origin</option><option>FOB Destination</option><option>Prepaid</option>
+                <option>Collect</option><option>DDP</option><option>EXW</option><option>FCA</option><option>CIF</option>
+            </select></label>
             <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
         </div>
         <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
@@ -5971,6 +5978,18 @@ function _renderQuoteDetail(reqId, q, container) {
     html += `</div>`; // close content
     html += `</div>`; // close outer container
     container.innerHTML = html;
+    // Set dropdown values for payment/shipping terms (handles custom values)
+    container.querySelectorAll('select[data-init-val]').forEach(sel => {
+        const v = sel.dataset.initVal;
+        if (!v) return;
+        sel.value = v;
+        if (sel.value !== v) {
+            const opt = document.createElement('option');
+            opt.value = v; opt.textContent = v;
+            sel.appendChild(opt);
+            sel.value = v;
+        }
+    });
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
@@ -5990,7 +6009,7 @@ function ddUpdateQuoteLine(reqId, idx, value) {
     if (!item) return;
     item.sell_price = parseFloat(value) || 0;
     const cost = item.cost_price || item.unit_cost || 0;
-    item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+    item.margin_pct = window.calcMarginPct ? window.calcMarginPct(item.sell_price, cost) : (item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0);
     // Update margin cell
     const mCell = document.querySelector(`.ddq-margin[data-req="${reqId}"][data-idx="${idx}"]`);
     if (mCell) {
@@ -6008,7 +6027,7 @@ function ddApplyQuoteMarkup(reqId) {
     lines.forEach(item => {
         const cost = item.cost_price || item.unit_cost || 0;
         item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 100) / 100;
-        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        item.margin_pct = window.calcMarginPct ? window.calcMarginPct(item.sell_price, cost) : (item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0);
     });
     // Re-render the expanded detail panel
     const detailRow = document.getElementById('ddqDetail-' + q.id);
@@ -12525,7 +12544,10 @@ async function saveVendorContact() {
         label: _v('vcLabel').trim() || 'Sales',
     };
     if (!body.email) { showToast('Email is required', 'error'); return; }
-    try {
+    if (window.isValidEmail && !window.isValidEmail(body.email)) { showToast('Invalid email format', 'error'); return; }
+    if (body.phone && window.isValidPhone && !window.isValidPhone(body.phone)) { showToast('Invalid phone number', 'error'); return; }
+    var btn = document.querySelector('#vendorContactModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         const url = contactId
             ? `/api/vendors/${cardId}/contacts/${contactId}`
             : `/api/vendors/${cardId}/contacts`;
@@ -12533,7 +12555,7 @@ async function saveVendorContact() {
         closeModal('vendorContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
         loadVendorContacts(parseInt(cardId));
-    } catch(e) { showToast('Failed to save contact', 'error'); }
+    });
 }
 
 async function deleteVendorContact(cardId, contactId, name) {
@@ -12634,26 +12656,26 @@ function placeVendorCall(cardId, vendorName, reqId, phone) {
 async function saveVendorLogCall() {
     const _v = id => document.getElementById(id)?.value || '';
     const cardId = _v('vlcCardId');
-    const dur = parseInt(_v('vlcDuration'));
+    const durSec = (parseInt(_v('vlcDurMin')) || 0) * 60 + (parseInt(_v('vlcDurSec')) || 0);
     const data = {
         phone: _v('vlcPhone').trim() || null,
         contact_name: _v('vlcContactName').trim() || null,
         direction: _v('vlcDirection'),
-        duration_seconds: isNaN(dur) ? null : dur,
+        duration_seconds: durSec || null,
         notes: _v('vlcNotes').trim() || null,
     };
     if (window._vlcReqId) data.requisition_id = window._vlcReqId;
-    try {
+    var btn = document.querySelector('#vendorLogCallModal .btn-primary');
+    await guardBtn(btn, 'Logging…', async () => {
         await apiFetch('/api/vendors/' + cardId + '/activities/call', { method: 'POST', body: data });
         closeModal('vendorLogCallModal');
         showToast('Call logged', 'success');
-        // Invalidate activity cache for any open drill-down
         if (currentReqId && _ddTabCache[currentReqId]) delete _ddTabCache[currentReqId].activity;
         if (window._vlcReqId) { loadActivity(); }
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlcReqId = null;
-    } catch(e) { console.error('saveVendorLogCall:', e); showToast('Couldn\'t log call — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 function openVendorLogNoteModal(cardId, vendorName, reqId) {
@@ -12674,7 +12696,8 @@ async function saveVendorLogNote() {
         notes: notes,
     };
     if (window._vlnReqId) data.requisition_id = window._vlnReqId;
-    try {
+    var btn = document.querySelector('#vendorLogNoteModal .btn-primary');
+    await guardBtn(btn, 'Saving…', async () => {
         await apiFetch('/api/vendors/' + cardId + '/activities/note', { method: 'POST', body: data });
         closeModal('vendorLogNoteModal');
         showToast('Note added', 'success');
@@ -12683,7 +12706,7 @@ async function saveVendorLogNote() {
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
         window._vlnReqId = null;
-    } catch(e) { console.error('saveVendorLogNote:', e); showToast('Couldn\'t add note — ' + friendlyError(e, 'please try again'), 'error'); }
+    });
 }
 
 // ── Confirmed Quotes ─────────────────────────────────────────────────
