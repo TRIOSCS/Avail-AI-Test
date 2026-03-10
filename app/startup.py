@@ -60,6 +60,7 @@ def run_startup_migrations() -> None:
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
+    _backfill_ticket_defaults()
     _seed_vinod_user()
     logger.info("Startup migrations complete")
 
@@ -630,6 +631,8 @@ def _backfill_proactive_offer_qty() -> None:
             logger.warning("Backfill proactive offer qty failed: %s", e)
             conn.rollback()
 
+
+def _backfill_ticket_defaults() -> None:
     """Backfill tickets with null risk_tier/category (report_button source).
 
     Sets default values so they appear in stats breakdowns.

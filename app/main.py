@@ -112,50 +112,56 @@ async def lifespan(app):
         logger.info("Sentry initialized (logging + tracing + AI monitoring)")
 
     run_startup_migrations()
-    _seed_api_sources()
-    from .connector_status import log_connector_status
 
-    _connector_status = log_connector_status()
-    app.state.connector_status = _connector_status
+    _is_testing = os.environ.get("TESTING") == "1"
 
-    from .scheduler import configure_scheduler, scheduler
+    if not _is_testing:
+        _seed_api_sources()
+        from .connector_status import log_connector_status
 
-    configure_scheduler()
-    scheduler.start()
-    logger.info("APScheduler started")
+        _connector_status = log_connector_status()
+        app.state.connector_status = _connector_status
 
-    # Warm heavy caches in background so first user request is fast
-    async def _warm_caches():  # pragma: no cover
+        from .scheduler import configure_scheduler, scheduler
+
+        configure_scheduler()
+        scheduler.start()
+        logger.info("APScheduler started")
+
+        # Warm heavy caches in background so first user request is fast
+        async def _warm_caches():  # pragma: no cover
+            import asyncio
+
+            await asyncio.sleep(2)  # let app finish startup first
+            try:
+                from .database import SessionLocal
+
+                db = SessionLocal()
+                try:
+                    from .models import Company, Requisition, VendorCard
+
+                    db.query(VendorCard).count()
+                    db.query(Company).count()
+                    db.query(Requisition).count()
+                    logger.info("Cache warmup complete")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.warning(f"Cache warmup failed (non-fatal): {e}")
+
         import asyncio
 
-        await asyncio.sleep(2)  # let app finish startup first
-        try:
-            from .database import SessionLocal
-
-            db = SessionLocal()
-            try:
-                from .models import Company, Requisition, VendorCard
-
-                db.query(VendorCard).count()
-                db.query(Company).count()
-                db.query(Requisition).count()
-                logger.info("Cache warmup complete")
-            finally:
-                db.close()
-        except Exception as e:
-            logger.warning(f"Cache warmup failed (non-fatal): {e}")
-
-    import asyncio
-
-    asyncio.create_task(_warm_caches())
+        asyncio.create_task(_warm_caches())
 
     yield
-    logger.info("Shutting down scheduler (waiting for running jobs)...")
-    scheduler.shutdown(wait=True)
-    from .http_client import close_clients
 
-    await close_clients()
-    logger.info("Shutdown complete")
+    if not _is_testing:
+        logger.info("Shutting down scheduler (waiting for running jobs)...")
+        scheduler.shutdown(wait=True)
+        from .http_client import close_clients
+
+        await close_clients()
+        logger.info("Shutdown complete")
 
 
 OPENAPI_TAGS = [
