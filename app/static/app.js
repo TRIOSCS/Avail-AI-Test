@@ -3040,7 +3040,7 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-const _statusLabels = {draft:'Draft',active:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
+const _statusLabels = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',reopened:'Reopened',won:'Won',lost:'Lost',archived:'Archived'};
 function updateDetailStatus(status) {
     const chip = document.getElementById('detailStatus');
     if (!chip) return;
@@ -5933,7 +5933,7 @@ function _renderDdQuotes(reqId, data, panel) {
             <td>${lines.length}</td>
             <td class="mono">$${Number(subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
             <td style="color:${marginPct >= 20 ? 'var(--green)' : marginPct >= 10 ? 'var(--amber)' : 'var(--red)'};font-weight:600">${Number(marginPct).toFixed(1)}%</td>
-            <td><span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></td>
+            <td><span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span>${q.is_expired && (q.status === 'sent' || q.status === 'revised') ? ' <span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;color:#fff;background:#ef4444">Expired</span>' : (q.days_until_expiry != null && q.days_until_expiry <= 3 && q.days_until_expiry >= 0 && (q.status === 'sent' || q.status === 'revised')) ? ' <span style="display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:600;color:#fff;background:#f59e0b">Expires in ' + q.days_until_expiry + 'd</span>' : ''}</td>
             <td style="font-size:10px;color:var(--muted)">${q.created_at ? fmtRelative(q.created_at) : '\u2014'}</td>
         </tr>
         <tr id="ddqDetail-${q.id}" style="display:none"><td colspan="8" style="padding:0"></td></tr>`;
@@ -7219,8 +7219,8 @@ function _renderMobileBuyPlansList(data, reqId, panel) {
         panel.innerHTML = '<div style="text-align:center;padding:24px 0;color:var(--muted);font-size:13px">No buy plans yet</div>';
         return;
     }
-    const statusColors = {draft:'var(--muted)',pending:'var(--amber)',approved:'var(--green)',po_entered:'var(--blue)',po_confirmed:'var(--blue)',completed:'var(--green)',rejected:'var(--red)',cancelled:'var(--red)'};
-    const statusLabels = {draft:'Draft',pending:'Pending',approved:'Approved',po_entered:'PO Entered',po_confirmed:'PO Confirmed',completed:'Completed',rejected:'Rejected',cancelled:'Cancelled'};
+    const statusColors = {draft:'var(--muted)',pending:'var(--amber)',approved:'var(--green)',po_entered:'var(--blue)',po_confirmed:'var(--blue)',completed:'var(--green)',rejected:'var(--red)',cancelled:'var(--red)',halted:'var(--amber)'};
+    const statusLabels = {draft:'Draft',pending:'Pending',approved:'Approved',po_entered:'PO Entered',po_confirmed:'PO Confirmed',completed:'Completed',rejected:'Rejected',cancelled:'Cancelled',halted:'Halted'};
     let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">' + plans.length + ' Buy Plan' + (plans.length !== 1 ? 's' : '') + '</div>';
     for (const bp of plans) {
         const sc = statusColors[bp.status] || 'var(--muted)';
@@ -7263,6 +7263,11 @@ function _renderMobileBuyPlansList(data, reqId, panel) {
             if (bp.status === 'draft') {
                 html += '<button class="m-chip m-chip-blue" style="cursor:pointer;border:none;font-size:12px;padding:6px 16px;width:100%" onclick="event.stopPropagation();if(typeof openBuyPlanDetailV3===\'function\')openBuyPlanDetailV3(' + bp.id + ')">Open Detail</button>';
             }
+            html += '</div>';
+        }
+        if (bp.status === 'halted' || bp.status === 'cancelled') {
+            html += '<div style="margin-top:8px">';
+            html += '<button class="btn-sm" style="font-size:11px;width:100%;color:var(--blue);border-color:var(--blue)" onclick="event.stopPropagation();_resubmitBuyPlan(' + bp.id + ')">↻ Resubmit as Draft</button>';
             html += '</div>';
         }
         html += '</div>';
@@ -14306,14 +14311,31 @@ async function viewThread(vendorName) {
             const bodyHtml = c.body
                 ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:300px;overflow-y:auto">${c.body}</div>`
                 : '';
-            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
+            let contactBadge = c.contact_type === 'email' ? '✉ Sent' : '📞 Called';
+            let contactStyle = 'background:var(--teal-light);border:1px solid rgba(26,127,155,.15)';
+            if (c.status === 'failed') {
+                contactBadge = '✉ <span style="color:#ef4444;font-weight:700">FAILED</span>';
+                contactStyle = 'background:#fef2f2;border:1px solid #fecaca';
+            } else if (c.status === 'ooo') {
+                contactBadge = '✉ <span style="color:#f59e0b;font-weight:700">OOO</span>';
+                contactStyle = 'background:#fffbeb;border:1px solid #fde68a';
+            } else if (c.status === 'bounced') {
+                contactBadge = '✉ <span style="color:#f59e0b;font-weight:700">BOUNCED</span>';
+                contactStyle = 'background:#fffbeb;border:1px solid #fde68a';
+            }
+            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;${contactStyle};border-radius:8px">
                 <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
-                    ${c.contact_type === 'email' ? '✉ Sent' : '📞 Called'} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
+                    ${contactBadge} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
                 </div>
                 ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
                 <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).join(', ')}</div>
                 ${bodyHtml}
             </div>`;
+            if (c.status === 'failed') {
+                html += `<div style="margin-top:4px"><button class="btn-sm" style="font-size:11px;color:#ef4444;border-color:#fecaca" onclick="event.stopPropagation();_retryRfq(${c.id})">↻ Retry Send</button>`;
+                if (c.error_message) html += `<span style="font-size:10px;color:var(--muted);margin-left:6px">${esc(c.error_message)}</span>`;
+                html += `</div>`;
+            }
         } else if (entry.type === 'inbound') {
             // Inbound response
             const r = entry.data;
@@ -14366,6 +14388,10 @@ async function viewThread(vendorName) {
                 ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
                 ${parsedHtml}
                 ${emailBodyHtml}
+                ${r.status === 'new' ? `<div style="margin-top:6px;display:flex;gap:6px">
+                    <button class="btn-sm" style="font-size:10px;color:var(--green);border-color:var(--green)" onclick="event.stopPropagation();_updateVrStatus(${r.id},'reviewed')">✓ Reviewed</button>
+                    <button class="btn-sm" style="font-size:10px;color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();_updateVrStatus(${r.id},'rejected')">✗ Reject</button>
+                </div>` : r.status === 'reviewed' ? `<div style="margin-top:4px;font-size:10px;color:var(--green)">✓ Reviewed</div>` : r.status === 'rejected' ? `<div style="margin-top:4px;font-size:10px;color:var(--red)">✗ Rejected</div>` : ''}
             </div>`;
         } else if (entry.type === 'activity') {
             // Manual call or note
@@ -14414,7 +14440,46 @@ async function viewThread(vendorName) {
     document.getElementById('threadSearch')?.focus();
 }
 
+async function _retryRfq(contactId) {
+    try {
+        const r = await apiFetch('/api/contacts/' + contactId + '/retry', {method:'POST'});
+        if (r.status === 'sent') {
+            showToast('RFQ resent successfully', 'success');
+        } else {
+            showToast(r.error || 'Retry failed', 'error');
+        }
+    } catch(e) {
+        showToast('Retry failed: ' + e.message, 'error');
+    }
+}
 
+async function _updateVrStatus(vrId, status) {
+    try {
+        await apiFetch('/api/vendor-responses/' + vrId + '/status', {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status}),
+        });
+        showToast('Response marked ' + status, 'success');
+    } catch(e) {
+        showToast('Failed: ' + e.message, 'error');
+    }
+}
+
+async function _resubmitBuyPlan(planId) {
+    if (!confirm('Return this buy plan to Draft for re-submission?')) return;
+    try {
+        const r = await apiFetch('/api/buy-plans-v3/' + planId + '/resubmit', {method:'POST'});
+        if (r.status === 'draft') {
+            showToast('Buy plan returned to draft', 'success');
+            location.reload();
+        } else {
+            showToast(r.error || 'Resubmit failed', 'error');
+        }
+    } catch(e) {
+        showToast('Resubmit failed: ' + e.message, 'error');
+    }
+}
 
 function _ensureEmailListModal() {
     if (document.getElementById('emailListModal')) return;
