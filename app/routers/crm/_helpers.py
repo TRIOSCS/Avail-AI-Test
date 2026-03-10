@@ -1,6 +1,6 @@
 """Shared helpers for CRM sub-routers."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -129,6 +129,15 @@ def quote_to_dict(q: Quote, db=None) -> dict:
 
             logger.warning("MaterialCard enrichment failed for quote %s, returning raw items", q.id)
             enriched_items = q.line_items or []
+    # Compute expiration fields
+    is_expired = False
+    days_until_expiry = None
+    if q.sent_at and q.validity_days:
+        sent_date = q.sent_at.date() if hasattr(q.sent_at, 'date') else q.sent_at
+        expiry_date = sent_date + timedelta(days=q.validity_days)
+        days_until_expiry = (expiry_date - date.today()).days
+        is_expired = days_until_expiry < 0
+
     return {
         "id": q.id,
         "requisition_id": q.requisition_id,
@@ -172,6 +181,8 @@ def quote_to_dict(q: Quote, db=None) -> dict:
         "created_by": q.created_by.name if q.created_by else None,
         "created_at": q.created_at.isoformat() if q.created_at else None,
         "updated_at": q.updated_at.isoformat() if q.updated_at else None,
+        "is_expired": is_expired,
+        "days_until_expiry": days_until_expiry,
     }
 
 

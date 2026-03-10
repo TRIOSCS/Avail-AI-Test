@@ -1,13 +1,15 @@
-"""Tests for part-level (requirement-scoped) API endpoints.
+"""Tests for part-level (requirement-scoped) API endpoints and quote expiration.
 
 Covers: /api/requirements/{id}/offers, /api/requirements/{id}/notes,
 /api/requirements/{id}/tasks — used by the part-number expansion panel.
+Also covers: quote expiration badges (is_expired, days_until_expiry).
 
 Called by: pytest
-Depends on: routers/requisitions/requirements.py, conftest fixtures
+Depends on: routers/requisitions/requirements.py, routers/crm/quotes.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
+import pytest
+from datetime import datetime, timedelta, timezone
 
 
 # ── Part-level Offers ───────────────────────────────────────────────
@@ -227,3 +229,159 @@ def test_requirement_tasks_404(client):
     """GET /api/requirements/99999/tasks returns 404 for nonexistent requirement."""
     resp = client.get("/api/requirements/99999/tasks")
     assert resp.status_code == 404
+
+
+# ── Requisition Status Filters ─────────────────────────────────────
+
+
+class TestRequisitionStatusFilter:
+    def test_comma_separated_status_filter(self, client, db_session, test_user):
+        """GET /api/requisitions?status=won,lost returns only matching statuses."""
+        from app.models import Requisition
+
+        r1 = Requisition(name="Won Req", status="won", created_by=test_user.id)
+        r2 = Requisition(name="Lost Req", status="lost", created_by=test_user.id)
+        r3 = Requisition(name="Active Req", status="active", created_by=test_user.id)
+        db_session.add_all([r1, r2, r3])
+        db_session.commit()
+
+        resp = client.get("/api/requisitions?status=won,lost")
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("items", data)
+        names = [r["name"] for r in items]
+        assert "Won Req" in names
+        assert "Lost Req" in names
+        assert "Active Req" not in names
+
+    def test_single_status_still_works(self, client, db_session, test_user):
+        """GET /api/requisitions?status=draft still works with a single value."""
+        from app.models import Requisition
+
+        r = Requisition(name="Draft Filter Req", status="draft", created_by=test_user.id)
+        db_session.add(r)
+        db_session.commit()
+
+        resp = client.get("/api/requisitions?status=draft")
+        assert resp.status_code == 200
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("items", data)
+        names = [r["name"] for r in items]
+        assert "Draft Filter Req" in names
+
+
+# ── Quote Expiration Badges ──────────────────────────────────────────
+
+
+@pytest.fixture
+def _quote_req(db_session, test_user):
+    from app.models import Requisition
+    from app.models.crm import Company, CustomerSite
+    co = Company(name="Test Co")
+    db_session.add(co)
+    db_session.flush()
+    site = CustomerSite(site_name="Test Site", company_id=co.id)
+    db_session.add(site)
+    db_session.flush()
+    req = Requisition(name="Quote Test", status="quoted", created_by=test_user.id, customer_site_id=site.id)
+    db_session.add(req)
+    db_session.flush()
+    return req, site
+
+
+class TestQuoteExpiration:
+    def test_expired_quote_flagged(self, client, db_session, test_user, _quote_req):
+        from app.models.quotes import Quote
+        req, site = _quote_req
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-EXP-001",
+            status="sent",
+            validity_days=7,
+            sent_at=datetime.now(timezone.utc) - timedelta(days=30),
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{req.id}/quotes")
+        if resp.status_code == 200:
+            data = resp.json()
+            quotes = data if isinstance(data, list) else data.get("items", data.get("quotes", [data]))
+            expired = [qd for qd in quotes if qd.get("id") == q.id]
+            if expired:
+                assert expired[0].get("is_expired") is True
+                assert expired[0].get("days_until_expiry") is not None
+                assert expired[0]["days_until_expiry"] < 0
+
+    def test_valid_quote_not_flagged(self, client, db_session, test_user, _quote_req):
+        from app.models.quotes import Quote
+        req, site = _quote_req
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-VAL-001",
+            status="sent",
+            validity_days=30,
+            sent_at=datetime.now(timezone.utc) - timedelta(days=1),
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{req.id}/quotes")
+        if resp.status_code == 200:
+            data = resp.json()
+            quotes = data if isinstance(data, list) else data.get("items", data.get("quotes", [data]))
+            valid = [qd for qd in quotes if qd.get("id") == q.id]
+            if valid:
+                assert valid[0].get("is_expired") is False
+                assert valid[0].get("days_until_expiry") is not None
+                assert valid[0]["days_until_expiry"] >= 0
+
+    def test_draft_quote_no_expiry(self, client, db_session, test_user, _quote_req):
+        from app.models.quotes import Quote
+        req, site = _quote_req
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-DRF-001",
+            status="draft",
+            validity_days=7,
+            sent_at=None,
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{req.id}/quotes")
+        if resp.status_code == 200:
+            data = resp.json()
+            quotes = data if isinstance(data, list) else data.get("items", data.get("quotes", [data]))
+            draft = [qd for qd in quotes if qd.get("id") == q.id]
+            if draft:
+                assert draft[0].get("is_expired") is False
+                assert draft[0].get("days_until_expiry") is None
+
+    def test_single_quote_endpoint_has_expiry(self, client, db_session, test_user, _quote_req):
+        from app.models.quotes import Quote
+        req, site = _quote_req
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-SGL-001",
+            status="sent",
+            validity_days=7,
+            sent_at=datetime.now(timezone.utc) - timedelta(days=30),
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{req.id}/quote")
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data.get("is_expired") is True
+            assert data.get("days_until_expiry") is not None
+            assert data["days_until_expiry"] < 0
