@@ -340,6 +340,40 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
     return plan
 
 
+RESUBMITTABLE_STATUSES = {BuyPlanStatus.halted.value, BuyPlanStatus.cancelled.value}
+
+
+def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlanV3:
+    """Reset a halted/cancelled buy plan back to draft for resubmission."""
+    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+
+    if plan.status not in RESUBMITTABLE_STATUSES:
+        raise ValueError(
+            f"Only halted/cancelled plans can be resubmitted (current: {plan.status})"
+        )
+
+    plan.status = BuyPlanStatus.draft.value
+    plan.so_status = SOVerificationStatus.pending.value
+    plan.auto_approved = False
+    plan.approved_by_id = None
+    plan.approved_at = None
+    plan.approval_notes = None
+    plan.so_verified_by_id = None
+    plan.so_verified_at = None
+    plan.so_rejection_note = None
+    plan.halted_by_id = None
+    plan.halted_at = None
+    plan.cancelled_at = None
+    plan.cancelled_by_id = None
+    plan.cancellation_reason = None
+    plan.updated_at = datetime.now(timezone.utc)
+
+    logger.info("Buy plan %d reset to draft by user %d", plan_id, user.id)
+    return plan
+
+
 def resubmit_buy_plan(
     plan_id: int,
     sales_order_number: str,

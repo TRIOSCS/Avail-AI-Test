@@ -53,6 +53,7 @@ from ...services.buy_plan_v3_service import (
     detect_favoritism,
     flag_line_issue,
     generate_case_report,
+    reset_buy_plan_to_draft,
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
@@ -492,6 +493,24 @@ async def resubmit_plan_v3(
     else:
         run_v3_notify_bg(notify_v3_submitted, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
+
+
+# ── Reset to Draft (halted/cancelled) ────────────────────────────────
+
+
+@router.post("/api/buy-plans-v3/{plan_id}/reset-to-draft")
+async def reset_plan_to_draft(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reset a halted/cancelled buy plan back to draft."""
+    try:
+        plan = reset_buy_plan_to_draft(plan_id, user, db)
+        db.commit()
+        return {"id": plan.id, "status": plan.status}
+    except ValueError as e:
+        return {"error": str(e), "status_code": 400}
 
 
 # ── SO Verification ──────────────────────────────────────────────────
