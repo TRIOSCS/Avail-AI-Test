@@ -15558,30 +15558,12 @@ async function _loadCtxTab(tabName) {
 }
 
 function _buildCtxSummary(obj) {
-    // Build AI summary card + follow-ups + blockers
+    // Lightweight status overview — no AI summary or suggested steps
     let html = '';
     html += `<div class="ctx-section">
-        <div class="ai-card">
-            <div class="ai-card-header">
-                <svg class="ai-card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93"/><path d="M8.56 2.75a4 4 0 0 0-1.09 6.89"/><path d="M12 8v14"/><path d="M5 18a7 7 0 0 1 14 0"/></svg>
-                <span class="ai-card-label">AI Summary</span>
-            </div>
-            <div class="ai-card-body" id="ctxAiSummaryBody">
-                <p style="color:var(--muted);font-style:italic">Generating summary...</p>
-            </div>
-        </div>
-    </div>`;
-    // Follow-ups section
-    html += `<div class="ctx-section">
-        <div class="ctx-section-title">Suggested Next Steps</div>
-        <div id="ctxFollowups">
-            <div class="followup-item">
-                <div class="followup-check" onclick="this.classList.toggle('done')"></div>
-                <div class="followup-body">
-                    <div class="followup-text">Review and respond to pending vendor offers</div>
-                    <div class="followup-meta"><span class="tag">Action</span> AI suggested</div>
-                </div>
-            </div>
+        <div class="ctx-section-title">Overview</div>
+        <div id="ctxOverviewBody" style="font-size:12px;color:var(--muted);padding:4px 0">
+            <p>${esc(obj.type.charAt(0).toUpperCase() + obj.type.slice(1))} — ${esc(obj.label)}</p>
         </div>
     </div>`;
     // Open questions
@@ -15666,10 +15648,30 @@ function bindContextPanel(type, id, label) {
     // Show toggle button
     const toggle = document.getElementById('ctxToggle');
     if (toggle) toggle.style.display = '';
-    // Open panel if not already open
-    if (!_ctxOpen) toggleContextPanel();
-    // Render current tab
+    // Keep panel closed by default — just show a badge with pending task count
+    _updateCtxTaskBadge(type, id);
+    // Pre-render current tab content (so it's ready if user opens panel)
     _renderCtxTab(_ctxActiveTab);
+}
+
+// Fetch pending task count and update the toggle badge
+async function _updateCtxTaskBadge(type, id) {
+    if (type !== 'requisition') return;
+    try {
+        const tasks = await apiFetch(`/api/requisitions/${id}/tasks`).catch(() => []);
+        const arr = Array.isArray(tasks) ? tasks : [];
+        const pending = arr.filter(t => t.status !== 'done').length;
+        const badge = document.getElementById('ctxToggleBadge');
+        const taskBadge = document.getElementById('ctxTaskBadge');
+        if (badge) {
+            badge.textContent = pending;
+            badge.style.display = pending > 0 ? '' : 'none';
+        }
+        if (taskBadge) {
+            taskBadge.textContent = pending;
+            taskBadge.style.display = pending > 0 ? '' : 'none';
+        }
+    } catch (e) { /* ignore */ }
 }
 
 function unbindContextPanel() {
@@ -15679,6 +15681,13 @@ function unbindContextPanel() {
     if (body) body.innerHTML = '<div class="ctx-empty">Select a requirement, material, or deal to see context here.</div>';
     const title = document.getElementById('ctxTitle');
     if (title) title.textContent = 'Context';
+    // Clear badge counts
+    const badge = document.getElementById('ctxToggleBadge');
+    if (badge) { badge.textContent = '0'; badge.style.display = 'none'; }
+    const taskBadge = document.getElementById('ctxTaskBadge');
+    if (taskBadge) { taskBadge.textContent = '0'; taskBadge.style.display = 'none'; }
+    // Close panel if open
+    if (_ctxOpen) toggleContextPanel();
 }
 
 // Send message from thread compose
