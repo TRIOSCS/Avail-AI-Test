@@ -3146,6 +3146,7 @@ body.ctx-open .toparea { margin-right: 340px; transition: margin-right .25s cubi
 .rfq-ocard-chip { font-size:11px; padding:2px 7px; border-radius:3px; background:var(--bg2); color:var(--fg2);
   white-space:nowrap; line-height:1.4; }
 .rfq-ocard-chip b { font-weight:700; color:var(--text); }
+.rfq-ocard-label { font-weight:600; color:var(--muted); margin-right:2px; font-size:10px; text-transform:uppercase; letter-spacing:.3px; }
 
 .rfq-ocard-meta { font-size:10px; color:var(--muted); margin-top:5px; line-height:1.4; }
 .rfq-ocard-note { color:var(--blue); cursor:help; }

@@ -15869,17 +15869,17 @@ function _rfqRenderOffers(offers, body) {
         const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
         const currency = o.currency && o.currency !== 'USD' ? ' ' + esc(o.currency) : '';
 
-        // Detail chips — only show what's available
+        // Detail chips — always show all fields with labels
         let details = [];
-        if (o.qty_available) details.push('<span class="rfq-ocard-chip" title="Qty available"><b>' + Number(o.qty_available).toLocaleString() + '</b> avail</span>');
-        if (o.condition) details.push('<span class="rfq-ocard-chip" title="Condition">' + esc(o.condition) + '</span>');
-        if (o.lead_time) details.push('<span class="rfq-ocard-chip" title="Lead time">' + esc(o.lead_time) + '</span>');
-        if (o.date_code) details.push('<span class="rfq-ocard-chip" title="Date code">DC: ' + esc(o.date_code) + '</span>');
-        if (o.packaging) details.push('<span class="rfq-ocard-chip" title="Packaging">' + esc(o.packaging) + '</span>');
-        if (o.moq) details.push('<span class="rfq-ocard-chip" title="MOQ">MOQ: ' + o.moq.toLocaleString() + '</span>');
-        if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">' + esc(o.warranty) + '</span>');
-        if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">' + esc(o.country_of_origin) + '</span>');
-        if (o.firmware) details.push('<span class="rfq-ocard-chip" title="Firmware">FW: ' + esc(o.firmware) + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">Qty</span> ' + (o.qty_available ? '<b>' + Number(o.qty_available).toLocaleString() + '</b>' : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">Cond</span> ' + (o.condition ? esc(o.condition) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">Lead</span> ' + (o.lead_time ? esc(o.lead_time) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">DC</span> ' + (o.date_code ? esc(o.date_code) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">Pkg</span> ' + (o.packaging ? esc(o.packaging) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">MOQ</span> ' + (o.moq ? o.moq.toLocaleString() : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">Warranty</span> ' + (o.warranty ? esc(o.warranty) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">COO</span> ' + (o.country_of_origin ? esc(o.country_of_origin) : '\u2014') + '</span>');
+        details.push('<span class="rfq-ocard-chip"><span class="rfq-ocard-label">FW</span> ' + (o.firmware ? esc(o.firmware) : '\u2014') + '</span>');
 
         // Meta line — source, age, entered by
         let meta = [];
