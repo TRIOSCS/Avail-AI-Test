@@ -16347,7 +16347,7 @@ function _rfqRenderOffers(offers, body) {
         <span class="rfq-offer-summary">${selected > 0 ? selected + ' selected for quote' : ''}</span>
     </div>`;
 
-    // Offer cards — structured multi-line layout
+    // Offer cards — three-line hierarchy: vendor+flags+price → commercial terms → metadata
     offers.forEach(o => {
         const selCls = o.selected_for_quote ? ' selected' : '';
         const histCls = o.is_historical ? ' historical' : '';
@@ -16362,7 +16362,7 @@ function _rfqRenderOffers(offers, body) {
             else { priceCls = ' over'; priceTooltip = '+' + pct + '% vs target'; }
         }
 
-        // Flags
+        // Flags — compact inline badges after vendor name
         let flags = '';
         if (o.is_substitute) flags += '<span class="rfq-offer-flag rfq-offer-flag-sub">SUB</span>';
         else flags += '<span class="rfq-offer-flag rfq-offer-flag-exact">EXACT</span>';
@@ -16376,50 +16376,45 @@ function _rfqRenderOffers(offers, body) {
         const price = o.unit_price ? '$' + Number(o.unit_price).toFixed(4) : '\u2014';
         const currency = o.currency && o.currency !== 'USD' ? ' ' + esc(o.currency) : '';
 
-        // MPN + manufacturer line (show when offered MPN differs or manufacturer exists)
-        let mpnLine = '';
-        if (o.mpn || o.manufacturer) {
-            const mpnParts = [];
-            if (o.mpn) mpnParts.push('<span class="rfq-ocard-mpn">' + esc(o.mpn) + '</span>');
-            if (o.manufacturer) mpnParts.push('<span class="rfq-ocard-mfr">' + esc(o.manufacturer) + '</span>');
-            mpnLine = '<div class="rfq-ocard-mpn-line">' + mpnParts.join(' &middot; ') + '</div>';
-        }
+        // ── LINE 2: commercial terms (structured, aligned) ──
+        // MPN/Mfr shown inline only when relevant (sub or manufacturer present)
+        let mpnChip = '';
+        if (o.is_substitute && o.mpn) mpnChip = '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">MPN</span>' + esc(o.mpn) + '</span>';
+        if (o.manufacturer) mpnChip += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Mfr</span>' + esc(o.manufacturer) + '</span>';
 
-        // Detail chips — show all available offer info
-        let details = [];
-        if (o.qty_available) details.push('<span class="rfq-ocard-chip" title="Qty available"><b>' + Number(o.qty_available).toLocaleString() + '</b> avail</span>');
-        if (o.condition) details.push('<span class="rfq-ocard-chip" title="Condition">' + esc(o.condition) + '</span>');
-        if (o.lead_time) details.push('<span class="rfq-ocard-chip" title="Lead time">' + esc(o.lead_time) + '</span>');
-        if (o.date_code) details.push('<span class="rfq-ocard-chip" title="Date code">DC: ' + esc(o.date_code) + '</span>');
-        if (o.packaging) details.push('<span class="rfq-ocard-chip" title="Packaging">' + esc(o.packaging) + '</span>');
-        if (o.moq) details.push('<span class="rfq-ocard-chip" title="MOQ">MOQ: ' + o.moq.toLocaleString() + '</span>');
-        if (o.warranty) details.push('<span class="rfq-ocard-chip" title="Warranty">' + esc(o.warranty) + '</span>');
-        if (o.country_of_origin) details.push('<span class="rfq-ocard-chip" title="Country of origin">' + esc(o.country_of_origin) + '</span>');
-        if (o.firmware) details.push('<span class="rfq-ocard-chip" title="Firmware">FW: ' + esc(o.firmware) + '</span>');
-        if (o.hardware_code) details.push('<span class="rfq-ocard-chip" title="Hardware code">HW: ' + esc(o.hardware_code) + '</span>');
-        if (o.valid_until) details.push('<span class="rfq-ocard-chip" title="Valid until">Valid: ' + esc(o.valid_until) + '</span>');
-        if (o.status && o.status !== 'active') details.push('<span class="rfq-ocard-chip rfq-ocard-chip-status" title="Offer status">' + esc(o.status.toUpperCase()) + '</span>');
+        let terms = mpnChip;
+        if (o.qty_available) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Qty</span><b>' + Number(o.qty_available).toLocaleString() + '</b></span>';
+        if (o.lead_time) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Lead</span>' + esc(o.lead_time) + '</span>';
+        if (o.condition) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Cond</span>' + esc(o.condition) + '</span>';
+        if (o.date_code) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">DC</span>' + esc(o.date_code) + '</span>';
+        if (o.moq) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">MOQ</span>' + o.moq.toLocaleString() + '</span>';
+        if (o.packaging) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Pkg</span>' + esc(o.packaging) + '</span>';
+        if (o.warranty) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Wrty</span>' + esc(o.warranty) + '</span>';
+        if (o.country_of_origin) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">COO</span>' + esc(o.country_of_origin) + '</span>';
+        if (o.firmware) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">FW</span>' + esc(o.firmware) + '</span>';
+        if (o.hardware_code) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">HW</span>' + esc(o.hardware_code) + '</span>';
+        if (o.valid_until) terms += '<span class="rfq-ocard-term"><span class="rfq-ocard-term-l">Valid</span>' + esc(o.valid_until) + '</span>';
+        // Status/expiry alerts inline
+        if (o.status && o.status !== 'active') terms += '<span class="rfq-ocard-term rfq-ocard-term-warn">' + esc(o.status.toUpperCase()) + '</span>';
         if (o.expires_at) {
             const expDate = new Date(o.expires_at);
             const expDays = Math.round((expDate - Date.now()) / 86400000);
-            if (expDays <= 3 && expDays >= 0) details.push('<span class="rfq-ocard-chip rfq-ocard-chip-expiring" title="Expires ' + expDate.toLocaleDateString() + '">Expires ' + (expDays === 0 ? 'today' : 'in ' + expDays + 'd') + '</span>');
-            else if (expDays < 0) details.push('<span class="rfq-ocard-chip rfq-ocard-chip-expired" title="Expired ' + expDate.toLocaleDateString() + '">Expired</span>');
+            if (expDays <= 3 && expDays >= 0) terms += '<span class="rfq-ocard-term rfq-ocard-term-warn">Exp ' + (expDays === 0 ? 'today' : expDays + 'd') + '</span>';
+            else if (expDays < 0) terms += '<span class="rfq-ocard-term rfq-ocard-term-expired">Expired</span>';
         }
-        if (o.attribution_status && o.attribution_status !== 'active') details.push('<span class="rfq-ocard-chip" title="Attribution">' + esc(o.attribution_status) + '</span>');
 
-        // Meta line — source, age, entered by, historical source
+        // ── LINE 3: metadata (compressed) ──
         let meta = [];
-        if (o.source && o.source !== 'manual') meta.push('via ' + esc(o.source));
-        if (o.entered_by) meta.push('by ' + esc(o.entered_by));
+        if (o.source && o.source !== 'manual') meta.push(esc(o.source));
+        if (o.entered_by) meta.push(esc(o.entered_by));
         if (o.created_at) {
-            const d = new Date(o.created_at);
             if (o.age_days === 0) meta.push('today');
-            else if (o.age_days === 1) meta.push('yesterday');
-            else if (o.age_days < 30) meta.push(o.age_days + 'd ago');
-            else meta.push(d.toLocaleDateString());
+            else if (o.age_days === 1) meta.push('1d');
+            else if (o.age_days < 30) meta.push(o.age_days + 'd');
+            else meta.push(new Date(o.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric'}));
         }
-        if (o.from_requisition_id) meta.push('from RFQ #' + o.from_requisition_id);
-        if (o.selected_at) meta.push('selected ' + new Date(o.selected_at).toLocaleDateString());
+        if (o.from_requisition_id) meta.push('RFQ#' + o.from_requisition_id);
+        const noteIndicator = o.notes ? '<span class="rfq-ocard-note" title="' + escAttr(o.notes) + '">\ud83d\udcdd</span>' : '';
 
         html += `<div class="rfq-ocard${selCls}${histCls}" data-offer-id="${o.id}">
             <div class="rfq-ocard-top">
@@ -16427,13 +16422,11 @@ function _rfqRenderOffers(offers, body) {
                     onclick="event.stopPropagation();rfqToggleOfferSelection(${o.id})"
                     title="Select for quote">
                 <div class="rfq-ocard-vendor" title="${escAttr(o.vendor_name)}">${esc(o.vendor_name)}</div>
-                <div class="rfq-offer-flags">${flags}</div>
-                ${ageBadge}
+                <div class="rfq-offer-flags">${flags}${ageBadge}</div>
                 <div class="rfq-ocard-price${priceCls}" title="${priceTooltip}">${price}${currency}</div>
             </div>
-            ${mpnLine}
-            <div class="rfq-ocard-details">${details.join('')}</div>
-            ${meta.length || o.notes ? '<div class="rfq-ocard-meta">' + meta.join(' \u00b7 ') + (o.notes ? ' <span class="rfq-ocard-note" title="' + escAttr(o.notes) + '">\ud83d\udcdd ' + esc(o.notes.length > 40 ? o.notes.slice(0, 40) + '\u2026' : o.notes) + '</span>' : '') + '</div>' : ''}
+            ${terms ? '<div class="rfq-ocard-terms">' + terms + '</div>' : ''}
+            ${meta.length || noteIndicator ? '<div class="rfq-ocard-meta">' + meta.join(' \u00b7 ') + ' ' + noteIndicator + '</div>' : ''}
         </div>`;
     });
 
