@@ -387,6 +387,13 @@ export async function apiFetch(url, opts = {}) {
                     throw lastErr;
                 }
                 if (res.status === 409) throw lastErr;
+                // Rate limit: extract retry-after and surface to caller
+                if (res.status === 429) {
+                    const retryAfter = parseInt(res.headers.get('retry-after') || '60', 10);
+                    lastErr.retryAfter = retryAfter;
+                    lastErr.isRateLimit = true;
+                    throw lastErr;
+                }
                 if (res.status >= 500 && attempt < maxRetries) continue;
                 throw lastErr;
             }
@@ -12062,8 +12069,18 @@ async function rfqConfirmSend() {
             if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
             renderSources();
             loadActivity();
+
+            // Auto-poll inbox after successful send to catch quick replies
+            if (sent > 0) {
+                _scheduleAutoPoll(currentReqId);
+            }
         } catch (e) {
-            showToast('Send error: ' + e.message, 'error');
+            if (e.isRateLimit) {
+                const secs = e.retryAfter || 60;
+                _showRateLimitCountdown(secs);
+            } else {
+                showToast('Send error: ' + e.message, 'error');
+            }
         }
     });
 }
@@ -12110,9 +12127,79 @@ async function rfqRetryFailed() {
             _rfqShowResults(data.results || []);
             loadActivity();
         } catch (e) {
-            showToast('Retry error: ' + e.message, 'error');
+            if (e.isRateLimit) {
+                _showRateLimitCountdown(e.retryAfter || 60);
+            } else {
+                showToast('Retry error: ' + e.message, 'error');
+            }
         }
     });
+}
+
+// ── Rate-Limit Countdown + Auto Inbox Poll ─────────────────────────────
+// Shows a countdown toast when the user hits the RFQ rate limit (5/min).
+// Called by: rfqConfirmSend on 429 response
+// Depends on: showToast
+
+let _rateLimitTimer = null;
+
+function _showRateLimitCountdown(totalSecs) {
+    if (_rateLimitTimer) clearInterval(_rateLimitTimer);
+    let remaining = totalSecs;
+    const toastId = 'rate-limit-toast';
+    // Remove any existing rate-limit toast
+    document.getElementById(toastId)?.remove();
+    const toast = document.createElement('div');
+    toast.id = toastId;
+    toast.className = 'toast toast-warn';
+    toast.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:10000;padding:12px 18px;border-radius:8px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.15);display:flex;align-items:center;gap:10px';
+    const update = () => {
+        toast.innerHTML = `<span style="font-size:18px">\u23F1</span> Rate limit reached \u2014 retry in <strong>${remaining}s</strong>`;
+    };
+    update();
+    document.body.appendChild(toast);
+    _rateLimitTimer = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(_rateLimitTimer);
+            _rateLimitTimer = null;
+            toast.remove();
+            showToast('Rate limit cleared \u2014 you can send again', 'success');
+        } else {
+            update();
+        }
+    }, 1000);
+}
+
+// Auto-poll inbox 30s and 90s after sending RFQs to catch quick replies
+// Called by: rfqConfirmSend after successful send
+// Depends on: apiFetch, showToast
+let _autoPollTimers = [];
+
+function _scheduleAutoPoll(reqId) {
+    // Clear any prior auto-poll timers
+    _autoPollTimers.forEach(t => clearTimeout(t));
+    _autoPollTimers = [];
+
+    const doPoll = async (label) => {
+        try {
+            const data = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+            const responses = data.responses || [];
+            if (responses.length > 0) {
+                showToast(`Inbox check: ${responses.length} new repl${responses.length === 1 ? 'y' : 'ies'} found`, 'success');
+                // Refresh the drill-down if it's open for this req
+                if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+                if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
+            } else {
+                showToast(`${label}: no new replies yet`, 'info');
+            }
+        } catch {
+            // Silent — don't bother user if auto-poll fails
+        }
+    };
+
+    _autoPollTimers.push(setTimeout(() => doPoll('30s inbox check'), 30000));
+    _autoPollTimers.push(setTimeout(() => doPoll('90s inbox check'), 90000));
 }
 
 // ── Click-to-Call Logging ───────────────────────────────────────────────
