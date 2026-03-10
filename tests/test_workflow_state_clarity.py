@@ -86,3 +86,82 @@ class TestRfqFailureRecovery:
         resp = client.post(f"/api/contacts/{contact.id}/retry")
         assert resp.status_code == 200  # Returns 200 with error body per project convention
         assert "failed" in resp.json()["error"].lower()
+
+
+class TestVendorResponseTerminalStates:
+    """P1: VendorResponses can be marked reviewed/rejected."""
+
+    @pytest.fixture
+    def _vendor_response(self, db_session, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        vr = VendorResponse(
+            requisition_id=_rfq_requisition.id,
+            vendor_name="Test Vendor",
+            vendor_email="test@vendor.com",
+            subject="Re: RFQ",
+            body="We can supply.",
+            status="new",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+        return vr
+
+    def test_mark_reviewed(self, client, db_session, _vendor_response):
+        resp = client.patch(
+            f"/api/vendor-responses/{_vendor_response.id}/status",
+            json={"status": "reviewed"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(_vendor_response)
+        assert _vendor_response.status == "reviewed"
+
+    def test_mark_rejected(self, client, db_session, _vendor_response):
+        resp = client.patch(
+            f"/api/vendor-responses/{_vendor_response.id}/status",
+            json={"status": "rejected"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(_vendor_response)
+        assert _vendor_response.status == "rejected"
+
+    def test_invalid_status_rejected(self, client, db_session, _vendor_response):
+        resp = client.patch(
+            f"/api/vendor-responses/{_vendor_response.id}/status",
+            json={"status": "invalid_state"},
+        )
+        assert resp.status_code == 200  # returns 200 with error body
+        assert "status_code" in resp.json()
+        assert resp.json()["status_code"] == 400
+
+    def test_list_responses_filters_by_status(self, client, db_session, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        for s in ("new", "reviewed", "rejected"):
+            vr = VendorResponse(
+                requisition_id=_rfq_requisition.id,
+                vendor_name=f"Vendor {s}",
+                vendor_email=f"{s}@vendor.com",
+                subject="Re: RFQ",
+                status=s,
+                received_at=datetime.now(timezone.utc),
+            )
+            db_session.add(vr)
+        db_session.commit()
+
+        # Default (status=new) returns only new
+        resp = client.get(f"/api/requisitions/{_rfq_requisition.id}/responses")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(r["status"] == "new" for r in data)
+
+        # status=all returns everything
+        resp_all = client.get(f"/api/requisitions/{_rfq_requisition.id}/responses?status=all")
+        assert resp_all.status_code == 200
+        assert len(resp_all.json()) >= 3
+
+        # status=reviewed returns only reviewed
+        resp_rev = client.get(f"/api/requisitions/{_rfq_requisition.id}/responses?status=reviewed")
+        assert resp_rev.status_code == 200
+        assert all(r["status"] == "reviewed" for r in resp_rev.json())

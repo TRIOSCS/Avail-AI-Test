@@ -196,9 +196,39 @@ async def poll(
     return {"responses": results}
 
 
+@router.patch("/api/vendor-responses/{vr_id}/status")
+async def update_vendor_response_status(
+    vr_id: int,
+    body: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a vendor response as reviewed or rejected."""
+    VALID_STATUSES = {"new", "reviewed", "rejected"}
+    new_status = body.get("status")
+    if new_status not in VALID_STATUSES:
+        return {"error": f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}", "status_code": 400}
+
+    vr = db.get(VendorResponse, vr_id)
+    if not vr:
+        raise HTTPException(status_code=404, detail="VendorResponse not found")
+
+    vr.status = new_status
+    db.commit()
+    return {"id": vr.id, "status": vr.status}
+
+
 @router.get("/api/requisitions/{req_id}/responses")
-async def list_responses(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    resps = db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.created_at.desc()).all()
+async def list_responses(
+    req_id: int,
+    status: str = "new",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    query = db.query(VendorResponse).filter_by(requisition_id=req_id)
+    if status != "all":
+        query = query.filter(VendorResponse.status == status)
+    resps = query.order_by(VendorResponse.created_at.desc()).all()
     return [
         {
             "id": r.id,
