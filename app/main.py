@@ -1073,3 +1073,7 @@ app.include_router(my_tasks_router)
 from .routers.strategic import router as strategic_router
 
 app.include_router(strategic_router)
+
+from .routers.outreach import router as outreach_router
+
+app.include_router(outreach_router)
