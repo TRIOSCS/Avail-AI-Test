@@ -6893,10 +6893,12 @@ export async function toggleDrillDown(reqId) {
     }
     const drow = document.getElementById('d-' + reqId);
     const arrow = document.getElementById('a-' + reqId);
+    const rrow = drow ? drow.previousElementSibling : null;
     if (!drow) return;
     const opening = !drow.classList.contains('open');
     drow.classList.toggle('open');
     if (arrow) arrow.classList.toggle('open');
+    if (rrow) rrow.classList.toggle('expanded', opening);
     _updateDrillToggleLabel();
     // Update URL hash to reflect drill-down state
     if (opening) {
@@ -9777,15 +9779,15 @@ function _renderReqRow(r) {
         if (_ssSent > 0 && _ssReplied === 0) blockers.push({ text: 'No vendor replies', level: 'warn' });
         const bsHtml = renderBlockerStrip(blockers);
 
-        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
-            <div style="display:flex;gap:4px;align-items:center">
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">Sourcing</button>
-                <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Log Offer</button>
-                <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
-                <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1;</button>
-                <button class="btn btn-sm" style="padding:4px 8px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
-                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
+        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;padding:2px 0">
+            <span style="font-size:11px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">\u00b7 searched ${lastSearch}</span></span>
+            <div style="display:flex;gap:3px;align-items:center">
+                <button class="btn btn-primary btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">Sourcing</button>
+                <button class="btn btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Offer</button>
+                <button class="btn btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Part</button>
+                <button class="btn btn-sm" style="padding:3px 6px;font-size:10px" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1;</button>
+                <button class="btn btn-sm" style="padding:3px 6px;font-size:10px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
+                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none;padding:3px 8px;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
         </div>
         ${ssHtml}${bsHtml}`;
@@ -16121,7 +16123,7 @@ async function rfqOpenWorkspace(reqId, container) {
     container.innerHTML = `<div class="rfq-workspace" id="rfqWorkspace-${reqId}">
         <div class="rfq-left" id="rfqLeft-${reqId}">
             <table class="rfq-part-list"><thead><tr>
-                <th>MPN</th><th>Qty</th><th>Target</th><th>Offers</th><th>Progress</th>
+                <th>MPN</th><th>Qty / Target</th><th>Status</th><th>Progress</th>
             </tr></thead><tbody id="rfqPartBody-${reqId}"></tbody></table>
         </div>
         <div class="rfq-right empty" id="rfqRight-${reqId}">
@@ -16140,7 +16142,7 @@ async function rfqOpenWorkspace(reqId, container) {
         }
     } catch(e) {
         document.getElementById('rfqPartBody-' + reqId).innerHTML =
-            '<tr><td colspan="5" style="color:var(--red);padding:12px">Failed to load parts</td></tr>';
+            '<tr><td colspan="4" style="color:var(--red);padding:12px">Failed to load parts</td></tr>';
     }
 }
 
@@ -16148,7 +16150,7 @@ function _rfqRenderPartList(reqId) {
     const tbody = document.getElementById('rfqPartBody-' + reqId);
     if (!tbody) return;
     if (_rfqPartsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-placeholder">No parts added yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4" class="empty-placeholder">No parts added yet</td></tr>';
         return;
     }
     tbody.innerHTML = _rfqPartsData.map(p => _rfqPartRow(p)).join('');
@@ -16183,10 +16185,11 @@ function _rfqPartRow(p) {
 
     const target = p.target_price ? '$' + Number(p.target_price).toFixed(4) : '\u2014';
 
+    const qtyTarget = target ? `${p.target_qty} @ ${target}` : `${p.target_qty}`;
+
     return `<tr class="rfq-part-row${active}" onclick="rfqSelectPart(${p.id})" data-part-id="${p.id}">
         <td><div class="rfq-mpn">${esc(p.primary_mpn)}</div>${p.brand ? '<div class="rfq-brand">' + esc(p.brand) + '</div>' : ''}</td>
-        <td class="mono" style="font-size:11px">${p.target_qty}</td>
-        <td class="mono" style="font-size:11px">${target}</td>
+        <td class="mono" style="font-size:10px;white-space:nowrap;color:var(--text2)">${qtyTarget}</td>
         <td><div class="rfq-chips">${chips}</div></td>
         <td>${stepper}</td>
     </tr>`;
@@ -16229,8 +16232,8 @@ async function rfqSelectPart(partId) {
                 <span>Qty: <b>${part.target_qty}</b></span>
                 ${target ? '<span>Target: <b>' + target + '</b></span>' : ''}
                 ${stepHtml}
+                ${flags ? '<div class="rfq-panel-flags">' + flags + '</div>' : ''}
             </div>
-            ${flags ? '<div class="rfq-panel-flags">' + flags + '</div>' : ''}
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
