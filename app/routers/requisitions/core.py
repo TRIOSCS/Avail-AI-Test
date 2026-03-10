@@ -347,7 +347,11 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     elif status == "archive":
         query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
     elif status:
-        query = query.filter(Requisition.status == status)
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if len(statuses) == 1:
+            query = query.filter(Requisition.status == statuses[0])
+        else:
+            query = query.filter(Requisition.status.in_(statuses))
     else:
         query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
 

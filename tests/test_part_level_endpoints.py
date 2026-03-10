@@ -235,6 +235,18 @@ def test_requirement_tasks_404(client):
 
 
 class TestRequisitionStatusFilter:
+    def _get_requisitions(self, resp):
+        """Extract requisition list from response, handling various formats."""
+        import json
+
+        data = resp.json()
+        # Handle double-encoded JSON (cached_endpoint may return a string)
+        if isinstance(data, str):
+            data = json.loads(data)
+        if isinstance(data, list):
+            return data
+        return data.get("requisitions", data.get("items", []))
+
     def test_comma_separated_status_filter(self, client, db_session, test_user):
         """GET /api/requisitions?status=won,lost returns only matching statuses."""
         from app.models import Requisition
@@ -247,8 +259,7 @@ class TestRequisitionStatusFilter:
 
         resp = client.get("/api/requisitions?status=won,lost")
         assert resp.status_code == 200
-        data = resp.json()
-        items = data if isinstance(data, list) else data.get("items", data)
+        items = self._get_requisitions(resp)
         names = [r["name"] for r in items]
         assert "Won Req" in names
         assert "Lost Req" in names
@@ -264,8 +275,7 @@ class TestRequisitionStatusFilter:
 
         resp = client.get("/api/requisitions?status=draft")
         assert resp.status_code == 200
-        data = resp.json()
-        items = data if isinstance(data, list) else data.get("items", data)
+        items = self._get_requisitions(resp)
         names = [r["name"] for r in items]
         assert "Draft Filter Req" in names
 
