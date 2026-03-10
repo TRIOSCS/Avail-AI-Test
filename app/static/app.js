@@ -5424,6 +5424,127 @@ function ddToggleGroupOffers(reqId, groupIdx, checked) {
 
 
 
+// ── Payment/Shipping Terms Presets ─────────────────────────────────────
+// Shared preset lists for payment and shipping terms dropdowns.
+// Used by: Build Quote modal, inline draft quote editor, ddShowCopyFromQuote
+const _PAYMENT_TERMS = ['Net 30', 'Net 45', 'Net 60', 'COD', 'Prepaid', 'CIA'];
+const _SHIPPING_TERMS = ['FOB Origin', 'FOB Destination', 'CIF', 'DDP', 'EXW', 'DAP'];
+
+function _termsSelectHtml(id, currentVal, presets) {
+    const isCustom = currentVal && !presets.includes(currentVal);
+    let html = `<select id="${id}" style="width:120px;padding:2px 4px">`;
+    for (const p of presets) {
+        html += `<option value="${escAttr(p)}"${p === currentVal ? ' selected' : ''}>${esc(p)}</option>`;
+    }
+    html += `<option value="__custom"${isCustom ? ' selected' : ''}>Other\u2026</option></select>`;
+    return html;
+}
+
+function _wireTermsSelect(selectId, customId) {
+    const sel = document.getElementById(selectId);
+    const custom = document.getElementById(customId);
+    if (!sel || !custom) return;
+    // If current value is custom, show the custom input pre-filled
+    if (sel.value === '__custom') {
+        custom.style.display = '';
+    }
+    sel.addEventListener('change', function() {
+        if (this.value === '__custom') {
+            custom.style.display = '';
+            custom.focus();
+        } else {
+            custom.style.display = 'none';
+            custom.value = '';
+        }
+    });
+}
+
+function _getTermsValue(selectId, customId) {
+    const sel = document.getElementById(selectId);
+    if (!sel) return '';
+    if (sel.value === '__custom') {
+        return document.getElementById(customId)?.value || '';
+    }
+    return sel.value;
+}
+
+async function ddShowCopyFromQuote(prefix) {
+    try {
+        const data = await apiFetch('/api/quotes/recent-terms');
+        if (!data || !data.length) { showToast('No recent quotes found', 'info'); return; }
+        // Build a small dropdown overlay near the button
+        const btnId = prefix === 'bq' ? 'bqCopyPrevBtn' : null;
+        let listHtml = '<div class="copy-terms-dropdown" style="position:absolute;z-index:9999;background:var(--bg1);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:4px 0;min-width:220px;max-height:200px;overflow-y:auto">';
+        for (const q of data) {
+            const label = esc((q.customer_name || 'Unknown') + ' — ' + (q.quote_number || 'Draft'));
+            const terms = [q.payment_terms, q.shipping_terms].filter(Boolean).join(' / ') || 'No terms';
+            listHtml += `<div class="copy-terms-item" style="padding:6px 12px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--border)" onclick="_applyCopiedTerms('${prefix}',${JSON.stringify(q).replace(/'/g, "\\'")})" onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''"><strong>${label}</strong><br><span style="color:var(--muted)">${esc(terms)}</span></div>`;
+        }
+        listHtml += '</div>';
+        // Remove any existing dropdown
+        document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+        const btn = btnId ? document.getElementById(btnId) : null;
+        if (btn) {
+            btn.style.position = 'relative';
+            btn.insertAdjacentHTML('afterend', listHtml);
+        } else {
+            document.body.insertAdjacentHTML('beforeend', listHtml);
+        }
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', function _closeCopy(e) {
+                if (!e.target.closest('.copy-terms-dropdown')) {
+                    document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+                    document.removeEventListener('click', _closeCopy);
+                }
+            });
+        }, 100);
+    } catch (e) {
+        showToast('Could not load recent quotes', 'error');
+    }
+}
+
+function _applyCopiedTerms(prefix, q) {
+    document.querySelectorAll('.copy-terms-dropdown').forEach(el => el.remove());
+    const termsSelId = prefix === 'bq' ? 'bqTerms' : null;
+    const shipSelId = prefix === 'bq' ? 'bqShip' : null;
+    const notesId = prefix === 'bq' ? 'bqNotes' : null;
+    const validId = prefix === 'bq' ? 'bqValid' : null;
+
+    // Set payment terms
+    if (termsSelId && q.payment_terms) {
+        _setTermsSelect(termsSelId, termsSelId + 'Custom', q.payment_terms, _PAYMENT_TERMS);
+    }
+    // Set shipping terms
+    if (shipSelId && q.shipping_terms) {
+        _setTermsSelect(shipSelId, shipSelId + 'Custom', q.shipping_terms, _SHIPPING_TERMS);
+    }
+    // Set notes
+    if (notesId && q.notes) {
+        const notesEl = document.getElementById(notesId);
+        if (notesEl) notesEl.value = q.notes;
+    }
+    // Set validity
+    if (validId && q.validity_days) {
+        const validEl = document.getElementById(validId);
+        if (validEl) validEl.value = q.validity_days;
+    }
+    showToast('Terms copied from ' + (q.quote_number || 'recent quote'), 'success');
+}
+
+function _setTermsSelect(selectId, customId, value, presets) {
+    const sel = document.getElementById(selectId);
+    const custom = document.getElementById(customId);
+    if (!sel) return;
+    if (presets.includes(value)) {
+        sel.value = value;
+        if (custom) { custom.style.display = 'none'; custom.value = ''; }
+    } else {
+        sel.value = '__custom';
+        if (custom) { custom.style.display = ''; custom.value = value; }
+    }
+}
+
 function ddBuildQuote(reqId) {
     const sel = _ddSelectedOffers[reqId];
     if (!sel || sel.size === 0) return;
@@ -5486,10 +5607,13 @@ function ddBuildQuote(reqId) {
                 </tr></tfoot>
             </table>
             </div>
-            <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12px">
-                <label>Payment Terms <input id="bqTerms" value="Net 30" placeholder="Net 30" style="width:100px;padding:4px 6px"></label>
-                <label>Shipping <input id="bqShip" value="FOB Origin" placeholder="FOB Origin" style="width:100px;padding:4px 6px"></label>
+            <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12px;align-items:end">
+                <label>Payment Terms <select id="bqTerms" style="width:120px;padding:4px 6px"><option value="Net 30" selected>Net 30</option><option value="Net 45">Net 45</option><option value="Net 60">Net 60</option><option value="COD">COD</option><option value="Prepaid">Prepaid</option><option value="CIA">CIA</option><option value="__custom">Other…</option></select></label>
+                <input id="bqTermsCustom" style="width:100px;padding:4px 6px;display:none" placeholder="Custom terms">
+                <label>Shipping <select id="bqShip" style="width:120px;padding:4px 6px"><option value="FOB Origin" selected>FOB Origin</option><option value="FOB Destination">FOB Destination</option><option value="CIF">CIF</option><option value="DDP">DDP</option><option value="EXW">EXW</option><option value="DAP">DAP</option><option value="__custom">Other…</option></select></label>
+                <input id="bqShipCustom" style="width:100px;padding:4px 6px;display:none" placeholder="Custom shipping">
                 <label>Valid <input id="bqValid" type="number" value="7" style="width:50px;padding:4px 6px"> days</label>
+                <button class="btn btn-ghost btn-sm" id="bqCopyPrevBtn" onclick="ddShowCopyFromQuote('bq')" title="Copy terms from a recent quote" style="font-size:11px">Copy from recent…</button>
             </div>
             <div style="margin-top:8px"><label style="font-size:12px">Notes<br><textarea id="bqNotes" rows="2" style="width:100%;font-size:11px;padding:4px" placeholder="Special instructions, terms, etc."></textarea></label></div>
             <div class="mactions" style="margin-top:12px">
@@ -5499,6 +5623,10 @@ function ddBuildQuote(reqId) {
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+
+    // Wire up payment/shipping custom selects
+    _wireTermsSelect('bqTerms', 'bqTermsCustom');
+    _wireTermsSelect('bqShip', 'bqShipCustom');
 
     // Wire up per-line sell price inputs
     document.querySelectorAll('.bq-sell').forEach(inp => {
@@ -5585,8 +5713,8 @@ async function ddConfirmBuildQuote(reqId) {
         await apiFetch('/api/quotes/' + quote.id, {
             method: 'PUT', body: {
                 line_items: lines,
-                payment_terms: document.getElementById('bqTerms')?.value || '',
-                shipping_terms: document.getElementById('bqShip')?.value || '',
+                payment_terms: _getTermsValue('bqTerms', 'bqTermsCustom'),
+                shipping_terms: _getTermsValue('bqShip', 'bqShipCustom'),
                 validity_days: parseInt(document.getElementById('bqValid')?.value) || 7,
                 notes: document.getElementById('bqNotes')?.value || '',
             }
@@ -5943,9 +6071,11 @@ function _renderQuoteDetail(reqId, q, container) {
 
     // ── Terms ──
     if (isDraft) {
-        html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
-            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:100px;padding:2px 4px"></label>
-            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:100px;padding:2px 4px"></label>
+        html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap;align-items:end">
+            <label>Payment ${_termsSelectHtml('ddqTerms-' + reqId, q.payment_terms || '', _PAYMENT_TERMS)}</label>
+            <input id="ddqTermsCustom-${reqId}" style="width:90px;padding:2px 4px;display:none" placeholder="Custom">
+            <label>Shipping ${_termsSelectHtml('ddqShip-' + reqId, q.shipping_terms || '', _SHIPPING_TERMS)}</label>
+            <input id="ddqShipCustom-${reqId}" style="width:90px;padding:2px 4px;display:none" placeholder="Custom">
             <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
         </div>
         <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
@@ -5971,6 +6101,12 @@ function _renderQuoteDetail(reqId, q, container) {
     html += `</div>`; // close content
     html += `</div>`; // close outer container
     container.innerHTML = html;
+
+    // Wire up payment/shipping selects for draft quotes
+    if (isDraft) {
+        _wireTermsSelect('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId);
+        _wireTermsSelect('ddqShip-' + reqId, 'ddqShipCustom-' + reqId);
+    }
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
@@ -6051,8 +6187,8 @@ async function ddSaveQuoteDraft(reqId) {
         await apiFetch('/api/quotes/' + q.id, {
             method: 'PUT', body: {
                 line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
+                payment_terms: _getTermsValue('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId),
+                shipping_terms: _getTermsValue('ddqShip-' + reqId, 'ddqShipCustom-' + reqId),
                 validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
             }
@@ -6081,8 +6217,8 @@ async function ddSendQuote(reqId) {
         await apiFetch('/api/quotes/' + q.id, {
             method: 'PUT', body: {
                 line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || q.payment_terms || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || q.shipping_terms || '',
+                payment_terms: _getTermsValue('ddqTerms-' + reqId, 'ddqTermsCustom-' + reqId) || q.payment_terms || '',
+                shipping_terms: _getTermsValue('ddqShip-' + reqId, 'ddqShipCustom-' + reqId) || q.shipping_terms || '',
                 validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || q.validity_days || 7,
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || q.notes || '',
             }

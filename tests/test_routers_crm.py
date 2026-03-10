@@ -506,6 +506,35 @@ class TestQuotes:
         assert isinstance(data, list)
         assert len(data) >= 1
 
+    def test_recent_quote_terms(self, client, db_session, test_requisition, test_customer_site, test_user):
+        """GET /api/quotes/recent-terms returns terms from user's recent quotes."""
+        q = Quote(
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="Q-2026-RT1",
+            status="sent",
+            line_items=[],
+            payment_terms="Net 45",
+            shipping_terms="CIF",
+            validity_days=14,
+            notes="Rush order",
+            created_by_id=test_user.id,
+        )
+        db_session.add(q)
+        db_session.commit()
+        resp = client.get("/api/quotes/recent-terms")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(r["payment_terms"] == "Net 45" for r in data)
+        assert any(r["shipping_terms"] == "CIF" for r in data)
+
+    def test_recent_quote_terms_empty(self, client):
+        """Returns empty list when user has no quotes."""
+        resp = client.get("/api/quotes/recent-terms")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
     def test_delete_draft_quote(self, client, db_session, test_requisition, test_customer_site, test_user):
         q = Quote(
             requisition_id=test_requisition.id,
