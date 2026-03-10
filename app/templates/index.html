@@ -252,8 +252,8 @@
     </div>
 </aside>
 
-<!-- My Tasks Sidebar Widget (right side, open by default) — legacy, hidden when context panel is active -->
-<div id="myTasksSidebar" class="my-tasks-sidebar">
+<!-- My Tasks Sidebar Widget — disabled, tasks accessible from requisition detail -->
+<div id="myTasksSidebar" class="my-tasks-sidebar" style="display:none">
     <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
         <span id="myTasksBadge" class="my-tasks-badge" style="display:none">0</span>
@@ -1529,8 +1529,12 @@
 {% endif %}
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/static/sw.js').catch(function(e) {
-    console.warn('SW registration failed:', e);
+  // Unregister all old service workers and clear their caches
+  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+    registrations.forEach(function(r) { r.unregister(); });
+  });
+  caches.keys().then(function(names) {
+    names.forEach(function(name) { caches.delete(name); });
   });
 }
 </script>

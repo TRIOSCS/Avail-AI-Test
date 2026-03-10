@@ -351,8 +351,13 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Cache-Control for static assets (hashed filenames from Vite get long cache)
+        # One-time nuke: Clear-Site-Data on HTML pages to kill stale SW + caches
+        # TODO: remove this header after 2026-03-17
         path = request.url.path
+        if not path.startswith("/static/") and not path.startswith("/api/") and not path.startswith("/auth/") and path != "/health":
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
+
+        # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
             if "/assets/" in path:  # Vite-hashed filenames — immutable
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"

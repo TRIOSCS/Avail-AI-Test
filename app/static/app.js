@@ -4435,8 +4435,6 @@ function toggleMyTasksSidebar() {
     var isOpen = sidebar.classList.toggle('open');
     document.body.classList.toggle('tasks-open', isOpen);
     if (isOpen) loadMyTasks();
-    // Remember preference
-    try { localStorage.setItem('myTasksOpen', isOpen ? '1' : '0'); } catch(e) {}
 }
 
 async function loadMyTasks() {
@@ -4547,32 +4545,27 @@ function _renderMyTaskItem(task) {
     return item;
 }
 
-// Open Tasks sidebar by default on page load (user can close, preference saved)
+// Load badge count on page load — sidebar stays closed until user clicks toggle
 (function() {
     setTimeout(function() {
         var sidebar = document.getElementById('myTasksSidebar');
         if (!sidebar) return;
-        var pref = '1';
-        try { pref = localStorage.getItem('myTasksOpen'); } catch(e) {}
-        // Default open (pref is null on first visit, or '1')
-        if (pref !== '0') {
-            sidebar.classList.add('open');
-            document.body.classList.add('tasks-open');
-            loadMyTasks();
-        } else {
-            // Still load badge count even when closed
-            (async function() {
-                try {
-                    var summary = await apiFetch('/api/tasks/mine/summary');
-                    var badge = document.getElementById('myTasksBadge');
-                    var pending = (summary.todo || 0) + (summary.in_progress || 0);
-                    if (badge) {
-                        badge.textContent = pending;
-                        badge.style.display = pending > 0 ? 'flex' : 'none';
-                    }
-                } catch(e) { /* silently fail */ }
-            })();
-        }
+        // Ensure closed and clear stale preference
+        sidebar.classList.remove('open');
+        document.body.classList.remove('tasks-open');
+        try { localStorage.removeItem('myTasksOpen'); } catch(e) {}
+        // Load badge count only
+        (async function() {
+            try {
+                var summary = await apiFetch('/api/tasks/mine/summary');
+                var badge = document.getElementById('myTasksBadge');
+                var pending = (summary.todo || 0) + (summary.in_progress || 0);
+                if (badge) {
+                    badge.textContent = pending;
+                    badge.style.display = pending > 0 ? 'flex' : 'none';
+                }
+            } catch(e) { /* silently fail */ }
+        })();
     }, 500);
 })();
 

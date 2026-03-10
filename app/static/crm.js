@@ -1893,91 +1893,145 @@ function _sortOffers(offers) {
     }
 }
 
+function _offerSourceBadge(source) {
+    if (!source || source === 'manual') return '';
+    var colors = {api:'#0369a1',email:'#7c3aed',rfq:'#0891b2'};
+    var c = colors[source] || '#64748b';
+    return '<span class="badge b-source" style="background:'+c+'18;color:'+c+'">'+esc(source)+'</span>';
+}
+
+function _offerValidUntil(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    var now = new Date();
+    var days = Math.ceil((d - now) / 86400000);
+    var label = d.toLocaleDateString('en-US', {month:'short',day:'numeric'});
+    if (days < 0) return '<span style="color:var(--red);font-size:10px">Expired '+esc(label)+'</span>';
+    if (days <= 3) return '<span style="color:var(--amber,#d97706);font-size:10px">Expires '+esc(label)+'</span>';
+    return '<span style="color:var(--muted);font-size:10px">Valid til '+esc(label)+'</span>';
+}
+
 function renderOffers() {
-    const el = document.getElementById('offersContent');
+    var el = document.getElementById('offersContent');
     if (!crmOffers.length) {
         el.innerHTML = stateEmpty('No offers yet', 'Log vendor offers as they come in');
         return;
     }
-    const filterBar = `<div id="offerFilterBar" class="offer-filter-bar">
-        <div class="filter-pills">
-            <button class="filter-pill ${_offerStatusFilter==='all'?'on':''}" onclick="setOfferFilter('all',this)">All</button>
-            <button class="filter-pill ${_offerStatusFilter==='active'?'on':''}" onclick="setOfferFilter('active',this)">Active</button>
-            <button class="filter-pill ${_offerStatusFilter==='expired'?'on':''}" onclick="setOfferFilter('expired',this)">Expired</button>
-        </div>
-        <select class="offer-sort" onchange="setOfferSort(this.value)">
-            <option value="newest" ${_offerSort==='newest'?'selected':''}>Newest</option>
-            <option value="price_asc" ${_offerSort==='price_asc'?'selected':''}>Price ↑</option>
-            <option value="price_desc" ${_offerSort==='price_desc'?'selected':''}>Price ↓</option>
-            <option value="vendor" ${_offerSort==='vendor'?'selected':''}>Vendor A→Z</option>
-        </select>
-    </div>`;
-    const groupsHtml = crmOffers.map(group => {
-        const targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(4) : 'no target';
-        const lastQ = group.last_quoted?.sell_price != null ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
-        let visibleOffers = group.offers;
+    // All data comes from our own API (server-escaped) and passes through esc() below.
+    var filterBar = '<div id="offerFilterBar" class="offer-filter-bar">'
+        + '<div class="filter-pills">'
+        + '<button class="filter-pill '+(_offerStatusFilter==='all'?'on':'')+'" onclick="setOfferFilter(\'all\',this)">All</button>'
+        + '<button class="filter-pill '+(_offerStatusFilter==='active'?'on':'')+'" onclick="setOfferFilter(\'active\',this)">Active</button>'
+        + '<button class="filter-pill '+(_offerStatusFilter==='expired'?'on':'')+'" onclick="setOfferFilter(\'expired\',this)">Expired</button>'
+        + '</div>'
+        + '<select class="offer-sort" onchange="setOfferSort(this.value)">'
+        + '<option value="newest" '+(_offerSort==='newest'?'selected':'')+'>Newest</option>'
+        + '<option value="price_asc" '+(_offerSort==='price_asc'?'selected':'')+'>Price &#8593;</option>'
+        + '<option value="price_desc" '+(_offerSort==='price_desc'?'selected':'')+'>Price &#8595;</option>'
+        + '<option value="vendor" '+(_offerSort==='vendor'?'selected':'')+'>Vendor A&#8594;Z</option>'
+        + '</select></div>';
+    var groupsHtml = crmOffers.map(function(group) {
+        var targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(4) : 'no target';
+        var lastQ = group.last_quoted && group.last_quoted.sell_price != null ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
+        var visibleOffers = group.offers;
         if (_offerStatusFilter !== 'all') {
-            visibleOffers = visibleOffers.filter(o => (o.status || 'active') === _offerStatusFilter);
+            visibleOffers = visibleOffers.filter(function(o) { return (o.status || 'active') === _offerStatusFilter; });
         }
         visibleOffers = _sortOffers(visibleOffers);
-        const offersHtml = visibleOffers.length ? visibleOffers.map(o => {
-            const checked = selectedOffers.has(o.id) ? 'checked' : '';
-            const isRef = o.status === 'reference';
-            const isExpired = o.status === 'expired';
-            const isSub = o.mpn && group.mpn && o.mpn.trim().toUpperCase() !== group.mpn.trim().toUpperCase();
-            const rowCls = isRef ? 'offer-ref' : (isExpired ? 'offer-expired' : (isSub ? 'offer-sub' : ''));
-            const subDetails = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
+        var offersHtml = visibleOffers.length ? visibleOffers.map(function(o) {
+            var checked = selectedOffers.has(o.id) ? 'checked' : '';
+            var isRef = o.status === 'reference';
+            var isExpired = o.status === 'expired';
+            var isSub = o.mpn && group.mpn && o.mpn.trim().toUpperCase() !== group.mpn.trim().toUpperCase();
+            var cardCls = 'offer-card' + (isRef ? ' offer-ref' : '') + (isExpired ? ' offer-expired' : '') + (isSub ? ' offer-sub' : '') + (o.selected_for_quote ? ' offer-selected' : '');
 
-            // Notes pill — shows date/time, click to expand
-            let noteStr = '';
-            if (o.notes) {
-                const noteDate = o.created_at ? new Date(o.created_at).toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '';
-                noteStr = `<span class="offer-note-pill" onclick="this.nextElementSibling.classList.toggle('hidden');event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:1px 8px;border-radius:10px;background:var(--amber-light,#fff3cd);color:var(--amber,#856404);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--amber,#856404)">📝 Notes${noteDate ? ' · '+noteDate : ''}</span><div class="hidden" style="margin-top:4px;padding:6px 8px;border-radius:6px;background:var(--bg2,#f8f9fa);border:1px solid var(--border);font-size:11px;color:var(--text1);white-space:pre-wrap;max-width:350px">${esc(o.notes)}</div>`;
-            }
+            // Badges
+            var badges = [];
+            if (isSub) badges.push('<span class="badge b-sub">SUB</span>');
+            if (o.quoted_on) badges.push('<span class="badge b-quoted">Q: '+esc(o.quoted_on)+'</span>');
+            var srcBadge = _offerSourceBadge(o.source);
+            if (srcBadge) badges.push(srcBadge);
+            if (o.status && o.status !== 'active') badges.push('<span class="badge b-status-'+esc(o.status)+'">'+esc(o.status)+'</span>');
+            var badgeRow = badges.join(' ');
 
-            // Photo indicator — prominent badge with count and click to open gallery
-            const images = (o.attachments||[]).filter(a => (a.content_type||'').startsWith('image/'));
-            const nonImages = (o.attachments||[]).filter(a => !(a.content_type||'').startsWith('image/'));
-            let photoHtml = '';
+            // Attachments
+            var images = (o.attachments||[]).filter(function(a) { return (a.content_type||'').startsWith('image/'); });
+            var nonImages = (o.attachments||[]).filter(function(a) { return !(a.content_type||'').startsWith('image/'); });
+            var mediaHtml = '';
             if (images.length) {
-                photoHtml = `<span onclick="openOfferGallery(${o.id});event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:2px 8px;border-radius:10px;background:var(--teal-light,#d1ecf1);color:var(--teal,#0c7c84);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--teal,#0c7c84)">📷 ${images.length} Photo${images.length>1?'s':''} — View</span>`;
+                mediaHtml += '<span class="offer-media-pill" onclick="openOfferGallery('+o.id+');event.stopPropagation()">&#128247; '+images.length+' photo'+(images.length>1?'s':'')+'</span>';
             }
-            const fileHtml = nonImages.map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a><button onclick="event.stopPropagation();deleteOfferAttachment(${a.id})" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Remove attachment">&times;</button>`).join(' ');
+            if (nonImages.length) {
+                mediaHtml += nonImages.map(function(a) { return '<a href="'+esc(a.onedrive_url||'#')+'" target="_blank" class="offer-file-link">'+esc(a.file_name)+'</a>'; }).join(' ');
+            }
 
-            const enteredStr = o.entered_by && o.entered_by !== '?' ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
-            return `
-            <tr class="${rowCls}">
-                <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
-                <td>${esc(o.vendor_name)}${isSub ? ' <span class="badge b-sub">SUB</span>' : ''}${o.mpn && isSub ? '<div style="font-size:10px;color:#0e7490;font-weight:600">'+esc(o.mpn)+'</div>' : ''}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr ? '<div>'+noteStr+'</div>' : ''}${photoHtml || fileHtml ? '<div style="margin-top:2px">'+photoHtml+(fileHtml?' '+fileHtml:'')+'</div>' : ''}</td>
-                <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
-                <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
-                <td>${esc(o.lead_time || '—')}</td>
-                <td>${esc(o.condition || '—')}</td>
-                <td>${esc(o.date_code || '—')}</td>
-                <td>${o.moq ? o.moq.toLocaleString() : '—'}</td>
-                <td style="font-size:10px">${esc(o.warranty || '—')}</td>
-                <td style="font-size:10px">${esc(o.country_of_origin || '—')}</td>
-                <td style="font-size:10px;white-space:nowrap">${o.avg_rating != null ? '<span style="color:var(--amber)">★</span> ' + o.avg_rating + ' <span style="color:var(--muted)">(' + o.review_count + ')</span>' : '—'}</td>
-                <td>${enteredStr}</td>
-                <td>${isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-ghost btn-sm" onclick="openEditOffer('+o.id+')" title="Edit offer" style="padding:2px 6px;font-size:10px">✎</button><button class="btn btn-danger btn-sm" onclick="deleteOffer('+o.id+')" title="Remove offer" style="padding:2px 6px;font-size:10px">✕</button>'}</td>
-            </tr>`;
-        }).join('') : '<tr><td colspan="13" class="empty" style="padding:8px">No offers for this part</td></tr>';
-        return `
-        <div class="offer-group">
-            <div class="offer-group-header">
-                <strong>${esc(group.mpn)}</strong>
-                <span>need ${(group.target_qty||0).toLocaleString()}</span>
-                <span>${targetStr}</span>
-                <span>${lastQ}</span>
-                <button class="btn btn-ghost btn-sm" onclick="openPricingHistory('${escAttr(group.mpn)}')">📊</button>
-            </div>
-            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-            <table class="tbl offer-table">
-                <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th>MOQ</th><th>Warranty</th><th>COO</th><th>Rating</th><th>By</th><th style="width:40px"></th></tr></thead>
-                <tbody>${offersHtml}</tbody>
-            </table>
-            </div>
-        </div>`;
+            // Detail grid — only show fields with values
+            var pairs = [
+                ['Lead Time', o.lead_time],
+                ['MOQ', o.moq ? o.moq.toLocaleString() : null],
+                ['Condition', o.condition],
+                ['Date Code', o.date_code],
+                ['Packaging', o.packaging],
+                ['Warranty', o.warranty],
+                ['COO', o.country_of_origin],
+                ['Manufacturer', o.manufacturer],
+                ['Firmware', o.firmware],
+                ['HW Rev', o.hardware_code],
+            ];
+            var detailHtml = pairs.filter(function(p) { return p[1]; }).map(function(p) {
+                return '<div class="offer-detail-cell"><span class="offer-detail-label">'+p[0]+'</span><span class="offer-detail-value">'+esc(String(p[1]))+'</span></div>';
+            }).join('');
+
+            // Meta
+            var ratingStr = o.avg_rating != null ? '<span class="offer-rating"><span style="color:var(--amber)">&#9733;</span> '+o.avg_rating+' ('+o.review_count+')</span>' : '';
+            var enteredStr = o.entered_by && o.entered_by !== '?' ? esc(o.entered_by) : '';
+            var dateStr = o.created_at ? new Date(o.created_at).toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '';
+            var validStr = _offerValidUntil(o.valid_until);
+
+            // Notes
+            var noteHtml = '';
+            if (o.notes) {
+                noteHtml = '<div class="offer-notes-row"><span class="offer-note-toggle" onclick="this.parentElement.classList.toggle(\'expanded\');event.stopPropagation()">&#128221; Notes</span><div class="offer-note-body">'+esc(o.notes)+'</div></div>';
+            }
+
+            return '<div class="'+cardCls+'">'
+                + '<div class="offer-card-top">'
+                +   '<label class="offer-check"><input type="checkbox" '+checked+' '+(isRef?'disabled':'')+' onchange="toggleOfferSelect('+o.id+',this.checked)"></label>'
+                +   '<div class="offer-card-vendor">'
+                +     '<strong>'+esc(o.vendor_name)+'</strong>'
+                +     (isSub ? '<div class="offer-sub-mpn">'+esc(o.mpn)+'</div>' : '')
+                +     (badgeRow ? '<div class="offer-badges">'+badgeRow+'</div>' : '')
+                +   '</div>'
+                +   '<div class="offer-card-price">'
+                +     (o.unit_price != null ? '<span class="offer-price-main">'+(o.currency||'$')+' '+Number(o.unit_price).toFixed(4)+'</span>' : '<span class="offer-price-none">No price</span>')
+                +     (o.qty_available != null ? '<span class="offer-price-qty">'+o.qty_available.toLocaleString()+' avail</span>' : '')
+                +   '</div>'
+                +   '<div class="offer-card-actions">'
+                +     (o.selected_for_quote ? '<span class="offer-selected-badge" title="Selected for quote">&#10003; Quote</span>' : '')
+                +     (isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-ghost btn-sm" onclick="openEditOffer('+o.id+')" title="Edit">&#9998;</button><button class="btn btn-ghost btn-sm offer-del-btn" onclick="deleteOffer('+o.id+')" title="Delete">&#10005;</button>')
+                +   '</div>'
+                + '</div>'
+                + (detailHtml ? '<div class="offer-detail-grid">'+detailHtml+'</div>' : '')
+                + '<div class="offer-card-meta">'
+                +   ratingStr
+                +   (enteredStr ? '<span class="offer-meta-item">by '+enteredStr+'</span>' : '')
+                +   (dateStr ? '<span class="offer-meta-item">'+dateStr+'</span>' : '')
+                +   (validStr ? '<span class="offer-meta-item">'+validStr+'</span>' : '')
+                +   (mediaHtml ? '<span class="offer-meta-item">'+mediaHtml+'</span>' : '')
+                + '</div>'
+                + noteHtml
+                + '</div>';
+        }).join('') : '<div class="offer-empty-part">No offers for this part</div>';
+        return '<div class="offer-group">'
+            + '<div class="offer-group-header">'
+            +   '<strong>'+esc(group.mpn)+'</strong>'
+            +   '<span>need '+(group.target_qty||0).toLocaleString()+'</span>'
+            +   '<span>'+targetStr+'</span>'
+            +   '<span>'+lastQ+'</span>'
+            +   '<button class="btn btn-ghost btn-sm" onclick="openPricingHistory(\''+escAttr(group.mpn)+'\')">&#128202;</button>'
+            + '</div>'
+            + '<div class="offer-cards-list">'+offersHtml+'</div>'
+            + '</div>';
     }).join('');
     el.innerHTML = filterBar + groupsHtml;
     updateBuildQuoteBtn();
