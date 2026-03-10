@@ -4547,15 +4547,15 @@ function _renderMyTaskItem(task) {
     return item;
 }
 
-// Open Tasks sidebar by default on page load (user can close, preference saved)
+// Tasks sidebar closed by default — opens when user clicks toggle (preference saved)
 (function() {
     setTimeout(function() {
         var sidebar = document.getElementById('myTasksSidebar');
         if (!sidebar) return;
-        var pref = '1';
+        var pref = '0';
         try { pref = localStorage.getItem('myTasksOpen'); } catch(e) {}
-        // Default open (pref is null on first visit, or '1')
-        if (pref !== '0') {
+        // Default closed (pref is null on first visit, or '0')
+        if (pref === '1') {
             sidebar.classList.add('open');
             document.body.classList.add('tasks-open');
             loadMyTasks();
