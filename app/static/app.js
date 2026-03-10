@@ -9779,18 +9779,19 @@ function _renderReqRow(r) {
         if (_ssSent > 0 && _ssReplied === 0) blockers.push({ text: 'No vendor replies', level: 'warn' });
         const bsHtml = renderBlockerStrip(blockers);
 
-        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0;padding:2px 0">
-            <span style="font-size:11px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">\u00b7 searched ${lastSearch}</span></span>
-            <div style="display:flex;gap:3px;align-items:center">
-                <button class="btn btn-primary btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">Sourcing</button>
-                <button class="btn btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Offer</button>
-                <button class="btn btn-sm" style="padding:3px 8px;font-size:10px" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Part</button>
-                <button class="btn btn-sm" style="padding:3px 6px;font-size:10px" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1;</button>
-                <button class="btn btn-sm" style="padding:3px 6px;font-size:10px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
-                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none;padding:3px 8px;font-size:10px" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
+        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:1px">
+            <span style="font-size:11px;font-weight:600;white-space:nowrap">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">\u00b7 ${lastSearch}</span></span>
+            ${ssHtml}
+            <div style="display:flex;gap:3px;align-items:center;flex-shrink:0">
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs for parts">Source</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Offer</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Part</button>
+                <button class="btn btn-sm" style="padding:3px 6px" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1;</button>
+                <button class="btn btn-sm" style="padding:3px 6px" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb;</button>
+                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Prepare RFQ (0)</button>
             </div>
         </div>
-        ${ssHtml}${bsHtml}`;
+        ${bsHtml}`;
     }
 
     const _urgency = _isDeadlineUrgent(r, new Date());
@@ -16033,13 +16034,14 @@ function renderObjHeader(opts) {
 }
 
 function renderStatusStrip(items) {
-    // items: [{ value, label, cls: 'alert'|'warn'|'good'|'' }]
-    return `<div class="status-strip">${items.map(i =>
-        `<div class="status-strip-item ${i.cls || ''}">
-            <div class="status-strip-value">${i.value}</div>
+    // items: [{ value, label, cls: 'alert'|'warn'|'good'|'', color: 'var(--green)' }]
+    return `<div class="status-strip">${items.map(i => {
+        const colorStyle = i.color ? ' style="color:' + i.color + '"' : '';
+        return `<div class="status-strip-item ${i.cls || ''}">
+            <div class="status-strip-value"${colorStyle}>${i.value}</div>
             <div class="status-strip-label">${esc(i.label)}</div>
-        </div>`
-    ).join('')}</div>`;
+        </div>`;
+    }).join('')}</div>`;
 }
 
 function renderBlockerStrip(blockers, actionLabel, actionOnclick) {
