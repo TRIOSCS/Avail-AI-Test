@@ -5139,6 +5139,13 @@ function _renderDdOffers(reqId, data, panel) {
             const offerAgeDays = o.created_at ? Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000) : 0;
             const staleBadge = offerAgeDays > 14 ? ' <span class="badge" style="background:var(--red-light);color:var(--red);font-size:8px">STALE</span>' : offerAgeDays > 7 ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:8px">AGING</span>' : '';
             const quotedBadge = o.quoted_on ? ` <span class="badge b-quoted">${esc(o.quoted_on)}</span>` : '';
+            // Parse confidence badge for email-parsed offers
+            let confBadge = '';
+            if (o.parse_confidence != null) {
+                const cc = o.parse_confidence >= 80 ? 'var(--green)' : o.parse_confidence >= 50 ? 'var(--amber)' : 'var(--red)';
+                const cl = o.parse_confidence >= 80 ? 'High' : o.parse_confidence >= 50 ? 'Review' : 'Low';
+                confBadge = ` <span class="badge" style="background:${cc}15;color:${cc};font-size:8px;padding:1px 4px" title="AI parse confidence: ${o.parse_confidence}%">${cl} ${o.parse_confidence}%</span>`;
+            }
 
             // Edited-by info
             let editedInfo = '';
@@ -5149,7 +5156,7 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${editedInfo}</td>
                 <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
@@ -16451,7 +16458,11 @@ function _rfqRenderSightings(data, body) {
     }
 
     const sightings = partData.sightings;
+    const blCount = partData.blacklisted_count || 0;
     let html = `<div style="font-size:12px;font-weight:600;margin-bottom:8px">${sightings.length} Source${sightings.length>1?'s':''} Found</div>`;
+    if (blCount > 0) {
+        html += `<div style="font-size:10px;color:var(--muted);margin-bottom:6px;padding:3px 6px;background:var(--bg-alt);border-radius:4px">🚫 ${blCount} vendor${blCount>1?'s':''} hidden (blacklisted)</div>`;
+    }
 
     // Compact sightings table
     html += '<table class="dtbl" style="font-size:10px"><thead><tr>';

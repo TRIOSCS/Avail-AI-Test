@@ -98,6 +98,15 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         )
         rating_map = {r[0]: {"avg": round(float(r[1]), 1), "count": r[2]} for r in rating_rows}
 
+    # Batch-fetch parse confidence from vendor_responses for email-parsed offers
+    vr_ids = {o.vendor_response_id for o in offers if o.vendor_response_id}
+    conf_map: dict[int, int | None] = {}
+    if vr_ids:
+        from ...models import VendorResponse
+
+        vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
+        conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -148,6 +157,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "attachments": atts,
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
+                "parse_confidence": conf_map.get(o.vendor_response_id),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
