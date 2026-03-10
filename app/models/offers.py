@@ -55,6 +55,14 @@ class Offer(Base):
     vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id", ondelete="SET NULL"))
     entered_by_id = Column(Integer, ForeignKey("users.id"))
 
+    # Evidence tier — provenance tag for data trust (T1–T7)
+    evidence_tier = Column(String(4))
+    # AI parse confidence (0.0–1.0) for email-parsed offers
+    parse_confidence = Column(Float)
+    # Promotion audit trail — when a human reviews and promotes a T4 offer
+    promoted_by_id = Column(Integer, ForeignKey("users.id"))
+    promoted_at = Column(DateTime)
+
     notes = Column(Text)
     status = Column(String(20), default="active")  # active | sold
     is_stale = Column(
@@ -87,6 +95,7 @@ class Offer(Base):
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
+    promoted_by = relationship("User", foreign_keys=[promoted_by_id])
     attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (

@@ -19,6 +19,7 @@ def register_all_jobs(scheduler, settings):
     from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
     from .prospecting_jobs import register_prospecting_jobs
+    from .sourcing_refresh_jobs import register_sourcing_refresh_jobs
     from .tagging_jobs import register_tagging_jobs
     from .teams_alert_jobs import register_teams_alert_jobs
 
@@ -28,6 +29,7 @@ def register_all_jobs(scheduler, settings):
     register_inventory_jobs(scheduler, settings)
     register_offers_jobs(scheduler, settings)
     register_prospecting_jobs(scheduler, settings)
+    register_sourcing_refresh_jobs(scheduler, settings)
     register_tagging_jobs(scheduler, settings)
     register_maintenance_jobs(scheduler, settings)
     register_health_jobs(scheduler, settings)

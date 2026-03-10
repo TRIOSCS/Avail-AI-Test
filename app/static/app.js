@@ -8182,6 +8182,39 @@ function _ddVendorInlineBadges(s) {
     return html;
 }
 
+function _ddEvidenceBadge(tier) {
+    if (!tier) return '';
+    const cfg = {
+        T1: { bg: '#dcfce7', color: '#166534', label: 'T1', tip: 'Authorized Distributor API' },
+        T2: { bg: '#dbeafe', color: '#1e40af', label: 'T2', tip: 'Direct API' },
+        T3: { bg: '#fef3c7', color: '#92400e', label: 'T3', tip: 'Marketplace' },
+        T4: { bg: '#fce7f3', color: '#9d174d', label: 'T4', tip: 'AI Parsed (needs review)' },
+        T5: { bg: '#e0e7ff', color: '#3730a3', label: 'T5', tip: 'AI Parsed (verified)' },
+        T6: { bg: '#f3f4f6', color: '#374151', label: 'T6', tip: 'Manual Entry' },
+        T7: { bg: '#f5f3ff', color: '#6b21a8', label: 'T7', tip: 'Historical' },
+    };
+    const c = cfg[tier] || { bg: '#f3f4f6', color: '#374151', label: tier, tip: tier };
+    return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:default" title="${c.tip}">${c.label}</span>`;
+}
+
+function _ddScoreTooltip(s) {
+    const sc = s.score_components;
+    if (!sc) return s.score != null ? 'Score: ' + s.score : '';
+    const bar = (label, val) => {
+        const w = Math.min(100, Math.max(0, val));
+        const color = w >= 66 ? 'var(--green)' : w >= 33 ? 'var(--amber)' : 'var(--red)';
+        return label + ': ' + Math.round(val) + '/100';
+    };
+    return [
+        'Score: ' + (s.score || 0) + '/100',
+        bar('Trust', sc.trust),
+        bar('Price', sc.price),
+        bar('Qty', sc.qty),
+        bar('Fresh', sc.freshness),
+        bar('Complete', sc.completeness),
+    ].join(' | ');
+}
+
 function _ddCopyContact(text, type) {
     navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(e => console.warn('clipboard copy failed:', e));
 }
@@ -8263,7 +8296,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
-            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>

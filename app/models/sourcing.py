@@ -142,6 +142,11 @@ class Sighting(Base):
     # NC integration: when the source data was fetched
     source_searched_at = Column(DateTime(timezone=True))
 
+    # Evidence tier — provenance tag for data trust (T1–T7)
+    evidence_tier = Column(String(4))
+    # Multi-factor score breakdown (JSON: {trust, price, qty, freshness, completeness})
+    score_components = Column(JSON)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")

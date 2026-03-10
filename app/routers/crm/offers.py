@@ -930,3 +930,96 @@ def _record_offer_won_history(db: Session, offer: Offer) -> None:
         )
     except Exception as e:
         logger.warning("Offer won purchase history recording failed: %s", e)
+
+
+# ── Review Queue — medium-confidence AI-parsed offers ─────────────────
+
+
+@router.get("/api/offers/review-queue")
+async def list_review_queue(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List offers needing human review (evidence_tier T4, status pending_review).
+
+    Called by: frontend review queue panel
+    Depends on: Offer model with evidence_tier column
+    """
+    offers = (
+        db.query(Offer)
+        .filter(
+            Offer.evidence_tier == "T4",
+            Offer.status == "pending_review",
+        )
+        .order_by(Offer.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return [
+        {
+            "id": o.id,
+            "requisition_id": o.requisition_id,
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "parse_confidence": o.parse_confidence,
+            "evidence_tier": o.evidence_tier,
+            "source": o.source,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in offers
+    ]
+
+
+@router.post("/api/offers/{offer_id}/promote")
+async def promote_offer(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Promote a T4 (medium-confidence) offer to T5 after human review.
+
+    Called by: review queue UI
+    Depends on: Offer model with promoted_by_id, promoted_at, evidence_tier
+    """
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.evidence_tier != "T4":
+        raise HTTPException(400, "Only T4 offers can be promoted")
+
+    offer.evidence_tier = "T5"
+    offer.status = "active"
+    offer.promoted_by_id = user.id
+    offer.promoted_at = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info(f"Offer {offer_id} promoted T4→T5 by user {user.id}")
+    return {"status": "promoted", "offer_id": offer_id}
+
+
+@router.post("/api/offers/{offer_id}/reject")
+async def reject_offer(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reject a T4 offer — marks as rejected, keeps for audit trail.
+
+    Called by: review queue UI
+    Depends on: Offer model
+    """
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.status not in ("pending_review",):
+        raise HTTPException(400, "Only pending_review offers can be rejected")
+
+    offer.status = "rejected"
+    offer.updated_by_id = user.id
+    offer.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info(f"Offer {offer_id} rejected by user {user.id}")
+    return {"status": "rejected", "offer_id": offer_id}
