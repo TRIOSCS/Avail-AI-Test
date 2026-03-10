@@ -545,6 +545,21 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             logger.warning(f"Batch submit failed, falling back to sequential: {e}")
             await _parse_sequential_fallback(pending_parse, db)
 
+    # ── Post-parse: update contact status for OOO/bounce classifications ──
+    OOO_CLASSIFICATIONS = {"ooo", "out_of_office", "auto_reply"}
+    BOUNCE_CLASSIFICATIONS = {"bounce", "bounced", "delivery_failure"}
+    for vr in pending_parse:
+        if vr.contact_id and vr.classification:
+            cls = vr.classification.lower()
+            parent_contact = db.get(Contact, vr.contact_id)
+            if parent_contact:
+                if cls in OOO_CLASSIFICATIONS:
+                    parent_contact.status = "ooo"
+                    parent_contact.status_updated_at = datetime.now(timezone.utc)
+                elif cls in BOUNCE_CLASSIFICATIONS:
+                    parent_contact.status = "bounced"
+                    parent_contact.status_updated_at = datetime.now(timezone.utc)
+
     # Single commit for all new responses
     try:
         db.commit()

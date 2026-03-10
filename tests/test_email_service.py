@@ -501,7 +501,7 @@ class TestSendBatchRfq:
             )
 
         assert len(results) == 1
-        assert results[0]["status"] == "error"
+        assert results[0]["status"] == "failed"  # Now persists as Contact with status=failed
         assert "SMTP Error" in results[0]["error"]
 
     @pytest.mark.asyncio

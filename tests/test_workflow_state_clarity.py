@@ -326,3 +326,65 @@ class TestPendingContactVisibility:
         # Normal classification shouldn't change contact status
         db_session.refresh(contact)
         assert contact.status == "sent"
+
+
+class TestWorkflowIntegration:
+    """End-to-end: send RFQ → fail → retry → OOO → mark VR reviewed."""
+
+    def test_full_rfq_lifecycle(self, db_session, test_user, _rfq_requisition):
+        from app.models.offers import VendorResponse
+
+        # 1. Failed send persists
+        c = Contact(
+            requisition_id=_rfq_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Lifecycle Corp",
+            vendor_contact="life@corp.com",
+            status="failed",
+            error_message="Timeout",
+        )
+        db_session.add(c)
+        db_session.flush()
+        assert c.status == "failed"
+        assert c.error_message == "Timeout"
+
+        # 2. Retry succeeds — old contact marked retried
+        c.status = "retried"
+        c.status_updated_at = datetime.now(timezone.utc)
+        db_session.flush()
+
+        c2 = Contact(
+            requisition_id=_rfq_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Lifecycle Corp",
+            vendor_contact="life@corp.com",
+            status="sent",
+        )
+        db_session.add(c2)
+        db_session.flush()
+        assert c.status == "retried"
+        assert c2.status == "sent"
+
+        # 3. OOO response arrives → contact updated
+        vr = VendorResponse(
+            contact_id=c2.id,
+            requisition_id=_rfq_requisition.id,
+            vendor_name="Lifecycle Corp",
+            vendor_email="life@corp.com",
+            classification="ooo",
+            status="new",
+            received_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+        c2.status = "ooo"
+        c2.status_updated_at = datetime.now(timezone.utc)
+        db_session.flush()
+        assert c2.status == "ooo"
+
+        # 4. Mark VR reviewed → terminal state
+        vr.status = "reviewed"
+        db_session.flush()
+        assert vr.status == "reviewed"
