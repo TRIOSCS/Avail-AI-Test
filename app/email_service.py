@@ -878,8 +878,10 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     vr.needs_action = classification["needs_action"]
     vr.action_hint = classification["action_hint"]
 
-    # Auto-create draft Offer records from parsed emails (confidence >= 0.5)
-    if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
+    # Auto-create draft Offer records from parsed emails.
+    # Only auto-create at high confidence (>=0.8).  Medium confidence
+    # (0.5-0.8) marks the VendorResponse for human review instead.
+    if db and vr.confidence and vr.confidence >= 0.8 and vr.requisition_id:
         try:
             from .services.response_parser import extract_draft_offers
 

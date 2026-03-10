@@ -127,8 +127,8 @@ def _build_lines_for_requirement(
         score = score_offer(offer, requirement, vendor_card, customer_region)
         scored.append((offer, vendor_card, score))
 
-    # Sort by score descending
-    scored.sort(key=lambda x: x[2], reverse=True)
+    # Sort by score descending, then by lowest price, then newest offer (deterministic)
+    scored.sort(key=lambda x: (-x[2], float(x[0].unit_price or 9999999), -(x[0].id or 0)))
 
     # Try single-vendor fulfillment first
     for offer, vendor_card, score in scored:
