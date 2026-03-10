@@ -8013,6 +8013,9 @@ async function _openMobileQuoteForm(reqId) {
                 + '<div style="font-weight:600;font-size:13px">' + esc(of2.mpn) + '</div>'
                 + '<div style="font-size:12px;color:var(--muted)">' + esc(of2.vendor_name) + (of2.manufacturer ? ' \u2014 ' + esc(of2.manufacturer) : '') + '</div>'
                 + '<div style="font-size:12px;color:var(--text2)">Qty: ' + qtyStr + ' \u00b7 ' + priceStr + (of2.lead_time ? ' \u00b7 ' + esc(of2.lead_time) : '') + '</div>'
+                + '<div style="font-size:11px;color:var(--muted);margin-top:2px">'
+                + [of2.condition ? 'Cond: ' + esc(of2.condition) : '', of2.date_code ? 'DC: ' + esc(of2.date_code) : '', of2.packaging ? 'Pkg: ' + esc(of2.packaging) : '', of2.firmware ? 'FW: ' + esc(of2.firmware) : '', of2.hardware_code ? 'HW: ' + esc(of2.hardware_code) : '', of2.moq != null ? 'MOQ: ' + Number(of2.moq).toLocaleString() : '', of2.warranty ? 'Warranty: ' + esc(of2.warranty) : '', of2.country_of_origin ? 'COO: ' + esc(of2.country_of_origin) : ''].filter(Boolean).join(' \u00b7 ')
+                + '</div>'
                 + '</div>'
                 + '</label>';
         }
