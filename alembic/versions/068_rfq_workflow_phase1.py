@@ -4,8 +4,8 @@ Adds sourcing_status to requirements (per-part tracking),
 claimed_by_id/claimed_at to requisitions (buyer ownership),
 urgency/opportunity_value to requisitions (sales context for buyers).
 
-Revision ID: 063
-Revises: 062
+Revision ID: 068
+Revises: 067
 Create Date: 2026-03-10
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "063"
-down_revision = "062"
+revision = "068"
+down_revision = "067"
 branch_labels = None
 depends_on = None
 
