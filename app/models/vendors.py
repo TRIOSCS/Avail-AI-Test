@@ -34,6 +34,7 @@ class VendorCard(Base):
     alternate_names = Column(JSON, default=list)
     sighting_count = Column(Integer, default=0)
     is_blacklisted = Column(Boolean, default=False)
+    is_broadcast = Column(Boolean, default=False)  # Always include in stock inquiries
     source = Column(String(50))
     raw_response = Column(Text)
 

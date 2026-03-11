@@ -305,6 +305,50 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
                     vendors[pnorm]["emails"].append(pc.vendor_contact)
                     vendors[pnorm]["sources"].add("past_rfq")
 
+    # 6. Broadcast vendors — always included regardless of MPN match
+    broadcast_cards = (
+        db.query(VendorCard)
+        .filter(
+            VendorCard.is_broadcast == True,  # noqa: E712
+            VendorCard.is_blacklisted == False,  # noqa: E712
+        )
+        .all()
+    )
+    for card in broadcast_cards:
+        norm = card.normalized_name
+        if norm in vendors:
+            # Already found via sightings — just tag as broadcast too
+            vendors[norm]["sources"].add("broadcast")
+            continue
+        emails = []
+        for email in card.emails or []:
+            if email and email not in emails:
+                emails.append(email)
+        # Also pull VendorContact emails for this card
+        bcontacts = (
+            db.query(VendorContact)
+            .filter_by(vendor_card_id=card.id)
+            .order_by(VendorContact.confidence.desc())
+            .all()
+        )
+        for vc in bcontacts:
+            if vc.email and vc.email not in emails:
+                emails.append(vc.email)
+        phones = list(card.phones or [])
+        vendors[norm] = {
+            "vendor_name": card.display_name or norm,
+            "emails": emails,
+            "phones": phones,
+            "domain": card.domain,
+            "card_id": card.id,
+            "sources": {"broadcast"},
+            "qty_available": None,
+            "unit_price": None,
+            "currency": None,
+            "last_seen": None,
+            "sighting_count": 0,
+        }
+
     # Convert to list, sorted by sighting count (most seen first)
     vendor_list = sorted(
         vendors.values(),

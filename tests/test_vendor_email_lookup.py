@@ -140,6 +140,47 @@ def test_build_inquiry_subject_truncation():
 
 
 # ---------------------------------------------------------------------------
+# broadcast vendors in build_inquiry_groups
+# ---------------------------------------------------------------------------
+
+
+def test_build_inquiry_groups_broadcast_vendors_included():
+    """Broadcast vendors (no sightings) still generate inquiry emails."""
+    vendor_results = {
+        "PART-A": [
+            # MPN-matched vendor
+            {"vendor_name": "V1", "emails": ["v1@v1.com"], "phones": [], "domain": "v1.com", "sources": ["brokerbin"], "sighting_count": 1},
+            # Broadcast vendor (no sighting, just flagged)
+            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+        ],
+    }
+    groups = build_inquiry_groups(vendor_results, [{"mpn": "PART-A", "qty": 10}])
+    emails = {g["vendor_email"] for g in groups}
+    assert "service@win-source.net" in emails
+    assert "v1@v1.com" in emails
+    assert len(groups) == 2
+
+
+def test_build_inquiry_groups_broadcast_vendor_gets_all_parts():
+    """Broadcast vendors should get inquiries for ALL queried parts."""
+    vendor_results = {
+        "PART-A": [
+            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+        ],
+        "PART-B": [
+            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+        ],
+    }
+    groups = build_inquiry_groups(
+        vendor_results,
+        [{"mpn": "PART-A", "qty": 10}, {"mpn": "PART-B", "qty": 20}],
+    )
+    assert len(groups) == 1  # Deduped by email
+    assert "PART-A" in groups[0]["body"]
+    assert "PART-B" in groups[0]["body"]
+
+
+# ---------------------------------------------------------------------------
 # Router tests (mocked DB)
 # ---------------------------------------------------------------------------
 
