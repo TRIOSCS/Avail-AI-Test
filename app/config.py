@@ -13,7 +13,7 @@ import os
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-APP_VERSION = "3.0.1"
+APP_VERSION = "3.1.0"
 
 # Microsoft Graph API scopes — single source of truth for auth + token refresh.
 # These must match exactly to prevent scope loss after token refresh.
