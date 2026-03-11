@@ -13,7 +13,7 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for thefuzz (C extension), WeasyPrint (PDF), and Playwright (browser testing)
+# System deps — rarely change, cached as base layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc python3-dev curl tini \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
@@ -22,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libasound2 fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies
+# Install Python deps early — only re-runs when requirements.txt changes
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true

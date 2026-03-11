@@ -37,6 +37,9 @@ services:
       resources:
         limits:
           memory: 2G
+          cpus: '1.5'
+        reservations:
+          memory: 512M
     logging:
       driver: json-file
       options:
@@ -93,6 +96,9 @@ services:
       resources:
         limits:
           memory: 2G
+          cpus: '2'
+        reservations:
+          memory: 1G
     logging:
       driver: json-file
       options:

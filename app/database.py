@@ -42,8 +42,8 @@ else:
 
     engine = create_engine(
         settings.database_url,
-        pool_size=15,
-        max_overflow=30,
+        pool_size=20,
+        max_overflow=40,
         pool_timeout=10,
         pool_pre_ping=True,
         pool_recycle=3600,
