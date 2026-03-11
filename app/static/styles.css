@@ -1762,6 +1762,22 @@ body.tasks-open .toparea { margin-right: 0; }
 .my-task-type-pill { font-size: 9px; background: var(--bg2, #f1f5f9); border-radius: 3px; padding: 1px 5px; color: var(--muted); text-transform: capitalize; }
 @media (max-width:768px) { .my-tasks-panel{width:100vw} .my-tasks-sidebar.open .my-tasks-toggle{display:none} body.tasks-open .main{margin-right:0} body.tasks-open .toparea{margin-right:0} }
 
+/* Activity timeline (merged notes + tasks + history) */
+.activity-section { margin-bottom: 8px; }
+.activity-timeline { display: flex; flex-direction: column; gap: 4px; }
+.activity-item { padding: 6px 10px; background: var(--bg2, #f8fafc); border-radius: 6px; border-left: 3px solid var(--border); font-size: 11px; }
+.activity-item-note { border-left-color: var(--blue, #3b82f6); }
+.activity-item-task-open { border-left-color: var(--amber, #f59e0b); background: rgba(245,158,11,.05); margin-bottom: 4px; }
+.activity-item-task-done { border-left-color: var(--green, #22c55e); }
+.activity-item-event { border-left-color: var(--muted, #94a3b8); }
+.activity-add-form { background: var(--bg2, #f8fafc); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; }
+
+/* My Tasks sidebar tabs */
+.my-tasks-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.my-tasks-tab { flex: 1; background: none; border: none; padding: 8px 6px; font-size: 10px; font-weight: 600; color: var(--muted); cursor: pointer; text-align: center; border-bottom: 2px solid transparent; transition: all .15s; }
+.my-tasks-tab:hover { color: var(--text); background: var(--bg2, #f8fafc); }
+.my-tasks-tab.active { color: var(--blue, #3b82f6); border-bottom-color: var(--blue, #3b82f6); }
+
 /* Drill-down sub-tabs */
 .dd-tabs { display: flex; gap: 1px; margin-bottom: 2px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
 .dd-tab { background: none; border: none; padding: 4px 10px; font-size: 10px; font-weight: 600;

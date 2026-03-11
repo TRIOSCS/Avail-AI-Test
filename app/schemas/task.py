@@ -6,32 +6,48 @@ Depends on: nothing
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
-    task_type: str = Field(default="general", pattern="^(sourcing|sales|general)$")
-    priority: int = Field(default=2, ge=1, le=3)
-    assigned_to_id: int | None = None
-    due_at: datetime | None = None
+    assigned_to_id: int = Field(..., description="User to assign the task to")
+    due_at: datetime = Field(..., description="Due date (min 24 hours from now)")
+
+    @field_validator("due_at")
+    @classmethod
+    def due_at_min_24h(cls, v: datetime) -> datetime:
+        now = datetime.now(timezone.utc)
+        # Make naive datetimes UTC for comparison
+        check = v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
+        if check < now + timedelta(hours=24):
+            raise ValueError("Due date must be at least 24 hours from now")
+        return v
 
 
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    task_type: str | None = Field(default=None, pattern="^(sourcing|sales|general)$")
-    status: str | None = Field(default=None, pattern="^(todo|in_progress|done)$")
-    priority: int | None = Field(default=None, ge=1, le=3)
     assigned_to_id: int | None = None
     due_at: datetime | None = None
 
+    @field_validator("due_at")
+    @classmethod
+    def due_at_min_24h(cls, v: datetime | None) -> datetime | None:
+        if v is None:
+            return v
+        now = datetime.now(timezone.utc)
+        check = v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
+        if check < now + timedelta(hours=24):
+            raise ValueError("Due date must be at least 24 hours from now")
+        return v
 
-class TaskStatusUpdate(BaseModel):
-    status: str = Field(..., pattern="^(todo|in_progress|done)$")
+
+class TaskComplete(BaseModel):
+    completion_note: str = Field(..., min_length=1, description="How was this task resolved?")
 
 
 class TaskResponse(BaseModel):
@@ -50,6 +66,8 @@ class TaskResponse(BaseModel):
     creator_name: str | None = None
     source: str
     source_ref: str | None = None
+    completion_note: str | None = None
+    requisition_name: str | None = None
     due_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
@@ -60,8 +78,6 @@ class TaskResponse(BaseModel):
 
 
 class TaskSummary(BaseModel):
-    todo: int = 0
-    in_progress: int = 0
-    done: int = 0
+    assigned_to_me: int = 0
+    waiting_on: int = 0
     overdue: int = 0
-    total: int = 0

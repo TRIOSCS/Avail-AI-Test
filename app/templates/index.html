@@ -254,8 +254,8 @@
     </div>
 </aside>
 
-<!-- My Tasks Sidebar Widget — disabled, tasks accessible from requisition detail -->
-<div id="myTasksSidebar" class="my-tasks-sidebar" style="display:none">
+<!-- My Tasks Sidebar Widget -->
+<div id="myTasksSidebar" class="my-tasks-sidebar">
     <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
         <span id="myTasksBadge" class="my-tasks-badge" style="display:none">0</span>
@@ -264,6 +264,10 @@
         <div class="my-tasks-header">
             <span>My Tasks</span>
             <button class="btn btn-ghost btn-sm" onclick="toggleMyTasksSidebar()" style="font-size:16px;color:var(--muted)">&times;</button>
+        </div>
+        <div class="my-tasks-tabs">
+            <button class="my-tasks-tab active" id="mtTabAssigned" onclick="switchMyTasksTab('assigned')">Assigned to Me</button>
+            <button class="my-tasks-tab" id="mtTabWaiting" onclick="switchMyTasksTab('waiting')">Waiting On</button>
         </div>
         <div id="myTasksList" class="my-tasks-list"></div>
     </div>
@@ -282,7 +286,7 @@
     <div class="ctx-tabs" id="ctxTabs">
         <button class="ctx-tab active" data-ctx-tab="summary" onclick="switchCtxTab('summary',this)">Summary</button>
         <button class="ctx-tab" data-ctx-tab="thread" onclick="switchCtxTab('thread',this)">Thread</button>
-        <button class="ctx-tab" data-ctx-tab="tasks" onclick="switchCtxTab('tasks',this)">Tasks <span id="ctxTaskBadge" class="ctx-tab-badge" style="display:none">0</span></button>
+        <!-- Tasks tab removed for MVP — tasks visible in Activity tab and My Tasks sidebar -->
         <button class="ctx-tab" data-ctx-tab="files" onclick="switchCtxTab('files',this)">Files</button>
         <button class="ctx-tab" data-ctx-tab="history" onclick="switchCtxTab('history',this)">History</button>
     </div>

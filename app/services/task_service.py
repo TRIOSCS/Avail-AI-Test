@@ -35,7 +35,17 @@ def create_task(
     source_ref: str | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask:
-    """Create a task on a requisition."""
+    """Create a task on a requisition.
+
+    For manual tasks, assigned_to_id and due_at are required and
+    due_at must be >= 24 hours from now (enforced by schema).
+    """
+    # Belt-and-suspenders 24h check for manual tasks (schema also validates)
+    if source == "manual" and due_at:
+        now = datetime.now(timezone.utc)
+        check_due = due_at.replace(tzinfo=timezone.utc) if due_at.tzinfo is None else due_at
+        if check_due < now + timedelta(hours=24):
+            raise ValueError("Due date must be at least 24 hours from now")
     task = RequisitionTask(
         requisition_id=requisition_id,
         title=title,
@@ -88,22 +98,31 @@ def get_my_tasks(
         # Default: exclude done tasks
         q = q.filter(RequisitionTask.status != "done")
     return q.order_by(
-        RequisitionTask.ai_priority_score.desc().nullslast(),
-        RequisitionTask.priority.desc(),
         RequisitionTask.due_at.asc().nullslast(),
+        RequisitionTask.created_at,
     ).all()
 
 
 def get_my_tasks_summary(db: Session, user_id: int) -> dict:
-    """Get task counts by status for a user (for sidebar badge)."""
+    """Get task counts for sidebar badge: assigned_to_me, waiting_on, overdue."""
     now = datetime.now(timezone.utc)
-    rows = (
-        db.query(RequisitionTask.status, func.count(RequisitionTask.id))
-        .filter(RequisitionTask.assigned_to_id == user_id)
-        .group_by(RequisitionTask.status)
-        .all()
-    )
-    counts = {r[0]: r[1] for r in rows}
+    assigned_to_me = (
+        db.query(func.count(RequisitionTask.id))
+        .filter(
+            RequisitionTask.assigned_to_id == user_id,
+            RequisitionTask.status != "done",
+        )
+        .scalar()
+    ) or 0
+    waiting_on = (
+        db.query(func.count(RequisitionTask.id))
+        .filter(
+            RequisitionTask.created_by == user_id,
+            RequisitionTask.assigned_to_id != user_id,
+            RequisitionTask.status != "done",
+        )
+        .scalar()
+    ) or 0
     overdue = (
         db.query(func.count(RequisitionTask.id))
         .filter(
@@ -114,11 +133,9 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict:
         .scalar()
     ) or 0
     return {
-        "todo": counts.get("todo", 0),
-        "in_progress": counts.get("in_progress", 0),
-        "done": counts.get("done", 0),
+        "assigned_to_me": assigned_to_me,
+        "waiting_on": waiting_on,
         "overdue": overdue,
-        "total": sum(counts.values()),
     }
 
 
@@ -149,6 +166,45 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
 def update_task_status(db: Session, task_id: int, status: str) -> RequisitionTask | None:
     """Quick status change (drag-drop). Returns None if not found."""
     return update_task(db, task_id, status=status)
+
+
+def complete_task(
+    db: Session,
+    task_id: int,
+    user_id: int,
+    completion_note: str,
+) -> RequisitionTask | None:
+    """Complete a task. Only the assignee can complete it.
+
+    Returns the updated task, or None if not found.
+    Raises PermissionError if the caller is not the assignee.
+    """
+    task = db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
+    if not task:
+        return None
+    if task.assigned_to_id != user_id:
+        raise PermissionError("Only the assignee can complete this task")
+    task.status = "done"
+    task.completed_at = datetime.now(timezone.utc)
+    task.completion_note = completion_note
+    db.commit()
+    db.refresh(task)
+    logger.info("Task {} completed by user {}", task_id, user_id)
+    return task
+
+
+def get_waiting_on_tasks(db: Session, user_id: int) -> list[RequisitionTask]:
+    """Get tasks created by the user but assigned to someone else (not done)."""
+    return (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.created_by == user_id,
+            RequisitionTask.assigned_to_id != user_id,
+            RequisitionTask.status != "done",
+        )
+        .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+        .all()
+    )
 
 
 def delete_task(db: Session, task_id: int) -> bool:
@@ -315,9 +371,13 @@ def task_to_response(task: RequisitionTask) -> dict:
     creator_name = None
     if task.creator:
         creator_name = task.creator.name or task.creator.email
+    requisition_name = None
+    if task.requisition:
+        requisition_name = getattr(task.requisition, "name", None)
     return {
         "id": task.id,
         "requisition_id": task.requisition_id,
+        "requisition_name": requisition_name,
         "title": task.title,
         "description": task.description,
         "task_type": task.task_type,
@@ -331,6 +391,7 @@ def task_to_response(task: RequisitionTask) -> dict:
         "creator_name": creator_name,
         "source": task.source,
         "source_ref": task.source_ref,
+        "completion_note": task.completion_note,
         "due_at": task.due_at.isoformat() if task.due_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,

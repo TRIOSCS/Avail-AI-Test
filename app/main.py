@@ -1073,9 +1073,8 @@ app.include_router(knowledge_sprinkles_router)
 from .routers.task import my_tasks_router
 from .routers.task import router as task_router
 
-if not settings.mvp_mode:
-    app.include_router(task_router)
-    app.include_router(my_tasks_router)
+app.include_router(task_router)
+app.include_router(my_tasks_router)
 
 # Strategic Vendors (per-buyer assignments with 39-day TTL)
 from .routers.strategic import router as strategic_router

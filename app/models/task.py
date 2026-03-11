@@ -52,6 +52,9 @@ class RequisitionTask(Base):
     source = Column(String(20), nullable=False, default="manual")  # manual | system | ai
     source_ref = Column(String(100), nullable=True)  # e.g. "offer:123", "rfq:456"
 
+    # Completion
+    completion_note = Column(Text, nullable=True)  # note from assignee on task resolution
+
     # Dates
     due_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -71,4 +74,5 @@ class RequisitionTask(Base):
         Index("ix_rt_req_status", "requisition_id", "status"),
         Index("ix_rt_assignee_status", "assigned_to_id", "status"),
         Index("ix_rt_status_due", "status", "due_at"),
+        Index("ix_rt_creator_status", "created_by", "status"),
     )

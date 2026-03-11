@@ -1,7 +1,8 @@
 """Task Board API — CRUD endpoints for requisition pipeline tasks.
 
-Provides per-requisition task management and cross-req "My Tasks"
-endpoints for the buyer sidebar widget.
+Provides per-requisition task management, cross-req "My Tasks" and
+"Waiting On" endpoints for the buyer sidebar widget, and a task
+completion endpoint.
 
 Called by: frontend (app.js)
 Depends on: services/task_service.py, dependencies.py
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_user
-from app.schemas.task import TaskCreate, TaskStatusUpdate, TaskUpdate
+from app.schemas.task import TaskComplete, TaskCreate, TaskUpdate
 from app.services import task_service
 
 router = APIRouter(prefix="/api/requisitions", tags=["tasks"])
@@ -61,17 +62,18 @@ def create_task(
     db: Session = Depends(get_db),
     user: dict = Depends(require_user),
 ):
-    task = task_service.create_task(
-        db,
-        requisition_id=req_id,
-        title=body.title,
-        description=body.description,
-        task_type=body.task_type,
-        priority=body.priority,
-        assigned_to_id=body.assigned_to_id,
-        due_at=body.due_at,
-        created_by=user.id,
-    )
+    try:
+        task = task_service.create_task(
+            db,
+            requisition_id=req_id,
+            title=body.title,
+            description=body.description,
+            assigned_to_id=body.assigned_to_id,
+            due_at=body.due_at,
+            created_by=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     return task_service.task_to_response(task)
 
 
@@ -90,21 +92,6 @@ def update_task(
     return task_service.task_to_response(updated)
 
 
-@router.patch("/{req_id}/tasks/{task_id}/status")
-def update_task_status(
-    req_id: int,
-    task_id: int,
-    body: TaskStatusUpdate,
-    db: Session = Depends(get_db),
-    user: dict = Depends(require_user),
-):
-    task = task_service.get_task(db, task_id)
-    if not task or task.requisition_id != req_id:
-        raise HTTPException(404, "Task not found")
-    updated = task_service.update_task_status(db, task_id, body.status)
-    return task_service.task_to_response(updated)
-
-
 @router.delete("/{req_id}/tasks/{task_id}", status_code=204)
 def delete_task(
     req_id: int,
@@ -119,7 +106,7 @@ def delete_task(
 
 
 # ---------------------------------------------------------------------------
-# Cross-req "My Tasks" endpoints (sidebar widget)
+# Cross-req "My Tasks" and "Waiting On" endpoints (sidebar widget)
 # ---------------------------------------------------------------------------
 
 
@@ -139,3 +126,31 @@ def get_my_tasks_summary(
     user: dict = Depends(require_user),
 ):
     return task_service.get_my_tasks_summary(db, user.id)
+
+
+@my_tasks_router.get("/waiting")
+def get_waiting_on_tasks(
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Get tasks created by the current user but assigned to someone else."""
+    tasks = task_service.get_waiting_on_tasks(db, user.id)
+    return [task_service.task_to_response(t) for t in tasks]
+
+
+@my_tasks_router.post("/{task_id}/complete")
+def complete_task(
+    task_id: int,
+    body: TaskComplete,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Complete a task with a resolution note. Only the assignee can complete."""
+    task = task_service.get_task(db, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    try:
+        completed = task_service.complete_task(db, task_id, user.id, body.completion_note)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    return task_service.task_to_response(completed)
