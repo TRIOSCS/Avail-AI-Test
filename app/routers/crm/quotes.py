@@ -199,7 +199,12 @@ async def create_quote(
         )
         db.add(quote)
         if req.status in ("active", "sourcing", "offers"):
-            req.status = "quoting"
+            from ...services.requisition_state import transition as req_transition
+
+            try:
+                req_transition(req, "quoting", user, db)
+            except ValueError:
+                pass  # already in quoting or later state
         try:
             db.commit()
             break
@@ -226,6 +231,22 @@ async def create_quote(
         )
         db.add(ql)
     db.commit()
+
+    # Auto-advance per-part sourcing status to "quoted"
+    try:
+        from app.services.requirement_status import on_quote_built
+
+        req_item_ids = [li.get("offer_id") for li in line_items if li.get("offer_id")]
+        if req_item_ids:
+            from ...models import Offer as OfferModel
+
+            offers_used = db.query(OfferModel).filter(OfferModel.id.in_(req_item_ids)).all()
+            requirement_ids = list({o.requirement_id for o in offers_used if o.requirement_id})
+            if requirement_ids:
+                on_quote_built(requirement_ids, db, actor=user)
+                db.commit()
+    except Exception as e:
+        logger.warning("Requirement status update (on_quote_built) failed: {}", e)
 
     # Auto-capture quote facts into Knowledge Ledger
     try:

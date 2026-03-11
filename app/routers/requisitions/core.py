@@ -527,7 +527,12 @@ async def mark_outcome(req_id: int, body: dict, user: User = Depends(require_use
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    req.status = outcome
+    from ...services.requisition_state import transition
+
+    try:
+        transition(req, outcome, user, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -540,10 +545,13 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    if req.status in ("archived", "won", "lost"):
-        req.status = "active"
-    else:
-        req.status = "archived"
+    from ...services.requisition_state import transition
+
+    target = "active" if req.status in ("archived", "won", "lost") else "archived"
+    try:
+        transition(req, target, user, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -552,13 +560,20 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
 @router.put("/api/requisitions/bulk-archive")
 async def bulk_archive(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Archive all active requisitions NOT created by the current user."""
+    from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    q = db.query(Requisition).filter(
+    reqs = db.query(Requisition).filter(
         Requisition.created_by != user.id,
         Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-    )
-    count = q.update({"status": "archived"}, synchronize_session="fetch")
+    ).all()
+    count = 0
+    for req in reqs:
+        try:
+            transition(req, "archived", user, db)
+            count += 1
+        except ValueError:
+            pass  # skip invalid transitions (e.g. won → archived already handled by filter)
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -571,16 +586,20 @@ async def batch_archive_by_ids(
     db: Session = Depends(get_db),
 ):
     """Archive specific requisitions by ID list."""
+    from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    count = (
-        db.query(Requisition)
-        .filter(
-            Requisition.id.in_(payload.ids),
-            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-        )
-        .update({"status": "archived"}, synchronize_session="fetch")
-    )
+    reqs = db.query(Requisition).filter(
+        Requisition.id.in_(payload.ids),
+        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+    ).all()
+    count = 0
+    for req in reqs:
+        try:
+            transition(req, "archived", user, db)
+            count += 1
+        except ValueError:
+            pass
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -593,17 +612,21 @@ async def batch_assign(
     db: Session = Depends(get_db),
 ):
     """Assign owner to specific requisitions by ID list."""
+    from ...services.requirement_status import claim_requisition
     from . import invalidate_prefix
 
     # Verify the target user exists
     target = db.query(User).filter(User.id == payload.owner_id).first()
     if not target:
         raise HTTPException(404, "Target user not found")
-    count = (
-        db.query(Requisition)
-        .filter(Requisition.id.in_(payload.ids))
-        .update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
-    )
+    reqs = db.query(Requisition).filter(Requisition.id.in_(payload.ids)).all()
+    count = 0
+    for req in reqs:
+        try:
+            claim_requisition(req, target, db)
+            count += 1
+        except ValueError:
+            pass  # skip already-claimed
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}

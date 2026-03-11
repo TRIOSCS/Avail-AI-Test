@@ -15,14 +15,15 @@ from ..models import ActivityLog
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "draft": {"active", "archived"},
+    "open": {"active", "sourcing", "offers", "quoting", "won", "archived"},  # legacy alias for active
     "active": {"sourcing", "offers", "quoting", "won", "archived"},
     "sourcing": {"active", "offers", "archived"},
     "offers": {"quoting", "won", "archived"},
     "quoting": {"quoted", "reopened", "won", "archived"},
     "quoted": {"won", "lost", "reopened", "archived"},
     "reopened": {"quoting", "won", "archived"},
-    "won": {"archived"},
-    "lost": {"archived", "reopened"},
+    "won": {"active", "archived"},
+    "lost": {"active", "archived", "reopened"},
     "archived": {"active"},
 }
 

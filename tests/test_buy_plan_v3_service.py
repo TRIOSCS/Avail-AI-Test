@@ -395,6 +395,7 @@ class TestGenerateAiFlags:
             margin_pct=50.0,
             requirement_id=None,
             quantity=100,
+            buyer_id=1,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -410,6 +411,7 @@ class TestGenerateAiFlags:
             margin_pct=5.0,
             requirement_id=None,
             quantity=100,
+            buyer_id=1,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -425,6 +427,7 @@ class TestGenerateAiFlags:
             margin_pct=-5.0,
             requirement_id=None,
             quantity=100,
+            buyer_id=1,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -441,6 +444,7 @@ class TestGenerateAiFlags:
             margin_pct=50.0,
             requirement_id=None,
             quantity=100,
+            buyer_id=1,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -455,6 +459,7 @@ class TestGenerateAiFlags:
             margin_pct=50.0,
             requirement_id=None,
             quantity=100,
+            buyer_id=1,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)

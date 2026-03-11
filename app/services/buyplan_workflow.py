@@ -65,24 +65,14 @@ def submit_buy_plan(
     plan.is_stock_sale = _is_stock_sale(plan, db)
 
     # Auto-approve decision
-    total = float(plan.total_cost or 0)
-    has_critical = any(
-        (f.get("severity") if isinstance(f, dict) else getattr(f, "severity", None)) == "critical"
-        for f in (plan.ai_flags or [])
-    )
-    if total < settings.buyplan_auto_approve_threshold and not has_critical:
+    if _should_auto_approve(plan):
         plan.status = BuyPlanStatus.active.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
-        logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, total)
+        logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, float(plan.total_cost or 0))
     else:
         plan.status = BuyPlanStatus.pending.value
-        logger.info(
-            "Buy plan %d pending approval (cost=%.2f, critical=%s)",
-            plan_id,
-            total,
-            has_critical,
-        )
+        logger.info("Buy plan %d pending approval (cost=%.2f)", plan_id, float(plan.total_cost or 0))
 
     db.flush()
     return plan
@@ -110,6 +100,10 @@ def approve_buy_plan(
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.pending.value:
         raise ValueError(f"Can only approve/reject pending plans (current: {plan.status})")
+
+    allowed_roles = {"manager", "admin"}
+    if not user.role or user.role not in allowed_roles:
+        raise PermissionError(f"Only managers/admins can approve buy plans (user role: {user.role})")
 
     now = datetime.now(timezone.utc)
     if action == "approve":
@@ -323,6 +317,8 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
     plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
     if not plan or plan.status != BuyPlanStatus.active.value:
         return plan
+    if plan.status == BuyPlanStatus.completed.value:
+        return plan  # idempotency guard
 
     if not plan.lines:
         return plan
@@ -411,12 +407,7 @@ def resubmit_buy_plan(
     plan.salesperson_notes = salesperson_notes
 
     # Auto-approve decision (same logic as initial submit)
-    total = float(plan.total_cost or 0)
-    has_critical = any(
-        (f.get("severity") if isinstance(f, dict) else getattr(f, "severity", None)) == "critical"
-        for f in (plan.ai_flags or [])
-    )
-    if total < settings.buyplan_auto_approve_threshold and not has_critical:
+    if _should_auto_approve(plan):
         plan.status = BuyPlanStatus.active.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
@@ -425,6 +416,23 @@ def resubmit_buy_plan(
 
     db.flush()
     return plan
+
+
+# ── Helpers: Auto-Approval ───────────────────────────────────────────
+
+
+def _should_auto_approve(plan: BuyPlanV3) -> bool:
+    """Decide whether a buy plan should be auto-approved.
+
+    Auto-approves when total cost < threshold AND no critical AI flags.
+    Used by both submit_buy_plan() and resubmit_buy_plan().
+    """
+    total = float(plan.total_cost or 0)
+    has_critical = any(
+        (f.get("severity") if isinstance(f, dict) else getattr(f, "severity", None)) == "critical"
+        for f in (plan.ai_flags or [])
+    )
+    return total < settings.buyplan_auto_approve_threshold and not has_critical
 
 
 # ── Helpers: Line Edits ──────────────────────────────────────────────

@@ -27,6 +27,15 @@ from app.dependencies import require_buyer, require_user
 from app.main import app
 from app.models import BuyPlan, Offer, User
 
+
+@pytest.fixture(autouse=True)
+def _enable_v1(monkeypatch):
+    """Re-enable V1 buy plans for legacy test coverage in this module."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

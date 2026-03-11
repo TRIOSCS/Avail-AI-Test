@@ -632,7 +632,12 @@ async def search_all(
 
     req.last_searched_at = datetime.now(timezone.utc)
     if req.status in ("draft", "archived"):
-        req.status = "active"
+        from ...services.requisition_state import transition
+
+        try:
+            transition(req, "active", user, db)
+        except ValueError:
+            pass  # status may already be active
     db.commit()
 
     req_ids = [r.id for r in reqs_to_search]

@@ -142,6 +142,12 @@ class TestAdminVendorMergeFKException:
 
 
 class TestBuyPlanMissingOffer:
+    @pytest.fixture(autouse=True)
+    def _enable_v1(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
     def test_submit_buy_plan_skips_missing_offer(self, client, db_session, test_user):
         """Buy plan submission skips offer IDs not found in DB (line 154)."""
         # Create a quote

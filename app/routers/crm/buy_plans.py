@@ -1,3 +1,12 @@
+"""buy_plans.py — V1 Buy Plan CRUD (legacy, deprecated in favor of V3).
+
+V1 buy plans use JSON line_items and do not enforce structured state machines.
+Disabled by default via buy_plan_v1_enabled feature flag.
+
+Called by: routers/crm/__init__.py
+Depends on: models, schemas, config
+"""
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -28,6 +37,12 @@ from ...schemas.crm import (
 )
 
 router = APIRouter()
+
+
+def _require_v1_enabled():
+    """Dependency that blocks V1 buy plan mutations when disabled."""
+    if not settings.buy_plan_v1_enabled:
+        raise HTTPException(410, "V1 buy plans are disabled. Use /api/v3/buy-plans endpoints.")
 
 # ── Buy Plans ────────────────────────────────────────────────────────────
 
@@ -190,7 +205,7 @@ async def create_buy_plan_draft(
     return {"ok": True, "buy_plan_id": plan.id, "status": "draft"}
 
 
-@router.put("/api/buy-plans/{plan_id}/submit")
+@router.put("/api/buy-plans/{plan_id}/submit", dependencies=[Depends(_require_v1_enabled)])
 async def submit_draft_buy_plan(
     plan_id: int,
     user: User = Depends(require_user),
@@ -354,7 +369,7 @@ async def get_buyplan_by_token(
     return _buyplan_to_dict(plan, db)
 
 
-@router.put("/api/buy-plans/token/{token}/approve")
+@router.put("/api/buy-plans/token/{token}/approve", dependencies=[Depends(_require_v1_enabled)])
 async def approve_buyplan_by_token(
     token: str,
     body: BuyPlanApprove,
@@ -412,7 +427,7 @@ async def approve_buyplan_by_token(
     return {"ok": True, "status": plan.status}
 
 
-@router.put("/api/buy-plans/token/{token}/reject")
+@router.put("/api/buy-plans/token/{token}/reject", dependencies=[Depends(_require_v1_enabled)])
 async def reject_buyplan_by_token(
     token: str,
     body: BuyPlanReject,
@@ -459,7 +474,7 @@ async def get_buy_plan(
     return _buyplan_to_dict(plan, db)
 
 
-@router.put("/api/buy-plans/{plan_id}/approve")
+@router.put("/api/buy-plans/{plan_id}/approve", dependencies=[Depends(_require_v1_enabled)])
 async def approve_buy_plan(
     plan_id: int,
     body: BuyPlanApprove,
@@ -520,7 +535,7 @@ async def approve_buy_plan(
     return {"ok": True, "status": plan.status}
 
 
-@router.put("/api/buy-plans/{plan_id}/reject")
+@router.put("/api/buy-plans/{plan_id}/reject", dependencies=[Depends(_require_v1_enabled)])
 async def reject_buy_plan(
     plan_id: int,
     body: BuyPlanReject,
@@ -554,7 +569,7 @@ async def reject_buy_plan(
     return {"ok": True, "status": "rejected"}
 
 
-@router.put("/api/buy-plans/{plan_id}/po")
+@router.put("/api/buy-plans/{plan_id}/po", dependencies=[Depends(_require_v1_enabled)])
 async def enter_po_number(
     plan_id: int,
     body: BuyPlanPOEntry,
@@ -618,7 +633,7 @@ async def check_po_verification(
     }
 
 
-@router.put("/api/buy-plans/{plan_id}/complete")
+@router.put("/api/buy-plans/{plan_id}/complete", dependencies=[Depends(_require_v1_enabled)])
 async def complete_buy_plan(
     plan_id: int,
     user: User = Depends(require_user),
@@ -661,7 +676,7 @@ async def complete_buy_plan(
     return {"ok": True, "status": "complete"}
 
 
-@router.put("/api/buy-plans/{plan_id}/cancel")
+@router.put("/api/buy-plans/{plan_id}/cancel", dependencies=[Depends(_require_v1_enabled)])
 async def cancel_buy_plan(
     plan_id: int,
     body: BuyPlanCancel,
@@ -726,7 +741,7 @@ async def cancel_buy_plan(
     return {"ok": True, "status": "cancelled"}
 
 
-@router.put("/api/buy-plans/{plan_id}/resubmit")
+@router.put("/api/buy-plans/{plan_id}/resubmit", dependencies=[Depends(_require_v1_enabled)])
 async def resubmit_buy_plan(
     plan_id: int,
     body: BuyPlanResubmit,
@@ -815,7 +830,7 @@ async def resubmit_buy_plan(
     return {"ok": True, "new_plan_id": new_plan.id, "status": "pending_approval"}
 
 
-@router.put("/api/buy-plans/{plan_id}/po-bulk")
+@router.put("/api/buy-plans/{plan_id}/po-bulk", dependencies=[Depends(_require_v1_enabled)])
 async def bulk_po_entry(
     plan_id: int,
     body: BuyPlanPOBulk,

@@ -287,6 +287,12 @@ class TestQuotedOfferBadge:
 class TestBuyPlanQuoteLineItems:
     """Buy plan preserves user edits from quote line_items."""
 
+    @pytest.fixture(autouse=True)
+    def _enable_v1(self, monkeypatch):
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
     def test_buy_plan_uses_quote_lead_time(self, client, test_requisition, test_offer, db_session, test_user):
         """submit_buy_plan reads lead_time from quote, not original offer."""
         from app.models import Company, CustomerSite

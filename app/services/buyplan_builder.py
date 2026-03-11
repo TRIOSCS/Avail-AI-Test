@@ -53,6 +53,24 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlanV3:
     if not quote:
         raise ValueError(f"Quote {quote_id} not found")
 
+    # Guard: quote must be in actionable state
+    if quote.status not in ("won", "sent"):
+        raise ValueError(f"Quote must be won or sent to build a buy plan (current: {quote.status})")
+
+    # Guard: prevent duplicate buy plans for same quote
+    existing = (
+        db.query(BuyPlanV3)
+        .filter(
+            BuyPlanV3.quote_id == quote_id,
+            BuyPlanV3.status.notin_(["cancelled"]),
+        )
+        .first()
+    )
+    if existing:
+        raise ValueError(
+            f"A buy plan already exists for quote {quote_id} (plan #{existing.id}, status: {existing.status})"
+        )
+
     # Determine customer region for geography scoring
     customer_region = None
     if quote.customer_site:
@@ -294,6 +312,20 @@ def generate_ai_flags(plan: BuyPlanV3, db: Session) -> list[dict]:
         # ── Geography mismatch check
         if offer and customer_region:
             _check_geo_mismatch(line, offer, customer_region, flags, db)
+
+        # ── No buyer assigned check
+        if not getattr(line, "buyer_id", None):
+            flags.append(
+                {
+                    "type": "no_buyer",
+                    "severity": "critical",
+                    "line_id": line.id,
+                    "message": (
+                        f"No buyer assigned for line"
+                        f" (reason: {getattr(line, 'assignment_reason', None) or 'unknown'})"
+                    ),
+                }
+            )
 
     # ── Quantity gap check (plan-level)
     if plan.lines:

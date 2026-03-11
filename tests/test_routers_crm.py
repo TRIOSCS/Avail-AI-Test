@@ -599,6 +599,13 @@ class TestQuotes:
 
 
 class TestBuyPlans:
+    @pytest.fixture(autouse=True)
+    def _enable_v1(self, monkeypatch):
+        """Re-enable V1 buy plans for legacy test coverage."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
     def _make_buy_plan(self, db_session, test_requisition, test_quote, test_offer, test_user):
         bp = BuyPlan(
             requisition_id=test_requisition.id,
@@ -2106,6 +2113,13 @@ def naive_crm_datetime(monkeypatch):
 
 
 class TestBuyPlansAdditional:
+    @pytest.fixture(autouse=True)
+    def _enable_v1(self, monkeypatch):
+        """Re-enable V1 buy plans for legacy test coverage."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
     def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
         bp = BuyPlan(
             requisition_id=test_requisition.id,
@@ -3253,6 +3267,13 @@ class TestOffersWithRatings:
 
 
 class TestBuyPlanApproveEdgeCases:
+    @pytest.fixture(autouse=True)
+    def _enable_v1(self, monkeypatch):
+        """Re-enable V1 buy plans for legacy test coverage."""
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
+
     def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
         bp = BuyPlan(
             requisition_id=test_requisition.id,

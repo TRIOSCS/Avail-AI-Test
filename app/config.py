@@ -209,7 +209,7 @@ class Settings(BaseSettings):
     search_concurrency_limit: int = 10
 
     # --- Buy Plan V1 deprecation ---
-    buy_plan_v1_enabled: bool = True
+    buy_plan_v1_enabled: bool = False
 
     # --- Contact intelligence ---
     contact_scoring_enabled: bool = True

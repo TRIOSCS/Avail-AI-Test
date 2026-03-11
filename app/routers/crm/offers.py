@@ -411,7 +411,12 @@ async def create_offer(
     db.add(offer)
     old_status = req.status
     if req.status in ("active", "sourcing"):
-        req.status = "offers"
+        from ...services.requisition_state import transition as req_transition
+
+        try:
+            req_transition(req, "offers", user, db)
+        except ValueError:
+            pass  # already in offers or later state
 
     # Phase 1: Auto-advance per-part sourcing status when offer is created
     if offer.requirement_id and offer.status == "active":
