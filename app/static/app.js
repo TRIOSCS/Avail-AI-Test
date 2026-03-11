@@ -4822,18 +4822,7 @@ function searchOpenPoolVendors() {
     }, 300);
 }
 
-async function claimStrategicVendor(vendorCardId, vendorName) {
-    try {
-        await apiFetch('/api/strategic-vendors/claim/' + vendorCardId, { method: 'POST' });
-        showToast(vendorName + ' claimed as strategic vendor', 'success');
-        closeStrategicClaimModal();
-        loadStrategicVendors();
-    } catch (e) {
-        var msg = 'Failed to claim vendor';
-        try { msg = (await e.json ? e.json() : e).detail || msg; } catch(ex) {}
-        showToast(msg, 'error');
-    }
-}
+// claimStrategicVendor defined in vendor cards section below
 
 // ---------------------------------------------------------------------------
 // Knowledge Ledger: Q&A Tab (legacy — kept for backward compat)
