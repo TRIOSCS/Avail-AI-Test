@@ -422,6 +422,11 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
+        # Sanitize text fields in line items to prevent stored XSS
+        from ...utils.sanitize import sanitize_dict
+
+        for li in updates["line_items"]:
+            sanitize_dict(li, ["mpn", "manufacturer", "notes", "condition", "date_code"])
         quote.line_items = updates.pop("line_items")
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
@@ -565,6 +570,7 @@ async def quote_result(
     if payload.result == "won":
         quote.won_revenue = quote.subtotal
     req = db.get(Requisition, quote.requisition_id)
+    old_req_status = req.status if req else None
     if req:
         req.status = payload.result
 
@@ -597,7 +603,7 @@ async def quote_result(
         "ok": True,
         "status": payload.result,
         "req_status": req.status if req else None,
-        "status_changed": True,
+        "status_changed": old_req_status != (req.status if req else None),
     }
 
 

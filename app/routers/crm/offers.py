@@ -602,6 +602,14 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+    # Validate status transition if status is being changed
+    if "status" in changes and changes["status"] != offer.status:
+        from ...services.status_machine import validate_transition
+
+        try:
+            validate_transition("offer", offer.status, changes["status"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",
@@ -1037,27 +1045,6 @@ async def promote_offer(
     return {"status": "promoted", "offer_id": offer_id}
 
 
-@router.post("/api/offers/{offer_id}/reject")
-async def reject_offer(
-    offer_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Reject a T4 offer — marks as rejected, keeps for audit trail.
-
-    Called by: review queue UI
-    Depends on: Offer model
-    """
-    offer = db.get(Offer, offer_id)
-    if not offer:
-        raise HTTPException(404, "Offer not found")
-    if offer.status not in ("pending_review",):
-        raise HTTPException(400, "Only pending_review offers can be rejected")
-
-    offer.status = "rejected"
-    offer.updated_by_id = user.id
-    offer.updated_at = datetime.now(timezone.utc)
-    db.commit()
-
-    logger.info(f"Offer {offer_id} rejected by user {user.id}")
-    return {"status": "rejected", "offer_id": offer_id}
+# Note: POST /api/offers/{offer_id}/reject was a duplicate of PUT /api/offers/{offer_id}/reject
+# (line 689). The PUT version with audit trail (record_changes) is the canonical endpoint.
+# The duplicate POST was removed to prevent undefined routing behavior.

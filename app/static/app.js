@@ -39,6 +39,12 @@ window.validateRfqName = validateRfqName;
     window.onerror = function(msg, src, line, col) {
         push({msg: String(msg), src: src, line: line, col: col, ts: Date.now()});
     };
+    // Catch unhandled promise rejections (async errors)
+    window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = reason instanceof Error ? reason.message : String(reason || 'Unknown async error');
+        push({msg: '[unhandledrejection] ' + msg, ts: Date.now()});
+    });
     var origWarn = console.warn, origErr = console.error;
     console.warn = function() {
         push({msg: '[warn] ' + Array.prototype.join.call(arguments, ' '), ts: Date.now()});
@@ -608,11 +614,14 @@ function _timeAgo(iso) {
 }
 export function fmtDate(iso) {
     if (!iso) return '';
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
+    const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 export function fmtDateTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 function stars(avg, count) {
@@ -3243,6 +3252,7 @@ function sortReqList(col) {
 const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers: data, ... }
 window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
+const _ddTabLoadSeq = {};  // reqId → monotonic counter to prevent stale async renders
 
 function _ddSubTabs(mainView) {
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['workspace', 'quote', 'activity'];
@@ -3381,6 +3391,10 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     }
     if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
 
+    // Race condition guard: track load sequence so stale responses don't render
+    if (!_ddTabLoadSeq[reqId]) _ddTabLoadSeq[reqId] = 0;
+    const seq = ++_ddTabLoadSeq[reqId];
+
     panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
     try {
         let data;
@@ -3437,9 +3451,12 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
         }
+        // Only render if this is still the latest request for this req
+        if (_ddTabLoadSeq[reqId] !== seq) return;
         _ddTabCache[reqId][tabName] = data;
         _renderDdTab(reqId, tabName, data, panel);
     } catch(e) {
+        if (_ddTabLoadSeq[reqId] !== seq) return;
         panel.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
     }
 }
@@ -14348,10 +14365,12 @@ function renderActivityCards() {
 }
 
 export function fmtRelative(iso) {
-    if (!iso) return '—';
+    if (!iso) return '\u2014';
     const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
     const now = new Date();
     const diff = Math.floor((now - d) / 1000);
+    if (diff < 0) return d.toLocaleDateString();
     if (diff < 60) return 'just now';
     if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;

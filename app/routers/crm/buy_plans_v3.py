@@ -346,6 +346,14 @@ async def list_buy_plans_v3(
         joinedload(BuyPlanV3.approved_by),
         joinedload(BuyPlanV3.lines),
     )
+    # Validate status filters against known enums
+    _valid_statuses = {"draft", "pending", "active", "halted", "completed", "cancelled"}
+    _valid_so_statuses = {"pending", "approved", "rejected"}
+    if status and status not in _valid_statuses:
+        raise HTTPException(400, f"Invalid status: {status}. Must be one of: {', '.join(sorted(_valid_statuses))}")
+    if so_status and so_status not in _valid_so_statuses:
+        raise HTTPException(400, f"Invalid so_status: {so_status}. Must be one of: {', '.join(sorted(_valid_so_statuses))}")
+
     if status:
         q = q.filter(BuyPlanV3.status == status)
     if so_status:
@@ -359,7 +367,7 @@ async def list_buy_plans_v3(
     if user.role == "sales":
         q = q.filter(BuyPlanV3.submitted_by_id == user.id)
 
-    plans = q.order_by(BuyPlanV3.created_at.desc()).all()
+    plans = q.order_by(BuyPlanV3.created_at.desc()).limit(500).all()
     return {"items": [_plan_to_list_item(p) for p in plans], "count": len(plans)}
 
 
@@ -510,7 +518,7 @@ async def reset_plan_to_draft(
         db.commit()
         return {"id": plan.id, "status": plan.status}
     except ValueError as e:
-        return {"error": str(e), "status_code": 400}
+        raise HTTPException(400, str(e))
 
 
 # ── SO Verification ──────────────────────────────────────────────────
