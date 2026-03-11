@@ -9,11 +9,12 @@ Depends on: app/models, app/services/buyplan_service, app/dependencies
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from pydantic import BaseModel
 
 from ..database import SessionLocal
+from ..dependencies import require_user
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -24,7 +25,7 @@ class CardActionPayload(BaseModel):
 
 
 @router.post("/card-action")
-async def handle_card_action(request: Request):
+async def handle_card_action(request: Request, user=Depends(require_user)):
     """Handle Action.Submit callbacks from Teams Adaptive Cards.
 
     Teams sends the action data as JSON. We parse and dispatch to the
@@ -74,7 +75,7 @@ async def _handle_buyplan_action(plan_id: int, action: str) -> dict:
     except Exception as e:
         logger.error("Teams card action %s failed: %s", verb, e)
         db.rollback()
-        return _response_card("Error", f"Failed to {verb[:-1]}: {str(e)[:200]}", "attention")
+        return _response_card("Error", f"Failed to process action. Please try again or contact support.", "attention")
     finally:
         db.close()
 

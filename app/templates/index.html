@@ -238,7 +238,7 @@
     <button type="button" class="sb-scroll-arrow sb-scroll-down" id="sbScrollDown" onclick="document.querySelector('.sidebar-nav').scrollBy({top:80,behavior:'smooth'})" aria-label="Scroll down"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
     <div class="sidebar-footer">
         <div class="sb-user-menu">
-            <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
+            <span class="ui">{{ (user_name[:2]|upper) | e if user_name else 'U' }}</span>
             <span class="un">{{ user_name | e }}</span>
             <span id="roleBadge" class="hidden"></span>
             {% if is_admin %}<span class="rb">Admin</span>{% endif %}
@@ -1535,7 +1535,7 @@
 <!-- System notification bell — placeholder, wired up when notification service is registered -->
 {% endif %}
 
-<script type="application/json" id="app-config">{"userName":"{{ user_name | e }}","userEmail":"{{ user_email | e }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role | e }}"}</script>
+<script type="application/json" id="app-config">{"userName":{{ user_name | tojson }},"userEmail":{{ user_email | tojson }},"isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":{{ user_role | tojson }}}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}
