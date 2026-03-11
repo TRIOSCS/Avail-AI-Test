@@ -36,6 +36,21 @@ class OEMSecretsConnector(BaseConnector):
         }
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=httpx.Timeout(self.timeout, connect=5.0))
+
+        # 401 — OEMSecrets returns this when API key is rejected OR quota
+        # is exhausted ("User is not accepted or has run out of api calls").
+        # Return empty instead of raising to avoid tripping the circuit breaker
+        # on a temporary quota issue.
+        if r.status_code == 401:
+            body_preview = r.text[:200]
+            logger.warning(f"OEMSecrets: 401 for {part_number} — quota exhausted or key invalid: {body_preview}")
+            return []
+
+        # 429 — explicit rate limit
+        if r.status_code == 429:
+            logger.warning(f"OEMSecrets: 429 rate limited for {part_number}, returning empty results")
+            return []
+
         if r.status_code != 200:
             logger.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             r.raise_for_status()

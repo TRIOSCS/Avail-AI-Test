@@ -53,11 +53,34 @@ def get_breaker(name: str) -> CircuitBreaker:
     return _breakers[name]
 
 
+# ── Per-connector concurrency limits ─────────────────────────────────
+# Prevents hammering a single API with too many parallel requests.
+_connector_semaphores: dict[str, asyncio.Semaphore] = {}
+
+# Default max concurrent requests per connector type
+_CONNECTOR_CONCURRENCY = {
+    "DigiKeyConnector": 2,
+    "MouserConnector": 2,
+    "OEMSecretsConnector": 3,
+    "NexarConnector": 3,
+    "BrokerBinConnector": 5,
+}
+
+
+def _get_connector_semaphore(name: str) -> asyncio.Semaphore:
+    """Get or create a per-connector semaphore to limit concurrency."""
+    if name not in _connector_semaphores:
+        limit = _CONNECTOR_CONCURRENCY.get(name, 3)
+        _connector_semaphores[name] = asyncio.Semaphore(limit)
+    return _connector_semaphores[name]
+
+
 class BaseConnector(ABC):
     def __init__(self, timeout: float = 20.0, max_retries: int = 2):
         self.timeout = timeout
         self.max_retries = max_retries
         self._breaker = get_breaker(self.__class__.__name__)
+        self._semaphore = _get_connector_semaphore(self.__class__.__name__)
 
     async def search(self, part_number: str) -> list[dict]:
         # Short-circuit if the breaker is open (service is known-down)
@@ -65,6 +88,11 @@ class BaseConnector(ABC):
             logger.warning(f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}")
             return []
 
+        # Per-connector concurrency limit — avoids hammering one API
+        async with self._semaphore:
+            return await self._search_with_retry(part_number)
+
+    async def _search_with_retry(self, part_number: str) -> list[dict]:
         last_err = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -77,13 +105,32 @@ class BaseConnector(ABC):
                 logger.warning(f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}")
                 raise
             except httpx.HTTPStatusError as e:
-                # Auth/permission errors will never succeed on retry — fail fast
-                if e.response.status_code in (401, 403, 422):
+                status = e.response.status_code
+
+                # 429 Too Many Requests — always retry with Retry-After
+                if status == 429:
+                    retry_after = _parse_retry_after(e.response)
+                    logger.warning(
+                        f"{self.__class__.__name__} rate limited (429) for {part_number}, "
+                        f"retry after {retry_after:.1f}s (attempt {attempt + 1}/{self.max_retries + 1})"
+                    )
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(retry_after)
+                        last_err = e
+                        continue
+                    # Final attempt exhausted — return empty instead of crashing
+                    self._breaker.record_failure()
+                    return []
+
+                # Auth/permission errors — fail fast (connector-specific
+                # _do_search can override to handle gracefully)
+                if status in (401, 403, 422):
                     self._breaker.record_failure()
                     logger.warning(
-                        f"{self.__class__.__name__} auth error {e.response.status_code} for {part_number} — not retrying"
+                        f"{self.__class__.__name__} auth error {status} for {part_number} — not retrying"
                     )
                     raise
+
                 self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
@@ -98,6 +145,18 @@ class BaseConnector(ABC):
                 else:
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
         raise last_err  # propagate so caller can track the error
+
+
+def _parse_retry_after(response: httpx.Response) -> float:
+    """Extract wait time from Retry-After header, default to exponential backoff."""
+    header = response.headers.get("Retry-After", "")
+    if header:
+        try:
+            return max(float(header), 1.0)
+        except ValueError:
+            pass
+    # No header or unparseable — default to 5s + jitter
+    return 5.0 + random.uniform(0, 2)
 
     @abstractmethod
     async def _do_search(self, part_number: str) -> list[dict]:
