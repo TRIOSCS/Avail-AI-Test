@@ -4203,167 +4203,93 @@ function _populateInsightsBody(body, data) {
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline Task Board (replaces Q&A sub-tab)
+// Simple Task Checklist (flat list with checkboxes)
 // ---------------------------------------------------------------------------
 
 function _renderDdTasks(reqId, tasks, panel) {
     tasks = tasks || [];
-    var columns = [
-        { id: 'todo', label: 'To Do', color: 'var(--muted)' },
-        { id: 'in_progress', label: 'In Progress', color: 'var(--blue, #3b82f6)' },
-        { id: 'done', label: 'Done', color: 'var(--green, #22c55e)' },
-    ];
+    var pending = tasks.filter(function(t) { return t.status !== 'done'; });
+    var done = tasks.filter(function(t) { return t.status === 'done'; });
+    // Show pending first, then done at the bottom
+    var sorted = pending.concat(done);
 
-    // Simple action bar (no category filters)
-    var filterBar = document.createElement('div');
-    filterBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
-    var taskLabel = document.createElement('span');
-    taskLabel.style.cssText = 'font-size:11px;color:var(--muted)';
-    taskLabel.textContent = tasks.length + ' task' + (tasks.length !== 1 ? 's' : '');
-    filterBar.appendChild(taskLabel);
+    // Header bar with count + add button
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
+    var label = document.createElement('span');
+    label.style.cssText = 'font-size:11px;color:var(--muted)';
+    label.textContent = pending.length + ' open' + (done.length ? ', ' + done.length + ' done' : '');
+    header.appendChild(label);
 
     var addBtn = document.createElement('button');
     addBtn.className = 'btn btn-sm';
     addBtn.textContent = '+ Add Task';
     addBtn.onclick = function() { _showInlineTaskForm(reqId, panel); };
-    filterBar.appendChild(addBtn);
+    header.appendChild(addBtn);
 
     panel.textContent = '';
-    panel.appendChild(filterBar);
+    panel.appendChild(header);
 
-    // Board container
-    var board = document.createElement('div');
-    board.className = 'task-board';
-    board.id = 'taskBoard-' + reqId;
-
-    for (var ci = 0; ci < columns.length; ci++) {
-        var col = columns[ci];
-        var colTasks = tasks.filter(function(t) { return t.status === col.id; });
-
-        var colDiv = document.createElement('div');
-        colDiv.className = 'task-col';
-        colDiv.dataset.status = col.id;
-        colDiv.ondragover = function(e) { e.preventDefault(); this.classList.add('drag-over'); };
-        colDiv.ondragleave = function() { this.classList.remove('drag-over'); };
-        colDiv.ondrop = (function(status, rId) {
-            return function(e) {
-                e.preventDefault();
-                this.classList.remove('drag-over');
-                var taskId = e.dataTransfer.getData('text/plain');
-                if (taskId) _moveTask(rId, parseInt(taskId), status);
-            };
-        })(col.id, reqId);
-
-        // Column header
-        var header = document.createElement('div');
-        header.className = 'task-col-header';
-        header.innerHTML = '<span class="task-col-dot" style="background:' + col.color + '"></span>' +
-            '<span class="task-col-title">' + col.label + '</span>' +
-            '<span class="task-col-count">' + colTasks.length + '</span>';
-        colDiv.appendChild(header);
-
-        // Cards
-        var cardList = document.createElement('div');
-        cardList.className = 'task-col-cards';
-        for (var ti = 0; ti < colTasks.length; ti++) {
-            cardList.appendChild(_renderTaskCard(colTasks[ti], reqId));
-        }
-        colDiv.appendChild(cardList);
-        board.appendChild(colDiv);
+    if (!sorted.length) {
+        var empty = document.createElement('div');
+        empty.style.cssText = 'font-size:12px;color:var(--muted);text-align:center;padding:20px 0';
+        empty.textContent = 'No tasks yet. Click "+ Add Task" to create one.';
+        panel.appendChild(empty);
+        return;
     }
 
-    panel.appendChild(board);
+    // Task list container
+    var list = document.createElement('div');
+    list.className = 'task-checklist';
+    list.id = 'taskList-' + reqId;
+    for (var i = 0; i < sorted.length; i++) {
+        list.appendChild(_renderTaskCheckItem(sorted[i], reqId));
+    }
+    panel.appendChild(list);
 }
 
-function _renderTaskCard(task, reqId) {
-    var card = document.createElement('div');
-    card.className = 'task-card task-card-' + task.task_type;
-    card.draggable = true;
-    card.dataset.taskId = task.id;
-    card.dataset.type = task.task_type;
-    card.ondragstart = function(e) {
-        e.dataTransfer.setData('text/plain', task.id.toString());
-        card.classList.add('dragging');
-    };
-    card.ondragend = function() { card.classList.remove('dragging'); };
+function _renderTaskCheckItem(task, reqId) {
+    var isDone = task.status === 'done';
+    var row = document.createElement('div');
+    row.className = 'task-check-item' + (isDone ? ' task-done' : '');
 
-    // Priority dot
+    // Priority indicator
     var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
-    var priLabels = { 1: 'Low', 2: 'Med', 3: 'High' };
+    row.style.borderLeftColor = priColors[task.priority] || priColors[2];
 
-    // Department header with assignee name
-    var deptHeader = document.createElement('div');
-    deptHeader.className = 'task-dept-header task-dept-' + task.task_type;
-    var deptLabel = task.task_type === 'sourcing' ? 'Purchasing' : task.task_type === 'sales' ? 'Sales' : 'General';
-    var assigneeName = task.assignee_name || 'Unassigned';
-    deptHeader.innerHTML = '<span class="task-dept-label">' + deptLabel + '</span><span class="task-dept-assignee">' + esc(assigneeName) + '</span>';
-    card.appendChild(deptHeader);
+    // Checkbox
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isDone;
+    cb.className = 'task-checkbox';
+    cb.onchange = function() { _toggleTaskStatus(reqId, task.id, cb.checked ? 'done' : 'todo'); };
+    row.appendChild(cb);
 
-    // Title row
-    var topRow = document.createElement('div');
-    topRow.style.cssText = 'margin-top:6px';
-    var titleSpan = document.createElement('span');
-    titleSpan.className = 'task-card-title';
-    titleSpan.textContent = task.title;
-    topRow.appendChild(titleSpan);
-    card.appendChild(topRow);
+    // Title
+    var title = document.createElement('span');
+    title.className = 'task-check-title';
+    title.textContent = task.title;
+    row.appendChild(title);
 
-    // Risk flag
-    if (task.ai_risk_flag) {
-        var riskDiv = document.createElement('div');
-        riskDiv.className = 'task-risk-flag';
-        riskDiv.textContent = '\u26a0 ' + task.ai_risk_flag;
-        card.appendChild(riskDiv);
-    }
-
-    // Bottom row: priority, assignee, due date, source
-    var bottomRow = document.createElement('div');
-    bottomRow.className = 'task-card-meta';
-
-    var priDot = document.createElement('span');
-    priDot.className = 'task-pri-dot';
-    priDot.style.background = priColors[task.priority] || priColors[2];
-    priDot.title = priLabels[task.priority] || 'Medium';
-    bottomRow.appendChild(priDot);
-
+    // Due date
     if (task.due_at) {
         var dueSpan = document.createElement('span');
-        dueSpan.className = 'task-due';
+        dueSpan.className = 'task-check-due';
         var dueDate = new Date(task.due_at);
-        var now = new Date();
-        if (dueDate < now && task.status !== 'done') dueSpan.classList.add('task-overdue');
+        if (dueDate < new Date() && !isDone) dueSpan.classList.add('task-overdue');
         dueSpan.textContent = _shortDate(task.due_at);
-        bottomRow.appendChild(dueSpan);
+        row.appendChild(dueSpan);
     }
 
-    if (task.source === 'system') {
-        var autoTag = document.createElement('span');
-        autoTag.className = 'task-auto-tag';
-        autoTag.textContent = 'auto';
-        bottomRow.appendChild(autoTag);
-    }
-
-    // Actions (edit / delete)
-    var actionsDiv = document.createElement('span');
-    actionsDiv.style.cssText = 'margin-left:auto;display:flex;gap:2px';
-    var editBtn = document.createElement('button');
-    editBtn.className = 'btn btn-ghost btn-sm';
-    editBtn.style.cssText = 'font-size:10px;padding:1px 4px';
-    editBtn.textContent = '\u270e';
-    editBtn.title = 'Edit';
-    editBtn.onclick = function(e) { e.stopPropagation(); _editTaskInline(reqId, task, card); };
-    actionsDiv.appendChild(editBtn);
+    // Delete button
     var delBtn = document.createElement('button');
-    delBtn.className = 'btn btn-ghost btn-sm';
-    delBtn.style.cssText = 'font-size:10px;padding:1px 4px;color:var(--red,#e74c3c)';
+    delBtn.className = 'btn btn-ghost btn-sm task-check-del';
     delBtn.textContent = '\u2715';
     delBtn.title = 'Delete';
     delBtn.onclick = function(e) { e.stopPropagation(); _deleteTask(reqId, task.id); };
-    actionsDiv.appendChild(delBtn);
-    bottomRow.appendChild(actionsDiv);
+    row.appendChild(delBtn);
 
-    card.appendChild(bottomRow);
-    return card;
+    return row;
 }
 
 function _shortDate(iso) {
@@ -4373,19 +4299,7 @@ function _shortDate(iso) {
     return months[d.getMonth()] + ' ' + d.getDate();
 }
 
-function _filterTasks(reqId, type, btn) {
-    var board = document.getElementById('taskBoard-' + reqId);
-    if (!board) return;
-    var cards = board.querySelectorAll('.task-card');
-    for (var i = 0; i < cards.length; i++) {
-        cards[i].style.display = (type === 'all' || cards[i].dataset.type === type) ? '' : 'none';
-    }
-    var allBtns = btn.parentNode.querySelectorAll('.task-filter');
-    for (var j = 0; j < allBtns.length; j++) allBtns[j].classList.remove('active');
-    btn.classList.add('active');
-}
-
-async function _moveTask(reqId, taskId, newStatus) {
+async function _toggleTaskStatus(reqId, taskId, newStatus) {
     try {
         await apiFetch('/api/requisitions/' + reqId + '/tasks/' + taskId + '/status', {
             method: 'PATCH',
@@ -4396,9 +4310,9 @@ async function _moveTask(reqId, taskId, newStatus) {
         var drow = document.getElementById('d-' + reqId);
         var panel = drow ? drow.querySelector('.dd-panel') : null;
         if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-        if (typeof showToast === 'function') showToast('Task updated', 'success');
+        if (typeof showToast === 'function') showToast(newStatus === 'done' ? 'Task completed' : 'Task reopened', 'success');
     } catch (e) {
-        if (typeof showToast === 'function') showToast('Failed to move task', 'error');
+        if (typeof showToast === 'function') showToast('Failed to update task', 'error');
     }
 }
 
@@ -4418,7 +4332,6 @@ function _deleteTask(reqId, taskId) {
 }
 
 function _showInlineTaskForm(reqId, panel) {
-    // Check if form already exists
     if (document.getElementById('taskForm-' + reqId)) return;
 
     var form = document.createElement('div');
@@ -4443,9 +4356,8 @@ function _showInlineTaskForm(reqId, panel) {
             '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'taskForm-' + reqId + '\').remove()">Cancel</button>' +
         '</div>';
 
-    // Insert after filter bar, before board
-    var board = document.getElementById('taskBoard-' + reqId);
-    if (board) panel.insertBefore(form, board);
+    var list = document.getElementById('taskList-' + reqId);
+    if (list) panel.insertBefore(form, list);
     else panel.appendChild(form);
     document.getElementById('taskTitle-' + reqId).focus();
 }
@@ -4478,80 +4390,6 @@ async function _submitNewTask(reqId) {
     } catch (e) {
         if (typeof showToast === 'function') showToast('Failed to create task', 'error');
     }
-}
-
-function _editTaskInline(reqId, task, cardEl) {
-    cardEl.innerHTML = '';
-    cardEl.draggable = false;
-
-    var titleInput = document.createElement('input');
-    titleInput.type = 'text';
-    titleInput.value = task.title;
-    titleInput.className = 'task-input';
-    titleInput.style.fontSize = '11px';
-    cardEl.appendChild(titleInput);
-
-    var row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:4px;margin-top:4px;align-items:center';
-
-    var typeSelect = document.createElement('select');
-    typeSelect.className = 'task-select';
-    ['sourcing', 'sales', 'general'].forEach(function(t) {
-        var opt = document.createElement('option');
-        opt.value = t; opt.textContent = t;
-        if (t === task.task_type) opt.selected = true;
-        typeSelect.appendChild(opt);
-    });
-    row.appendChild(typeSelect);
-
-    var priSelect = document.createElement('select');
-    priSelect.className = 'task-select';
-    [['1','Low'],['2','Med'],['3','High']].forEach(function(p) {
-        var opt = document.createElement('option');
-        opt.value = p[0]; opt.textContent = p[1];
-        if (parseInt(p[0]) === task.priority) opt.selected = true;
-        priSelect.appendChild(opt);
-    });
-    row.appendChild(priSelect);
-
-    var saveBtn = document.createElement('button');
-    saveBtn.className = 'btn btn-sm';
-    saveBtn.style.fontSize = '10px';
-    saveBtn.textContent = 'Save';
-    saveBtn.onclick = async function() {
-        try {
-            await apiFetch('/api/requisitions/' + reqId + '/tasks/' + task.id, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: titleInput.value.trim(),
-                    task_type: typeSelect.value,
-                    priority: parseInt(priSelect.value),
-                }),
-            });
-            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
-            var drow = document.getElementById('d-' + reqId);
-            var panel = drow ? drow.querySelector('.dd-panel') : null;
-            if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-        } catch (e) {
-            if (typeof showToast === 'function') showToast('Failed to update', 'error');
-        }
-    };
-    row.appendChild(saveBtn);
-
-    var cancelBtn = document.createElement('button');
-    cancelBtn.className = 'btn btn-ghost btn-sm';
-    cancelBtn.style.fontSize = '10px';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.onclick = async function() {
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
-        var drow = document.getElementById('d-' + reqId);
-        var panel = drow ? drow.querySelector('.dd-panel') : null;
-        if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-    };
-    row.appendChild(cancelBtn);
-    cardEl.appendChild(row);
-    titleInput.focus();
 }
 
 // ---------------------------------------------------------------------------
@@ -4594,36 +4432,17 @@ async function loadMyTasks() {
             return;
         }
 
-        // Group by urgency
-        var now = new Date();
-        var groups = { overdue: [], today: [], upcoming: [], nodate: [] };
-        for (var i = 0; i < tasks.length; i++) {
-            var t = tasks[i];
-            if (!t.due_at) { groups.nodate.push(t); continue; }
-            var due = new Date(t.due_at);
-            if (due < now) { groups.overdue.push(t); }
-            else if (due.toDateString() === now.toDateString()) { groups.today.push(t); }
-            else { groups.upcoming.push(t); }
-        }
+        // Sort: tasks with due dates first (earliest first), then no-date tasks
+        tasks.sort(function(a, b) {
+            if (!a.due_at && !b.due_at) return 0;
+            if (!a.due_at) return 1;
+            if (!b.due_at) return -1;
+            return new Date(a.due_at) - new Date(b.due_at);
+        });
 
         list.innerHTML = '';
-        var sections = [
-            { key: 'overdue', label: 'Overdue', cls: 'overdue' },
-            { key: 'today', label: 'Due Today', cls: 'today' },
-            { key: 'upcoming', label: 'Upcoming', cls: '' },
-            { key: 'nodate', label: 'No Due Date', cls: '' },
-        ];
-        for (var si = 0; si < sections.length; si++) {
-            var sec = sections[si];
-            var items = groups[sec.key];
-            if (!items.length) continue;
-            var header = document.createElement('div');
-            header.className = 'my-task-group-header ' + sec.cls;
-            header.textContent = sec.label + ' (' + items.length + ')';
-            list.appendChild(header);
-            for (var ti = 0; ti < items.length; ti++) {
-                list.appendChild(_renderMyTaskItem(items[ti]));
-            }
+        for (var i = 0; i < tasks.length; i++) {
+            list.appendChild(_renderMyTaskItem(tasks[i]));
         }
     } catch (e) {
         list.innerHTML = '<span style="font-size:11px;color:var(--red);padding:20px;text-align:center;display:block">Failed to load tasks</span>';
@@ -4631,13 +4450,39 @@ async function loadMyTasks() {
 }
 
 function _renderMyTaskItem(task) {
+    var isDone = task.status === 'done';
     var item = document.createElement('div');
-    item.className = 'my-task-item';
+    item.className = 'my-task-item' + (isDone ? ' task-done' : '');
     if (task.priority === 3) item.classList.add('pri-high');
     else if (task.priority === 2) item.classList.add('pri-med');
     else item.classList.add('pri-low');
 
-    item.onclick = function() {
+    // Checkbox to toggle done
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = isDone;
+    cb.className = 'task-checkbox';
+    cb.onclick = function(e) { e.stopPropagation(); };
+    cb.onchange = function() {
+        var newStatus = cb.checked ? 'done' : 'todo';
+        apiFetch('/api/requisitions/' + task.requisition_id + '/tasks/' + task.id + '/status', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus }),
+        }).then(function() {
+            loadMyTasks();
+            if (typeof showToast === 'function') showToast(newStatus === 'done' ? 'Task completed' : 'Task reopened', 'success');
+        }).catch(function() {
+            cb.checked = !cb.checked;
+            if (typeof showToast === 'function') showToast('Failed to update task', 'error');
+        });
+    };
+    item.appendChild(cb);
+
+    // Content wrapper (clickable to navigate)
+    var content = document.createElement('div');
+    content.style.cssText = 'flex:1;min-width:0;cursor:pointer';
+    content.onclick = function() {
         toggleMyTasksSidebar();
         expandToSubTab(task.requisition_id, 'tasks');
     };
@@ -4645,32 +4490,24 @@ function _renderMyTaskItem(task) {
     var title = document.createElement('div');
     title.className = 'my-task-item-title';
     title.textContent = task.title;
-    item.appendChild(title);
-
-    var reqName = document.createElement('div');
-    reqName.className = 'my-task-item-req';
-    reqName.textContent = task.requisition_name || 'Req #' + task.requisition_id;
-    item.appendChild(reqName);
+    content.appendChild(title);
 
     var meta = document.createElement('div');
     meta.className = 'my-task-item-meta';
+    var reqName = document.createElement('span');
+    reqName.className = 'my-task-item-req';
+    reqName.textContent = task.requisition_name || 'Req #' + task.requisition_id;
+    meta.appendChild(reqName);
     if (task.due_at) {
         var dateSpan = document.createElement('span');
+        dateSpan.className = 'task-check-due';
+        var dueDate = new Date(task.due_at);
+        if (dueDate < new Date() && !isDone) dateSpan.classList.add('task-overdue');
         dateSpan.textContent = _shortDate(task.due_at);
         meta.appendChild(dateSpan);
     }
-    if (task.task_type && task.task_type !== 'general') {
-        var pill = document.createElement('span');
-        pill.className = 'my-task-type-pill';
-        pill.textContent = task.task_type;
-        meta.appendChild(pill);
-    }
-    if (task.ai_risk_flag) {
-        var risk = document.createElement('span');
-        risk.textContent = '\u26a0 ' + task.ai_risk_flag;
-        meta.appendChild(risk);
-    }
-    item.appendChild(meta);
+    content.appendChild(meta);
+    item.appendChild(content);
 
     return item;
 }
@@ -15852,14 +15689,18 @@ function _buildCtxThread(activities) {
 }
 
 function _buildCtxTasks(tasks) {
-    if (!tasks.length) return '<div class="ctx-empty">No tasks. Tasks from the drill-down will appear here.</div>';
-    let html = '<div class="ctx-section"><div class="ctx-section-title">Tasks</div>';
-    for (const t of tasks) {
-        const pri = t.priority === 'high' ? 'pri-high' : t.priority === 'medium' ? 'pri-med' : 'pri-low';
-        const done = t.status === 'done' ? 'done' : '';
-        html += `<div class="my-task-item ${pri}" style="margin-bottom:6px">
-            <div class="my-task-item-title" style="${done ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(t.title || t.name || '')}</div>
-            <div class="my-task-item-meta">${t.due_date ? 'Due ' + fmtRelative(t.due_date) : ''} ${t.assignee_name ? '· ' + esc(t.assignee_name) : ''}</div>
+    if (!tasks.length) return '<div class="ctx-empty">No tasks yet.</div>';
+    const pending = tasks.filter(t => t.status !== 'done');
+    const done = tasks.filter(t => t.status === 'done');
+    const sorted = pending.concat(done);
+    let html = '<div class="ctx-section"><div class="ctx-section-title">Tasks (' + pending.length + ' open)</div>';
+    for (const t of sorted) {
+        const isDone = t.status === 'done';
+        const priMap = { 1: 'pri-low', 2: 'pri-med', 3: 'pri-high' };
+        const pri = priMap[t.priority] || 'pri-low';
+        html += `<div class="task-check-item ${pri}${isDone ? ' task-done' : ''}" style="margin-bottom:4px">
+            <span class="task-check-title">${isDone ? '&#10003; ' : '&#9675; '}${esc(t.title || '')}</span>
+            ${t.due_at ? '<span class="task-check-due">' + _shortDate(t.due_at) + '</span>' : ''}
         </div>`;
     }
     html += '</div>';
