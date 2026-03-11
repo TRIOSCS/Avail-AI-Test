@@ -202,6 +202,7 @@ def commodity_slug_to_display(slug: str) -> str:
     """
     return COMMODITY_DISPLAY_NAMES.get(slug, slug.replace("_", " ").title())
 
+
 # Flatten keywords for quick lookup
 _COMMODITY_KEYWORDS = {}
 for category, keywords in COMMODITY_MAP.items():

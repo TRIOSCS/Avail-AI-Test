@@ -7,7 +7,6 @@ Called by: pytest
 Depends on: app.jobs.selfheal_jobs
 """
 
-import pytest
 
 
 class TestSelfhealJobsRemoved:

@@ -1126,10 +1126,7 @@ async def list_requirement_tasks(
     part_ref = f"requirement:{requirement_id}"
 
     # Offer-level tasks: find offer IDs for this requirement
-    offer_ids = [
-        oid
-        for (oid,) in db.query(Offer.id).filter(Offer.requirement_id == requirement_id).all()
-    ]
+    offer_ids = [oid for (oid,) in db.query(Offer.id).filter(Offer.requirement_id == requirement_id).all()]
     offer_refs = [f"offer:{oid}" for oid in offer_ids]
 
     all_refs = [part_ref] + offer_refs
@@ -1218,7 +1215,7 @@ async def list_requirement_history(
 
     Returns a unified timeline of events for the selected part.
     """
-    from ...models import ActivityLog, RequisitionTask
+    from ...models import RequisitionTask
 
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:
@@ -1254,42 +1251,43 @@ async def list_requirement_history(
             user_map[u.id] = u.name or u.email
 
     for c in changes:
-        events.append({
-            "type": "change",
-            "entity": "requirement",
-            "field": c.field_name,
-            "old_value": c.old_value,
-            "new_value": c.new_value,
-            "user": user_map.get(c.user_id, ""),
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-        })
+        events.append(
+            {
+                "type": "change",
+                "entity": "requirement",
+                "field": c.field_name,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
+                "user": user_map.get(c.user_id, ""),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+        )
     for c in offer_changes:
-        events.append({
-            "type": "change",
-            "entity": "offer",
-            "field": c.field_name,
-            "old_value": c.old_value,
-            "new_value": c.new_value,
-            "user": user_map.get(c.user_id, ""),
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-        })
+        events.append(
+            {
+                "type": "change",
+                "entity": "offer",
+                "field": c.field_name,
+                "old_value": c.old_value,
+                "new_value": c.new_value,
+                "user": user_map.get(c.user_id, ""),
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+        )
 
     # Offers created for this part
-    offers = (
-        db.query(Offer)
-        .filter(Offer.requirement_id == requirement_id)
-        .order_by(Offer.created_at.desc())
-        .all()
-    )
+    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id).order_by(Offer.created_at.desc()).all()
     for o in offers:
-        events.append({
-            "type": "offer_created",
-            "vendor_name": o.vendor_name,
-            "mpn": o.mpn,
-            "unit_price": float(o.unit_price) if o.unit_price else None,
-            "qty_available": o.qty_available,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        })
+        events.append(
+            {
+                "type": "offer_created",
+                "vendor_name": o.vendor_name,
+                "mpn": o.mpn,
+                "unit_price": float(o.unit_price) if o.unit_price else None,
+                "qty_available": o.qty_available,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+        )
 
     # Contacts (RFQs sent) that included this part's MPN
     mpn = req_item.primary_mpn
@@ -1303,13 +1301,15 @@ async def list_requirement_history(
     for ct in contacts:
         parts = ct.parts_included or []
         if mpn and mpn in parts:
-            events.append({
-                "type": "rfq_sent",
-                "vendor_name": ct.vendor_name,
-                "contact_type": ct.contact_type,
-                "status": ct.status,
-                "created_at": ct.created_at.isoformat() if ct.created_at else None,
-            })
+            events.append(
+                {
+                    "type": "rfq_sent",
+                    "vendor_name": ct.vendor_name,
+                    "contact_type": ct.contact_type,
+                    "status": ct.status,
+                    "created_at": ct.created_at.isoformat() if ct.created_at else None,
+                }
+            )
 
     # Tasks completed for this part
     part_ref = f"requirement:{requirement_id}"
@@ -1325,12 +1325,14 @@ async def list_requirement_history(
         .all()
     )
     for t in done_tasks:
-        events.append({
-            "type": "task_done",
-            "title": t.title,
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        })
+        events.append(
+            {
+                "type": "task_done",
+                "title": t.title,
+                "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+        )
 
     # Sort all events by created_at descending
     events.sort(key=lambda e: e.get("created_at") or "", reverse=True)

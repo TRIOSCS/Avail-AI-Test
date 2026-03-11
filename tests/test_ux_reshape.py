@@ -12,8 +12,8 @@ import subprocess
 
 import pytest
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="module")
 def index_html():
@@ -41,23 +41,19 @@ def styles_css():
 
 # ── JS Syntax ─────────────────────────────────────────────────────────────
 
+
 class TestJSSyntax:
     def test_app_js_parses(self):
-        result = subprocess.run(
-            ["node", "-c", "app/static/app.js"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["node", "-c", "app/static/app.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
     def test_crm_js_parses(self):
-        result = subprocess.run(
-            ["node", "-c", "app/static/crm.js"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["node", "-c", "app/static/crm.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
 
 # ── Phase 2: Coverage Columns & Blocker Indicators ─────────────────────
+
 
 class TestCoverageColumns:
     def test_coverage_sort_case(self, app_js):
@@ -83,6 +79,7 @@ class TestCoverageColumns:
 
 # ── Phase 3: Requirement Workspace ────────────────────────────────────
 
+
 class TestRequirementWorkspace:
     def test_status_strip_in_drilldown(self, app_js):
         """Drill-down includes status strip with coverage metrics."""
@@ -100,6 +97,7 @@ class TestRequirementWorkspace:
 
 # ── Phase 4: Material Item Workspace ──────────────────────────────────
 
+
 class TestMaterialWorkspace:
     def test_material_uses_obj_header(self, app_js):
         assert "renderObjHeader({" in app_js
@@ -116,15 +114,16 @@ class TestMaterialWorkspace:
 
 # ── Phase 5: Deal Board ──────────────────────────────────────────────
 
+
 class TestDealBoard:
     def test_deals_pill_in_html(self, index_html):
-        assert "data-view=\"deals\"" in index_html
+        assert 'data-view="deals"' in index_html
 
     def test_render_deal_board_function(self, app_js):
         assert "function _renderDealBoard()" in app_js
 
     def test_deal_stages_defined(self, app_js):
-        for stage in ['gathering', 'rfq-out', 'offers-in', 'quoting', 'closing']:
+        for stage in ["gathering", "rfq-out", "offers-in", "quoting", "closing"]:
             assert f"key: '{stage}'" in app_js
 
     def test_deal_board_css(self, styles_css):
@@ -144,6 +143,7 @@ class TestDealBoard:
 
 # ── Phase 6: Nerve Center ────────────────────────────────────────────
 
+
 class TestNerveCenter:
     def test_nerve_feed_generation(self, app_js):
         assert "_nerveFeed" in app_js
@@ -162,6 +162,7 @@ class TestNerveCenter:
 
 # ── Phase 7: Proactive Opportunity Board ──────────────────────────────
 
+
 class TestProactiveBoard:
     def test_proactive_uses_status_strip(self, crm_js):
         assert "renderStatusStrip" in crm_js
@@ -172,6 +173,7 @@ class TestProactiveBoard:
 
 
 # ── Phase 8: Buy Plan Execution Board ────────────────────────────────
+
 
 class TestBuyPlanExecution:
     def test_buyplan_summary_stats(self, crm_js):
@@ -188,6 +190,7 @@ class TestBuyPlanExecution:
 
 
 # ── Phase 9: Intake Integration ──────────────────────────────────────
+
 
 class TestIntakeIntegration:
     def test_intake_views_include_buyplans(self, app_js):

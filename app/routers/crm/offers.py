@@ -439,11 +439,7 @@ async def create_offer(
                 )
                 .first()
             )
-            offer_count = (
-                db.query(Offer)
-                .filter(Offer.requisition_id == req_id, Offer.status == "active")
-                .count()
-            )
+            offer_count = db.query(Offer).filter(Offer.requisition_id == req_id, Offer.status == "active").count()
             new_subj = f"New offer: {offer.vendor_name} — {offer.mpn} (${offer.unit_price or 'TBD'}) · {offer_count} total offers"
             if existing_notif:
                 existing_notif.subject = new_subj
@@ -475,6 +471,7 @@ async def create_offer(
     if offer.vendor_card_id:
         try:
             from app.services.strategic_vendor_service import record_offer
+
             record_offer(db, offer.vendor_card_id)
         except Exception as e:
             logger.debug("Strategic vendor clock reset failed: {}", e)

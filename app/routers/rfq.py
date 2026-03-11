@@ -82,13 +82,15 @@ async def retry_failed_rfq(
         db=db,
         user_id=user.id,
         requisition_id=contact.requisition_id,
-        vendor_groups=[{
-            "vendor_name": contact.vendor_name,
-            "vendor_email": contact.vendor_contact,
-            "parts": contact.parts_included or [],
-            "subject": contact.subject or f"RFQ [ref:{contact.requisition_id}]",
-            "body": contact.details or "",
-        }],
+        vendor_groups=[
+            {
+                "vendor_name": contact.vendor_name,
+                "vendor_email": contact.vendor_contact,
+                "parts": contact.parts_included or [],
+                "subject": contact.subject or f"RFQ [ref:{contact.requisition_id}]",
+                "body": contact.details or "",
+            }
+        ],
     )
     # Mark old contact as superseded
     contact.status = "retried"

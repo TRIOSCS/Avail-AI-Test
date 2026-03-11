@@ -8,9 +8,9 @@ Called by: pytest
 Depends on: routers/requisitions/requirements.py, routers/crm/quotes.py, conftest fixtures
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
 
+import pytest
 
 # ── Part-level Offers ───────────────────────────────────────────────
 
@@ -19,9 +19,7 @@ def test_list_requirement_offers_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/offers returns empty list when no offers exist."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.get(f"/api/requirements/{req.id}/offers")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -31,9 +29,7 @@ def test_list_requirement_offers_with_data(client, test_requisition, db_session)
     """GET /api/requirements/{id}/offers returns offers for this requirement."""
     from app.models import Offer, Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -61,9 +57,7 @@ def test_list_requirement_offers_includes_extended_fields(client, test_requisiti
     """GET /api/requirements/{id}/offers returns country_of_origin, firmware, source, entered_by."""
     from app.models import Offer, Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -105,9 +99,7 @@ def test_list_requirement_notes_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/notes returns empty when no notes."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     req.notes = None
     db_session.commit()
 
@@ -122,9 +114,7 @@ def test_add_requirement_note(client, test_requisition, db_session):
     """POST /api/requirements/{id}/notes appends to requirement notes."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     req.notes = None
     db_session.commit()
 
@@ -144,9 +134,7 @@ def test_add_requirement_note_empty_text(client, test_requisition, db_session):
     """POST /api/requirements/{id}/notes rejects empty text."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.post(f"/api/requirements/{req.id}/notes", json={"text": ""})
     assert resp.status_code == 422
 
@@ -155,9 +143,7 @@ def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_se
     """GET /api/requirements/{id}/notes includes offer notes."""
     from app.models import Offer, Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -185,9 +171,7 @@ def test_list_requirement_tasks_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/tasks returns empty when no tasks."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.get(f"/api/requirements/{req.id}/tasks")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -197,9 +181,7 @@ def test_create_requirement_task(client, test_requisition, db_session):
     """POST /api/requirements/{id}/tasks creates a task linked to the requirement."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": "Follow up on pricing"})
     assert resp.status_code == 200
     data = resp.json()
@@ -218,9 +200,7 @@ def test_create_requirement_task_empty_title(client, test_requisition, db_sessio
     """POST /api/requirements/{id}/tasks rejects empty title."""
     from app.models import Requirement
 
-    req = db_session.query(Requirement).filter(
-        Requirement.requisition_id == test_requisition.id
-    ).first()
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": ""})
     assert resp.status_code == 422
 
@@ -287,6 +267,7 @@ class TestRequisitionStatusFilter:
 def _quote_req(db_session, test_user):
     from app.models import Requisition
     from app.models.crm import Company, CustomerSite
+
     co = Company(name="Test Co")
     db_session.add(co)
     db_session.flush()
@@ -302,6 +283,7 @@ def _quote_req(db_session, test_user):
 class TestQuoteExpiration:
     def test_expired_quote_flagged(self, client, db_session, test_user, _quote_req):
         from app.models.quotes import Quote
+
         req, site = _quote_req
         q = Quote(
             requisition_id=req.id,
@@ -327,6 +309,7 @@ class TestQuoteExpiration:
 
     def test_valid_quote_not_flagged(self, client, db_session, test_user, _quote_req):
         from app.models.quotes import Quote
+
         req, site = _quote_req
         q = Quote(
             requisition_id=req.id,
@@ -352,6 +335,7 @@ class TestQuoteExpiration:
 
     def test_draft_quote_no_expiry(self, client, db_session, test_user, _quote_req):
         from app.models.quotes import Quote
+
         req, site = _quote_req
         q = Quote(
             requisition_id=req.id,
@@ -376,6 +360,7 @@ class TestQuoteExpiration:
 
     def test_single_quote_endpoint_has_expiry(self, client, db_session, test_user, _quote_req):
         from app.models.quotes import Quote
+
         req, site = _quote_req
         q = Quote(
             requisition_id=req.id,

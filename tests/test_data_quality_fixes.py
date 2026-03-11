@@ -14,7 +14,6 @@ from app.models import (
     ActivityLog,
     Company,
     CustomerSite,
-    User,
 )
 
 # ═══════════════════════════════════════════════════════════════════════

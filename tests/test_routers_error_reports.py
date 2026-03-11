@@ -232,8 +232,17 @@ class TestGetErrorReport:
     def test_get_detail_fields(self, client, sample_report):
         resp = client.get(f"/api/error-reports/{sample_report.id}")
         data = resp.json()
-        for field in ("id", "ticket_number", "title", "description",
-                      "status", "risk_tier", "category", "current_page", "created_at"):
+        for field in (
+            "id",
+            "ticket_number",
+            "title",
+            "description",
+            "status",
+            "risk_tier",
+            "category",
+            "current_page",
+            "created_at",
+        ):
             assert field in data, f"Missing field: {field}"
 
     def test_get_not_found(self, client):

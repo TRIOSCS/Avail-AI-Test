@@ -327,7 +327,9 @@ class TestTasksSidebarRight:
     def test_sidebar_css_matches_nav_aesthetic(self, styles_css):
         """Tasks sidebar panel uses white background and border styling."""
         # Panel uses border-left with var(--border)
-        assert "border-left: 1px solid var(--border)" in styles_css or "border-left:1px solid var(--border)" in styles_css
+        assert (
+            "border-left: 1px solid var(--border)" in styles_css or "border-left:1px solid var(--border)" in styles_css
+        )
         # Panel uses box-shadow for depth
         assert "box-shadow" in styles_css
 
@@ -353,6 +355,7 @@ class TestTasksSidebarRight:
 
 
 # ── Scroll-End Detection ────────────────────────────────────────────────
+
 
 class TestScrollEndDetection:
     """Verify scroll-end detection wires up for CSS fade-out hint removal."""

@@ -11,8 +11,7 @@ Depends on: routers/requisitions/requirements.py, conftest fixtures
 
 from datetime import datetime, timezone
 
-from app.models import ChangeLog, Offer, Requirement, Requisition, RequisitionTask
-
+from app.models import ChangeLog, Offer, RequisitionTask
 
 # ── Enhanced Offers Endpoint ──────────────────────────────────────────
 

@@ -350,9 +350,7 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlanV3:
         raise ValueError(f"Buy plan {plan_id} not found")
 
     if plan.status not in RESUBMITTABLE_STATUSES:
-        raise ValueError(
-            f"Only halted/cancelled plans can be resubmitted (current: {plan.status})"
-        )
+        raise ValueError(f"Only halted/cancelled plans can be resubmitted (current: {plan.status})")
 
     plan.status = BuyPlanStatus.draft.value
     plan.so_status = SOVerificationStatus.pending.value

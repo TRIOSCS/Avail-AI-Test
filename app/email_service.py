@@ -1030,6 +1030,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 if offer.vendor_card_id:
                     try:
                         from app.services.strategic_vendor_service import record_offer as sv_record
+
                         sv_record(db, offer.vendor_card_id)
                     except Exception:
                         logger.debug("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)

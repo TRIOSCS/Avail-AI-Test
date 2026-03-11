@@ -1,4 +1,5 @@
 """Tests for app.utils.async_helpers — safe background task utility."""
+
 import asyncio
 
 import pytest
@@ -25,6 +26,7 @@ async def test_exception_is_caught_and_logged():
     captured = []
     sink_id = logger.add(lambda msg: captured.append(str(msg)), level="ERROR")
     try:
+
         async def _boom():
             raise ValueError("kaboom")
 
@@ -80,6 +82,7 @@ async def test_cancellation_logged():
     captured = []
     sink_id = logger.add(lambda msg: captured.append(str(msg)), level="INFO")
     try:
+
         async def _slow():
             await asyncio.sleep(100)
 

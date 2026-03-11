@@ -9,10 +9,10 @@ Depends on: models (Requisition, Requirement, Offer), database
 
 from datetime import datetime, timezone
 
+from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
 from ..models import Offer, Requirement, Requisition
 from ..utils.normalization import (
@@ -21,7 +21,6 @@ from ..utils.normalization import (
     normalize_mpn_key,
     normalize_packaging,
 )
-
 
 # ---------------------------------------------------------------------------
 # Datetime helpers

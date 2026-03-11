@@ -72,13 +72,7 @@ def score_sighting_v2(
     fields_present = sum(1 for f in [has_price, has_qty, has_lead_time, has_condition] if f)
     completeness = (fields_present / 4.0) * 100.0
 
-    total = (
-        trust * 0.30
-        + price_f * 0.25
-        + qty_f * 0.20
-        + freshness * 0.15
-        + completeness * 0.10
-    )
+    total = trust * 0.30 + price_f * 0.25 + qty_f * 0.20 + freshness * 0.15 + completeness * 0.10
     components = {
         "trust": round(trust, 1),
         "price": round(price_f, 1),

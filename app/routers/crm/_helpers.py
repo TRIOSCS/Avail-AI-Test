@@ -133,7 +133,7 @@ def quote_to_dict(q: Quote, db=None) -> dict:
     is_expired = False
     days_until_expiry = None
     if q.sent_at and q.validity_days:
-        sent_date = q.sent_at.date() if hasattr(q.sent_at, 'date') else q.sent_at
+        sent_date = q.sent_at.date() if hasattr(q.sent_at, "date") else q.sent_at
         expiry_date = sent_date + timedelta(days=q.validity_days)
         days_until_expiry = (expiry_date - date.today()).days
         is_expired = days_until_expiry < 0

@@ -8,13 +8,12 @@ Called by: pytest
 Depends on: app/templates/index.html, app/static/app.js, app/static/styles.css
 """
 
-import re
 import subprocess
 
 import pytest
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="module")
 def index_html():
@@ -36,17 +35,16 @@ def styles_css():
 
 # ── JS Syntax ─────────────────────────────────────────────────────────────
 
+
 class TestJSSyntaxAfterFramework:
     def test_app_js_still_parses(self):
         """app.js passes Node.js syntax check after framework additions."""
-        result = subprocess.run(
-            ["node", "-c", "app/static/app.js"],
-            capture_output=True, text=True, timeout=10
-        )
+        result = subprocess.run(["node", "-c", "app/static/app.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
 
 # ── Context Panel ─────────────────────────────────────────────────────────
+
 
 class TestContextPanel:
     def test_ctx_panel_html_exists(self, index_html):
@@ -56,7 +54,7 @@ class TestContextPanel:
         assert 'id="ctxToggle"' in index_html
 
     def test_ctx_tabs_exist(self, index_html):
-        for tab in ['summary', 'thread', 'tasks', 'files', 'history']:
+        for tab in ["summary", "thread", "tasks", "files", "history"]:
             assert f'data-ctx-tab="{tab}"' in index_html, f"Missing ctx tab: {tab}"
 
     def test_ctx_body_placeholder(self, index_html):
@@ -107,6 +105,7 @@ class TestContextPanel:
 
 # ── Universal Intake Bar ──────────────────────────────────────────────────
 
+
 class TestIntakeBar:
     def test_intake_bar_html_exists(self, index_html):
         assert 'id="intakeBar"' in index_html
@@ -155,6 +154,7 @@ class TestIntakeBar:
 
 # ── Object Page Components ────────────────────────────────────────────────
 
+
 class TestObjectPageComponents:
     def test_renderObjHeader_function(self, app_js):
         assert "function renderObjHeader(" in app_js
@@ -188,6 +188,7 @@ class TestObjectPageComponents:
 
 # ── Follow-up Items ───────────────────────────────────────────────────────
 
+
 class TestFollowupItems:
     def test_followup_css(self, styles_css):
         assert ".followup-item" in styles_css
@@ -195,11 +196,12 @@ class TestFollowupItems:
         assert ".followup-check.done" in styles_css
 
     def test_thread_item_tags(self, styles_css):
-        for tag in ['question', 'decision', 'blocker', 'action']:
+        for tag in ["question", "decision", "blocker", "action"]:
             assert f".thread-item-tag.{tag}" in styles_css, f"Missing thread tag: {tag}"
 
 
 # ── Action Bar ────────────────────────────────────────────────────────────
+
 
 class TestActionBar:
     def test_action_bar_css(self, styles_css):
@@ -208,6 +210,7 @@ class TestActionBar:
 
 
 # ── Responsive ────────────────────────────────────────────────────────────
+
 
 class TestContextPanelResponsive:
     def test_mobile_ctx_panel_full_width(self, styles_css):
@@ -221,18 +224,19 @@ class TestContextPanelResponsive:
 
 # ── Window Exports ────────────────────────────────────────────────────────
 
+
 class TestWindowExports:
     def test_context_panel_exported(self, app_js):
         """Context panel functions are exported to window."""
-        for fn in ['toggleContextPanel', 'switchCtxTab', 'bindContextPanel', 'unbindContextPanel']:
+        for fn in ["toggleContextPanel", "switchCtxTab", "bindContextPanel", "unbindContextPanel"]:
             assert fn in app_js
 
     def test_intake_bar_exported(self, app_js):
         """Intake bar functions are exported to window."""
-        for fn in ['showIntakeBar', 'hideIntakeBar', '_intakeUpload', '_intakeClose', '_intakeConfirm']:
+        for fn in ["showIntakeBar", "hideIntakeBar", "_intakeUpload", "_intakeClose", "_intakeConfirm"]:
             assert fn in app_js
 
     def test_shared_helpers_exported(self, app_js):
         """Shared page helper functions are exported to window."""
-        for fn in ['renderObjHeader', 'renderStatusStrip', 'renderBlockerStrip', 'renderAiCard']:
+        for fn in ["renderObjHeader", "renderStatusStrip", "renderBlockerStrip", "renderAiCard"]:
             assert fn in app_js

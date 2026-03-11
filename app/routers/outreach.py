@@ -68,9 +68,7 @@ async def send_outreach(
             "message": {
                 "subject": req.subject,
                 "body": {"contentType": "HTML", "content": html_body},
-                "toRecipients": [
-                    {"emailAddress": {"address": r.email, "name": r.name}}
-                ],
+                "toRecipients": [{"emailAddress": {"address": r.email, "name": r.name}}],
                 "isReadReceiptRequested": False,
                 "isDeliveryReceiptRequested": False,
             },
@@ -88,13 +86,15 @@ async def send_outreach(
             failed.append({"name": r.name, "email": r.email, "company": r.company, "error": str(e)[:200]})
 
     # Log activity
-    db.add(ActivityLog(
-        user_id=user.id,
-        activity_type="outreach",
-        channel="email",
-        summary=f"Sent to {len(sent)}/{len(req.recipients)} recipients: {req.subject[:100]}",
-        created_at=datetime.now(timezone.utc),
-    ))
+    db.add(
+        ActivityLog(
+            user_id=user.id,
+            activity_type="outreach",
+            channel="email",
+            summary=f"Sent to {len(sent)}/{len(req.recipients)} recipients: {req.subject[:100]}",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
     db.commit()
 
     return OutreachResult(sent=sent, failed=failed)

@@ -1,8 +1,9 @@
 """Tests for workflow state clarity features — RFQ failures, retry endpoint, buy plan resubmission."""
 
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.models.buy_plan import BuyPlanStatus, BuyPlanV3
 from app.models.offers import Contact
@@ -10,7 +11,7 @@ from app.models.offers import Contact
 
 @pytest.fixture
 def _rfq_requisition(db_session, test_user):
-    from app.models import Requisition, Requirement
+    from app.models import Requirement, Requisition
 
     req = Requisition(name="RFQ Test Req", status="active", created_by=test_user.id)
     db_session.add(req)
@@ -171,8 +172,8 @@ class TestVendorResponseTerminalStates:
 class TestBuyPlanResubmission:
     @pytest.fixture
     def _halted_plan(self, db_session, test_user, _rfq_requisition):
-        from app.models.quotes import Quote
         from app.models.crm import Company, CustomerSite
+        from app.models.quotes import Quote
 
         co = Company(name="BP Test Co")
         db_session.add(co)

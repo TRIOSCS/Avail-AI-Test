@@ -10,7 +10,6 @@ Depends on: conftest.py fixtures, app/services/strategic_vendor_service.py,
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import User, VendorCard
@@ -24,6 +23,7 @@ def _utcnow_naive():
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _make_vendor(db: Session, name: str) -> VendorCard:
     """Create a vendor card with the given name."""
@@ -54,6 +54,7 @@ def _make_user(db: Session, email: str) -> User:
 
 
 # ── Service layer tests ─────────────────────────────────────────────
+
 
 class TestClaimVendor:
     def test_claim_success(self, db_session: Session, test_user: User, test_vendor_card: VendorCard):
@@ -105,9 +106,11 @@ class TestDropVendor:
         assert ok is True
         assert err is None
         # Verify released
-        record = db_session.query(StrategicVendor).filter_by(
-            user_id=test_user.id, vendor_card_id=test_vendor_card.id
-        ).first()
+        record = (
+            db_session.query(StrategicVendor)
+            .filter_by(user_id=test_user.id, vendor_card_id=test_vendor_card.id)
+            .first()
+        )
         assert record.released_at is not None
         assert record.release_reason == "dropped"
 
@@ -234,6 +237,7 @@ class TestQueries:
 
 # ── API endpoint tests ──────────────────────────────────────────────
 
+
 class TestStrategicAPI:
     def test_get_mine(self, client, db_session, test_user, test_vendor_card):
         svc.claim_vendor(db_session, test_user.id, test_vendor_card.id)
@@ -265,10 +269,13 @@ class TestStrategicAPI:
         v1 = _make_vendor(db_session, "Replace Old")
         v2 = _make_vendor(db_session, "Replace New")
         svc.claim_vendor(db_session, test_user.id, v1.id)
-        resp = client.post("/api/strategic-vendors/replace", json={
-            "drop_vendor_card_id": v1.id,
-            "claim_vendor_card_id": v2.id,
-        })
+        resp = client.post(
+            "/api/strategic-vendors/replace",
+            json={
+                "drop_vendor_card_id": v1.id,
+                "claim_vendor_card_id": v2.id,
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["vendor_card_id"] == v2.id
 

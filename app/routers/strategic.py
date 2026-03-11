@@ -27,6 +27,7 @@ class ReplaceRequest(BaseModel):
 def _vendor_to_dict(record):
     """Convert a StrategicVendor record to API response dict."""
     from datetime import datetime, timezone
+
     from app.services.strategic_vendor_service import _ensure_utc
 
     now = datetime.now(timezone.utc)
@@ -93,9 +94,7 @@ def replace_vendor(
     user=Depends(require_buyer),
 ):
     """Atomic swap: drop one vendor, claim another."""
-    record, err = svc.replace_vendor(
-        db, user.id, body.drop_vendor_card_id, body.claim_vendor_card_id
-    )
+    record, err = svc.replace_vendor(db, user.id, body.drop_vendor_card_id, body.claim_vendor_card_id)
     if not record:
         return JSONResponse(status_code=409, content={"error": err, "status_code": 409})
     return _vendor_to_dict(record)
@@ -125,10 +124,7 @@ def open_pool(
     """List vendors not claimed by anyone."""
     vendors, total = svc.get_open_pool(db, limit=limit, offset=offset, search=search)
     return {
-        "vendors": [
-            {"id": v.id, "display_name": v.display_name, "vendor_score": v.vendor_score}
-            for v in vendors
-        ],
+        "vendors": [{"id": v.id, "display_name": v.display_name, "vendor_score": v.vendor_score} for v in vendors],
         "total": total,
         "limit": limit,
         "offset": offset,

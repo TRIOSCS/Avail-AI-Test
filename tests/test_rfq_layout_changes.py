@@ -14,7 +14,7 @@ Depends on: conftest.py fixtures (client, db_session, test_user, test_requisitio
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-from app.models import Offer, Requirement, Requisition, User
+from app.models import Offer, Requirement
 
 
 def _make_task(db_session, requisition, user, **kwargs):
@@ -85,8 +85,11 @@ def test_offers_endpoint_returns_grouped_by_requirement(client, db_session, test
     # Create exact and substitute offers
     _make_offer(db_session, test_requisition, req, vendor_name="Digi-Key", notes="Exact match")
     _make_offer(
-        db_session, test_requisition, req,
-        vendor_name="Rochester", mpn=req.primary_mpn + "-ALT",
+        db_session,
+        test_requisition,
+        req,
+        vendor_name="Rochester",
+        mpn=req.primary_mpn + "-ALT",
         notes="Substitute part",
     )
 
@@ -115,13 +118,17 @@ def test_offers_have_notes_field(client, db_session, test_requisition, test_user
 def test_tasks_endpoint_returns_task_type_and_assignee(mock_scoring, client, db_session, test_requisition, test_user):
     """GET /api/requisitions/{id}/tasks returns tasks with type and assignee_name."""
     _make_task(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         title="Follow up with vendor",
         task_type="sourcing",
         priority=3,
     )
     _make_task(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         title="Prepare customer quote",
         task_type="sales",
         priority=2,

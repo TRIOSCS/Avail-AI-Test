@@ -83,52 +83,74 @@ class TestScoreSightingV2:
 
     def test_qty_full_coverage(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False,
-            qty_available=1000, target_qty=1000,
+            vendor_score=50.0,
+            is_authorized=False,
+            qty_available=1000,
+            target_qty=1000,
         )
         assert comp["qty"] == 100.0
 
     def test_qty_half_coverage(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False,
-            qty_available=500, target_qty=1000,
+            vendor_score=50.0,
+            is_authorized=False,
+            qty_available=500,
+            target_qty=1000,
         )
         assert comp["qty"] == 50.0
 
     def test_freshness_zero_age(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False, age_hours=0.0,
+            vendor_score=50.0,
+            is_authorized=False,
+            age_hours=0.0,
         )
         assert comp["freshness"] == 100.0
 
     def test_freshness_decays(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False, age_hours=48.0,
+            vendor_score=50.0,
+            is_authorized=False,
+            age_hours=48.0,
         )
         assert comp["freshness"] < 100.0
 
     def test_completeness_all_fields(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False,
-            has_price=True, has_qty=True, has_lead_time=True, has_condition=True,
+            vendor_score=50.0,
+            is_authorized=False,
+            has_price=True,
+            has_qty=True,
+            has_lead_time=True,
+            has_condition=True,
         )
         assert comp["completeness"] == 100.0
 
     def test_completeness_no_fields(self):
         _, comp = score_sighting_v2(
-            vendor_score=50.0, is_authorized=False,
-            has_price=False, has_qty=False, has_lead_time=False, has_condition=False,
+            vendor_score=50.0,
+            is_authorized=False,
+            has_price=False,
+            has_qty=False,
+            has_lead_time=False,
+            has_condition=False,
         )
         assert comp["completeness"] == 0.0
 
     def test_total_weighted_sum(self):
         """Verify total = weighted sum of components."""
         total, comp = score_sighting_v2(
-            vendor_score=80.0, is_authorized=False,
-            unit_price=1.0, median_price=1.0,
-            qty_available=1000, target_qty=1000,
+            vendor_score=80.0,
+            is_authorized=False,
+            unit_price=1.0,
+            median_price=1.0,
+            qty_available=1000,
+            target_qty=1000,
             age_hours=0.0,
-            has_price=True, has_qty=True, has_lead_time=True, has_condition=True,
+            has_price=True,
+            has_qty=True,
+            has_lead_time=True,
+            has_condition=True,
         )
         expected = (
             comp["trust"] * 0.30

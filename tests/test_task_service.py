@@ -7,7 +7,6 @@ for the pipeline task board.
 Depends on: conftest.py fixtures, app/services/task_service.py, app/routers/task.py
 """
 
-from datetime import datetime, timezone
 from unittest.mock import patch
 
 from sqlalchemy.orm import Session

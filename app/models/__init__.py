@@ -100,6 +100,9 @@ from .sourcing import (  # noqa: F401
     Sighting,
 )
 
+# Strategic Vendors (per-buyer assignments with 39-day TTL)
+from .strategic import StrategicVendor  # noqa: F401
+
 # Sync
 from .sync import SyncLog  # noqa: F401
 
@@ -118,9 +121,6 @@ from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # Unified Score (cross-role leaderboard)
 from .unified_score import UnifiedScoreSnapshot  # noqa: F401
-
-# Strategic Vendors (per-buyer assignments with 39-day TTL)
-from .strategic import StrategicVendor  # noqa: F401
 
 # Vendors
 from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401

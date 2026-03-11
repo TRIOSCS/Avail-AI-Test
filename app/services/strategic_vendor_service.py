@@ -85,7 +85,7 @@ def claim_vendor(
     if existing:
         if existing.user_id == user_id:
             return None, "You already have this vendor as strategic."
-        return None, f"This vendor is already claimed by another buyer."
+        return None, "This vendor is already claimed by another buyer."
 
     # Verify vendor exists
     vendor = db.query(VendorCard).filter(VendorCard.id == vendor_card_id).first()
@@ -107,14 +107,14 @@ def claim_vendor(
         db.flush()
     logger.info(
         "Strategic vendor claimed: user={} vendor={} expires={}",
-        user_id, vendor_card_id, record.expires_at,
+        user_id,
+        vendor_card_id,
+        record.expires_at,
     )
     return record, None
 
 
-def drop_vendor(
-    db: Session, user_id: int, vendor_card_id: int, *, commit: bool = True
-) -> tuple[bool, str | None]:
+def drop_vendor(db: Session, user_id: int, vendor_card_id: int, *, commit: bool = True) -> tuple[bool, str | None]:
     """Drop a strategic vendor back to open pool. Returns (success, error).
 
     When commit=False, flushes instead of committing — caller is responsible
@@ -198,7 +198,8 @@ def record_offer(db: Session, vendor_card_id: int) -> bool:
     db.commit()
     logger.info(
         "Strategic vendor clock reset: vendor={} new_expires={}",
-        vendor_card_id, record.expires_at,
+        vendor_card_id,
+        record.expires_at,
     )
     return True
 
@@ -266,11 +267,7 @@ def get_open_pool(
     db: Session, limit: int = 50, offset: int = 0, search: str | None = None
 ) -> tuple[list[VendorCard], int]:
     """Return vendors not claimed by any buyer. Returns (vendors, total_count)."""
-    claimed_ids = (
-        db.query(StrategicVendor.vendor_card_id)
-        .filter(StrategicVendor.released_at.is_(None))
-        .subquery()
-    )
+    claimed_ids = db.query(StrategicVendor.vendor_card_id).filter(StrategicVendor.released_at.is_(None)).subquery()
     q = db.query(VendorCard).filter(VendorCard.id.notin_(claimed_ids))
 
     if search:

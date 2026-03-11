@@ -152,9 +152,17 @@ class TestSidebarNavigation:
     """Full coverage of sidebar navigation groups and buttons."""
 
     ALL_NAV_IDS = [
-        "navDashboard", "navScorecard",
-        "navReqs", "navProactive", "navMaterials", "navBuyPlans",
-        "navCustomers", "navVendors", "navStrategic", "navProspecting", "navContacts",
+        "navDashboard",
+        "navScorecard",
+        "navReqs",
+        "navProactive",
+        "navMaterials",
+        "navBuyPlans",
+        "navCustomers",
+        "navVendors",
+        "navStrategic",
+        "navProspecting",
+        "navContacts",
         "navSettings",
     ]
 
@@ -180,19 +188,22 @@ class TestSidebarNavigation:
             el = authed_page.locator(f"#{nav_id}")
             assert el.count() > 0 or nav_id == "navSettings", f"#{nav_id} missing from DOM"
 
-    @pytest.mark.parametrize("nav_id,view_id", [
-        ("navReqs", "view-list"),
-        ("navVendors", "view-vendors"),
-        ("navMaterials", "view-materials"),
-        ("navCustomers", "view-customers"),
-        ("navProactive", "view-proactive"),
-        ("navBuyPlans", "view-buyplans"),
-        ("navDashboard", "view-dashboard"),
-        ("navScorecard", "view-scorecard"),
-        ("navContacts", "view-contacts"),
-        ("navStrategic", "view-strategic"),
-        ("navProspecting", "view-suggested"),
-    ])
+    @pytest.mark.parametrize(
+        "nav_id,view_id",
+        [
+            ("navReqs", "view-list"),
+            ("navVendors", "view-vendors"),
+            ("navMaterials", "view-materials"),
+            ("navCustomers", "view-customers"),
+            ("navProactive", "view-proactive"),
+            ("navBuyPlans", "view-buyplans"),
+            ("navDashboard", "view-dashboard"),
+            ("navScorecard", "view-scorecard"),
+            ("navContacts", "view-contacts"),
+            ("navStrategic", "view-strategic"),
+            ("navProspecting", "view-suggested"),
+        ],
+    )
     def test_nav_shows_correct_view(self, authed_page, base_url, nav_id, view_id):
         """Each nav button shows its corresponding view."""
         wait_for_app(authed_page, base_url)
@@ -1098,8 +1109,15 @@ class TestAPIHealth:
         """Navigating through all major views produces no API errors."""
         failed = collect_failed_apis(authed_page)
         wait_for_app(authed_page, base_url)
-        for nav in ["navVendors", "navMaterials", "navCustomers", "navProactive",
-                     "navBuyPlans", "navContacts", "navReqs"]:
+        for nav in [
+            "navVendors",
+            "navMaterials",
+            "navCustomers",
+            "navProactive",
+            "navBuyPlans",
+            "navContacts",
+            "navReqs",
+        ]:
             nav_click(authed_page, nav)
             authed_page.wait_for_timeout(1000)
         assert len(failed) == 0, f"Failed API calls during navigation: {failed}"
@@ -1122,9 +1140,19 @@ class TestConsoleErrors:
         """No JS errors navigating through all views."""
         errors = collect_errors(authed_page)
         wait_for_app(authed_page, base_url)
-        for nav in ["navVendors", "navMaterials", "navCustomers", "navProactive",
-                     "navBuyPlans", "navDashboard", "navScorecard",
-                     "navContacts", "navStrategic", "navProspecting", "navReqs"]:
+        for nav in [
+            "navVendors",
+            "navMaterials",
+            "navCustomers",
+            "navProactive",
+            "navBuyPlans",
+            "navDashboard",
+            "navScorecard",
+            "navContacts",
+            "navStrategic",
+            "navProspecting",
+            "navReqs",
+        ]:
             nav_click(authed_page, nav)
             authed_page.wait_for_timeout(300)
         assert len(errors) == 0, f"JS errors during navigation: {errors}"
@@ -1133,8 +1161,14 @@ class TestConsoleErrors:
         """No JS errors when opening and closing modals."""
         errors = collect_errors(authed_page)
         wait_for_app(authed_page, base_url)
-        for modal in ["newReqModal", "newCompanyModal", "vendorContactModal",
-                       "vendorLogCallModal", "addSiteModal", "logCallModal"]:
+        for modal in [
+            "newReqModal",
+            "newCompanyModal",
+            "vendorContactModal",
+            "vendorLogCallModal",
+            "addSiteModal",
+            "logCallModal",
+        ]:
             open_modal(authed_page, modal)
             authed_page.wait_for_timeout(200)
             close_modal(authed_page, modal)

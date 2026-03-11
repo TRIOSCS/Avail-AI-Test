@@ -45,6 +45,7 @@ def _redact_api_keys(text: str | None) -> str | None:
     """Redact potential API keys from notification text to prevent key leakage."""
     if not text:
         return text
+
     # Redact named key patterns (api_key=xxx, token=xxx, etc.)
     def _mask_named(m):
         prefix = m.group(0)[: m.start(2) - m.start(0)]
@@ -56,6 +57,7 @@ def _redact_api_keys(text: str | None) -> str | None:
         return f"{prefix}{quote}{masked}{quote}"
 
     result = _API_KEY_RE.sub(_mask_named, text)
+
     # Redact long bare tokens that look like API keys in URLs
     def _mask_bare(m):
         key = m.group(0)
@@ -71,6 +73,7 @@ def _redact_api_keys(text: str | None) -> str | None:
             parts[1] = _BARE_KEY_RE.sub(_mask_bare, parts[1])
             result = "?".join(parts)
     return result
+
 
 # Known good MPN for testing — universally available across all distributors
 DEEP_TEST_MPN = "LM317"

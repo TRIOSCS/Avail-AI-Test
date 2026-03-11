@@ -43,27 +43,21 @@ class TestMainViewPills:
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
-        assert 'data-view="purchasing"' in pills_html, (
-            "Desktop mainPills missing data-view='purchasing' button"
-        )
+        assert 'data-view="purchasing"' in pills_html, "Desktop mainPills missing data-view='purchasing' button"
 
     def test_desktop_sourcing_button_calls_purchasing(self, index_html):
         """The desktop Sourcing button onclick must call setMainView('purchasing')."""
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
-        assert "setMainView('purchasing'" in pills_html, (
-            "Desktop Sourcing button should call setMainView('purchasing')"
-        )
+        assert "setMainView('purchasing'" in pills_html, "Desktop Sourcing button should call setMainView('purchasing')"
 
     def test_mobile_pills_use_purchasing(self, index_html):
         """The mobile #mobilePills buttons should use 'purchasing' not 'sourcing'."""
         match = re.search(r'id="mobilePills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mobilePills element not found"
         pills_html = match.group(1)
-        assert 'data-view="sourcing"' not in pills_html, (
-            "Mobile pills still uses data-view='sourcing'"
-        )
+        assert 'data-view="sourcing"' not in pills_html, "Mobile pills still uses data-view='sourcing'"
         assert 'data-view="purchasing"' in pills_html
 
     def test_mobile_req_pills_use_purchasing(self, index_html):

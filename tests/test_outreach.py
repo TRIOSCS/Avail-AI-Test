@@ -72,22 +72,28 @@ def test_send_outreach_partial_failure(client: TestClient, outreach_payload):
 
 def test_send_outreach_no_recipients(client: TestClient):
     """Empty recipients list returns 400."""
-    resp = client.post("/api/outreach/send", json={
-        "recipients": [],
-        "subject": "Test",
-        "body": "Hi,\n\nTest.",
-    })
+    resp = client.post(
+        "/api/outreach/send",
+        json={
+            "recipients": [],
+            "subject": "Test",
+            "body": "Hi,\n\nTest.",
+        },
+    )
     assert resp.status_code == 400
 
 
 def test_send_outreach_too_many_recipients(client: TestClient):
     """More than 50 recipients returns 400."""
     recipients = [{"name": f"R{i}", "email": f"r{i}@test.com", "company": ""} for i in range(51)]
-    resp = client.post("/api/outreach/send", json={
-        "recipients": recipients,
-        "subject": "Test",
-        "body": "Hi,\n\nTest.",
-    })
+    resp = client.post(
+        "/api/outreach/send",
+        json={
+            "recipients": recipients,
+            "subject": "Test",
+            "body": "Hi,\n\nTest.",
+        },
+    )
     assert resp.status_code == 400
 
 
@@ -97,11 +103,14 @@ def test_send_outreach_graph_error_response(client: TestClient):
         mock_gc = MockGC.return_value
         mock_gc.post_json = AsyncMock(return_value={"error": 403, "detail": "Forbidden"})
 
-        resp = client.post("/api/outreach/send", json={
-            "recipients": [{"name": "Test", "email": "test@example.com", "company": "Co"}],
-            "subject": "Test",
-            "body": "Hi,\n\nTest.",
-        })
+        resp = client.post(
+            "/api/outreach/send",
+            json={
+                "recipients": [{"name": "Test", "email": "test@example.com", "company": "Co"}],
+                "subject": "Test",
+                "body": "Hi,\n\nTest.",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["failed"]) == 1

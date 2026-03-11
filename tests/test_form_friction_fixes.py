@@ -18,19 +18,33 @@ import re
 from pathlib import Path
 
 import pytest
-from app.schemas.crm import SiteCreate, SiteUpdate
 
+from app.schemas.crm import SiteCreate, SiteUpdate
 
 # ── Q5: Payment Terms Dropdown ──────────────────────────────────────────
 
 EXPECTED_PAYMENT_OPTIONS = [
-    "Net 15", "Net 30", "Net 45", "Net 60", "Net 90",
-    "COD", "CIA", "2/10 Net 30", "Due on Receipt", "Prepaid",
+    "Net 15",
+    "Net 30",
+    "Net 45",
+    "Net 60",
+    "Net 90",
+    "COD",
+    "CIA",
+    "2/10 Net 30",
+    "Due on Receipt",
+    "Prepaid",
 ]
 
 EXPECTED_SHIPPING_OPTIONS = [
-    "FOB Origin", "FOB Destination", "Prepaid",
-    "Collect", "DDP", "EXW", "FCA", "CIF",
+    "FOB Origin",
+    "FOB Destination",
+    "Prepaid",
+    "Collect",
+    "DDP",
+    "EXW",
+    "FCA",
+    "CIF",
 ]
 
 
@@ -133,16 +147,14 @@ class TestAutoNameRequisition:
         assert match, "selectSite function not found"
         body = match.group(1)
         assert "nrName" in body, "Should reference the name input"
-        assert "toLocaleString" in body or "month" in body.lower() or "Mon" in body, \
-            "Should format month for auto-name"
+        assert "toLocaleString" in body or "month" in body.lower() or "Mon" in body, "Should format month for auto-name"
 
     def test_auto_name_only_when_empty(self, crm_js: str) -> None:
         """Auto-name should only fire when name field is empty (no overwrite)."""
         match = re.search(r"function selectSite\(.*?\{(.+?)\n\}", crm_js, re.DOTALL)
         assert match
         body = match.group(1)
-        assert "!nrName.value.trim()" in body, \
-            "Should check that name is empty before auto-populating"
+        assert "!nrName.value.trim()" in body, "Should check that name is empty before auto-populating"
 
 
 # ── Q3: Sticky Vendor on Mobile Offer Form ──────────────────────────────
@@ -187,11 +199,11 @@ class TestAppJsQuoteTerms:
 
     def test_ddq_terms_uses_helper(self, app_js: str) -> None:
         """ddqTerms should use _termsSelectHtml helper for rendering."""
-        assert "_termsSelectHtml('ddqTerms-'" in app_js or "_termsSelectHtml(\"ddqTerms-\"" in app_js
+        assert "_termsSelectHtml('ddqTerms-'" in app_js or '_termsSelectHtml("ddqTerms-"' in app_js
 
     def test_ddq_ship_uses_helper(self, app_js: str) -> None:
         """ddqShip should use _termsSelectHtml helper for rendering."""
-        assert "_termsSelectHtml('ddqShip-'" in app_js or "_termsSelectHtml(\"ddqShip-\"" in app_js
+        assert "_termsSelectHtml('ddqShip-'" in app_js or '_termsSelectHtml("ddqShip-"' in app_js
 
     def test_wire_terms_select_for_drafts(self, app_js: str) -> None:
         """Draft quotes wire up _wireTermsSelect for payment/shipping."""
@@ -217,19 +229,19 @@ class TestBulkOwnerDropdown:
         """bulkAssignOwner should NOT use promptInput."""
         # Extract just the function body
         idx = crm_js.index("async function bulkAssignOwner()")
-        chunk = crm_js[idx:idx + 2000]
+        chunk = crm_js[idx : idx + 2000]
         assert "promptInput" not in chunk
 
     def test_uses_select_dropdown(self, crm_js: str) -> None:
         """bulkAssignOwner should create a <select> for user selection."""
         idx = crm_js.index("async function bulkAssignOwner()")
-        chunk = crm_js[idx:idx + 2000]
+        chunk = crm_js[idx : idx + 2000]
         assert "_bulkOwnerSelect" in chunk
 
     def test_fetches_user_list(self, crm_js: str) -> None:
         """bulkAssignOwner should use the cached user list."""
         idx = crm_js.index("async function bulkAssignOwner()")
-        chunk = crm_js[idx:idx + 2000]
+        chunk = crm_js[idx : idx + 2000]
         assert "_userListCache" in chunk
 
 
@@ -357,7 +369,7 @@ class TestStaleModalPrevention:
     def test_vendor_modal_clears_fields(self, crm_js: str) -> None:
         """openNewVendorModal should clear all vendor contact fields."""
         idx = crm_js.index("function openNewVendorModal()")
-        chunk = crm_js[idx:idx + 500]
+        chunk = crm_js[idx : idx + 500]
         assert "vcFullName" in chunk
         assert "vcEmail" in chunk
         assert "vcPhone" in chunk
@@ -366,7 +378,7 @@ class TestStaleModalPrevention:
     def test_vendor_modal_resets_hidden_ids(self, crm_js: str) -> None:
         """openNewVendorModal should reset hidden card/contact IDs."""
         idx = crm_js.index("function openNewVendorModal()")
-        chunk = crm_js[idx:idx + 500]
+        chunk = crm_js[idx : idx + 500]
         assert "'vcCardId', 'value', ''" in chunk
         assert "'vcContactId', 'value', ''" in chunk
 
@@ -438,13 +450,13 @@ class TestStyledDeleteConfirmation:
     def test_no_browser_confirm_in_delete_task(self, app_js: str) -> None:
         """_deleteTask should NOT use browser confirm()."""
         idx = app_js.index("function _deleteTask(")
-        chunk = app_js[idx:idx + 800]
+        chunk = app_js[idx : idx + 800]
         assert "confirm(" not in chunk
 
     def test_uses_confirmAction(self, app_js: str) -> None:
         """_deleteTask should use confirmAction styled modal."""
         idx = app_js.index("function _deleteTask(")
-        chunk = app_js[idx:idx + 800]
+        chunk = app_js[idx : idx + 800]
         assert "confirmAction(" in chunk
 
 
@@ -464,28 +476,34 @@ class TestGuardBtnProtection:
         path = Path(__file__).parent.parent / "app" / "static" / "app.js"
         return path.read_text()
 
-    @pytest.mark.parametrize("func_name", [
-        "saveEditCompany",
-        "saveSiteContact",
-        "saveLogCall",
-        "saveLogNote",
-        "addSite",
-    ])
+    @pytest.mark.parametrize(
+        "func_name",
+        [
+            "saveEditCompany",
+            "saveSiteContact",
+            "saveLogCall",
+            "saveLogNote",
+            "addSite",
+        ],
+    )
     def test_crm_save_uses_guardBtn(self, crm_js: str, func_name: str) -> None:
         """CRM save functions should use guardBtn()."""
         idx = crm_js.index(f"function {func_name}(")
-        chunk = crm_js[idx:idx + 2000]
+        chunk = crm_js[idx : idx + 2000]
         assert "guardBtn(" in chunk, f"{func_name} missing guardBtn()"
 
-    @pytest.mark.parametrize("func_name", [
-        "saveVendorContact",
-        "saveVendorLogCall",
-        "saveVendorLogNote",
-    ])
+    @pytest.mark.parametrize(
+        "func_name",
+        [
+            "saveVendorContact",
+            "saveVendorLogCall",
+            "saveVendorLogNote",
+        ],
+    )
     def test_app_save_uses_guardBtn(self, app_js: str, func_name: str) -> None:
         """App save functions should use guardBtn()."""
         idx = app_js.index(f"function {func_name}(")
-        chunk = app_js[idx:idx + 2000]
+        chunk = app_js[idx : idx + 2000]
         assert "guardBtn(" in chunk, f"{func_name} missing guardBtn()"
 
 
@@ -502,14 +520,17 @@ class TestRequiredFieldIndicators:
 
     RED_ASTERISK = '<span style="color:var(--red)">*</span>'
 
-    @pytest.mark.parametrize("field_label", [
-        "Company Name",   # newCompanyModal
-        "Name",           # newReqModal
-        "Site Name",      # addSiteModal
-        "Phone",          # logCallModal
-        "Note",           # logNoteModal + vendorLogNoteModal
-        "Email",          # vendorContactModal
-    ])
+    @pytest.mark.parametrize(
+        "field_label",
+        [
+            "Company Name",  # newCompanyModal
+            "Name",  # newReqModal
+            "Site Name",  # addSiteModal
+            "Phone",  # logCallModal
+            "Note",  # logNoteModal + vendorLogNoteModal
+            "Email",  # vendorContactModal
+        ],
+    )
     def test_required_field_has_red_asterisk(self, template_html: str, field_label: str) -> None:
         """Required fields should use the red asterisk <span> pattern."""
         pattern = f"{field_label} {self.RED_ASTERISK}"
@@ -518,7 +539,7 @@ class TestRequiredFieldIndicators:
     def test_no_inline_asterisk_pattern(self, template_html: str) -> None:
         """No labels should use inline 'Label *' pattern without styling."""
         # These old patterns should be replaced with styled spans
-        for old_pattern in ['>Phone *<', '>Name *<', '>Note *<', '>Email *<']:
+        for old_pattern in [">Phone *<", ">Name *<", ">Note *<", ">Email *<"]:
             assert old_pattern not in template_html, f"Found unstyled asterisk: {old_pattern}"
 
 
@@ -538,29 +559,29 @@ class TestEnterKeyHandlers:
         assert 'id="ecName"' in template_html
         # Find the line with ecName and check for onkeydown
         idx = template_html.index('id="ecName"')
-        chunk = template_html[idx - 200:idx + 200]
+        chunk = template_html[idx - 200 : idx + 200]
         assert "saveEditCompany()" in chunk
 
     def test_add_site_enter_handler(self, template_html: str) -> None:
         """asSiteName should have Enter key handler to save."""
         idx = template_html.index('id="asSiteName"')
-        chunk = template_html[idx - 200:idx + 200]
+        chunk = template_html[idx - 200 : idx + 200]
         assert "addSite()" in chunk
 
     def test_log_note_ctrl_enter(self, template_html: str) -> None:
         """lnNotes textarea should support Ctrl+Enter to save."""
         idx = template_html.index('id="lnNotes"')
-        chunk = template_html[idx - 200:idx + 400]
+        chunk = template_html[idx - 200 : idx + 400]
         assert "ctrlKey" in chunk or "metaKey" in chunk
 
     def test_vendor_log_note_ctrl_enter(self, template_html: str) -> None:
         """vlnNotes textarea should support Ctrl+Enter to save."""
         idx = template_html.index('id="vlnNotes"')
-        chunk = template_html[idx - 200:idx + 400]
+        chunk = template_html[idx - 200 : idx + 400]
         assert "ctrlKey" in chunk or "metaKey" in chunk
 
     def test_edit_company_name_required(self, template_html: str) -> None:
         """ecName should have required attribute."""
         idx = template_html.index('id="ecName"')
-        chunk = template_html[idx - 200:idx + 200]
+        chunk = template_html[idx - 200 : idx + 200]
         assert "required" in chunk

@@ -1,18 +1,17 @@
 """Tests for requisition_service — date normalization, validation, error mapping."""
 
-from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 
 from app.services.requisition_service import (
-    to_utc,
     parse_date_field,
     parse_positive_int,
     safe_commit,
+    to_utc,
 )
-
 
 # ---------------------------------------------------------------------------
 # to_utc()

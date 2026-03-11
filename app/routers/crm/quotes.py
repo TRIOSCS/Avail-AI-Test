@@ -72,14 +72,16 @@ async def recent_quote_terms(user: User = Depends(require_user), db: Session = D
         company_name = ""
         if q.customer_site and q.customer_site.company:
             company_name = q.customer_site.company.name or ""
-        results.append({
-            "quote_number": q.quote_number,
-            "customer_name": company_name,
-            "payment_terms": q.payment_terms or "",
-            "shipping_terms": q.shipping_terms or "",
-            "validity_days": q.validity_days or 7,
-            "notes": q.notes or "",
-        })
+        results.append(
+            {
+                "quote_number": q.quote_number,
+                "customer_name": company_name,
+                "payment_terms": q.payment_terms or "",
+                "shipping_terms": q.shipping_terms or "",
+                "validity_days": q.validity_days or 7,
+                "notes": q.notes or "",
+            }
+        )
     return results
 
 

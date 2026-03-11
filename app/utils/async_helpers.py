@@ -7,6 +7,7 @@ enrichment, analytics) never crashes the request handler.
 Called by: routers, services, jobs
 Depends on: loguru
 """
+
 import asyncio
 from typing import Any, Coroutine
 

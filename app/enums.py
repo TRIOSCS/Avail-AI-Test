@@ -55,6 +55,7 @@ class RequirementSourcingStatus(str, enum.Enum):
 
 class ContactStatus(str, enum.Enum):
     """RFQ outbound contact status."""
+
     sent = "sent"
     failed = "failed"
     opened = "opened"
@@ -68,6 +69,7 @@ class ContactStatus(str, enum.Enum):
 
 class VendorResponseStatus(str, enum.Enum):
     """Vendor response queue status."""
+
     new = "new"
     reviewed = "reviewed"
     rejected = "rejected"

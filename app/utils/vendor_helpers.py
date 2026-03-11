@@ -361,9 +361,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         "response_velocity_hours": card.response_velocity_hours,
         "last_contact_at": card.last_contact_at.isoformat() if card.last_contact_at else None,
         "brand_tags": card.brand_tags or [],
-        "commodity_tags": [
-            commodity_slug_to_display(t) for t in (card.commodity_tags or [])
-        ],
+        "commodity_tags": [commodity_slug_to_display(t) for t in (card.commodity_tags or [])],
         "material_tags_updated_at": card.material_tags_updated_at.isoformat()
         if card.material_tags_updated_at
         else None,

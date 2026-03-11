@@ -4,7 +4,6 @@ Called by: app/jobs/__init__.py via register_sourcing_refresh_jobs()
 Depends on: app.database, app.models, app.search_service
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
@@ -50,9 +49,7 @@ async def _job_refresh_stale_requisitions():
                 Requirement.primary_mpn.isnot(None),
             )
             .group_by(Requirement.id)
-            .having(
-                (func.max(Sighting.created_at) < cutoff) | (func.max(Sighting.created_at).is_(None))
-            )
+            .having((func.max(Sighting.created_at) < cutoff) | (func.max(Sighting.created_at).is_(None)))
             .limit(20)
             .all()
         )
@@ -71,9 +68,7 @@ async def _job_refresh_stale_requisitions():
                 sighting_count = len(result.get("sightings", []))
                 if sighting_count > 0:
                     refreshed += 1
-                    logger.debug(
-                        f"Auto-refresh: req {req.id} ({req.primary_mpn}) → {sighting_count} sightings"
-                    )
+                    logger.debug(f"Auto-refresh: req {req.id} ({req.primary_mpn}) → {sighting_count} sightings")
             except Exception as e:
                 logger.warning(f"Auto-refresh failed for req {req.id}: {e}")
                 continue

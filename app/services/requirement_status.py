@@ -124,9 +124,7 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
     return changed
 
 
-def claim_requisition(
-    requisition: Requisition, buyer: User, db: Session
-) -> bool:
+def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> bool:
     """Buyer claims a requisition for sourcing.
 
     Returns True if claim was set, False if already claimed by this buyer.
@@ -136,9 +134,7 @@ def claim_requisition(
         return False
 
     if requisition.claimed_by_id is not None:
-        raise ValueError(
-            f"Requisition already claimed by user {requisition.claimed_by_id}"
-        )
+        raise ValueError(f"Requisition already claimed by user {requisition.claimed_by_id}")
 
     requisition.claimed_by_id = buyer.id
     requisition.claimed_at = datetime.now(timezone.utc)

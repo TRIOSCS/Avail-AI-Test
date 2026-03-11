@@ -35,9 +35,7 @@ def upgrade() -> None:
         )
         # Create with the partial unique index from the start
         op.execute(
-            "CREATE UNIQUE INDEX uq_active_vendor_claim "
-            "ON strategic_vendors (vendor_card_id) "
-            "WHERE released_at IS NULL"
+            "CREATE UNIQUE INDEX uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
         )
         op.create_index("ix_strategic_user_released", "strategic_vendors", ["user_id", "released_at"])
         op.create_index("ix_strategic_expires_released", "strategic_vendors", ["expires_at", "released_at"])
@@ -46,9 +44,7 @@ def upgrade() -> None:
         # Table exists — replace lifetime unique with partial unique
         op.drop_constraint("uq_user_vendor_strategic", "strategic_vendors", type_="unique")
         op.execute(
-            "CREATE UNIQUE INDEX uq_active_vendor_claim "
-            "ON strategic_vendors (vendor_card_id) "
-            "WHERE released_at IS NULL"
+            "CREATE UNIQUE INDEX uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
         )
 
 
@@ -56,6 +52,4 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS uq_active_vendor_claim")
     conn = op.get_bind()
     if conn.dialect.has_table(conn, "strategic_vendors"):
-        op.create_unique_constraint(
-            "uq_user_vendor_strategic", "strategic_vendors", ["user_id", "vendor_card_id"]
-        )
+        op.create_unique_constraint("uq_user_vendor_strategic", "strategic_vendors", ["user_id", "vendor_card_id"])

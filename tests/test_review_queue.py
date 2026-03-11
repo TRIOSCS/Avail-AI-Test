@@ -71,11 +71,7 @@ class TestReviewQueueModel:
         db_session.commit()
 
         # Query T4 pending_review offers (review queue query)
-        queue = (
-            db_session.query(Offer)
-            .filter(Offer.evidence_tier == "T4", Offer.status == "pending_review")
-            .all()
-        )
+        queue = db_session.query(Offer).filter(Offer.evidence_tier == "T4", Offer.status == "pending_review").all()
         assert len(queue) == 1
         assert queue[0].parse_confidence == 0.65
 
