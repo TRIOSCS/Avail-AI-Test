@@ -120,6 +120,34 @@ class QuoteDetailResponse(BaseModel, extra="allow"):
     sent_at: str | None = None
 
 
+class QuoteSummaryResponse(BaseModel, extra="allow"):
+    """Lightweight quote-tab projection for inline requisition view.
+
+    Always populated — never blank. Shows quote status, buy plan linkage,
+    selected offers, and risk flags to drive CTAs.
+    """
+
+    requisition_id: int
+    has_quote: bool = False
+    has_buy_plan: bool = False
+    selected_offer_count: int = 0
+    total_offer_count: int = 0
+    risk_flags: list[dict] = Field(default_factory=list)
+    # Quote fields (present when has_quote=True)
+    quote_id: int | None = None
+    quote_number: str | None = None
+    quote_status: str | None = None
+    quote_revision: int | None = None
+    line_count: int | None = None
+    subtotal: float | None = None
+    total_margin_pct: float | None = None
+    quote_updated_at: str | None = None
+    # Buy plan fields (present when has_buy_plan=True)
+    buy_plan_id: int | None = None
+    buy_plan_status: str | None = None
+    buy_plan_line_count: int | None = None
+
+
 # ── Buy Plans ───────────────────────────────────────────────────────────
 
 

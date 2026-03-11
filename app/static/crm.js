@@ -3290,11 +3290,15 @@ function renderBuyPlanV3Status(targetId) {
         flagsHtml += '</div>';
     }
 
-    // Context
+    // Context — includes return navigation to originating requisition
     let contextHtml = '';
-    if (bp.customer_name || bp.quote_number || bp.sales_order_number) {
-        contextHtml = '<div class="info-card">'
-            + (bp.customer_name ? '<div><strong>Customer:</strong> ' + esc(bp.customer_name) + '</div>' : '')
+    if (bp.customer_name || bp.quote_number || bp.sales_order_number || bp.requisition_id) {
+        contextHtml = '<div class="info-card">';
+        if (bp.requisition_id) {
+            contextHtml += '<div><strong>Requisition:</strong> <a href="javascript:void(0)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));setTimeout(function(){goToReq(' + bp.requisition_id + ')},300)" style="color:var(--blue);text-decoration:underline;cursor:pointer">'
+                + esc(bp.requisition_name || '#' + bp.requisition_id) + '</a> \u2190 Return</div>';
+        }
+        contextHtml += (bp.customer_name ? '<div><strong>Customer:</strong> ' + esc(bp.customer_name) + '</div>' : '')
             + (bp.quote_number ? '<div><strong>Quote:</strong> ' + esc(bp.quote_number) + '</div>' : '')
             + (bp.sales_order_number ? '<div><strong>SO#:</strong> ' + esc(bp.sales_order_number) + '</div>' : '')
             + (bp.customer_po_number ? '<div><strong>Customer PO:</strong> ' + esc(bp.customer_po_number) + '</div>' : '')

@@ -3417,6 +3417,16 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
                 break;
+            case 'quote':
+                // Lightweight summary + full quotes list for unified Quote tab
+                {
+                    const [summary, quotes] = await Promise.all([
+                        apiFetch(`/api/requisitions/${reqId}/quote-summary`),
+                        apiFetch(`/api/requisitions/${reqId}/quotes`),
+                    ]);
+                    data = { summary, quotes };
+                }
+                break;
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
@@ -3446,6 +3456,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
                 break;
             case 'activity': _renderMobileActivityList(reqId, data, panel); break;
             case 'offers': _renderMobileOffersList(data, reqId, panel); break;
+            case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
             case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
             case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
             case 'tasks': _renderDdTasks(reqId, data, panel); break;
@@ -3482,6 +3493,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
             }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
+        case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
@@ -5158,6 +5170,16 @@ function _renderDdOffers(reqId, data, panel) {
                 confBadge = ` <span class="badge" style="background:${cc}15;color:${cc};font-size:8px;padding:1px 4px" title="AI parse confidence: ${o.parse_confidence}%">${cl} ${o.parse_confidence}%</span>`;
             }
 
+            // Risk flag badges — surface AI risk flags directly on offer cards
+            let riskBadges = '';
+            if (o.risk_flags && o.risk_flags.length) {
+                for (const rf of o.risk_flags) {
+                    const rc = rf.severity === 'critical' ? 'var(--red)' : rf.severity === 'warning' ? 'var(--amber)' : 'var(--blue)';
+                    const rl = rf.type ? rf.type.replace(/_/g, ' ') : 'risk';
+                    riskBadges += ` <span class="badge" style="background:${rc}15;color:${rc};font-size:8px;padding:1px 4px;cursor:help" title="${esc(rf.message || rl)}">\u26a0 ${esc(rl)}</span>`;
+                }
+            }
+
             // Edited-by info
             let editedInfo = '';
             if (o.updated_at) {
@@ -5167,7 +5189,7 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${riskBadges}${editedInfo}</td>
                 <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
@@ -5906,6 +5928,97 @@ async function ddDeleteOffer(reqId, offerId) {
             showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
         }
     }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
+}
+
+// ── Unified Quote Tab (summary + quotes list + buy plan link) ─────────
+function _renderDdQuoteTab(reqId, data, panel) {
+    const summary = data?.summary || {};
+    const quotes = data?.quotes || [];
+    let html = '';
+
+    // ── Risk flags banner (if any) ──
+    const flags = summary.risk_flags || [];
+    if (flags.length) {
+        html += '<div style="background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:6px;padding:8px 12px;margin-bottom:10px">';
+        html += '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:4px">Risk Flags</div>';
+        for (const f of flags) {
+            const icon = f.severity === 'critical' ? '\u{1F6A8}' : f.severity === 'warning' ? '\u26a0\ufe0f' : '\u{2139}\ufe0f';
+            const color = f.severity === 'critical' ? 'var(--red)' : f.severity === 'warning' ? 'var(--amber)' : 'var(--muted)';
+            html += `<div style="font-size:10px;color:${color};padding:2px 0">${icon} <b>${esc(f.type.replace(/_/g, ' '))}</b>: ${esc(f.message)}</div>`;
+        }
+        html += '</div>';
+    }
+
+    // ── Quote status summary card ──
+    if (summary.has_quote) {
+        const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+        const statusLabel = statusMap[summary.quote_status] || summary.quote_status || 'Draft';
+        html += `<div style="background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div>
+                    <span style="font-weight:700;font-size:13px;color:var(--blue)">${esc(summary.quote_number || '')}</span>
+                    <span style="font-size:10px;color:var(--muted);margin-left:6px">Rev ${summary.quote_revision || 1}</span>
+                    <span class="status-badge status-${summary.quote_status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px">${statusLabel}</span>
+                </div>
+                <div style="text-align:right;font-size:10px;color:var(--muted)">${summary.quote_updated_at ? 'Updated ' + fmtRelative(summary.quote_updated_at) : ''}</div>
+            </div>
+            <div style="display:flex;gap:16px;font-size:11px">
+                <div><span style="color:var(--muted)">Lines:</span> <b>${summary.line_count || 0}</b></div>
+                <div><span style="color:var(--muted)">Subtotal:</span> <b>$${Number(summary.subtotal || 0).toLocaleString(undefined,{minimumFractionDigits:2})}</b></div>
+                <div><span style="color:var(--muted)">Margin:</span> <b style="color:${(summary.total_margin_pct||0) >= 20 ? 'var(--green)' : (summary.total_margin_pct||0) >= 10 ? 'var(--amber)' : 'var(--red)'}">${Number(summary.total_margin_pct || 0).toFixed(1)}%</b></div>
+                <div><span style="color:var(--muted)">Offers:</span> <b>${summary.selected_offer_count}/${summary.total_offer_count}</b> selected</div>
+            </div>
+        </div>`;
+    } else {
+        html += `<div style="background:var(--bg2);border-radius:8px;padding:16px;margin-bottom:10px;border:1px dashed var(--border);text-align:center">
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px">No quote created yet</div>
+            <div style="font-size:11px;color:var(--muted)">Select offers in the <b>Parts</b> tab and click <b>Build Quote</b>, or log offers first.</div>
+        </div>`;
+    }
+
+    // ── Buy Plan CTA ──
+    html += '<div style="display:flex;gap:8px;margin-bottom:12px">';
+    if (summary.has_buy_plan) {
+        const bpStatusMap = {draft:'Draft',pending:'Pending',active:'Active',halted:'Halted',completed:'Completed',cancelled:'Cancelled'};
+        const bpLabel = bpStatusMap[summary.buy_plan_status] || summary.buy_plan_status || '';
+        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();window.location.hash='buyplans';if(window.loadBuyPlansV3)loadBuyPlansV3()">Open Buy Plan <span style="font-size:10px;opacity:.8">(${bpLabel} \u00b7 ${summary.buy_plan_line_count || 0} lines)</span></button>`;
+    } else if (summary.has_quote) {
+        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddCreateBuyPlan(${reqId})">Create Buy Plan</button>`;
+    }
+    if (summary.has_quote) {
+        html += `<button class="btn btn-ghost" style="font-size:11px" onclick="event.stopPropagation();_switchDdTab(${reqId},'quotes')">View All Quotes</button>`;
+    }
+    html += '</div>';
+
+    // ── Inline quotes list (collapsed) ──
+    if (quotes.length) {
+        // Re-use existing quotes renderer in a sub-panel
+        const subPanel = document.createElement('div');
+        panel.innerHTML = html;
+        panel.appendChild(subPanel);
+        _renderDdQuotes(reqId, quotes, subPanel);
+        return;
+    }
+
+    panel.innerHTML = html;
+}
+
+// Create buy plan from requisition context
+async function ddCreateBuyPlan(reqId) {
+    try {
+        showToast('Creating buy plan...', 'info');
+        const result = await apiFetch(`/api/requisitions/${reqId}/buy-plan`, { method: 'POST' });
+        if (result.buy_plan_id) {
+            showToast(result.created ? 'Buy plan created' : 'Opening existing buy plan', 'success');
+            // Refresh quote tab to show the new buy plan link
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quote;
+            const drow = document.getElementById('d-' + reqId);
+            const panel = drow?.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quote', panel);
+        }
+    } catch(e) {
+        showToast('Failed to create buy plan \u2014 ' + friendlyError(e, 'please try again'), 'error');
+    }
 }
 
 function _renderDdQuotes(reqId, data, panel) {

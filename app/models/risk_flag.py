@@ -1,0 +1,81 @@
+"""
+risk_flag.py — Structured risk flag model for deal intelligence.
+
+Purpose: Tracks risk flags attached to buy plan lines and offers.
+         Replaces ad-hoc JSON ai_flags with queryable, auditable records.
+         Enables surfacing risk signals during offer review (not just in buy plans).
+
+Called by: services/buy_plan_v3_service.py, routers/crm/offers.py, routers/crm/quotes.py
+Depends on: models.base, models.buy_plan, models.offers
+"""
+
+import enum
+from datetime import datetime, timezone
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.orm import relationship
+
+from .base import Base
+
+
+class RiskFlagType(str, enum.Enum):
+    """Types of risk flags that can be raised on a deal."""
+
+    price_increase = "price_increase"
+    lead_time_risk = "lead_time_risk"
+    vendor_reliability = "vendor_reliability"
+    qty_shortfall = "qty_shortfall"
+    geo_risk = "geo_risk"
+    stale_offer = "stale_offer"
+    margin_below_threshold = "margin_below_threshold"
+    single_source = "single_source"
+    counterfeit_risk = "counterfeit_risk"
+    other = "other"
+
+
+class RiskFlagSeverity(str, enum.Enum):
+    """Severity levels for risk flags."""
+
+    info = "info"
+    warning = "warning"
+    critical = "critical"
+
+
+class RiskFlag(Base):
+    """Structured risk flag attached to a buy plan line or source offer.
+
+    Replaces the JSON ai_flags field on BuyPlanV3 with queryable records.
+    Risk flags can be raised by AI analysis, rule-based checks, or manual review.
+    """
+
+    __tablename__ = "risk_flags"
+
+    id = Column(Integer, primary_key=True)
+
+    # Link to buy plan line (optional — can exist without a buy plan)
+    buy_plan_line_id = Column(Integer, ForeignKey("buy_plan_lines.id", ondelete="CASCADE"), nullable=True)
+    # Link to source offer (optional — for surfacing in offer review)
+    source_offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=True)
+    # Link to requisition (always set for filtering)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=True)
+
+    type = Column(String(50), nullable=False)
+    severity = Column(String(20), nullable=False, default=RiskFlagSeverity.info.value)
+    message = Column(Text, nullable=False)
+
+    # Who/what raised this flag
+    source = Column(String(50), default="ai")  # ai, rule, manual
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    buy_plan_line = relationship("BuyPlanLine", foreign_keys=[buy_plan_line_id])
+    source_offer = relationship("Offer", foreign_keys=[source_offer_id])
+
+    __table_args__ = (
+        Index("ix_risk_flags_line", "buy_plan_line_id"),
+        Index("ix_risk_flags_offer", "source_offer_id"),
+        Index("ix_risk_flags_req", "requisition_id"),
+        Index("ix_risk_flags_severity", "severity"),
+        Index("ix_risk_flags_type", "type"),
+    )

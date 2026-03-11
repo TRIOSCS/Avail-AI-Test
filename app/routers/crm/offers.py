@@ -26,6 +26,7 @@ from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
 from ...utils.normalization import normalize_mpn_key
+from ...utils.sanitize import sanitize_text
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
@@ -107,6 +108,24 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
         conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
 
+    # Batch-fetch risk flags for offers in this requisition
+    from ...models.risk_flag import RiskFlag
+
+    risk_rows = (
+        db.query(RiskFlag)
+        .filter(RiskFlag.requisition_id == req_id, RiskFlag.source_offer_id.isnot(None))
+        .all()
+    )
+    risk_by_offer: dict[int, list] = {}
+    for rf in risk_rows:
+        if rf.source_offer_id not in risk_by_offer:
+            risk_by_offer[rf.source_offer_id] = []
+        risk_by_offer[rf.source_offer_id].append({
+            "type": rf.type,
+            "severity": rf.severity,
+            "message": rf.message,
+        })
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -158,6 +177,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_by_offer.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -315,6 +335,14 @@ async def create_offer(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
+
+    # Sanitize user-entered text fields to prevent stored XSS
+    for field in ("vendor_name", "mpn", "manufacturer", "notes", "lead_time",
+                  "condition", "date_code", "packaging", "firmware", "hardware_code",
+                  "warranty", "country_of_origin"):
+        val = getattr(payload, field, None)
+        if val and isinstance(val, str):
+            setattr(payload, field, sanitize_text(val))
 
     card = None
 

@@ -15,7 +15,7 @@ from ...database import get_db
 from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
-from ...schemas.responses import QuoteDetailResponse
+from ...schemas.responses import QuoteDetailResponse, QuoteSummaryResponse
 from ._helpers import (
     _PRICED_STATUSES,
     _build_quote_email_html,
@@ -29,6 +29,155 @@ router = APIRouter()
 
 
 # ── Quotes ───────────────────────────────────────────────────────────────
+
+
+@router.get("/api/requisitions/{req_id}/quote-summary", response_model=QuoteSummaryResponse)
+async def get_quote_summary(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Return a lightweight quote-tab projection for inline requisition view.
+
+    Shows quote status, selected-offer summary, buy plan linkage, and CTAs.
+    Never returns blank — always provides actionable state.
+
+    Called by: frontend Quote tab in requisition detail
+    Depends on: Quote, BuyPlanV3, Offer models
+    """
+    from ...dependencies import get_req_for_user
+    from ...models.buy_plan import BuyPlanV3
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    # Latest quote (highest revision)
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc())
+        .first()
+    )
+
+    # Active draft buy plan (V3) for this requisition
+    buy_plan = (
+        db.query(BuyPlanV3)
+        .filter(BuyPlanV3.requisition_id == req_id)
+        .order_by(BuyPlanV3.created_at.desc())
+        .first()
+    )
+
+    # Count selected offers
+    selected_count = (
+        db.query(Offer)
+        .filter(Offer.requisition_id == req_id, Offer.selected_for_quote.is_(True))
+        .count()
+    )
+    total_offers = (
+        db.query(Offer)
+        .filter(Offer.requisition_id == req_id, Offer.status == "active")
+        .count()
+    )
+
+    # AI risk flags from buy plan
+    risk_flags = []
+    if buy_plan and buy_plan.ai_flags:
+        for flag in buy_plan.ai_flags:
+            risk_flags.append({
+                "type": flag.get("type", "unknown"),
+                "severity": flag.get("severity", "info"),
+                "message": flag.get("message", ""),
+            })
+
+    result = {
+        "requisition_id": req_id,
+        "has_quote": quote is not None,
+        "has_buy_plan": buy_plan is not None,
+        "selected_offer_count": selected_count,
+        "total_offer_count": total_offers,
+        "risk_flags": risk_flags,
+    }
+
+    if quote:
+        lines = quote.line_items or []
+        result.update({
+            "quote_id": quote.id,
+            "quote_number": quote.quote_number,
+            "quote_status": quote.status or "draft",
+            "quote_revision": quote.revision or 1,
+            "line_count": len(lines),
+            "subtotal": float(quote.subtotal) if quote.subtotal else 0,
+            "total_margin_pct": float(quote.total_margin_pct) if quote.total_margin_pct else 0,
+            "quote_updated_at": quote.updated_at.isoformat() if quote.updated_at else None,
+        })
+
+    if buy_plan:
+        result.update({
+            "buy_plan_id": buy_plan.id,
+            "buy_plan_status": buy_plan.status,
+            "buy_plan_line_count": len(buy_plan.lines) if buy_plan.lines else 0,
+        })
+
+    return result
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_or_get_buy_plan(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Create or return the active draft buy plan for a requisition.
+
+    If an active draft buy plan exists, returns it. Otherwise creates one from
+    the latest quote. This is the bridge between requisition context and buy plan
+    workspace per the spec's canonical workflow.
+
+    Called by: frontend Quote tab "Open Buy Plan" CTA
+    Depends on: Quote, BuyPlanV3, build_buy_plan service
+    """
+    from ...dependencies import get_req_for_user
+    from ...models.buy_plan import BuyPlanV3
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    # Check for existing active draft buy plan
+    existing = (
+        db.query(BuyPlanV3)
+        .filter(
+            BuyPlanV3.requisition_id == req_id,
+            BuyPlanV3.status.in_(["draft", "pending", "active"]),
+        )
+        .order_by(BuyPlanV3.created_at.desc())
+        .first()
+    )
+    if existing:
+        return {
+            "buy_plan_id": existing.id,
+            "status": existing.status,
+            "created": False,
+            "quote_id": existing.quote_id,
+        }
+
+    # Need a quote to create a buy plan
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "No quote exists for this requisition — create a quote first")
+
+    # Build buy plan from quote using V3 service
+    try:
+        from ...services.buy_plan_v3_service import build_buy_plan
+
+        plan = await build_buy_plan(db, quote.id, user)
+        return {
+            "buy_plan_id": plan.id,
+            "status": plan.status,
+            "created": True,
+            "quote_id": quote.id,
+        }
+    except Exception as e:
+        logger.error("Failed to create buy plan for req={}: {}", req_id, e)
+        raise HTTPException(500, f"Failed to create buy plan: {e}")
 
 
 @router.get(
@@ -112,6 +261,16 @@ async def create_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """Create a new quote from selected offers or manual line items.
+
+    Transaction safety: the entire operation is wrapped so that failures
+    (e.g. unique constraint violations, material card resolution errors)
+    never poison the DB session for subsequent reads. Savepoints protect
+    optional enrichment steps.
+
+    Called by: frontend Build Quote modal
+    Depends on: Quote, QuoteLine, Offer, MaterialCard models
+    """
     from ...dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id)
@@ -182,50 +341,60 @@ async def create_quote(
     from sqlalchemy.exc import IntegrityError
 
     old_status = req.status
-    for attempt in range(3):
-        quote = Quote(
-            requisition_id=req_id,
-            customer_site_id=req.customer_site_id,
-            quote_number=next_quote_number(db),
-            line_items=line_items,
-            subtotal=total_sell,
-            total_cost=total_cost,
-            total_margin_pct=(round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0),
-            payment_terms=site.payment_terms if site else None,
-            shipping_terms=site.shipping_terms if site else None,
-            created_by_id=user.id,
-        )
-        db.add(quote)
-        if req.status in ("active", "sourcing", "offers"):
-            req.status = "quoting"
-        try:
-            db.commit()
-            break
-        except IntegrityError:
-            db.rollback()
-            req.status = old_status
-            if attempt == 2:
-                raise
-    # Write structured QuoteLine rows (parallel to JSON for backward compat)
-    from ...models import QuoteLine
+    quote = None
+    try:
+        for attempt in range(3):
+            quote = Quote(
+                requisition_id=req_id,
+                customer_site_id=req.customer_site_id,
+                quote_number=next_quote_number(db),
+                line_items=line_items,
+                subtotal=total_sell,
+                total_cost=total_cost,
+                total_margin_pct=(round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0),
+                payment_terms=site.payment_terms if site else None,
+                shipping_terms=site.shipping_terms if site else None,
+                created_by_id=user.id,
+            )
+            db.add(quote)
+            if req.status in ("active", "sourcing", "offers"):
+                req.status = "quoting"
+            try:
+                db.commit()
+                break
+            except IntegrityError:
+                db.rollback()
+                req.status = old_status
+                if attempt == 2:
+                    raise
+        # Write structured QuoteLine rows (parallel to JSON for backward compat)
+        from ...models import QuoteLine
 
-    for li in line_items:
-        ql = QuoteLine(
-            quote_id=quote.id,
-            material_card_id=li.get("material_card_id"),
-            offer_id=li.get("offer_id"),
-            mpn=li.get("mpn", ""),
-            manufacturer=li.get("manufacturer"),
-            qty=li.get("qty"),
-            cost_price=li.get("cost_price"),
-            sell_price=li.get("sell_price"),
-            margin_pct=li.get("margin_pct"),
-            currency=li.get("currency", "USD"),
-        )
-        db.add(ql)
-    db.commit()
+        for li in line_items:
+            ql = QuoteLine(
+                quote_id=quote.id,
+                material_card_id=li.get("material_card_id"),
+                offer_id=li.get("offer_id"),
+                mpn=li.get("mpn", ""),
+                manufacturer=li.get("manufacturer"),
+                qty=li.get("qty"),
+                cost_price=li.get("cost_price"),
+                sell_price=li.get("sell_price"),
+                margin_pct=li.get("margin_pct"),
+                currency=li.get("currency", "USD"),
+            )
+            db.add(ql)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.error("Quote creation failed with IntegrityError for req={}", req_id)
+        raise HTTPException(500, "Quote creation failed — please try again")
+    except Exception as e:
+        db.rollback()
+        logger.error("Quote creation failed for req={}: {}", req_id, e)
+        raise HTTPException(500, "Quote creation failed — please try again")
 
-    # Auto-capture quote facts into Knowledge Ledger
+    # Auto-capture quote facts into Knowledge Ledger (non-blocking)
     try:
         from app.services.knowledge_service import capture_quote_fact
 
