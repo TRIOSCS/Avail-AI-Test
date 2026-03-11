@@ -60,6 +60,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "is_admin": is_admin,
             "is_manager": is_manager,
             "user_role": user_role,
+            "mvp_mode": settings.mvp_mode,
             "app_version": APP_VERSION,
             "vite_css_tags": vite_css_tags(APP_VERSION),
             "vite_js_tags": vite_js_tags(APP_VERSION),

@@ -180,6 +180,7 @@
     <button type="button" class="sb-scroll-arrow sb-scroll-up" id="sbScrollUp" onclick="document.querySelector('.sidebar-nav').scrollBy({top:-80,behavior:'smooth'})" aria-label="Scroll up"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
     <nav class="sidebar-nav">
         <!-- Command Center -->
+        {% if not mvp_mode %}
         <div class="sb-top-gradient sb-top-gradient-cc" data-section="cc"></div>
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
@@ -193,6 +194,7 @@
                 <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span><span class="sb-label"> Scorecard</span></button>
             </div>
         </div>
+        {% endif %}
         <!-- Opportunity -->
         <div class="sb-top-gradient" data-section="sourcing"></div>
         <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
@@ -1300,6 +1302,7 @@
         </div>
     </div>
 
+    {% if not mvp_mode %}
     <!-- VIEW: Dashboard -->
     <div id="view-dashboard" class="hidden">
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -1333,6 +1336,7 @@
         <div id="scPersonalSummary"></div>
         <div id="scContent"><p class="empty">Loading...</p></div>
     </div>
+    {% endif %}
 
 
     <!-- VIEW: Settings (admin only) -->
@@ -1381,7 +1385,7 @@
         <div id="settings-apihealth" class="settings-panel hidden">
             <div class="tabs" id="apiHealthTabs">
                 <button type="button" class="tab on" onclick="switchApiHealthTab('dashboard',this)">API Health</button>
-                <button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>
+                {% if not mvp_mode %}<button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>{% endif %}
             </div>
 
             <!-- API Health Dashboard -->
@@ -1535,7 +1539,7 @@
 <!-- System notification bell — placeholder, wired up when notification service is registered -->
 {% endif %}
 
-<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}"}</script>
+<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}","mvpMode":{{ "true" if mvp_mode else "false" }}}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}

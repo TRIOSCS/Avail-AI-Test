@@ -195,6 +195,25 @@ class TestTypeCoercion:
                 _make()
 
 
+class TestMvpMode:
+    """MVP_MODE flag controls feature availability."""
+
+    def test_mvp_mode_default_true(self):
+        with patch.dict(os.environ, {}, clear=True):
+            s = _make()
+        assert s.mvp_mode is True
+
+    def test_mvp_mode_disabled(self):
+        with patch.dict(os.environ, {"MVP_MODE": "false"}, clear=True):
+            s = _make()
+        assert s.mvp_mode is False
+
+    def test_mvp_mode_enabled_explicitly(self):
+        with patch.dict(os.environ, {"MVP_MODE": "true"}, clear=True):
+            s = _make()
+        assert s.mvp_mode is True
+
+
 class TestSecretKeyFallback:
     """SECRET_KEY env var maps to secret_key field."""
 

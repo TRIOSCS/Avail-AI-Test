@@ -228,6 +228,11 @@ class Settings(BaseSettings):
     eight_by_eight_enabled: bool = False
     eight_by_eight_poll_interval_minutes: int = 30
 
+    # --- MVP Mode ---
+    # When True, disables: Dashboard/Analytics, Enrichment, Teams, Task Manager
+    # Set MVP_MODE=false in .env to re-enable all features
+    mvp_mode: bool = True
+
     # --- Prospecting ---
     prospecting_enabled: bool = True
     prospecting_min_fit_for_contacts: int = 60
