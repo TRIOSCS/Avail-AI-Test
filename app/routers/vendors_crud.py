@@ -18,6 +18,7 @@ from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import Company, User, VendorCard, VendorReview
+from ..models.strategic import StrategicVendor
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
 from ..schemas.vendors import VendorBlacklistToggle, VendorCardUpdate, VendorReviewCreate
 from ..utils.sql_helpers import escape_like
@@ -135,6 +136,17 @@ async def list_vendors(
                 | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
             )
         if q:
+            from sqlalchemy import String as SAString, or_
+
+            safe_q = escape_like(q)
+            # Tag match — vendors whose brand/commodity tags contain the query
+            tag_filter = or_(
+                sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(q),
+                sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(q),
+                VendorCard.industry.ilike(f"%{safe_q}%"),
+            )
+            name_filter = VendorCard.normalized_name.ilike(f"%{safe_q}%")
+
             if len(q) >= 3:
                 # Full-text search for longer queries (faster + ranked)
                 try:
@@ -154,16 +166,13 @@ async def list_vendors(
                     if fts_count > 0:
                         query = fts_query
                     else:
-                        # FTS found nothing, fall back to ILIKE
-                        safe_q = escape_like(q)
-                        query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+                        # FTS found nothing, fall back to name + tag search
+                        query = query.filter(or_(name_filter, tag_filter))
                 except (ProgrammingError, OperationalError):
-                    # FTS not available (e.g., SQLite in tests), fall back to ILIKE
-                    safe_q = escape_like(q)
-                    query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+                    # FTS not available (e.g., SQLite in tests), fall back
+                    query = query.filter(or_(name_filter, tag_filter))
             else:
-                safe_q = escape_like(q)
-                query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+                query = query.filter(or_(name_filter, tag_filter))
         # ── Apply explicit sort (overrides default order_by) ──
         if sort:
             sort = sort.strip().lower()
@@ -200,6 +209,23 @@ async def list_vendors(
                 .all()
             ):
                 review_stats[cid] = (avg, cnt)
+        # Batch fetch strategic claim info -- single query instead of N+1
+        claim_map = {}
+        if card_ids:
+            for sv in (
+                db.query(StrategicVendor)
+                .filter(
+                    StrategicVendor.vendor_card_id.in_(card_ids),
+                    StrategicVendor.released_at.is_(None),
+                )
+                .all()
+            ):
+                owner_name = sv.user.name if sv.user else None
+                claim_map[sv.vendor_card_id] = {
+                    "claimed_by_user_id": sv.user_id,
+                    "claimed_by_name": owner_name,
+                }
+
         results = []
         for c in cards:
             stat = review_stats.get(c.id)
@@ -208,6 +234,12 @@ async def list_vendors(
             resp_rate = None
             if c.total_outreach and c.total_outreach > 0:
                 resp_rate = round((c.total_responses or 0) / c.total_outreach * 100, 1)
+
+            # Build location string from available fields
+            loc_parts = [p for p in [c.hq_city, c.hq_state, c.hq_country] if p]
+            location = ", ".join(loc_parts) if loc_parts else None
+
+            claim = claim_map.get(c.id)
             results.append(
                 {
                     "id": c.id,
@@ -226,6 +258,16 @@ async def list_vendors(
                     "last_sighting_at": (c.last_activity_at or c.updated_at or c.created_at).isoformat()
                     if (c.last_activity_at or c.updated_at or c.created_at)
                     else None,
+                    "brand_tags": c.brand_tags or [],
+                    "commodity_tags": c.commodity_tags or [],
+                    "industry": c.industry,
+                    "location": location,
+                    "website": c.website,
+                    "domain": c.domain,
+                    "avg_response_hours": c.avg_response_hours,
+                    "overall_win_rate": c.overall_win_rate,
+                    "total_revenue": c.total_revenue or 0,
+                    "claimed_by": claim,
                 }
             )
         return {"vendors": results, "total": total, "limit": limit, "offset": offset}

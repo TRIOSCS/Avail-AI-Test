@@ -2369,6 +2369,44 @@ body.rfq-drawer-open .main { margin-right: 520px; transition: margin-right .25s 
 .tier-badge-caution{background:#fef3c7;color:#a16207}
 .tier-badge-new{background:#f3f4f6;color:var(--muted)}
 
+/* ── Vendor Card Grid ───────────────────────────────────────────────── */
+.vendor-grid-wrap{flex:1;overflow-y:auto;padding:0 16px 16px}
+.vendor-card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px;padding-top:6px}
+.vendor-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px 14px;box-shadow:var(--shadow-sm);cursor:pointer;transition:all var(--speed) cubic-bezier(.4,0,.2,1)}
+.vendor-card:hover{border-color:var(--teal);box-shadow:var(--shadow-md),var(--glow-blue)}
+.vc-header{display:flex;align-items:flex-start;justify-content:space-between;gap:6px;margin-bottom:4px}
+.vc-name{font-size:13px;font-weight:700;color:var(--text);line-height:1.25}
+.vc-domain{font-size:10px;color:var(--blue);text-decoration:none}
+.vc-domain:hover{text-decoration:underline}
+.vc-badges{display:flex;gap:3px;flex-shrink:0;flex-wrap:wrap}
+.vc-badge{font-size:8px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:1px 6px;border-radius:999px;white-space:nowrap}
+.vc-badge-proven{background:#dcfce7;color:#16a34a}
+.vc-badge-developing{background:#dbeafe;color:#2563eb}
+.vc-badge-caution{background:#fef3c7;color:#a16207}
+.vc-badge-new{background:#f3f4f6;color:var(--muted)}
+.vc-badge-blocked{background:#fee2e2;color:#dc2626}
+.vc-badge-claimed{background:#faf5ff;color:#7c3aed}
+.vc-meta{font-size:11px;color:var(--text2);line-height:1.4;margin-bottom:4px}
+.vc-score-section{margin:5px 0 4px}
+.vc-score-label{font-size:9px;color:var(--muted);display:flex;justify-content:space-between;margin-bottom:1px}
+.vc-score-track{height:4px;background:var(--surface);border-radius:2px;overflow:hidden}
+.vc-score-fill{height:100%;border-radius:2px;transition:width .4s ease}
+.vc-rating{margin:3px 0;font-size:12px;line-height:1}
+.vc-tags{display:flex;flex-wrap:wrap;gap:3px;margin:4px 0}
+.vc-tag{font-size:9px;padding:1px 5px;border-radius:3px;font-weight:500}
+.vc-tag-brand{background:#ede9fe;color:#6d28d9}
+.vc-tag-commodity{background:#e0f2fe;color:#0369a1}
+.vc-stats{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text2);margin:5px 0}
+.vc-stats b{color:var(--text);font-weight:700}
+.vc-footer{display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px}
+.vc-last-activity{font-size:10px;color:var(--muted)}
+.vc-actions{display:flex;gap:4px}
+.vc-btn-claim{background:var(--teal,#0d9488);color:#fff;border:none;padding:3px 10px;border-radius:var(--radius-sm);font-size:10px;font-weight:600;cursor:pointer;transition:background var(--speed-fast)}
+.vc-btn-claim:hover{background:#0f766e}
+.vc-btn-details{background:transparent;border:1px solid var(--border);padding:3px 8px;border-radius:var(--radius-sm);font-size:10px;color:var(--text2);cursor:pointer;transition:all var(--speed-fast)}
+.vc-btn-details:hover{border-color:var(--blue);color:var(--blue)}
+@media(max-width:640px){.vendor-card-grid{grid-template-columns:1fr}}
+
 /* Account type badge */
 .account-type-badge{display:inline-flex;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600}
 .account-type-badge-strategic{background:#faf5ff;color:#7c3aed}
