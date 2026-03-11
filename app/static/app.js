@@ -13418,17 +13418,53 @@ async function unifiedEnrichVendor(cardId) {
 // ── Vendors Tab ────────────────────────────────────────────────────────
 
 let _vendorAbort = null;
+let _vendorViewMode = 'cards'; // 'cards' or 'table'
+
+function toggleVendorView() {
+    _vendorViewMode = _vendorViewMode === 'cards' ? 'table' : 'cards';
+    const btn = document.getElementById('vendorViewToggle');
+    if (btn) btn.textContent = _vendorViewMode === 'cards' ? 'Table' : 'Cards';
+    filterVendorList();
+}
+
+function setVendorSort(val) {
+    const [col, dir] = val.split('_');
+    _vendorSortCol = col;
+    _vendorSortDir = dir || 'desc';
+    filterVendorList();
+}
+
 async function loadVendorList() {
     if (_vendorAbort) { try { _vendorAbort.abort(); } catch(e){} }
     _vendorAbort = new AbortController();
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     var vl = document.getElementById('vendorList');
-    if (vl && !_vendorListData.length) vl.innerHTML = window.skeletonRows(5);
+    if (vl && !_vendorListData.length) vl.innerHTML = window.skeletonRows ? window.skeletonRows(5) : '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
     let resp;
-    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`, {signal: _vendorAbort.signal}); }
+    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}&limit=500`, {signal: _vendorAbort.signal}); }
     catch (e) { if (e.name === 'AbortError') return; logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
     _vendorListData = resp.vendors || resp;
+    _populateVendorFilterDropdowns();
     filterVendorList();
+}
+
+function _populateVendorFilterDropdowns() {
+    const brands = new Map();
+    const commodities = new Map();
+    for (const c of _vendorListData) {
+        for (const t of (c.brand_tags || [])) brands.set(t.toLowerCase(), t);
+        for (const t of (c.commodity_tags || [])) commodities.set(t.toLowerCase(), t);
+    }
+    _fillFilterSelect('vendorBrandFilter', 'Brand', [...brands.values()].sort().slice(0, 50));
+    _fillFilterSelect('vendorCommodityFilter', 'Commodity', [...commodities.values()].sort().slice(0, 50));
+}
+
+function _fillFilterSelect(selectId, label, items) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const current = el.value;
+    el.innerHTML = `<option value="">${label}: All</option>` + items.map(t => `<option value="${escAttr(t)}">${esc(t)}</option>`).join('');
+    if (current) el.value = current;
 }
 
 function vendorTier(c) {
@@ -13456,14 +13492,34 @@ function filterVendorList() {
     let filtered = [..._vendorListData];
     if (q) {
         const lq = q.toLowerCase();
-        filtered = filtered.filter(c => (c.display_name || '').toLowerCase().includes(lq));
+        filtered = filtered.filter(c => {
+            if ((c.display_name || '').toLowerCase().includes(lq)) return true;
+            if ((c.brand_tags || []).some(t => t.toLowerCase().includes(lq))) return true;
+            if ((c.commodity_tags || []).some(t => t.toLowerCase().includes(lq))) return true;
+            if ((c.industry || '').toLowerCase().includes(lq)) return true;
+            return false;
+        });
     }
     if (_vendorTierFilter !== 'all') {
         filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
 
+    // Brand filter
+    const brandFilter = (document.getElementById('vendorBrandFilter') || {}).value || '';
+    if (brandFilter) filtered = filtered.filter(c => (c.brand_tags || []).some(t => t.toLowerCase() === brandFilter.toLowerCase()));
+
+    // Commodity filter
+    const commodityFilter = (document.getElementById('vendorCommodityFilter') || {}).value || '';
+    if (commodityFilter) filtered = filtered.filter(c => (c.commodity_tags || []).some(t => t.toLowerCase() === commodityFilter.toLowerCase()));
+
+    // Claimed filter
+    const claimFilter = (document.getElementById('vendorClaimFilter') || {}).value || '';
+    if (claimFilter === 'claimed') filtered = filtered.filter(c => c.claimed_by);
+    if (claimFilter === 'unclaimed') filtered = filtered.filter(c => !c.claimed_by);
+
     // Sort
-    if (_vendorSortCol) {
+    const _tierRank = t => ({proven:1,developing:2,caution:3,new:4}[vendorTier(t)] || 4);
+    if (_vendorSortCol && _vendorSortCol !== 'tier') {
         filtered.sort((a, b) => {
             let va, vb;
             switch (_vendorSortCol) {
@@ -13472,13 +13528,19 @@ function filterVendorList() {
                 case 'response': va = (a.response_rate ?? 0); vb = (b.response_rate ?? 0); break;
                 case 'pos': va = (a.total_pos ?? 0); vb = (b.total_pos ?? 0); break;
                 case 'parts': va = (a.sighting_count ?? 0); vb = (b.sighting_count ?? 0); break;
+                case 'rating': va = (a.avg_rating ?? 0); vb = (b.avg_rating ?? 0); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _vendorSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
             return _vendorSortDir === 'asc' ? va - vb : vb - va;
         });
     } else {
-        filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
+        // Default: tier first (proven > developing > caution > new), then score desc
+        filtered.sort((a, b) => {
+            const ta = _tierRank(a), tb = _tierRank(b);
+            if (ta !== tb) return ta - tb;
+            return (b.vendor_score ?? -1) - (a.vendor_score ?? -1);
+        });
     }
 
     const countEl = document.getElementById('vendorFilterCount');
@@ -13486,15 +13548,121 @@ function filterVendorList() {
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = _vendorListData.length ? stateEmpty('No vendors match filters', 'Try adjusting your search or filter criteria') : stateEmpty('No vendors yet', 'They\'ll appear automatically after your first search');
+        el.innerHTML = _vendorListData.length
+            ? (typeof stateEmpty === 'function' ? stateEmpty('No vendors match filters', 'Try adjusting your search or filter criteria') : '<p class="empty">No vendors match filters</p>')
+            : (typeof stateEmpty === 'function' ? stateEmpty('No vendors yet', 'They\'ll appear automatically after your first search') : '<p class="empty">No vendors yet</p>');
         return;
     }
 
-    // Build table
-    const thSort = (col, label, extra = '') => {
+    // Card view (default) or table view
+    if (_vendorViewMode === 'cards' || window.__isMobile) {
+        el.innerHTML = '<div class="vendor-card-grid">' + filtered.map(c => _renderVendorCard(c)).join('') + '</div>';
+    } else {
+        _renderVendorTable(filtered, el);
+    }
+}
+
+function _renderVendorCard(c) {
+    const score = c.vendor_score != null ? Math.round(c.vendor_score) : null;
+    const tier = vendorTier(c);
+    const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : null;
+
+    // Tier badge
+    const tierBadge = `<span class="vc-badge vc-badge-${tier}">${tier}</span>`;
+    const blackBadge = c.is_blacklisted ? '<span class="vc-badge vc-badge-blocked">Blocked</span>' : '';
+
+    // Claimed badge
+    let claimBadge = '';
+    if (c.claimed_by) {
+        claimBadge = `<span class="vc-badge vc-badge-claimed" title="Claimed by ${esc(c.claimed_by.claimed_by_name || 'unknown')}">${esc(c.claimed_by.claimed_by_name || 'Claimed')}</span>`;
+    }
+
+    // Score bar
+    const scorePct = score != null ? Math.min(score, 100) : 0;
+    const scoreColor = score >= 66 ? 'var(--green,#16a34a)' : score >= 33 ? 'var(--blue)' : 'var(--amber,#d97706)';
+    const scoreHtml = score != null
+        ? `<div class="vc-score-section">
+            <div class="vc-score-label"><span>Score</span><span style="font-weight:700;font-family:'JetBrains Mono',monospace">${score}</span></div>
+            <div class="vc-score-track"><div class="vc-score-fill" style="width:${scorePct}%;background:${scoreColor}"></div></div>
+           </div>`
+        : '<div class="vc-score-section"><span style="font-size:10px;color:var(--muted)">New — no score yet</span></div>';
+
+    // Rating stars
+    let ratingHtml = '';
+    if (c.avg_rating) {
+        const fullStars = Math.floor(c.avg_rating);
+        let stars = '';
+        for (let i = 0; i < 5; i++) stars += i < fullStars ? '<span style="color:#f59e0b">&#9733;</span>' : '<span style="color:var(--border)">&#9733;</span>';
+        const ratingLabel = c.rating_source === 'auto' ? '(auto)' : `(${c.review_count})`;
+        ratingHtml = `<div class="vc-rating">${stars} <span style="font-size:10px;color:var(--muted)">${ratingLabel}</span></div>`;
+    }
+
+    // Brand tags (top 5)
+    const brands = (c.brand_tags || []).slice(0, 5);
+    const brandHtml = brands.length
+        ? '<div class="vc-tags">' + brands.map(t => `<span class="vc-tag vc-tag-brand">${esc(t)}</span>`).join('') + (c.brand_tags.length > 5 ? `<span class="vc-tag" style="color:var(--muted)">+${c.brand_tags.length - 5}</span>` : '') + '</div>'
+        : '';
+
+    // Commodity tags (top 4)
+    const commodities = (c.commodity_tags || []).slice(0, 4);
+    const commodityHtml = commodities.length
+        ? '<div class="vc-tags">' + commodities.map(t => `<span class="vc-tag vc-tag-commodity">${esc(t)}</span>`).join('') + (c.commodity_tags.length > 4 ? `<span class="vc-tag" style="color:var(--muted)">+${c.commodity_tags.length - 4}</span>` : '') + '</div>'
+        : '';
+
+    // Stats row
+    const stats = [];
+    if (c.sighting_count) stats.push(`<span><b>${c.sighting_count}</b> parts</span>`);
+    if (responseRate) stats.push(`<span><b>${responseRate}</b> response</span>`);
+    if (c.total_pos) stats.push(`<span><b>${c.total_pos}</b> POs</span>`);
+    if (c.overall_win_rate != null) stats.push(`<span><b>${Math.round(c.overall_win_rate * 100)}%</b> win rate</span>`);
+    const statsHtml = stats.length ? `<div class="vc-stats">${stats.join('')}</div>` : '';
+
+    // Top contact
+    let contactHtml = '';
+    if (c.top_contact) {
+        const tc = c.top_contact;
+        const cParts = [];
+        if (tc.name) cParts.push(`<b>${esc(tc.name)}</b>`);
+        if (tc.email) cParts.push(`<a href="mailto:${escAttr(tc.email)}" onclick="event.stopPropagation()">${esc(tc.email)}</a>`);
+        if (tc.phone) cParts.push(`<a href="tel:${escAttr(tc.phone)}" onclick="event.stopPropagation()">${esc(tc.phone)}</a>`);
+        if (cParts.length) contactHtml = `<div class="vc-contact">${cParts.join(' &middot; ')}</div>`;
+    }
+
+    // Domain link
+    const domainHtml = c.website
+        ? `<a class="vc-domain" href="${escAttr(c.website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(c.domain || c.website.replace(/^https?:\/\//, '').replace(/\/.*/, ''))}</a>`
+        : '';
+
+    // Actions
+    const claimBtn = !c.claimed_by
+        ? `<button class="vc-btn-claim" onclick="event.stopPropagation();claimStrategicVendor(${c.id},'${escAttr(c.display_name)}')">Claim</button>`
+        : '';
+
+    return `<div class="vendor-card" onclick="openVendorDrawer(${c.id})" data-vendor-id="${c.id}">
+        <div class="vc-header">
+            <div>
+                <div class="vc-name">${esc(c.display_name)}</div>
+                ${domainHtml}
+            </div>
+            <div class="vc-badges">${claimBadge}${tierBadge}${blackBadge}</div>
+        </div>
+        ${scoreHtml}
+        ${ratingHtml}
+        ${brandHtml}
+        ${commodityHtml}
+        ${statsHtml}
+        ${contactHtml}
+        <div class="vc-footer">
+            <div class="vc-actions">${claimBtn}<button class="vc-btn-details" onclick="event.stopPropagation();openVendorPopup(${c.id})">Details</button></div>
+        </div>
+    </div>`;
+}
+
+function _renderVendorTable(filtered, el) {
+    const thSort = (col, label) => {
         const active = _vendorSortCol === col;
         const arrow = active ? (_vendorSortDir === 'asc' ? ' ▲' : ' ▼') : '';
-        return `<th class="${active ? 'sorted' : ''}" onclick="sortVendorList('${col}')" ${extra}>${label}<span class="sort-arrow">${arrow}</span></th>`;
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortVendorList('${col}')">${label}<span class="sort-arrow">${arrow}</span></th>`;
     };
 
     let html = `<table class="crm-table">
@@ -13529,41 +13697,35 @@ function filterVendorList() {
         </tr>`;
     }
     html += '</tbody></table>';
-
-    // Mobile: render cards instead of table
-    if (window.__isMobile) {
-        let mHtml = '';
-        for (const c of filtered) {
-            mHtml += _renderVendorCardMobile(c);
-        }
-        el.innerHTML = mHtml || '<p class="m-empty">No vendors match filters</p>';
-    } else {
-        el.innerHTML = html;
-    }
+    el.innerHTML = html;
 }
 
 function _renderVendorCardMobile(c) {
-    const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
-    const tier = vendorTier(c);
-    const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
-    const parts = c.sighting_count || 0;
-    const tierColors = {proven:'m-chip-green',developing:'m-chip-blue',caution:'m-chip-amber','new':'m-chip'};
+    // Mobile now uses the same card renderer
+    return _renderVendorCard(c);
+}
 
-    return `<div class="m-card" onclick="openVendorDrawer(${c.id})">
-        <div class="m-card-header">
-            <span class="m-card-title">${esc(c.display_name)}${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px">BLOCKED</span>' : ''}</span>
-            <span class="m-chip ${tierColors[tier] || 'm-chip'}">${tier}</span>
-        </div>
-        <div class="m-card-body">
-            <span style="font-size:12px">Score: <b>${score}</b></span>
-            <span style="font-size:12px">Response: <b>${responseRate}</b></span>
-            <span style="font-size:12px"><b>${parts}</b> parts</span>
-        </div>
-        <div class="m-card-footer">
-            <span class="m-card-meta">${c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—'}</span>
-            <span class="m-card-chevron">›</span>
-        </div>
-    </div>`;
+async function claimStrategicVendor(vendorId, vendorName) {
+    if (typeof confirmAction === 'function') {
+        confirmAction('Claim Strategic Vendor', 'Claim "' + vendorName + '" as your strategic vendor? You can have up to 10.', async function() {
+            await _doClaimVendor(vendorId, vendorName);
+        });
+    } else {
+        if (!confirm('Claim "' + vendorName + '" as your strategic vendor?')) return;
+        await _doClaimVendor(vendorId, vendorName);
+    }
+}
+
+async function _doClaimVendor(vendorId, vendorName) {
+    try {
+        await apiFetch('/api/strategic-vendors/claim/' + vendorId, { method: 'POST' });
+        showToast('Claimed: ' + vendorName, 'success');
+        // Refresh list to update claim badge
+        loadVendorList();
+    } catch (e) {
+        const msg = e?.error || e?.message || 'Failed to claim vendor';
+        showToast(msg, 'error');
+    }
 }
 
 function sortVendorList(col) {

@@ -1794,3 +1794,100 @@ class TestVendorDomainDedupBugFix:
         # We should have at most 1 card (merged) or 2 if fuzzy didn't match
         # The key point is the threshold is lower now
         assert len(digi_cards) >= 1
+
+
+# ── Vendor card enhancements: top contact, auto rating ──────────────
+
+
+def test_list_vendors_includes_top_contact(client, db_session, test_vendor_card, test_vendor_contact):
+    """GET /api/vendors returns top_contact with name, email, phone."""
+    resp = client.get("/api/vendors")
+    assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    vendor = next((v for v in vendors if v["id"] == test_vendor_card.id), None)
+    assert vendor is not None
+    tc = vendor.get("top_contact")
+    assert tc is not None
+    assert tc["name"] == "John Sales"
+    assert tc["email"] == "john@arrow.com"
+    assert tc["phone"] == "+1-555-0200"
+
+
+def test_list_vendors_auto_rating(client, db_session):
+    """Vendors with metrics but no reviews get an auto-calculated star rating."""
+    vc = VendorCard(
+        normalized_name="autorated vendor",
+        display_name="AutoRated Vendor",
+        sighting_count=10,
+        vendor_score=80.0,
+        is_new_vendor=False,
+        total_outreach=10,
+        total_responses=8,
+        overall_win_rate=0.6,
+    )
+    db_session.add(vc)
+    db_session.commit()
+
+    resp = client.get("/api/vendors")
+    assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    vendor = next((v for v in vendors if v["display_name"] == "AutoRated Vendor"), None)
+    assert vendor is not None
+    assert vendor["avg_rating"] is not None
+    assert vendor["avg_rating"] > 0
+    assert vendor["rating_source"] == "auto"
+
+
+def test_list_vendors_manual_rating_overrides_auto(client, db_session, test_user):
+    """Manual reviews take priority over auto-calculated rating."""
+    vc = VendorCard(
+        normalized_name="reviewed vendor",
+        display_name="Reviewed Vendor",
+        sighting_count=10,
+        vendor_score=80.0,
+        is_new_vendor=False,
+        total_outreach=10,
+        total_responses=8,
+        overall_win_rate=0.6,
+    )
+    db_session.add(vc)
+    db_session.flush()
+
+    review = VendorReview(
+        vendor_card_id=vc.id,
+        user_id=test_user.id,
+        rating=2,
+        comment="Below average",
+    )
+    db_session.add(review)
+    db_session.commit()
+
+    resp = client.get("/api/vendors")
+    assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    vendor = next((v for v in vendors if v["display_name"] == "Reviewed Vendor"), None)
+    assert vendor is not None
+    assert vendor["rating_source"] == "manual"
+    assert vendor["avg_rating"] == 2.0
+
+
+def test_list_vendors_no_contact_returns_null(client, db_session):
+    """Vendors without contacts have top_contact as null."""
+    vc = VendorCard(
+        normalized_name="lonely vendor",
+        display_name="Lonely Vendor",
+        sighting_count=1,
+    )
+    db_session.add(vc)
+    db_session.commit()
+
+    resp = client.get("/api/vendors")
+    assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    vendor = next((v for v in vendors if v["display_name"] == "Lonely Vendor"), None)
+    assert vendor is not None
+    assert vendor.get("top_contact") is None

@@ -612,10 +612,13 @@
     <div id="view-vendors" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Vendors</h2>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()" style="margin-left:auto">+ Add Vendor</button>
+            <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
+                <button type="button" class="btn btn-ghost btn-sm" id="vendorViewToggle" onclick="toggleVendorView()" title="Toggle table/card view">Table</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()">+ Add Vendor</button>
+            </div>
         </div>
-        <div class="crm-toolbar">
-            <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
+        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px;align-items:center">
+            <input class="sbox" id="vendorSearch" placeholder="Search vendors, brands, parts…" oninput="debouncedFilterVendors()" style="flex:1;min-width:140px" aria-label="Search vendors by name, brand, or commodity">
             <div class="chip-row" style="margin:0" id="vendorTierPills">
                 <span class="chip on" data-value="all" onclick="setVendorTier('all',this)">All</span>
                 <span class="chip" data-value="proven" onclick="setVendorTier('proven',this)">Proven</span>
@@ -623,9 +626,29 @@
                 <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
                 <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
             </div>
+            <select id="vendorBrandFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Brand: All</option>
+            </select>
+            <select id="vendorCommodityFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Commodity: All</option>
+            </select>
+            <select id="vendorClaimFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Claimed: All</option>
+                <option value="claimed">Claimed</option>
+                <option value="unclaimed">Unclaimed</option>
+            </select>
+            <select id="vendorSortSelect" onchange="setVendorSort(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="tier_desc" selected>Sort: Tier + Score</option>
+                <option value="score_desc">Sort: Score</option>
+                <option value="name_asc">Sort: Name</option>
+                <option value="rating_desc">Sort: Rating</option>
+                <option value="parts_desc">Sort: Parts Seen</option>
+                <option value="pos_desc">Sort: POs Sent</option>
+                <option value="response_desc">Sort: Response Rate</option>
+            </select>
             <span id="vendorFilterCount" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
         </div>
-        <div class="crm-table-wrap" id="vendorTableWrap">
+        <div class="vendor-grid-wrap" id="vendorTableWrap">
             <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
         </div>
         <!-- Vendor detail drawer -->
