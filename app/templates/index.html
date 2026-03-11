@@ -626,7 +626,19 @@
                 <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
                 <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
             </div>
+            <select id="vendorBrandFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Brand: All</option>
+            </select>
+            <select id="vendorCommodityFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Commodity: All</option>
+            </select>
+            <select id="vendorClaimFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">Claimed: All</option>
+                <option value="claimed">Claimed</option>
+                <option value="unclaimed">Unclaimed</option>
+            </select>
             <select id="vendorSortSelect" onchange="setVendorSort(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="tier_desc" selected>Sort: Tier + Score</option>
                 <option value="score_desc">Sort: Score</option>
                 <option value="name_asc">Sort: Name</option>
                 <option value="rating_desc">Sort: Rating</option>

@@ -13444,7 +13444,27 @@ async function loadVendorList() {
     try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}&limit=500`, {signal: _vendorAbort.signal}); }
     catch (e) { if (e.name === 'AbortError') return; logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
     _vendorListData = resp.vendors || resp;
+    _populateVendorFilterDropdowns();
     filterVendorList();
+}
+
+function _populateVendorFilterDropdowns() {
+    const brands = new Map();
+    const commodities = new Map();
+    for (const c of _vendorListData) {
+        for (const t of (c.brand_tags || [])) brands.set(t.toLowerCase(), t);
+        for (const t of (c.commodity_tags || [])) commodities.set(t.toLowerCase(), t);
+    }
+    _fillFilterSelect('vendorBrandFilter', 'Brand', [...brands.values()].sort().slice(0, 50));
+    _fillFilterSelect('vendorCommodityFilter', 'Commodity', [...commodities.values()].sort().slice(0, 50));
+}
+
+function _fillFilterSelect(selectId, label, items) {
+    const el = document.getElementById(selectId);
+    if (!el) return;
+    const current = el.value;
+    el.innerHTML = `<option value="">${label}: All</option>` + items.map(t => `<option value="${escAttr(t)}">${esc(t)}</option>`).join('');
+    if (current) el.value = current;
 }
 
 function vendorTier(c) {
@@ -13484,8 +13504,22 @@ function filterVendorList() {
         filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
 
+    // Brand filter
+    const brandFilter = (document.getElementById('vendorBrandFilter') || {}).value || '';
+    if (brandFilter) filtered = filtered.filter(c => (c.brand_tags || []).some(t => t.toLowerCase() === brandFilter.toLowerCase()));
+
+    // Commodity filter
+    const commodityFilter = (document.getElementById('vendorCommodityFilter') || {}).value || '';
+    if (commodityFilter) filtered = filtered.filter(c => (c.commodity_tags || []).some(t => t.toLowerCase() === commodityFilter.toLowerCase()));
+
+    // Claimed filter
+    const claimFilter = (document.getElementById('vendorClaimFilter') || {}).value || '';
+    if (claimFilter === 'claimed') filtered = filtered.filter(c => c.claimed_by);
+    if (claimFilter === 'unclaimed') filtered = filtered.filter(c => !c.claimed_by);
+
     // Sort
-    if (_vendorSortCol) {
+    const _tierRank = t => ({proven:1,developing:2,caution:3,new:4}[vendorTier(t)] || 4);
+    if (_vendorSortCol && _vendorSortCol !== 'tier') {
         filtered.sort((a, b) => {
             let va, vb;
             switch (_vendorSortCol) {
@@ -13501,7 +13535,12 @@ function filterVendorList() {
             return _vendorSortDir === 'asc' ? va - vb : vb - va;
         });
     } else {
-        filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
+        // Default: tier first (proven > developing > caution > new), then score desc
+        filtered.sort((a, b) => {
+            const ta = _tierRank(a), tb = _tierRank(b);
+            if (ta !== tb) return ta - tb;
+            return (b.vendor_score ?? -1) - (a.vendor_score ?? -1);
+        });
     }
 
     const countEl = document.getElementById('vendorFilterCount');
@@ -13527,7 +13566,6 @@ function _renderVendorCard(c) {
     const score = c.vendor_score != null ? Math.round(c.vendor_score) : null;
     const tier = vendorTier(c);
     const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : null;
-    const lastAgo = c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : null;
 
     // Tier badge
     const tierBadge = `<span class="vc-badge vc-badge-${tier}">${tier}</span>`;
@@ -13555,7 +13593,8 @@ function _renderVendorCard(c) {
         const fullStars = Math.floor(c.avg_rating);
         let stars = '';
         for (let i = 0; i < 5; i++) stars += i < fullStars ? '<span style="color:#f59e0b">&#9733;</span>' : '<span style="color:var(--border)">&#9733;</span>';
-        ratingHtml = `<div class="vc-rating">${stars} <span style="font-size:10px;color:var(--muted)">(${c.review_count})</span></div>`;
+        const ratingLabel = c.rating_source === 'auto' ? '(auto)' : `(${c.review_count})`;
+        ratingHtml = `<div class="vc-rating">${stars} <span style="font-size:10px;color:var(--muted)">${ratingLabel}</span></div>`;
     }
 
     // Brand tags (top 5)
@@ -13570,12 +13609,6 @@ function _renderVendorCard(c) {
         ? '<div class="vc-tags">' + commodities.map(t => `<span class="vc-tag vc-tag-commodity">${esc(t)}</span>`).join('') + (c.commodity_tags.length > 4 ? `<span class="vc-tag" style="color:var(--muted)">+${c.commodity_tags.length - 4}</span>` : '') + '</div>'
         : '';
 
-    // Meta info
-    const meta = [];
-    if (c.industry) meta.push(esc(c.industry));
-    if (c.location) meta.push(esc(c.location));
-    const metaHtml = meta.length ? `<div class="vc-meta">${meta.join(' &middot; ')}</div>` : '';
-
     // Stats row
     const stats = [];
     if (c.sighting_count) stats.push(`<span><b>${c.sighting_count}</b> parts</span>`);
@@ -13583,6 +13616,17 @@ function _renderVendorCard(c) {
     if (c.total_pos) stats.push(`<span><b>${c.total_pos}</b> POs</span>`);
     if (c.overall_win_rate != null) stats.push(`<span><b>${Math.round(c.overall_win_rate * 100)}%</b> win rate</span>`);
     const statsHtml = stats.length ? `<div class="vc-stats">${stats.join('')}</div>` : '';
+
+    // Top contact
+    let contactHtml = '';
+    if (c.top_contact) {
+        const tc = c.top_contact;
+        const cParts = [];
+        if (tc.name) cParts.push(`<b>${esc(tc.name)}</b>`);
+        if (tc.email) cParts.push(`<a href="mailto:${escAttr(tc.email)}" onclick="event.stopPropagation()">${esc(tc.email)}</a>`);
+        if (tc.phone) cParts.push(`<a href="tel:${escAttr(tc.phone)}" onclick="event.stopPropagation()">${esc(tc.phone)}</a>`);
+        if (cParts.length) contactHtml = `<div class="vc-contact">${cParts.join(' &middot; ')}</div>`;
+    }
 
     // Domain link
     const domainHtml = c.website
@@ -13602,14 +13646,13 @@ function _renderVendorCard(c) {
             </div>
             <div class="vc-badges">${claimBadge}${tierBadge}${blackBadge}</div>
         </div>
-        ${metaHtml}
         ${scoreHtml}
         ${ratingHtml}
         ${brandHtml}
         ${commodityHtml}
         ${statsHtml}
+        ${contactHtml}
         <div class="vc-footer">
-            <span class="vc-last-activity">${lastAgo ? lastAgo : ''}</span>
             <div class="vc-actions">${claimBtn}<button class="vc-btn-details" onclick="event.stopPropagation();openVendorPopup(${c.id})">Details</button></div>
         </div>
     </div>`;

@@ -2398,8 +2398,11 @@ body.rfq-drawer-open .main { margin-right: 520px; transition: margin-right .25s 
 .vc-tag-commodity{background:#e0f2fe;color:#0369a1}
 .vc-stats{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text2);margin:5px 0}
 .vc-stats b{color:var(--text);font-weight:700}
-.vc-footer{display:flex;align-items:center;justify-content:space-between;margin-top:6px;gap:6px}
-.vc-last-activity{font-size:10px;color:var(--muted)}
+.vc-contact{font-size:11px;color:var(--muted);margin:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vc-contact b{color:var(--text);font-weight:600}
+.vc-contact a{color:var(--blue);text-decoration:none}
+.vc-contact a:hover{text-decoration:underline}
+.vc-footer{display:flex;align-items:center;justify-content:flex-end;margin-top:6px;gap:6px}
 .vc-actions{display:flex;gap:4px}
 .vc-btn-claim{background:var(--teal,#0d9488);color:#fff;border:none;padding:3px 10px;border-radius:var(--radius-sm);font-size:10px;font-weight:600;cursor:pointer;transition:background var(--speed-fast)}
 .vc-btn-claim:hover{background:#0f766e}
