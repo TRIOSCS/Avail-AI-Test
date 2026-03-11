@@ -20,6 +20,8 @@ node_modules/
 .coverage
 coverage.xml
 test-results.xml
+test-results/
+playwright-report/
 .ruff_cache/
 htmlcov/
 *.bak
