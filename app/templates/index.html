@@ -581,7 +581,7 @@
     <!-- VIEW: Strategic Vendors (My Vendors — 10-slot panel) -->
     <div id="view-strategic" class="u-hidden" style="flex-direction:column;padding:24px;max-width:900px">
         <div class="crm-header" style="margin-bottom:16px">
-            <h2>My Strategic Vendors</h2>
+            <h2>My Vendors</h2>
             <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
                 <span id="strategicSlots" style="font-size:13px;color:var(--muted)">0/10 slots</span>
                 <button type="button" class="btn btn-primary btn-sm" id="strategicClaimBtn" onclick="openStrategicClaimModal()">+ Claim Vendor</button>
@@ -1304,7 +1304,7 @@
     <div id="view-dashboard" class="hidden">
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:12px">
-                <h2 style="margin:0;font-size:18px">Command Center</h2>
+                <h2 style="margin:0;font-size:18px">Dashboard</h2>
                 <select id="dashUserSelect" class="vflt" onchange="setDashUserFilter(this.value)" style="font-size:11px;min-width:120px"></select>
             </div>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -1495,7 +1495,7 @@
         <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Describe your issue — a screenshot and context are captured automatically.</p>
         <div id="troubleChatBody" style="flex:1;min-height:80px;max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;align-items:flex-end">
-            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}"></textarea>
+            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="event.stopPropagation();if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}" onkeyup="event.stopPropagation()" onkeypress="event.stopPropagation()"></textarea>
             <button type="button" class="btn btn-primary" id="troubleSendBtn" onclick="submitTrouble(this)" style="white-space:nowrap">Send</button>
         </div>
     </div>

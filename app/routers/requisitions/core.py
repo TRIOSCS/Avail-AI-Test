@@ -239,7 +239,10 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
     )
     offer_count_sq = (
         select(sqlfunc.count(Offer.id))
-        .where(Offer.requisition_id == Requisition.id)
+        .where(
+            Offer.requisition_id == Requisition.id,
+            Offer.status.notin_(["rejected", "deleted", "expired"]),
+        )
         .correlate(Requisition)
         .scalar_subquery()
         .label("offer_count")

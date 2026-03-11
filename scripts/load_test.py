@@ -79,7 +79,7 @@ VENDORS = [
     "Master Electronics",
     "Smith & Associates",
     "Fusion Worldwide",
-    "SourcEnginge",
+    "Sourcengine",
     "Bisco Industries",
     "Symmetry Electronics",
 ]

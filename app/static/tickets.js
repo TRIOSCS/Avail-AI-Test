@@ -23,14 +23,14 @@ var STATUS_LABELS = {
     submitted: 'Submitted', diagnosed: 'Diagnosed',
     fix_proposed: 'Fix Proposed', fix_in_progress: 'Fixing',
     fix_applied: 'Fix Applied', awaiting_verification: 'Awaiting Verify',
-    in_progress: 'In Progress', open: 'Open',
+    fix_queued: 'Fix Queued', in_progress: 'In Progress', open: 'Open',
     resolved: 'Resolved', escalated: 'Escalated', rejected: 'Rejected',
 };
 var STATUS_COLORS = {
     submitted: '#6b7280', diagnosed: '#7c3aed',
     fix_proposed: '#2563eb', fix_in_progress: '#2563eb',
     fix_applied: '#0891b2', awaiting_verification: '#d97706',
-    in_progress: '#2563eb', open: '#6b7280',
+    fix_queued: '#0e7490', in_progress: '#2563eb', open: '#6b7280',
     resolved: '#16a34a', escalated: '#dc2626', rejected: '#991b1b',
 };
 var RISK_COLORS = { low: '#16a34a', medium: '#d97706', high: '#dc2626' };
@@ -404,7 +404,7 @@ async function showTicketDetail(ticketId) {
         if (t.risk_tier) metaRow.appendChild(badge(t.risk_tier, RISK_COLORS[t.risk_tier] || '#6b7280'));
         if (t.category) metaRow.appendChild(el('span', { style: 'font-size:12px;color:var(--muted);', textContent: t.category }));
         if (t.source) {
-            var srcLabel = t.source === 'report_button' ? 'Bug Report' : 'Ticket Form';
+            var srcLabel = t.source === 'report_button' ? 'Bug Report' : t.source === 'agent' ? 'Agent' : t.source === 'playwright' ? 'Browser Test' : 'Ticket Form';
             metaRow.appendChild(el('span', { style: 'font-size:10px;padding:2px 6px;border-radius:4px;background:var(--bg-alt);color:var(--muted);border:1px solid var(--border);', textContent: srcLabel }));
         }
         container.appendChild(metaRow);
