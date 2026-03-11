@@ -1085,3 +1085,6 @@ app.include_router(strategic_router)
 from .routers.outreach import router as outreach_router
 
 app.include_router(outreach_router)
+from .routers.vendor_inquiry import router as vendor_inquiry_router
+
+app.include_router(vendor_inquiry_router)
