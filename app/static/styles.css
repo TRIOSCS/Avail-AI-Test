@@ -493,6 +493,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .sidebar .sb-top-gradient{display:block}
     .sidebar .sidebar-nav{padding:12px 10px;gap:2px}
     .sidebar .sidebar-nav button{justify-content:flex-start;padding:10px 14px;gap:10px;font-size:13px;color:var(--text2)}
+    .sidebar .sb-label{display:inline}
     .sidebar .sidebar-nav button::after{display:none}
     .sidebar .sb-group-items .sb-nav-btn{padding-left:22px}
     .sidebar .sidebar-footer .un,.sidebar .sidebar-footer .rb{display:initial}
@@ -1322,6 +1323,7 @@ html .sidebar .sb-group-items{max-height:none;opacity:1;pointer-events:auto}
 .sidebar .sidebar-nav{padding:12px 0 8px;gap:2px;scrollbar-width:none;justify-content:flex-start;align-items:center}
 .sidebar .sidebar-nav::-webkit-scrollbar{display:none}
 .sidebar .sidebar-nav button{justify-content:center;align-items:center;padding:6px 0;gap:0;overflow:hidden;font-size:0;color:transparent;width:100%}
+.sidebar .sb-label{display:none}
 .sidebar .sb-nav-group{width:100%}
 .sidebar .sb-nav-icon{width:24px;height:24px;color:var(--blue);transition:color .15s,filter .15s}.sidebar .sb-nav-icon svg{width:18px;height:18px}
 .sidebar .sidebar-nav button.active{box-shadow:inset 3px 0 0 var(--section-accent,var(--blue))}
@@ -1356,6 +1358,7 @@ body.sb-open .sb-nav-group + .sb-nav-group::before,.sidebar:hover .sb-nav-group 
 body.sb-open .sidebar .sb-top-gradient,.sidebar:hover .sb-top-gradient{display:block}
 body.sb-open .sidebar .sidebar-nav,.sidebar:hover .sidebar-nav{padding:12px 10px;gap:2px}
 body.sb-open .sidebar .sidebar-nav button,.sidebar:hover .sidebar-nav button{justify-content:flex-start;padding:10px 14px;gap:10px;font-size:13px;color:var(--text2)}
+body.sb-open .sidebar .sb-label,.sidebar:hover .sb-label{display:inline}
 body.sb-open .sidebar .sidebar-nav button.active,.sidebar:hover .sidebar-nav button.active{color:var(--blue)}
 body.sb-open .sidebar .sidebar-nav button::after,.sidebar:hover .sidebar-nav button::after{display:none}
 body.sb-open .sidebar .sb-nav-icon,.sidebar:hover .sb-nav-icon{width:20px;height:20px}body.sb-open .sidebar .sb-nav-icon svg,.sidebar:hover .sb-nav-icon svg{width:16px;height:16px}

@@ -944,7 +944,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     await loadRequisitions();
     // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
-    if (!initView || initView === 'view-list') {
+    // Only restore when actually on the requisition list view (not dashboard/materials/etc.)
+    if ((!initView && !effectiveView) || initView === 'view-list' || effectiveView === 'view-list') {
         var restoreId = initDrillId;
         if (!restoreId) {
             const lastId = parseInt(safeGet('lastReqId', '0'));
@@ -1219,6 +1220,9 @@ function applyRoleGating() {
     const navSettings = document.getElementById('navSettings');
     if (navSettings) { if (isAdmin) navSettings.classList.remove('u-hidden'); else navSettings.classList.add('u-hidden'); }
 
+    // Apollo tab in account drawer: admin only
+    document.querySelectorAll('.apollo-admin-only').forEach(el => { el.style.display = isAdmin ? '' : 'none'; });
+
     // "My Accounts" toggle: admin/manager/trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
     if (myAccountsBtn) {
@@ -1244,7 +1248,7 @@ export async function refreshProactiveBadge() {
 const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['tickets'] = 'view-settings'; // tickets moved into settings
@@ -1255,7 +1259,8 @@ let _navFromPopstate = false;
 let _lastPushedHash = '';
 function _pushNav(viewId, reqId) {
     if (_navFromPopstate) return;
-    var hashStr = _viewToHash[viewId] || 'rfqs';
+    var hashStr = _viewToHash[viewId];
+    if (!hashStr) { console.warn('_pushNav: unknown viewId', viewId); hashStr = 'rfqs'; }
     if (reqId && viewId === 'view-list') hashStr = 'rfqs/' + reqId;
     var hash = '#' + hashStr;
     if (hash === _lastPushedHash) return;
@@ -6995,11 +7000,14 @@ export async function toggleDrillDown(reqId) {
     if (arrow) arrow.classList.toggle('open');
     if (rrow) rrow.classList.toggle('expanded', opening);
     _updateDrillToggleLabel();
-    // Update URL hash to reflect drill-down state
-    if (opening) {
-        try { _pushNav('view-list', reqId); } catch(e) {}
-    } else {
-        try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
+    // Update URL hash to reflect drill-down state — only when the list view is active,
+    // so that expanding a drill-down from a background render doesn't override the current view's hash
+    if (_currentViewId === 'view-list') {
+        if (opening) {
+            try { _pushNav('view-list', reqId); } catch(e) {}
+        } else {
+            try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
+        }
     }
     if (!opening) {
         delete _addRowActive[reqId];
@@ -9471,6 +9479,10 @@ function renderReqList() {
                     if (drow && !drow.classList.contains('open')) {
                         drow.classList.add('open');
                         if (arrow) arrow.classList.add('open');
+                        // Re-bind context panel to the restored drill-down
+                        const reqInfo = _reqListData.find(r => r.id === id);
+                        const ctxLabel = reqInfo ? (reqInfo.customer_display || reqInfo.name || 'Req #' + id) : 'Req #' + id;
+                        bindContextPanel('requisition', id, ctxLabel);
                         // Reload sub-tab content into the panel
                         const defaultTab = _ddActiveTab[id] || _ddDefaultTab(_currentMainView);
                         _ddActiveTab[id] = defaultTab;
@@ -10302,6 +10314,9 @@ function _cancelTabInflight() {
 function setMainView(view, btn) {
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
+
+    // Ensure the requisition list container is visible (deals/archive/sales all render into view-list)
+    showView('view-list');
 
     // Clear stale data from previous tab so we always fetch fresh for the new view
     _reqListData = [];
@@ -15212,20 +15227,20 @@ document.addEventListener('keydown', function(e) {
         if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault(); openNewReqModal(); return;
         }
-        // 1/2/3 — Switch tabs: Open / Sourcing / Archive
-        if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // 1/2/3 — Switch tabs: Open / Sourcing / Archive (only when on list view)
+        if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
             const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
             if (btn) setMainView('rfq', btn);
             return;
         }
-        if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
             const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
             if (btn) setMainView('purchasing', btn);
             return;
         }
-        if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
             const btn = document.querySelector('#mainPills .fp[data-view="archive"]');
             if (btn) setMainView('archive', btn);

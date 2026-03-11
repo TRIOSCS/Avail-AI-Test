@@ -10,6 +10,7 @@ Depends on: services/knowledge_service.py, dependencies.py
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -231,14 +232,23 @@ def get_insights(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    entries = knowledge_service.get_cached_insights(db, req_id)
-    now = datetime.now(timezone.utc)
-    return {
-        "requisition_id": req_id,
-        "insights": [_entry_to_response(e, now) for e in entries],
-        "generated_at": entries[0].created_at.isoformat() if entries else None,
-        "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
-    }
+    try:
+        entries = knowledge_service.get_cached_insights(db, req_id)
+        now = datetime.now(timezone.utc)
+        return {
+            "requisition_id": req_id,
+            "insights": [_entry_to_response(e, now) for e in entries],
+            "generated_at": entries[0].created_at.isoformat() if entries else None,
+            "has_expired": any(e.expires_at and e.expires_at < now for e in entries),
+        }
+    except Exception as e:
+        logger.warning("Failed to load insights for req {}: {}", req_id, e)
+        return {
+            "requisition_id": req_id,
+            "insights": [],
+            "generated_at": None,
+            "has_expired": False,
+        }
 
 
 @insights_router.post("/{req_id}/insights/refresh")
@@ -247,14 +257,23 @@ async def refresh_insights(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    entries = await knowledge_service.generate_insights(db, req_id)
-    now = datetime.now(timezone.utc)
-    return {
-        "requisition_id": req_id,
-        "insights": [_entry_to_response(e, now) for e in entries],
-        "generated_at": entries[0].created_at.isoformat() if entries else None,
-        "has_expired": False,
-    }
+    try:
+        entries = await knowledge_service.generate_insights(db, req_id)
+        now = datetime.now(timezone.utc)
+        return {
+            "requisition_id": req_id,
+            "insights": [_entry_to_response(e, now) for e in entries],
+            "generated_at": entries[0].created_at.isoformat() if entries else None,
+            "has_expired": False,
+        }
+    except Exception as e:
+        logger.warning("Failed to generate insights for req {}: {}", req_id, e)
+        return {
+            "requisition_id": req_id,
+            "insights": [],
+            "generated_at": None,
+            "has_expired": False,
+        }
 
 
 # --- Phase 3: AI Sprinkles endpoints ---

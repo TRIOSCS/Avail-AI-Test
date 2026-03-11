@@ -6077,7 +6077,7 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || safeGet('settings_active_tab', 'users'));
+    switchSettingsTab(panel || safeGet('settings_active_tab') || 'users');
 }
 
 function switchSettingsTab(name, btn) {

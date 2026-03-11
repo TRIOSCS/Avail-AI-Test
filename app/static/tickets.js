@@ -239,8 +239,8 @@ async function renderAdminDashboard(container) {
 
     // Filter pills
     var pills = el('div', { className: 'fpills fpills-sm', style: 'margin-bottom:12px;' });
-    var filters = ['', 'submitted', 'diagnosed', 'escalated', 'resolved'];
-    var labels = ['All', 'Submitted', 'Diagnosed', 'Escalated', 'Resolved'];
+    var filters = ['', 'submitted', 'diagnosed', 'fix_queued', 'escalated', 'resolved'];
+    var labels = ['All', 'Submitted', 'Diagnosed', 'Fix Queued', 'Escalated', 'Resolved'];
     filters.forEach(function(f, i) {
         var btn = el('button', {
             type: 'button',
