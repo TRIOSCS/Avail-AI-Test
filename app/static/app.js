@@ -189,6 +189,9 @@ function toggleMobileMore(btn) {
 }
 
 function mobileBack() {
+    // If a mobile drill-down is open, close it first
+    var dd = document.getElementById('mobileDrillDown');
+    if (dd) { _closeMobileDrillDown(); return; }
     if (_mobileNavStack.length > 1) {
         _mobileNavStack.pop();
         var prev = _mobileNavStack[_mobileNavStack.length - 1];
@@ -3143,6 +3146,9 @@ export async function loadRequisitions(query = '', append = false) {
             _partActiveTab = {};
             _partDetailCache = {};
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
+            // Clear per-req filters so they don't bleed across list reloads
+            for (const k of Object.keys(_ddSightingFilters)) delete _ddSightingFilters[k];
+            for (const k of Object.keys(_ddScoreCache)) delete _ddScoreCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         if (_currentMainView === 'archive') _archiveTotal = resp.total || items.length;
@@ -3253,6 +3259,24 @@ const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers
 window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 const _ddTabLoadSeq = {};  // reqId → monotonic counter to prevent stale async renders
+
+// Clean up all per-requisition state (call on archive/delete)
+function _cleanupReqState(reqId) {
+    delete _ddTabCache[reqId];
+    delete _ddActiveTab[reqId];
+    delete _ddTabLoadSeq[reqId];
+    delete _ddReqCache[reqId];
+    delete _ddSightingsCache[reqId];
+    delete _ddScoreCache[reqId];
+    if (_ddSelectedSightings[reqId]) delete _ddSelectedSightings[reqId];
+    if (_ddSightingFilters && _ddSightingFilters[reqId]) delete _ddSightingFilters[reqId];
+    // Clean up tier state keys for this req
+    for (const k of Object.keys(_ddTierState)) { if (k.startsWith(reqId + '-')) delete _ddTierState[k]; }
+    // Unbind context panel if bound to this req
+    if (_ctxBoundObject && _ctxBoundObject.type === 'requisition' && _ctxBoundObject.id === reqId) {
+        unbindContextPanel();
+    }
+}
 
 function _ddSubTabs(mainView) {
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['workspace', 'quote', 'activity'];
@@ -8666,7 +8690,10 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
             }
             _renderSourcingDrillDown(reqId); // re-render with scores
-        }).catch(e => console.warn('score fetch error:', e));
+        }).catch(e => {
+            console.warn('score fetch error:', e);
+            delete _ddScoreCache[reqId]; // clear sentinel so retry is possible
+        });
         _ddScoreCache[reqId] = { _loading: true }; // sentinel to prevent duplicate fetches
     }
     const scoreMap = _ddScoreCache[reqId] || {};
@@ -10817,6 +10844,7 @@ async function archiveFromList(reqId) {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
             _reqListData = _reqListData.filter(r => r.id !== reqId);
+            _cleanupReqState(reqId);
             const drow = document.getElementById('d-' + reqId);
             if (drow) drow.remove();
             const arow = document.getElementById('a-' + reqId);
@@ -10874,6 +10902,8 @@ async function _archiveWithOutcome(reqId, outcome) {
             await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
         }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
+        // Clean up all per-requisition state on archive
+        _cleanupReqState(reqId);
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
