@@ -524,8 +524,13 @@ def test_batch_archive_by_ids(client, db_session, test_user):
 
 
 def test_batch_assign(client, db_session, test_user):
-    """PUT /api/requisitions/batch-assign assigns owner to specific reqs."""
+    """PUT /api/requisitions/batch-assign assigns owner to specific reqs (admin only)."""
+    from app.dependencies import require_admin
+    from app.main import app
     from app.models import Requisition
+
+    # batch-assign requires admin; override for this test
+    app.dependency_overrides[require_admin] = lambda: test_user
 
     r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
@@ -539,8 +544,14 @@ def test_batch_assign(client, db_session, test_user):
     assert data["assigned_count"] == 2
 
 
-def test_batch_assign_invalid_user(client):
+def test_batch_assign_invalid_user(client, test_user):
     """PUT /api/requisitions/batch-assign with invalid user returns 404."""
+    from app.dependencies import require_admin
+    from app.main import app
+
+    # batch-assign requires admin; override for this test
+    app.dependency_overrides[require_admin] = lambda: test_user
+
     resp = client.put("/api/requisitions/batch-assign", json={"ids": [1], "owner_id": 99999})
     assert resp.status_code == 404
 

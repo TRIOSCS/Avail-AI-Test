@@ -7931,9 +7931,17 @@ function editDrillCell(td, rfqId, reqId, field) {
             _restoreDrillCell(td, r, field);
             return;
         }
+        if (field === 'primary_mpn' && !val) {
+            showToast('MPN cannot be blank', 'warn');
+            _restoreDrillCell(td, r, field);
+            return;
+        }
         const body = {};
-        if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
-        else if (field === 'target_qty') body[field] = parseInt(val) || 1;
+        if (field === 'target_price') {
+            const pf = val ? parseFloat(val) : null;
+            body[field] = (pf !== null && (isNaN(pf) || pf < 0)) ? null : pf;
+        }
+        else if (field === 'target_qty') { const pq = parseInt(val); body[field] = (pq >= 1) ? pq : 1; }
         else if (field === 'substitutes') body[field] = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
         else body[field] = val;
         try {
@@ -7998,8 +8006,12 @@ function _appendAddRow(rfqId, dd) {
     tr.className = 'add-row';
     tr.addEventListener('click', e => e.stopPropagation());
 
-    // Badge (empty for add row)
+    // Expand arrow (empty for add row)
     let td = document.createElement('td');
+    tr.appendChild(td);
+
+    // Badge (empty for add row)
+    td = document.createElement('td');
     tr.appendChild(td);
 
     // MPN (required)
@@ -8072,9 +8084,13 @@ async function _saveAddRow(rfqId) {
         return;
     }
 
-    const body = { primary_mpn: mpn, target_qty: parseInt(qtyInput?.value) || 1 };
+    const parsedQty = parseInt(qtyInput?.value);
+    const body = { primary_mpn: mpn, target_qty: (parsedQty >= 1) ? parsedQty : 1 };
     const priceVal = priceInput?.value.trim();
-    if (priceVal) body.target_price = parseFloat(priceVal);
+    if (priceVal) {
+        const pf = parseFloat(priceVal);
+        if (!isNaN(pf) && pf >= 0) body.target_price = pf;
+    }
 
     // Disable inputs during save
     _saveAddRowPending[rfqId] = true;
@@ -10754,7 +10770,9 @@ async function sendBulkFollowUp() {
     });
 }
 
+let _createReqPending = false;
 async function createRequisition() {
+    if (_createReqPending) return; // prevent double-submit
     const name = document.getElementById('nrName')?.value?.trim() || '';
     if (!name) { showToast('Please enter a requisition name', 'error'); return; }
     const siteId = document.getElementById('nrSiteId')?.value || null;
@@ -10762,6 +10780,7 @@ async function createRequisition() {
     const isAsap = document.getElementById('nrAsap')?.checked;
     const dlVal = document.getElementById('nrDeadline')?.value || '';
     const deadline = isAsap ? 'ASAP' : (dlVal || null);
+    _createReqPending = true;
     try {
         const data = await apiFetch('/api/requisitions', {
             method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
@@ -10769,21 +10788,24 @@ async function createRequisition() {
         closeModal('newReqModal');
         const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
         _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
-        _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
+        _s('nrDeadline', 'value', ''); _s('nrDeadline', 'disabled', false); _s('nrAsap', 'checked', false);
         const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
         const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+        const nrCS = document.getElementById('nrContactSelect'); if (nrCS) nrCS.innerHTML = '<option value="">— Select contact —</option>';
         await loadRequisitions();
         expandToSubTab(data.id, 'sightings');
         showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
+    _createReqPending = false;
 }
 
 function _clearNrValidation() {
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
-    _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
+    _s('nrDeadline', 'value', ''); _s('nrDeadline', 'disabled', false); _s('nrAsap', 'checked', false);
     const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
     const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+    const nrCS = document.getElementById('nrContactSelect'); if (nrCS) nrCS.innerHTML = '<option value="">— Select contact —</option>';
     ['nrNameError', 'nrSiteError'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.textContent = ''; } });
 }
 

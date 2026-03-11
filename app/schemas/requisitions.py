@@ -122,6 +122,20 @@ class RequirementCreate(BaseModel):
             return [normalize_mpn(s) or s for s in v if s]
         return v
 
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
 
 class RequirementUpdate(BaseModel):
     primary_mpn: str | None = None
@@ -141,6 +155,9 @@ class RequirementUpdate(BaseModel):
     def normalize_primary_mpn(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        v = v.strip()
+        if not v:
+            raise ValueError("primary_mpn must not be blank")
         return normalize_mpn(v) or v
 
     @field_validator("substitutes", mode="before")

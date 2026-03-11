@@ -19,7 +19,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
-from ...dependencies import get_req_for_user, require_user
+from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
     ActivityLog,
     Contact,
@@ -470,7 +470,7 @@ async def requisition_sourcing_score(
     db: Session = Depends(get_db),
 ):
     """Get detailed per-requirement sourcing scores for a requisition."""
-    req = db.get(Requisition, req_id)
+    req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
     from ...services.sourcing_score import compute_requisition_scores
@@ -571,14 +571,14 @@ async def batch_archive_by_ids(
     """Archive specific requisitions by ID list."""
     from . import invalidate_prefix
 
-    count = (
-        db.query(Requisition)
-        .filter(
-            Requisition.id.in_(payload.ids),
-            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-        )
-        .update({"status": "archived"}, synchronize_session="fetch")
+    q = db.query(Requisition).filter(
+        Requisition.id.in_(payload.ids),
+        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
     )
+    # Sales users can only archive their own requisitions
+    if user.role == "sales":
+        q = q.filter(Requisition.created_by == user.id)
+    count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -587,10 +587,10 @@ async def batch_archive_by_ids(
 @router.put("/api/requisitions/batch-assign")
 async def batch_assign(
     payload: BatchAssign,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Assign owner to specific requisitions by ID list."""
+    """Assign owner to specific requisitions by ID list. Admin only."""
     from . import invalidate_prefix
 
     # Verify the target user exists
