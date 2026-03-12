@@ -120,6 +120,11 @@ Mouser, DigiKey, OEMSecrets, BrokerBin, Element14, Nexar/Octopart, NetComponents
 - Always write tests alongside business logic — never ask, just include them
 - Simple over clever. 20 readable lines beats 10 clever lines.
 - Push back on big-bang requests. Break them into phases.
+- **Agent routing policy: QUALITY-FIRST.**
+- For every prompt, auto-select the best available agent/model for correctness and depth over speed.
+- Default to higher-reasoning capability for implementation, debugging, architecture, and code reviews.
+- Use faster modes only for trivial lookups or mechanical steps, then return to quality-first mode.
+- Dynamically switch agent/model during a task when complexity or risk increases.
 
 ---
 
