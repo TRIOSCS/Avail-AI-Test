@@ -429,6 +429,24 @@
         </div>
     </div>
 
+    <!-- Quick Search Modal — ad-hoc MPN lookup via supplier APIs -->
+    <div id="quickSearchModal" class="modal-bg" onclick="if(event.target===this)closeModal('quickSearchModal')" style="display:none">
+        <div class="modal" style="max-width:900px;width:95%">
+            <h2 style="margin:0 0 8px;font-size:16px">Quick Part Search</h2>
+            <p style="margin:0 0 12px;font-size:12px;color:var(--muted)">Search supplier APIs for a single part number — see live availability and offer history without creating a requisition.</p>
+            <div style="display:flex;gap:8px;margin-bottom:16px">
+                <input type="text" id="qsInput" class="sbox" placeholder="Enter MPN (e.g. LM358DR)" style="flex:1" onkeydown="if(event.key==='Enter'){event.preventDefault();_quickSearchRun()}">
+                <button class="btn btn-primary btn-sm" id="qsRunBtn" onclick="_quickSearchRun()">Search APIs</button>
+            </div>
+            <div id="qsResults" style="max-height:60vh;overflow-y:auto">
+                <p class="empty" style="color:var(--muted);font-size:12px">Enter a part number above and click Search APIs.</p>
+            </div>
+            <div style="text-align:right;margin-top:12px">
+                <button class="btn btn-ghost btn-sm" onclick="closeModal('quickSearchModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- VIEW: Requisition List (v8 — role-aware priority lanes) -->
     <div id="view-list">
         <div id="reqBreadcrumb" style="display:none;padding:6px 12px;background:var(--bg);border-bottom:1px solid var(--border)"></div>

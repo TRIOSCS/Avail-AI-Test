@@ -308,6 +308,31 @@ async def get_material(card_id: int, user: User = Depends(require_user), db: Ses
     return material_card_to_dict(card, db)
 
 
+@router.post("/api/quick-search")
+async def quick_search(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Ad-hoc MPN search — hit supplier APIs for a single part number.
+
+    Quick check for sightings and offer history without creating a requisition.
+    Called by: frontend API button in intake bar.
+    Depends on: search_service.quick_search_mpn
+    """
+    body = await request.json()
+    mpn = (body.get("mpn") or "").strip()
+    if not mpn:
+        raise HTTPException(400, "MPN is required")
+    if len(mpn) < 2:
+        raise HTTPException(400, "MPN must be at least 2 characters")
+
+    from ..search_service import quick_search_mpn
+
+    result = await quick_search_mpn(mpn, db)
+    return result
+
+
 @router.get("/api/materials/by-mpn/{mpn}")
 async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Look up a material card by MPN."""

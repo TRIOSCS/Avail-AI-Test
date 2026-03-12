@@ -16788,8 +16788,101 @@ function _intakeFileSelected(input) {
 }
 
 function _intakeImportApi() {
-    showToast('API import: use Search to pull live availability from supplier APIs', 'info');
+    // Open quick-search modal, pre-fill with intake bar input if present
+    const intake = document.getElementById('intakeInput');
+    const modal = document.getElementById('quickSearchModal');
+    const input = document.getElementById('qsInput');
+    if (!modal || !input) return;
+    modal.style.display = '';
+    const prefill = (intake?.value || '').trim();
+    if (prefill) input.value = prefill;
+    input.focus();
+    input.select();
 }
+
+async function _quickSearchRun() {
+    const input = document.getElementById('qsInput');
+    const btn = document.getElementById('qsRunBtn');
+    const results = document.getElementById('qsResults');
+    const mpn = (input?.value || '').trim();
+    if (!mpn || mpn.length < 2) {
+        showToast('Enter at least 2 characters', 'warn');
+        if (input) input.focus();
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
+    if (results) results.innerHTML = '<div style="text-align:center;padding:24px"><span class="dd-search-spinner" style="width:20px;height:20px"></span><div style="margin-top:8px;font-size:12px;color:var(--muted)">Searching supplier APIs\u2026</div></div>';
+    try {
+        const data = await apiFetch('/api/quick-search', { method: 'POST', body: { mpn } });
+        _renderQuickSearchResults(mpn, data, results);
+    } catch (e) {
+        if (results) results.innerHTML = `<p class="empty" style="color:var(--red)">Search failed: ${esc(e.message || 'Unknown error')}</p>`;
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Search APIs'; }
+    }
+}
+
+function _renderQuickSearchResults(mpn, data, container) {
+    if (!container) return;
+    const sightings = data.sightings || [];
+    const stats = data.source_stats || [];
+    const card = data.material_card;
+
+    let html = '';
+
+    // Source stats summary
+    const okSources = stats.filter(s => s.status === 'ok');
+    const errSources = stats.filter(s => s.status === 'error');
+    const totalResults = stats.reduce((n, s) => n + (s.results || 0), 0);
+    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap">`;
+    html += `<span><strong>${totalResults}</strong> result${totalResults !== 1 ? 's' : ''} from <strong>${okSources.length}</strong> source${okSources.length !== 1 ? 's' : ''}</span>`;
+    if (errSources.length) html += `<span style="color:var(--orange)">${errSources.length} source${errSources.length !== 1 ? 's' : ''} failed</span>`;
+    if (card) html += `<span>Material card: <strong>${esc(card.mpn || mpn)}</strong>${card.manufacturer ? ' \u2014 ' + esc(card.manufacturer) : ''}${card.lifecycle_status ? ' <span style="opacity:0.7">(' + esc(card.lifecycle_status) + ')</span>' : ''}</span>`;
+    html += `</div>`;
+
+    if (!sightings.length) {
+        html += `<p class="empty" style="font-size:13px;padding:20px 0">No results found for <strong>${esc(mpn)}</strong>. Try a different part number or check API health in Settings.</p>`;
+        container.innerHTML = html;
+        return;
+    }
+
+    // Results table
+    html += `<table style="width:100%;border-collapse:collapse;font-size:11px">`;
+    html += `<thead><tr style="border-bottom:2px solid var(--border);text-transform:uppercase;font-size:9px;letter-spacing:0.5px;color:var(--text2)">`;
+    html += `<th style="padding:4px 6px;text-align:left">Vendor</th>`;
+    html += `<th style="padding:4px 6px;text-align:left">MPN</th>`;
+    html += `<th style="padding:4px 6px;text-align:right">Qty</th>`;
+    html += `<th style="padding:4px 6px;text-align:right">Price</th>`;
+    html += `<th style="padding:4px 6px;text-align:left">Source</th>`;
+    html += `<th style="padding:4px 6px;text-align:left">Condition</th>`;
+    html += `<th style="padding:4px 6px;text-align:center">Score</th>`;
+    html += `</tr></thead><tbody>`;
+
+    for (const s of sightings) {
+        const isHist = s.is_material_history;
+        const rowStyle = isHist ? 'opacity:0.65;font-style:italic' : '';
+        const authBadge = s.is_authorized ? '<span style="color:var(--green);font-weight:600" title="Authorized distributor">\u2713</span> ' : '';
+        const priceStr = s.unit_price != null ? `${s.currency === 'USD' ? '$' : s.currency + ' '}${Number(s.unit_price).toFixed(4)}` : '\u2014';
+        const qtyStr = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
+        const scoreColor = s.score >= 60 ? 'var(--green)' : s.score >= 40 ? 'var(--orange)' : 'var(--muted)';
+
+        html += `<tr style="border-bottom:1px solid var(--border);${rowStyle}">`;
+        html += `<td style="padding:5px 6px">${authBadge}${esc(s.vendor_name || '\u2014')}</td>`;
+        html += `<td style="padding:5px 6px" class="mono">${esc(s.mpn_matched || '\u2014')}</td>`;
+        html += `<td style="padding:5px 6px;text-align:right" class="mono">${qtyStr}</td>`;
+        html += `<td style="padding:5px 6px;text-align:right" class="mono">${priceStr}</td>`;
+        html += `<td style="padding:5px 6px">${esc(s.source_type || '\u2014')}${isHist ? ' <span style="font-size:9px">(history)</span>' : ''}</td>`;
+        html += `<td style="padding:5px 6px">${esc(s.condition || '\u2014')}</td>`;
+        html += `<td style="padding:5px 6px;text-align:center;font-weight:600;color:${scoreColor}">${Math.round(s.score || 0)}</td>`;
+        html += `</tr>`;
+    }
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+}
+
+window._quickSearchRun = _quickSearchRun;
+window._renderQuickSearchResults = _renderQuickSearchResults;
 
 function _intakeRowsFromDraft(data) {
     const rows = [];
