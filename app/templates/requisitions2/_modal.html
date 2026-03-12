@@ -1,0 +1,56 @@
+<div class="rq2-modal-overlay"
+     x-data="{ open: true }"
+     x-show="open"
+     x-on:keydown.escape.window="open = false"
+     x-on:click.self="open = false"
+     x-transition
+     x-cloak>
+
+  <div class="rq2-modal-content">
+    <header class="rq2-modal-header">
+      <h2>{{ req.name }}</h2>
+      <span class="badge badge-{{ req.status }}">{{ req.status }}</span>
+      <button x-on:click="open = false" class="btn-close">&times;</button>
+    </header>
+
+    <div class="rq2-modal-body">
+      <dl>
+        <dt>Customer</dt>
+        <dd>{{ req.customer_display or '—' }}</dd>
+        <dt>Owner</dt>
+        <dd>{{ req.created_by_name }}</dd>
+        <dt>Parts</dt>
+        <dd>{{ req.requirement_count }}</dd>
+        <dt>Urgency</dt>
+        <dd>{{ req.urgency }}</dd>
+        <dt>Deadline</dt>
+        <dd>{{ req.deadline or '—' }}</dd>
+        <dt>Created</dt>
+        <dd>{{ req.created_at.strftime('%Y-%m-%d %H:%M') if req.created_at else '—' }}</dd>
+      </dl>
+
+      {% if requirements %}
+      <h3 style="margin-top:1rem; font-size:1rem;">Requirements</h3>
+      <table class="rq2-table rq2-mini-table">
+        <thead>
+          <tr><th>MPN</th><th>Qty</th><th>Target Price</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          {% for r in requirements %}
+          <tr>
+            <td>{{ r.primary_mpn }}</td>
+            <td>{{ r.target_qty }}</td>
+            <td>{{ '${:,.2f}'.format(r.target_price) if r.target_price else '—' }}</td>
+            <td><span class="badge">{{ r.sourcing_status or 'open' }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+
+    <footer class="rq2-modal-footer">
+      <button x-on:click="open = false" class="btn-sm" style="margin-right:0.5rem">Close</button>
+    </footer>
+  </div>
+</div>

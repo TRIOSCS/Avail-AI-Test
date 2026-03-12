@@ -1038,6 +1038,10 @@ from .routers.apollo_sync import router as apollo_sync_router
 
 app.include_router(apollo_sync_router)
 
+from .routers.requisitions2 import router as rq2_router
+
+app.include_router(rq2_router)
+
 try:
     from .routers.explorium import router as explorium_router
 

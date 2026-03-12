@@ -1,0 +1,58 @@
+{% for req in requisitions %}
+<tr id="rq2-row-{{ req.id }}" class="rq2-row {{ 'rq2-urgent' if req.urgency == 'critical' else '' }}">
+  <td>
+    <input type="checkbox" value="{{ req.id }}"
+           x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
+           x-bind:checked="selectedIds.has({{ req.id }})">
+  </td>
+  <td>
+    <a hx-get="/requisitions2/{{ req.id }}/modal"
+       hx-target="#rq2-modal"
+       hx-swap="innerHTML"
+       style="cursor:pointer">
+      {{ req.name }}
+    </a>
+  </td>
+  <td><span class="badge badge-{{ req.status }}">{{ req.status }}</span></td>
+  <td>{{ req.customer_display or '—' }}</td>
+  <td>{{ req.requirement_count }}</td>
+  <td>{{ req.offer_count }}</td>
+  <td>{{ req.created_by_name }}</td>
+  <td>
+    {% if req.urgency and req.urgency != 'normal' %}
+    <span class="badge badge-{{ req.urgency }}">{{ req.urgency }}</span>
+    {% endif %}
+  </td>
+  <td>{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else '—' }}</td>
+  <td class="rq2-actions">
+    {% if req.status != 'archived' %}
+    <button hx-post="/requisitions2/{{ req.id }}/action/archive"
+            hx-target="#rq2-table"
+            hx-include="#rq2-filters"
+            hx-confirm="Archive this requisition?"
+            class="btn-sm">Archive</button>
+    {% else %}
+    <button hx-post="/requisitions2/{{ req.id }}/action/activate"
+            hx-target="#rq2-table"
+            hx-include="#rq2-filters"
+            class="btn-sm">Activate</button>
+    {% endif %}
+
+    {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
+    <button hx-post="/requisitions2/{{ req.id }}/action/claim"
+            hx-target="#rq2-table"
+            hx-include="#rq2-filters"
+            class="btn-sm btn-primary">Claim</button>
+    {% elif req.claimed_by_id == user.id %}
+    <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
+            hx-target="#rq2-table"
+            hx-include="#rq2-filters"
+            class="btn-sm">Unclaim</button>
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr>
+  <td colspan="10" class="rq2-empty">No requisitions found.</td>
+</tr>
+{% endfor %}
