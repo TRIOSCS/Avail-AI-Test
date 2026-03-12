@@ -66,15 +66,18 @@ class TestTemplateParsing:
         assert t is not None
 
 
-# ── View Mode Toggle (Sales / Sourcing / Archive) ────────────────────────
+# ── View Mode Toggle (Pipeline / Deals / Archive) ────────────────────────
 
 
 class TestViewModeToggle:
-    def test_sales_view_pill(self, index_html):
+    def test_pipeline_view_pill(self, index_html):
         assert 'data-view="sales"' in index_html
 
-    def test_sourcing_view_pill(self, index_html):
-        assert 'data-view="sourcing"' in index_html
+    def test_deals_view_pill(self, index_html):
+        assert 'data-view="deals"' in index_html
+
+    def test_no_sourcing_view_pill(self, index_html):
+        assert 'data-view="sourcing"' not in index_html
 
     def test_archive_view_pill(self, index_html):
         assert 'data-view="archive"' in index_html
