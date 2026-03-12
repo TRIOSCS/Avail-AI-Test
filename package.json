@@ -10,6 +10,7 @@
     "test:frontend:e2e": "node --test tests/frontend/*.e2e.test.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "jsdom": "^28.1.0",
     "terser": "^5.46.0",
     "vite": "^6.0.0",
