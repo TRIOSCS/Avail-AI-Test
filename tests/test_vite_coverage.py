@@ -229,6 +229,16 @@ class TestViteJsTags:
                 assert "/static/app.js" in str(result)
                 assert "?v=" not in str(result)
 
+    def test_fallback_touch_js_uses_module_type(self):
+        """touch.js must load as type=module in fallback (it uses ES import syntax)."""
+        _clear_manifest_cache()
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("VITE_DEV", None)
+            with patch.object(vite_mod, "_load_manifest", return_value=None):
+                result = str(vite_js_tags(app_version="1.0"))
+                assert 'type="module" src="/static/touch.js' in result
+                assert "<script defer" not in result
+
     def test_manifest_with_tickets_and_touch(self):
         """With manifest including tickets.js and touch.js, all script tags emitted."""
         _clear_manifest_cache()

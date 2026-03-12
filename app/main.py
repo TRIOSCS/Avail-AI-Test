@@ -357,12 +357,7 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # One-time nuke: Clear-Site-Data on ALL responses to kill stale SW + caches
-        # The old SW intercepts fetches, so we must send this on static/api too
-        # TODO: remove this header after 2026-03-17
         path = request.url.path
-        if path != "/health":
-            response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):

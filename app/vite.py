@@ -130,5 +130,5 @@ def vite_js_tags(app_version: str = "") -> Markup:
         f'    <script type="module" src="/static/app.js{bust}"></script>\n'
         f'    <script type="module" src="/static/crm.js{bust}"></script>\n'
         f'    <script type="module" src="/static/tickets.js{bust}"></script>\n'
-        f'    <script defer src="/static/touch.js{bust}"></script>'
+        f'    <script type="module" src="/static/touch.js{bust}"></script>'
     )
