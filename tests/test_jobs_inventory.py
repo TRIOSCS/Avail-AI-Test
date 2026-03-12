@@ -899,6 +899,8 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     """Teams alert is sent when imported MPNs match open requirements."""
     import base64
 
+    from app.models import Sighting
+
     test_user.access_token = "at_dl"
     test_requisition.status = "active"
     scheduler_db.commit()
@@ -932,6 +934,19 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
         )
 
         mock_alert.assert_called_once()
+
+    req_id = test_requisition.requirements[0].id
+    sightings = (
+        scheduler_db.query(Sighting)
+        .filter(
+            Sighting.requirement_id == req_id,
+            Sighting.source_type == "email_auto_import",
+            Sighting.vendor_name_normalized == "arrow",
+        )
+        .all()
+    )
+    assert len(sightings) == 1
+    assert sightings[0].qty_available == 100
 
 
 def test_download_and_import_stock_list_teams_alert_exception(scheduler_db, test_user, test_requisition):

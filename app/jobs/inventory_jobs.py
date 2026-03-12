@@ -198,6 +198,7 @@ async def _download_and_import_stock_list(
     # Import into material cards — batch pre-load for performance
     imported = 0
     norm_vendor = normalize_vendor_name(vendor_name)
+    imported_for_matching: list[dict] = []
 
     # Pre-load existing MaterialCards in one query instead of per-row
     valid_mpns = list(
@@ -286,6 +287,14 @@ async def _download_and_import_stock_list(
             db.add(mvh)
 
         imported += 1
+        imported_for_matching.append(
+            {
+                "row": row,
+                "norm_key": norm_key,
+                "display_mpn": normalize_mpn(raw_mpn) or raw_mpn.strip().upper(),
+                "material_card_id": card.id,
+            }
+        )
 
     try:
         db.commit()
@@ -296,6 +305,139 @@ async def _download_and_import_stock_list(
         db.rollback()
         return
 
+    # Auto-create actionable sightings for open requirements that match imported stock.
+    try:
+        from sqlalchemy import func as sa_func
+
+        from app.models import Requirement, Requisition, Sighting
+        from app.utils import safe_float, safe_int
+        from app.utils.normalization import (
+            normalize_condition,
+            normalize_date_code,
+            normalize_lead_time,
+            normalize_packaging,
+        )
+
+        source_type = "excess_list" if is_excess_list else "email_auto_import"
+        imported_mpns_upper = sorted({item["display_mpn"].upper() for item in imported_for_matching if item["display_mpn"]})
+        matches = []
+        if imported_mpns_upper:
+            matches = (
+                db.query(
+                    Requirement.id,
+                    Requirement.requisition_id,
+                    Requirement.primary_mpn,
+                    Requirement.material_card_id,
+                )
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .filter(
+                    Requisition.status.in_(["active", "sourcing", "offers"]),
+                    sa_func.upper(Requirement.primary_mpn).in_(imported_mpns_upper),
+                )
+                .all()
+            )
+
+        if matches:
+            req_ids = [m.id for m in matches]
+            req_map: dict[str, list] = {}
+            for m in matches:
+                req_map.setdefault((m.primary_mpn or "").upper(), []).append(m)
+
+            existing_rows = (
+                db.query(
+                    Sighting.requirement_id,
+                    Sighting.vendor_name_normalized,
+                    Sighting.normalized_mpn,
+                    Sighting.qty_available,
+                    Sighting.unit_price,
+                )
+                .filter(
+                    Sighting.requirement_id.in_(req_ids),
+                    Sighting.vendor_name_normalized == norm_vendor,
+                    Sighting.source_type == source_type,
+                )
+                .all()
+            )
+            existing_keys = {
+                (
+                    requirement_id,
+                    vendor_name_normalized or "",
+                    normalized_mpn or "",
+                    qty_available,
+                    round(float(unit_price), 6) if unit_price is not None else None,
+                )
+                for requirement_id, vendor_name_normalized, normalized_mpn, qty_available, unit_price in existing_rows
+            }
+
+            created_sightings = 0
+            now = datetime.now(timezone.utc)
+            for item in imported_for_matching:
+                reqs = req_map.get(item["display_mpn"].upper(), [])
+                if not reqs:
+                    continue
+
+                row = item["row"]
+                qty = safe_int(row.get("qty"))
+                if qty is None or qty <= 0:
+                    continue  # Quality gate: only current stock lines become sightings
+                price = safe_float(row.get("unit_price") or row.get("price"))
+                price_norm = round(price, 6) if price and price > 0 else None
+
+                for req in reqs:
+                    dedup_key = (
+                        req.id,
+                        norm_vendor,
+                        item["norm_key"],
+                        qty,
+                        price_norm,
+                    )
+                    if dedup_key in existing_keys:
+                        continue
+                    existing_keys.add(dedup_key)
+
+                    s = Sighting(
+                        requirement_id=req.id,
+                        material_card_id=req.material_card_id or item["material_card_id"],
+                        vendor_name=vendor_name,
+                        vendor_name_normalized=norm_vendor,
+                        vendor_email=vendor_email or None,
+                        mpn_matched=item["display_mpn"],
+                        normalized_mpn=item["norm_key"],
+                        manufacturer=row.get("manufacturer"),
+                        qty_available=qty,
+                        unit_price=price_norm,
+                        currency=(row.get("currency") or "USD"),
+                        source_type=source_type,
+                        confidence=0.8,
+                        score=55.0,
+                        condition=normalize_condition(row.get("condition")),
+                        packaging=normalize_packaging(row.get("packaging")),
+                        date_code=normalize_date_code(row.get("date_code")),
+                        lead_time=row.get("lead_time"),
+                        lead_time_days=normalize_lead_time(row.get("lead_time")),
+                        source_company_id=source_company_id,
+                        raw_data={
+                            "filename": filename,
+                            "vendor_email": vendor_email,
+                            "import_method": "email_attachment",
+                        },
+                        created_at=now,
+                    )
+                    db.add(s)
+                    created_sightings += 1
+
+            if created_sightings:
+                db.commit()
+                logger.info(
+                    "Auto-created %d stock sightings from %s (%s)",
+                    created_sightings,
+                    filename,
+                    vendor_name,
+                )
+    except Exception as e:
+        logger.error(f"Auto-create sightings from stock list failed: {e}")
+        db.rollback()
+
     # Teams: check if imported MPNs match any open requirements
     try:
         from sqlalchemy import func as sa_func
@@ -303,9 +445,7 @@ async def _download_and_import_stock_list(
         from app.models import Requirement, Requisition
         from app.services.teams import send_stock_match_alert
 
-        imported_mpns = [
-            normalize_mpn(r.get("mpn", "")) or r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")
-        ]
+        imported_mpns = [item["display_mpn"] for item in imported_for_matching if item.get("display_mpn")]
         if imported_mpns:
             matches = (
                 db.query(Requirement.id, Requirement.primary_mpn, Requirement.requisition_id)
