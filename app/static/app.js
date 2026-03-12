@@ -888,6 +888,10 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    // Skip init when app shell not present (e.g. login page — scripts may load in some edge cases)
+    if (!document.getElementById('view-list') || !document.getElementById('mainSearch')) {
+        return;
+    }
     // Wire scroll-end detection on static table wraps so CSS fade-out hint disappears
     document.querySelectorAll('.crm-table-wrap').forEach(el => {
         el.addEventListener('scroll', () => {
@@ -9420,6 +9424,7 @@ function renderReqList() {
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
+    if (!el) return;
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
     if (!_serverSearchActive) {
