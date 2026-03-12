@@ -4,8 +4,8 @@ Tracks risk flags attached to buy plan lines and offers, replacing ad-hoc
 JSON ai_flags with queryable, auditable records. Enables surfacing risk
 signals during offer review.
 
-Revision ID: 073
-Revises: 072
+Revision ID: 074
+Revises: 073
 Create Date: 2026-03-11
 """
 
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "073"
-down_revision = "072"
+revision = "074"
+down_revision = "073"
 branch_labels = None
 depends_on = None
 
