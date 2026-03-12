@@ -482,6 +482,49 @@ def get_requisition_detail(
     }
 
 
+def get_row_context(db: Session, req: Requisition, user) -> dict:
+    """Build template context for a single row after inline edit.
+
+    Called by: app/routers/requisitions2.py (inline_save)
+    Depends on: Requisition model, User model
+    """
+    # Requirement count
+    req_cnt = db.query(sqlfunc.count(Requirement.id)).filter(
+        Requirement.requisition_id == req.id
+    ).scalar() or 0
+    # Offer count
+    offer_cnt = db.query(sqlfunc.count(Offer.id)).filter(
+        Offer.requisition_id == req.id
+    ).scalar() or 0
+    # Creator name
+    creator = db.query(User).filter(User.id == req.created_by).first()
+    creator_name = creator.name or creator.email if creator else ""
+    # Customer display
+    customer_display = req.customer_name or ""
+    if req.customer_site_id:
+        site = db.query(CustomerSite).filter(
+            CustomerSite.id == req.customer_site_id
+        ).first()
+        if site and site.company:
+            customer_display = f"{site.company.name} — {site.site_name}"
+    return {
+        "req": {
+            "id": req.id,
+            "name": req.name,
+            "status": req.status,
+            "customer_display": customer_display,
+            "requirement_count": req_cnt,
+            "offer_count": offer_cnt,
+            "created_by": req.created_by,
+            "created_by_name": creator_name,
+            "created_at": req.created_at,
+            "claimed_by_id": req.claimed_by_id,
+            "urgency": req.urgency or "normal",
+        },
+        "user": user,
+    }
+
+
 def get_team_users(db: Session) -> list[dict]:
     """Get list of active users for owner filter dropdown."""
     users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()

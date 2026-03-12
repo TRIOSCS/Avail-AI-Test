@@ -126,3 +126,24 @@ def test_pagination_context():
     p = PaginationContext(page=2, per_page=25, total=75, total_pages=3)
     assert p.page == 2
     assert p.total_pages == 3
+
+
+# ── InlineEditField ────────────────────────────────────────────────
+
+
+def test_inline_edit_field_values():
+    """InlineEditField has the expected values."""
+    from app.schemas.requisitions2 import InlineEditField
+    assert InlineEditField.name.value == "name"
+    assert InlineEditField.status.value == "status"
+    assert InlineEditField.urgency.value == "urgency"
+    assert InlineEditField.deadline.value == "deadline"
+    assert InlineEditField.owner.value == "owner"
+
+
+def test_inline_edit_field_invalid():
+    """Invalid field name raises ValueError."""
+    from app.schemas.requisitions2 import InlineEditField
+    import pytest
+    with pytest.raises(ValueError):
+        InlineEditField("invalid_field")

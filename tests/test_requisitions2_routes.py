@@ -623,3 +623,145 @@ def test_pagination_shows_controls(client, db_session, test_user):
     assert resp.status_code == 200
     assert "Next" in resp.text
     assert "Page 1 of" in resp.text
+
+
+# ── Inline edit cell ────────────────────────────────────────────────
+
+
+def test_inline_edit_name_cell(client, test_requisition):
+    """GET edit/name returns an input form."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/name")
+    assert resp.status_code == 200
+    assert 'name="value"' in resp.text
+    assert test_requisition.name in resp.text
+
+
+def test_inline_edit_status_cell(client, test_requisition):
+    """GET edit/status returns a select form."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/status")
+    assert resp.status_code == 200
+    assert "<select" in resp.text
+    assert "active" in resp.text
+
+
+def test_inline_edit_urgency_cell(client, test_requisition):
+    """GET edit/urgency returns a select form."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/urgency")
+    assert resp.status_code == 200
+    assert "<select" in resp.text
+    assert "critical" in resp.text
+
+
+def test_inline_edit_owner_cell(client, test_requisition):
+    """GET edit/owner returns a select with team users."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/owner")
+    assert resp.status_code == 200
+    assert "<select" in resp.text
+
+
+def test_inline_edit_deadline_cell(client, test_requisition):
+    """GET edit/deadline returns a date input."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/deadline")
+    assert resp.status_code == 200
+    assert 'type="date"' in resp.text
+
+
+def test_inline_edit_cell_not_found(client):
+    """GET edit cell for non-existent requisition returns 404."""
+    resp = client.get("/requisitions2/99999/edit/name")
+    assert resp.status_code == 404
+
+
+# ── Inline save ─────────────────────────────────────────────────────
+
+
+def test_inline_save_name(client, test_requisition):
+    """PATCH inline saves name and returns updated row."""
+    resp = client.patch(
+        f"/requisitions2/{test_requisition.id}/inline",
+        data={"field": "name", "value": "RENAMED-001"},
+    )
+    assert resp.status_code == 200
+    assert "RENAMED-001" in resp.text
+    assert "showToast" in resp.headers.get("HX-Trigger", "")
+
+
+def test_inline_save_urgency(client, test_requisition):
+    """PATCH inline saves urgency."""
+    resp = client.patch(
+        f"/requisitions2/{test_requisition.id}/inline",
+        data={"field": "urgency", "value": "critical"},
+    )
+    assert resp.status_code == 200
+    assert "critical" in resp.text
+
+
+def test_inline_save_deadline(client, test_requisition):
+    """PATCH inline saves deadline."""
+    resp = client.patch(
+        f"/requisitions2/{test_requisition.id}/inline",
+        data={"field": "deadline", "value": "2026-06-01"},
+    )
+    assert resp.status_code == 200
+    assert "showToast" in resp.headers.get("HX-Trigger", "")
+
+
+def test_inline_save_owner(client, test_requisition, test_user):
+    """PATCH inline saves owner."""
+    resp = client.patch(
+        f"/requisitions2/{test_requisition.id}/inline",
+        data={"field": "owner", "value": str(test_user.id)},
+    )
+    assert resp.status_code == 200
+
+
+def test_inline_save_empty_name_no_change(client, test_requisition):
+    """PATCH inline with empty name does not change it."""
+    resp = client.patch(
+        f"/requisitions2/{test_requisition.id}/inline",
+        data={"field": "name", "value": "  "},
+    )
+    assert resp.status_code == 200
+    assert test_requisition.name in resp.text
+
+
+def test_inline_save_not_found(client):
+    """PATCH inline for non-existent requisition returns 404."""
+    resp = client.patch(
+        "/requisitions2/99999/inline",
+        data={"field": "name", "value": "test"},
+    )
+    assert resp.status_code == 404
+
+
+# ── SSE stream ──────────────────────────────────────────────────────
+
+
+def test_sse_broker_publish_subscribe():
+    """SSE broker delivers events to subscribers."""
+    import asyncio
+    from app.services.sse_broker import SSEBroker
+
+    async def _test():
+        b = SSEBroker()
+        q = b.subscribe("test-ch")
+        await b.publish("test-ch", "my-event", "hello")
+        msg = q.get_nowait()
+        assert msg["event"] == "my-event"
+        assert msg["data"] == "hello"
+        b.unsubscribe("test-ch", q)
+        assert len(b._channels["test-ch"]) == 0
+
+    asyncio.get_event_loop().run_until_complete(_test())
+
+
+def test_sse_broker_no_subscribers():
+    """Publishing with no subscribers does not raise."""
+    import asyncio
+    from app.services.sse_broker import SSEBroker
+
+    async def _test():
+        b = SSEBroker()
+        await b.publish("empty-ch", "event", "data")
+
+    asyncio.get_event_loop().run_until_complete(_test())

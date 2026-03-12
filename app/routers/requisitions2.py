@@ -11,25 +11,30 @@ Depends on: app/services/requisition_list_service.py,
             app/templates/requisitions2/
 """
 
+import asyncio
 import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
+
+from ..services.sse_broker import broker
 
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import Requisition, User
 from ..schemas.requisitions2 import (
     BulkActionName,
+    InlineEditField,
     ReqListFilters,
     RowActionName,
 )
 from ..services.requisition_list_service import (
     get_requisition_detail,
+    get_row_context,
     get_team_users,
     list_requisitions,
 )
@@ -84,6 +89,40 @@ async def requisitions_page(
         return templates.TemplateResponse("requisitions2/_table.html", ctx)
 
     return templates.TemplateResponse("requisitions2/page.html", ctx)
+
+
+# ── SSE stream ───────────────────────────────────────────────────────
+
+
+@router.get("/stream")
+async def requisitions_stream(request: Request):
+    """SSE endpoint — pushes table-refresh events when data changes."""
+
+    async def event_generator():
+        queue = broker.subscribe("requisitions")
+        try:
+            while True:
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"event: {msg['event']}\ndata: {msg.get('data', '')}\n\n"
+                except asyncio.TimeoutError:
+                    # Send keepalive comment to prevent connection timeout
+                    yield ": keepalive\n\n"
+        finally:
+            broker.unsubscribe("requisitions", queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ── Table fragment ───────────────────────────────────────────────────
@@ -142,6 +181,87 @@ async def requisition_modal(
         "requisitions2/_modal.html",
         {"request": request, **detail, "user": user},
     )
+
+
+# ── Inline editing ───────────────────────────────────────────────────
+
+
+@router.get("/{req_id}/edit/{field}", response_class=HTMLResponse)
+async def inline_edit_cell(
+    request: Request,
+    req_id: int,
+    field: InlineEditField,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Return an inline edit form for a single cell."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        return HTMLResponse("Not found", status_code=404)
+    users = get_team_users(db) if field == InlineEditField.owner else []
+    return templates.TemplateResponse(
+        "requisitions2/_inline_cell.html",
+        {"request": request, "req": req, "field": field.value, "users": users},
+    )
+
+
+@router.patch("/{req_id}/inline", response_class=HTMLResponse)
+async def inline_save(
+    request: Request,
+    req_id: int,
+    field: str = Form(...),
+    value: str = Form(default=""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Save an inline edit and return the updated full row."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        return HTMLResponse("Not found", status_code=404)
+
+    msg = "Updated"
+
+    if field == "name":
+        clean = value.strip()
+        if clean:
+            req.name = clean
+            msg = f"Renamed to '{clean}'"
+
+    elif field == "status":
+        from ..services.requisition_state import transition
+        try:
+            transition(req, value, user, db)
+            msg = f"Status changed to {value}"
+        except ValueError as e:
+            msg = str(e)
+
+    elif field == "urgency":
+        if value in ("normal", "hot", "critical"):
+            req.urgency = value
+            msg = f"Urgency set to {value}"
+
+    elif field == "deadline":
+        req.deadline = value if value else None
+        msg = f"Deadline {'set to ' + value if value else 'cleared'}"
+
+    elif field == "owner":
+        if value and value.isdigit():
+            req.created_by = int(value)
+            msg = "Owner reassigned"
+
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+
+    # Build single-row context and return full <tr>
+    from ..services.requisition_list_service import get_row_context
+    row_ctx = get_row_context(db, req, user)
+    row_ctx["request"] = request
+    response = templates.TemplateResponse("requisitions2/_single_row.html", row_ctx)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    await broker.publish("requisitions", "table-refresh", msg)
+    return response
 
 
 # ── Row actions ──────────────────────────────────────────────────────
@@ -220,6 +340,7 @@ async def row_action(
     ctx = _table_context(request, filters, db, user)
     response = templates.TemplateResponse("requisitions2/_table.html", ctx)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    await broker.publish("requisitions", "table-refresh", msg)
     return response
 
 
@@ -276,4 +397,5 @@ async def bulk_action(
         "showToast": {"message": msg},
         "clearSelection": True,
     })
+    await broker.publish("requisitions", "table-refresh", msg)
     return response

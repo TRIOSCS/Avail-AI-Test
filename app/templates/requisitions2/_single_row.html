@@ -1,4 +1,9 @@
-{% for req in requisitions %}
+{# Single row returned after inline edit save.
+   Same structure as _table_rows.html but for one req (no loop).
+
+   Called by: PATCH /requisitions2/{id}/inline
+   Depends on: req dict, user object
+#}
 <tr id="rq2-row-{{ req.id }}" class="rq2-row {{ 'rq2-urgent' if req.urgency == 'critical' else '' }}">
   <td>
     <input type="checkbox" value="{{ req.id }}"
@@ -87,8 +92,3 @@
     {% endif %}
   </td>
 </tr>
-{% else %}
-<tr>
-  <td colspan="10" class="rq2-empty">No requisitions found.</td>
-</tr>
-{% endfor %}

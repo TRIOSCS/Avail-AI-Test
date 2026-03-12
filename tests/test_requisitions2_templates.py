@@ -450,3 +450,70 @@ def test_pagination_links_have_preload(client, db_session, test_user):
 
     resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10", "page": "2"})
     assert "preload" in resp.text
+
+
+# ── Inline editing styles and attributes ────────────────────────────
+
+
+def test_inline_edit_css_styles(client):
+    """Page includes inline editing CSS styles."""
+    resp = client.get("/requisitions2")
+    assert "rq2-editable" in resp.text
+    assert "rq2-inline-input" in resp.text
+    assert "rq2-inline-select" in resp.text
+
+
+def test_editable_cells_have_dblclick_trigger(client, test_requisition):
+    """Editable cells use hx-trigger=dblclick."""
+    resp = client.get("/requisitions2/table/rows", params={"status": "all"})
+    assert 'hx-trigger="dblclick"' in resp.text
+    assert "rq2-editable" in resp.text
+
+
+def test_editable_cells_have_edit_endpoints(client, test_requisition):
+    """Editable cells point to /edit/ endpoints."""
+    resp = client.get("/requisitions2/table/rows", params={"status": "all"})
+    assert f"/requisitions2/{test_requisition.id}/edit/name" in resp.text
+    assert f"/requisitions2/{test_requisition.id}/edit/status" in resp.text
+    assert f"/requisitions2/{test_requisition.id}/edit/urgency" in resp.text
+    assert f"/requisitions2/{test_requisition.id}/edit/owner" in resp.text
+
+
+def test_inline_cell_name_has_autofocus(client, test_requisition):
+    """Inline name edit cell has autofocus."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/name")
+    assert "autofocus" in resp.text
+
+
+def test_inline_cell_has_escape_handler(client, test_requisition):
+    """Inline edit cells have escape key handler."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/edit/name")
+    assert "keydown.escape" in resp.text
+
+
+# ── SSE integration ────────────────────────────────────────────────
+
+
+def test_sse_extension_loaded(client):
+    """Page loads the SSE extension script."""
+    resp = client.get("/requisitions2")
+    assert "htmx-ext-sse" in resp.text
+
+
+def test_sse_source_element_exists(client):
+    """Page has the SSE source element with stream URL."""
+    resp = client.get("/requisitions2")
+    assert 'sse-connect="/requisitions2/stream"' in resp.text
+
+
+def test_sse_triggers_table_refresh(client):
+    """SSE source element triggers table refresh on sse:table-refresh."""
+    resp = client.get("/requisitions2")
+    assert "sse:table-refresh" in resp.text
+    assert 'hx-get="/requisitions2/table"' in resp.text
+
+
+def test_live_indicator_present(client):
+    """Page has a live update indicator dot."""
+    resp = client.get("/requisitions2")
+    assert "rq2-live-dot" in resp.text

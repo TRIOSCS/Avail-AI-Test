@@ -64,6 +64,14 @@ class ReqListFilters(BaseModel):
     per_page: int = Field(default=25, ge=1, le=100)
 
 
+class InlineEditField(str, Enum):
+    name = "name"
+    status = "status"
+    urgency = "urgency"
+    deadline = "deadline"
+    owner = "owner"
+
+
 class RowActionName(str, Enum):
     assign = "assign"
     claim = "claim"
