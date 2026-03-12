@@ -10696,7 +10696,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -14703,10 +14703,10 @@ async function _retryRfq(contactId) {
         if (r.status === 'sent') {
             showToast('RFQ resent successfully', 'success');
         } else {
-            showToast(r.error || 'Retry failed', 'error');
+            showToast(r.error || r.detail || 'Retry failed', 'error');
         }
     } catch(e) {
-        showToast('Retry failed: ' + e.message, 'error');
+        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -14719,7 +14719,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Failed: ' + e.message, 'error');
+        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 

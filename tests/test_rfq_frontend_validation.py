@@ -169,6 +169,22 @@ class TestInlineRfqBar:
         assert "_clearSightingSelection" in app_js
 
 
+class TestFollowUpPanelRefresh:
+    def test_bulk_follow_up_refreshes_panel(self, app_js):
+        assert "loadFollowUpsPanel();" in app_js
+
+    def test_no_stale_loadFollowUps_call(self, app_js):
+        assert "loadFollowUps();" not in app_js
+
+
+class TestRfqErrorToasts:
+    def test_retry_rfq_uses_friendly_error_toast(self, app_js):
+        assert "Couldn\\'t retry RFQ — " in app_js
+
+    def test_update_status_uses_friendly_error_toast(self, app_js):
+        assert "Couldn\\'t update response status — " in app_js
+
+
 # ── Notification Bar ─────────────────────────────────────────────────────
 
 
