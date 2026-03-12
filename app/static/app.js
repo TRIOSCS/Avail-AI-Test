@@ -1,5 +1,12 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
+import {
+    loadFollowUpsPanelImpl,
+    sendBulkFollowUpImpl,
+    sendFollowUpImpl,
+    updateBulkFollowUpBtnImpl,
+} from './rfq/followups.js';
+
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
 const TEST_PATTERNS = [/QA\s+VALIDATION\s+TEST/i, /DELETE\s+ME/i, /\(clone\).*\(clone\)/i];
@@ -10534,16 +10541,18 @@ function setMainPill(view) {
 const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 
 async function sendFollowUp(contactId, vendorName) {
-    confirmAction('Send Follow-Up', 'Send follow-up email to ' + vendorName + '?', async function() {
-        if (sendFollowUp._busy) return; sendFollowUp._busy = true;
-        try {
-            const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
-            showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
-            if (typeof loadActivity === 'function') loadActivity();
-            loadFollowUpsPanel();
-        } catch (e) { showToast('Failed to send follow-up', 'error'); }
-        finally { sendFollowUp._busy = false; }
-    });
+    sendFollowUpImpl(
+        {
+            confirmAction,
+            apiFetch,
+            showToast,
+            loadActivityFn: typeof loadActivity === 'function' ? loadActivity : null,
+            loadFollowUpsPanelFn: loadFollowUpsPanel,
+        },
+        contactId,
+        vendorName,
+        sendFollowUp,
+    );
 }
 
 // ── Deal Board ─────────────────────────────────────────────────────────
@@ -10654,68 +10663,28 @@ async function _dealCardClick(reqId) {
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
 async function loadFollowUpsPanel() {
-    const panel = document.getElementById('followUpsPanel');
-    if (!panel) return;
-    if (_currentMainView === 'archive') { panel.style.display = 'none'; return; }
-    if (_followUpsAbort) try { _followUpsAbort.abort(); } catch(e){}
-    _followUpsAbort = new AbortController();
-    try {
-        const data = await apiFetch('/api/follow-ups', { signal: _followUpsAbort.signal });
-        if (_currentMainView === 'archive') return; // stale — user switched tabs
-        const followUps = data.follow_ups || [];
-        if (!followUps.length) { panel.style.display = 'none'; return; }
-        // Group by requisition
-        const groups = {};
-        for (const fu of followUps) {
-            const key = fu.requisition_id || 0;
-            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown Requirement', items: [] };
-            groups[key].items.push(fu);
-        }
-        let html = `<div class="card" style="margin:0 16px 12px;padding:12px;border-left:3px solid var(--amber)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <span style="font-weight:700;font-size:13px;color:var(--amber)">Awaiting Vendor Replies (${followUps.length})</span>
-                <button class="btn btn-warning btn-sm" id="bulkFollowUpBtn" onclick="sendBulkFollowUp()" style="font-size:10px;display:none">Send Selected</button>
-            </div>`;
-        for (const [rfqId, g] of Object.entries(groups)) {
-            html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${esc(g.name)}</span></div>`;
-            for (const fu of g.items) {
-                const dayColor = fu.days_waiting > 5 ? 'var(--red)' : fu.days_waiting > 2 ? 'var(--amber)' : 'var(--green)';
-                html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px">
-                    ${fu.contact_id ? `<input type="checkbox" class="fu-cb" data-contact-id="${fu.contact_id}" onchange="_updateBulkFollowUpBtn()">` : ''}
-                    <span style="color:var(--text2)">${esc(fu.vendor_name)}</span>
-                    <span style="color:var(--muted)">${esc(fu.vendor_email || '')}</span>
-                    <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
-                    ${fu.parts && fu.parts.length ? `<span style="color:var(--muted)">${esc(Array.isArray(fu.parts) ? fu.parts.join(', ') : String(fu.parts))}</span>` : ''}
-                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Send Now</button>` : ''}
-                </div>`;
-            }
-        }
-        html += '</div>';
-        panel.innerHTML = html;
-        panel.style.display = '';
-    } catch(e) { if (e.name !== 'AbortError') panel.style.display = 'none'; }
+    await loadFollowUpsPanelImpl({
+        apiFetch,
+        esc,
+        escAttr,
+        getCurrentMainView: () => _currentMainView,
+        getAbortController: () => _followUpsAbort,
+        setAbortController: (controller) => {
+            _followUpsAbort = controller;
+        },
+    });
 }
 
 function _updateBulkFollowUpBtn() {
-    const checked = document.querySelectorAll('.fu-cb:checked').length;
-    const btn = document.getElementById('bulkFollowUpBtn');
-    if (btn) {
-        btn.style.display = checked > 0 ? '' : 'none';
-        btn.textContent = `Send ${checked} Follow-up${checked > 1 ? 's' : ''}`;
-    }
+    updateBulkFollowUpBtnImpl();
 }
 
 async function sendBulkFollowUp() {
-    const checked = [...document.querySelectorAll('.fu-cb:checked')];
-    const contactIds = checked.map(cb => parseInt(cb.dataset.contactId)).filter(Boolean);
-    if (!contactIds.length) return;
-    const btn = document.getElementById('bulkFollowUpBtn');
-    await guardBtn(btn, 'Sending…', async () => {
-        const data = await apiFetch('/api/follow-ups/send-batch', {
-            method: 'POST', body: { contact_ids: contactIds }
-        });
-        showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUpsPanel();
+    await sendBulkFollowUpImpl({
+        apiFetch,
+        guardBtn,
+        showToast,
+        loadFollowUpsPanelFn: loadFollowUpsPanel,
     });
 }
 
