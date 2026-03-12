@@ -33,6 +33,9 @@ from ..models import (
 )
 from ..schemas.ai import (
     CompareQuotesRequest,
+    FreeTextParseRequest,
+    FreeTextSaveOffersRequest,
+    FreeTextSaveRfqRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ProspectContactSave,
@@ -683,3 +686,177 @@ async def ai_compare_quotes(
     if not result:
         return {"available": False, "reason": "Comparison not available"}
     return {"available": True, **result}
+
+
+# ── Feature 6: Free-Text RFQ/Offer Parser ─────────────────────────────
+
+
+@router.post("/api/ai/parse-free-text")
+@limiter.limit("10/minute")
+async def ai_parse_free_text(
+    payload: FreeTextParseRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse free-form text into structured RFQ or Offer data for user review."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.free_text_parser import parse_free_text
+
+    result = await parse_free_text(payload.text)
+
+    if not result or not result.get("line_items"):
+        return {
+            "parsed": False,
+            "reason": "Could not extract any parts from the text",
+        }
+
+    return {
+        "parsed": True,
+        "document_type": result.get("document_type", "rfq"),
+        "confidence": result.get("confidence", 0),
+        "company_name": result.get("company_name"),
+        "contact_name": result.get("contact_name"),
+        "contact_email": result.get("contact_email"),
+        "notes": result.get("notes"),
+        "line_items": result.get("line_items", []),
+    }
+
+
+@router.post("/api/ai/save-free-text-rfq")
+async def save_free_text_rfq(
+    payload: FreeTextSaveRfqRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save AI-parsed free-text as a new Requisition with Requirements."""
+    import re
+
+    from ..models import Requirement, Requisition
+    from ..utils.normalization import normalize_mpn_key
+
+    safe_name = re.sub(r"<[^>]+>", "", payload.name).strip() or "Untitled"
+
+    req = Requisition(
+        name=safe_name,
+        customer_name=payload.customer_name,
+        customer_site_id=payload.customer_site_id,
+        created_by=user.id,
+        status="draft",
+    )
+    db.add(req)
+    db.flush()
+
+    created = []
+    for item in payload.line_items:
+        if not item.mpn:
+            continue
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=item.mpn,
+            normalized_mpn=normalize_mpn_key(item.mpn),
+            target_qty=item.quantity or 1,
+            target_price=item.target_price,
+            condition=item.condition,
+            date_codes=item.date_code,
+            packaging=item.packaging,
+            notes=item.notes,
+        )
+        db.add(r)
+        db.flush()
+        created.append({
+            "id": r.id,
+            "mpn": r.primary_mpn,
+            "qty": r.target_qty,
+            "target_price": float(r.target_price) if r.target_price else None,
+        })
+
+    if payload.notes:
+        req.name = f"{safe_name}"
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "requisition_id": req.id,
+        "requisition_name": req.name,
+        "requirements_created": len(created),
+        "requirements": created,
+    }
+
+
+@router.post("/api/ai/save-free-text-offers")
+async def save_free_text_offers(
+    payload: FreeTextSaveOffersRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save AI-parsed free-text as Offers on an existing Requisition."""
+    from ..dependencies import get_req_for_user
+    from ..models import Offer, Requirement
+    from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
+
+    req = get_req_for_user(db, user, payload.requisition_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    reqs = db.query(Requirement).filter(
+        Requirement.requisition_id == payload.requisition_id
+    ).all()
+
+    vendor_norm = normalize_vendor_name(payload.vendor_name)
+    vendor_card = db.query(VendorCard).filter(
+        VendorCard.normalized_name == vendor_norm
+    ).first()
+
+    created = []
+    for item in payload.line_items:
+        if not item.mpn:
+            continue
+
+        req_id = None
+        for r in reqs:
+            if r.primary_mpn and fuzzy_mpn_match(item.mpn, r.primary_mpn):
+                req_id = r.id
+                break
+
+        from app.search_service import resolve_material_card
+
+        mat_card = resolve_material_card(item.mpn, db)
+
+        offer = Offer(
+            requisition_id=payload.requisition_id,
+            requirement_id=req_id,
+            material_card_id=mat_card.id if mat_card else None,
+            vendor_name=payload.vendor_name,
+            vendor_name_normalized=vendor_norm,
+            vendor_card_id=vendor_card.id if vendor_card else None,
+            mpn=item.mpn,
+            normalized_mpn=normalize_mpn_key(item.mpn),
+            manufacturer=item.manufacturer,
+            qty_available=item.quantity,
+            unit_price=item.target_price,
+            currency=item.currency or "USD",
+            lead_time=item.lead_time,
+            date_code=item.date_code,
+            condition=item.condition or "new",
+            packaging=item.packaging,
+            moq=item.moq,
+            source="free_text",
+            entered_by_id=user.id,
+            notes=item.notes,
+            status="active",
+        )
+        db.add(offer)
+        db.flush()
+        created.append(offer.id)
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "requisition_id": payload.requisition_id,
+        "offers_created": len(created),
+        "offer_ids": created,
+    }
