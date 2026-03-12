@@ -358,11 +358,7 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Temporary cache-buster for stale service worker/cached assets.
-        # Auto-expires via _should_set_clear_site_data() after rollout window.
         path = request.url.path
-        if path != "/health" and _should_set_clear_site_data():
-            response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
