@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -357,11 +358,10 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # One-time nuke: Clear-Site-Data on ALL responses to kill stale SW + caches
-        # The old SW intercepts fetches, so we must send this on static/api too
-        # TODO: remove this header after 2026-03-17
+        # Temporary cache-buster for stale service worker/cached assets.
+        # Auto-expires via _should_set_clear_site_data() after rollout window.
         path = request.url.path
-        if path != "/health":
+        if path != "/health" and _should_set_clear_site_data():
             response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
@@ -402,6 +402,14 @@ async def api_version_middleware(request: Request, call_next):
 # ── Health Check ──────────────────────────────────────────────────────
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
 BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
+CLEAR_SITE_DATA_UNTIL = datetime(2026, 3, 17, 23, 59, 59, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now_utc: datetime | None = None) -> bool:
+    """Return True while temporary cache-busting header is active."""
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
+    return now_utc <= CLEAR_SITE_DATA_UNTIL
 
 
 def _check_backup_freshness() -> str:
@@ -906,7 +914,10 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
+                new_source = ApiSource(status=status, is_active=is_active, **src)
+                db.add(new_source)
+                # Keep local map synchronized for follow-up quota backfill.
+                existing_map[src["name"]] = new_source
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -919,16 +930,18 @@ def _seed_api_sources():
         # Backfill known monthly quotas (only sets if currently NULL)
         quota_map = {
             "apollo_enrichment": 10000,
-            "hunter": 500,
+            "hunter_enrichment": 500,
+            "hunter": 500,  # legacy row name support
             "lusha_enrichment": 6400,
-            "clearbit": 1000,
+            "clearbit_enrichment": 1000,
+            "clearbit": 1000,  # legacy row name support
             "digikey": 1000,
             "mouser": 1000,
             "oemsecrets": 5000,
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

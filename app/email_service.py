@@ -15,6 +15,7 @@ from .models import (
     ProcessedMessage,
     Requirement,
     Requisition,
+    VendorCard,
     VendorResponse,
 )
 from .services.credential_service import get_credential_cached
