@@ -16727,6 +16727,58 @@ function _rfqRenderSightings(data, body) {
 }
 
 
+// ── Freeform AI Parse helpers (called from inline onclick in index.html) ──
+async function parseFreeformOffer() {
+    const raw = document.getElementById('loPasteText')?.value?.trim();
+    if (!raw) { showToast('Paste vendor text first', 'warning'); return; }
+    const btn = document.getElementById('loParseBtn');
+    btn.disabled = true; btn.textContent = 'Parsing…';
+    try {
+        const data = await apiFetch('/api/ai/parse-freeform-offer', { method: 'POST', body: { raw_text: raw } });
+        const container = document.getElementById('loParsedOffers');
+        if (!data.offers?.length) { showToast('No offers found in text', 'info'); return; }
+        container.textContent = '';
+        data.offers.forEach(o => {
+            const div = document.createElement('div');
+            div.style.cssText = 'padding:4px 0;border-bottom:1px solid var(--border);font-size:12px';
+            const b = document.createElement('b');
+            b.textContent = o.mpn || '';
+            div.appendChild(b);
+            div.appendChild(document.createTextNode(` — ${o.qty||'?'} pcs @ $${o.unit_price||'?'} (${o.vendor_name||''})`));
+            container.appendChild(div);
+        });
+        container.classList.remove('u-hidden');
+        showToast(`Parsed ${data.offers.length} offer(s)`, 'success');
+    } catch(e) { showToast('AI parse failed: ' + e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Parse with AI'; }
+}
+
+async function parseFreeformRfq() {
+    const raw = document.getElementById('nrPasteText')?.value?.trim();
+    if (!raw) { showToast('Paste customer text first', 'warning'); return; }
+    const btn = document.getElementById('nrParseBtn');
+    btn.disabled = true; btn.textContent = 'Parsing…';
+    try {
+        const data = await apiFetch('/api/ai/parse-freeform-rfq', { method: 'POST', body: { raw_text: raw } });
+        const container = document.getElementById('nrParsedReqs');
+        if (!data.parts?.length) { showToast('No parts found in text', 'info'); return; }
+        container.textContent = '';
+        data.parts.forEach(p => {
+            const div = document.createElement('div');
+            div.style.cssText = 'padding:4px 0;border-bottom:1px solid var(--border);font-size:12px';
+            const b = document.createElement('b');
+            b.textContent = p.mpn || '';
+            div.appendChild(b);
+            const desc = ` — qty ${p.qty||'?'}` + (p.manufacturer ? ` (${p.manufacturer})` : '');
+            div.appendChild(document.createTextNode(desc));
+            container.appendChild(div);
+        });
+        container.classList.remove('u-hidden');
+        showToast(`Parsed ${data.parts.length} part(s)`, 'success');
+    } catch(e) { showToast('AI parse failed: ' + e.message, 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'Parse with AI'; }
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
@@ -16795,7 +16847,7 @@ Object.assign(window, {
     toggleMyAccounts, toggleNotifications, toggleSidebar, toggleSidebarGroup, toggleStockImport,
     triggerMainSearch,
     // AI feature functions
-    aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply,
+    aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply, parseFreeformOffer, parseFreeformRfq,
     _applyNormalized, _showAiModal,
     // v2 visual helpers
     engRing, healthDot, statCard, daysSince, recencyColor,
