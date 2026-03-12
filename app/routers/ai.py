@@ -33,6 +33,7 @@ from ..models import (
 )
 from ..schemas.ai import (
     CompareQuotesRequest,
+    IntakeParseRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ProspectContactSave,
@@ -378,6 +379,22 @@ async def promote_prospect_contact(
 
 
 # ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────
+
+
+@router.post("/api/ai/intake-parse")
+@limiter.limit("20/minute")
+async def ai_intake_parse(
+    payload: IntakeParseRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse free-form pasted text into RFQ/offer draft template rows."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.ai_intake_service import parse_freeform_intake
+
+    return await parse_freeform_intake(payload.text, payload.mode)
 
 
 @router.post("/api/ai/parse-email")

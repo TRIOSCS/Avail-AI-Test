@@ -34,6 +34,21 @@ class ProspectContactSave(BaseModel):
     notes: str | None = None
 
 
+class IntakeParseRequest(BaseModel):
+    """Input for free-form RFQ/offer intake parsing."""
+
+    text: str = Field(min_length=5, max_length=12000)
+    mode: Literal["auto", "rfq", "offer"] = "auto"
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text is required")
+        return v
+
+
 class DraftOfferItem(BaseModel):
     vendor_name: str = ""
     mpn: str = ""

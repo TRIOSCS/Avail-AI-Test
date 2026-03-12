@@ -16093,7 +16093,10 @@ function ctxAttachFile() {
 // ═══════════════════════════════════════════════════════════════════════
 
 let _intakeParsedRows = [];
+let _intakeParsedContext = {};
 let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
+let _intakeParsing = false;
+let _intakeParseTimer = null;
 
 function showIntakeBar() {
     const bar = document.getElementById('intakeBar');
@@ -16107,15 +16110,16 @@ function hideIntakeBar() {
 }
 
 function _intakeInputChange(value) {
-    // Multi-line paste triggers review
-    if (value.includes('\n') || value.includes('\t')) {
-        _intakeParseText(value);
+    // Multi-line and longer text triggers AI parse preview.
+    if (value.includes('\n') || value.includes('\t') || value.length > 40) {
+        if (_intakeParseTimer) clearTimeout(_intakeParseTimer);
+        _intakeParseTimer = setTimeout(() => _intakeParseText(value), 220);
     }
 }
 
 function _intakePaste(event) {
     const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
-    if (text.includes('\n') || text.includes('\t')) {
+    if (text.includes('\n') || text.includes('\t') || text.length > 40) {
         event.preventDefault();
         const input = document.getElementById('intakeInput');
         if (input) input.value = text;
@@ -16123,33 +16127,86 @@ function _intakePaste(event) {
     }
 }
 
-function _intakeParseText(text) {
-    // Parse tab/newline separated data into rows
-    const lines = text.trim().split('\n').filter(l => l.trim());
-    if (lines.length === 0) return;
-    _intakeParsedRows = [];
-    // Detect header row
+function _intakeNormalizeRow(row, mode) {
+    const rowType = row?.row_type || row?.type || (mode === 'offer' ? 'offer' : 'requirement');
+    const qtyVal = row?.qty == null ? '' : String(row.qty);
+    const unitPrice = row?.unit_price == null ? '' : String(row.unit_price);
+    return {
+        row_type: rowType,
+        mpn: (row?.mpn || '').trim(),
+        qty: qtyVal,
+        unit_price: unitPrice,
+        vendor_name: (row?.vendor_name || '').trim(),
+        manufacturer: (row?.manufacturer || '').trim(),
+        lead_time: (row?.lead_time || '').trim(),
+        condition: (row?.condition || '').trim(),
+        packaging: (row?.packaging || '').trim(),
+        notes: (row?.notes || '').trim(),
+        confidence: Number(row?.confidence ?? 0.5) || 0.5
+    };
+}
+
+function _intakeParseTextFallback(text, mode) {
+    const lines = (text || '').trim().split('\n').filter(l => l.trim());
+    const parsed = [];
+    if (!lines.length) return parsed;
     const firstLine = lines[0].toLowerCase();
     const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
     const startIdx = hasHeader ? 1 : 0;
+    const fallbackType = mode === 'offer' ? 'offer' : 'requirement';
     for (let i = startIdx; i < lines.length; i++) {
         const cols = lines[i].split('\t');
-        if (cols.length === 0 || !cols[0].trim()) continue;
-        const row = {
-            mpn: cols[0]?.trim() || '',
+        const mpn = cols[0]?.trim() || '';
+        if (!mpn) continue;
+        parsed.push({
+            row_type: fallbackType,
+            mpn,
             qty: cols[1]?.trim() || '',
-            price: cols[2]?.trim() || '',
+            unit_price: cols[2]?.trim() || '',
             manufacturer: cols[3]?.trim() || '',
-            confidence: 'high',
-            type: _intakeTargetType,
-            duplicate: false
-        };
-        // Simple confidence heuristic
-        if (!row.mpn || row.mpn.length < 3) row.confidence = 'low';
-        else if (!row.qty && !row.price) row.confidence = 'med';
-        _intakeParsedRows.push(row);
+            vendor_name: fallbackType === 'offer' ? (_intakeParsedContext.vendor_name || '') : '',
+            confidence: 0.4
+        });
     }
-    _intakeRenderDrawer();
+    return parsed;
+}
+
+async function _intakeParseText(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed || _intakeParsing) return;
+    _intakeParsing = true;
+    const titleEl = document.getElementById('intakeDrawerTitle');
+    if (titleEl) titleEl.textContent = 'AI Review — parsing...';
+    const mode = document.getElementById('intakeModeSelect')?.value || 'auto';
+    _intakeTargetType = mode === 'offer' ? 'offer' : 'requirement';
+    try {
+        const parsed = await apiFetch('/api/ai/intake-parse', {
+            method: 'POST',
+            body: { text: trimmed, mode }
+        });
+        _intakeParsedContext = parsed?.context || {};
+        _intakeParsedRows = (parsed?.rows || []).map(r => _intakeNormalizeRow(r, mode)).filter(r => r.mpn);
+        if (!_intakeParsedRows.length) {
+            _intakeParsedRows = _intakeParseTextFallback(trimmed, mode).map(r => _intakeNormalizeRow(r, mode));
+        }
+        if (!_intakeParsedRows.length) {
+            showToast('No valid line items found in pasted text', 'warn');
+            _intakeClose();
+            return;
+        }
+        _intakeRenderDrawer();
+    } catch (e) {
+        // Safe fallback so intake still works when AI is unavailable.
+        _intakeParsedRows = _intakeParseTextFallback(trimmed, mode).map(r => _intakeNormalizeRow(r, mode));
+        if (_intakeParsedRows.length) {
+            _intakeRenderDrawer();
+            showToast('AI parsing unavailable — using fallback parse', 'warn');
+        } else {
+            showToast('Could not parse intake text', 'error');
+        }
+    } finally {
+        _intakeParsing = false;
+    }
 }
 
 function _intakeRenderDrawer() {
@@ -16158,25 +16215,34 @@ function _intakeRenderDrawer() {
     const titleEl = document.getElementById('intakeDrawerTitle');
     if (!drawer || !body) return;
     drawer.classList.add('open');
-    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} items detected`;
+    const ctxLabel = _intakeParsedContext?.customer_name || _intakeParsedContext?.vendor_name || '';
+    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} draft line item${_intakeParsedRows.length !== 1 ? 's' : ''}${ctxLabel ? ' · ' + ctxLabel : ''}`;
     let html = '';
     for (let i = 0; i < _intakeParsedRows.length; i++) {
         const r = _intakeParsedRows[i];
-        const confClass = r.confidence === 'high' ? 'high' : r.confidence === 'med' ? 'med' : 'low';
-        const confPct = r.confidence === 'high' ? '95' : r.confidence === 'med' ? '65' : '30';
+        const conf = Math.max(0, Math.min(100, Math.round((Number(r.confidence) || 0) * 100)));
+        const confClass = conf >= 80 ? 'high' : conf >= 55 ? 'med' : 'low';
         html += `<div class="intake-row">
-            <div class="intake-row-confidence ${confClass}" title="Confidence: ${r.confidence}">${confPct}%</div>
+            <div class="intake-row-confidence ${confClass}" title="AI confidence">${conf}%</div>
             <div class="intake-row-data">
-                <div class="intake-row-mpn">${esc(r.mpn)}</div>
-                <div class="intake-row-detail">Qty: ${esc(r.qty || '—')} · Price: ${esc(r.price || '—')} ${r.manufacturer ? '· ' + esc(r.manufacturer) : ''}</div>
+                <div style="display:grid;grid-template-columns:1fr 92px 92px;gap:6px;align-items:center;margin-bottom:6px">
+                    <input value="${escAttr(r.mpn || '')}" placeholder="MPN" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'mpn',this.value)">
+                    <input value="${escAttr(r.qty || '')}" placeholder="Qty" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'qty',this.value)">
+                    <input value="${escAttr(r.unit_price || '')}" placeholder="Price" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'unit_price',this.value)">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center">
+                    <input value="${escAttr(r.vendor_name || '')}" placeholder="Vendor (offers)" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'vendor_name',this.value)">
+                    <input value="${escAttr(r.manufacturer || '')}" placeholder="Manufacturer" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'manufacturer',this.value)">
+                </div>
+                <div style="margin-top:6px">
+                    <input value="${escAttr(r.notes || '')}" placeholder="Notes (optional)" style="font-size:11px;padding:4px 6px;width:100%" oninput="_intakeEdit(${i},'notes',this.value)">
+                </div>
             </div>
-            <span class="intake-row-tag ${r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer'}">${r.type}</span>
-            ${r.duplicate ? '<span class="intake-row-tag dup">DUP</span>' : ''}
+            <span class="intake-row-tag ${r.row_type === 'requirement' ? 'req' : 'offer'}">${r.row_type}</span>
             <div class="intake-row-actions">
-                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeChangeType(${i},this.value)">
-                    <option value="requirement" ${r.type === 'requirement' ? 'selected' : ''}>Requirement</option>
-                    <option value="sighting" ${r.type === 'sighting' ? 'selected' : ''}>Sighting</option>
-                    <option value="offer" ${r.type === 'offer' ? 'selected' : ''}>Offer</option>
+                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeEdit(${i},'row_type',this.value)">
+                    <option value="requirement" ${r.row_type === 'requirement' ? 'selected' : ''}>RFQ line</option>
+                    <option value="offer" ${r.row_type === 'offer' ? 'selected' : ''}>Offer line</option>
                 </select>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 4px;color:var(--red)" onclick="_intakeRemoveRow(${i})" title="Remove">✕</button>
             </div>
@@ -16185,9 +16251,13 @@ function _intakeRenderDrawer() {
     body.innerHTML = html;
 }
 
-function _intakeChangeType(idx, type) {
-    if (_intakeParsedRows[idx]) {
-        _intakeParsedRows[idx].type = type;
+function _intakeEdit(idx, field, value) {
+    const row = _intakeParsedRows[idx];
+    if (!row) return;
+    row[field] = value;
+    if (field === 'row_type') {
+        if (value === 'requirement') row.vendor_name = '';
+        _intakeRenderDrawer();
     }
 }
 
@@ -16200,50 +16270,108 @@ function _intakeClose() {
     const drawer = document.getElementById('intakeDrawer');
     if (drawer) drawer.classList.remove('open');
     _intakeParsedRows = [];
+    _intakeParsedContext = {};
     const input = document.getElementById('intakeInput');
     if (input) input.value = '';
 }
 
-const _intakeSubmit = () => _intakeConfirm();
+const _intakeSubmit = () => {
+    const input = document.getElementById('intakeInput');
+    if (_intakeParsedRows.length) return _intakeConfirm();
+    if (input?.value?.trim()) return _intakeParseText(input.value.trim());
+};
 async function _intakeConfirm() {
     if (!_intakeParsedRows.length) return;
-    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement');
-    // For requirements, add them to the current requisition
-    if (reqRows.length && currentReqId) {
+    const reqRows = _intakeParsedRows
+        .filter(r => r.row_type === 'requirement' && (r.mpn || '').trim())
+        .map(r => ({
+            primary_mpn: (r.mpn || '').trim(),
+            target_qty: parseInt(r.qty, 10) > 0 ? parseInt(r.qty, 10) : 1,
+            target_price: r.unit_price === '' || r.unit_price == null ? null : Number(r.unit_price),
+            notes: (r.notes || '').trim() || null
+        }));
+    const offerRows = _intakeParsedRows
+        .filter(r => r.row_type === 'offer' && (r.mpn || '').trim())
+        .map(r => ({
+            mpn: (r.mpn || '').trim(),
+            vendor_name: (r.vendor_name || _intakeParsedContext.vendor_name || 'Unknown Vendor').trim(),
+            manufacturer: (r.manufacturer || '').trim() || null,
+            qty_available: parseInt(r.qty, 10) > 0 ? parseInt(r.qty, 10) : null,
+            unit_price: r.unit_price === '' || r.unit_price == null ? null : Number(r.unit_price),
+            lead_time: (r.lead_time || '').trim() || null,
+            condition: (r.condition || 'new').trim() || 'new',
+            packaging: (r.packaging || '').trim() || null,
+            notes: (r.notes || '').trim() || null,
+            source: 'ai_intake',
+            status: 'pending_review'
+        }));
+
+    if (!reqRows.length && !offerRows.length) {
+        showToast('No valid rows to submit', 'warn');
+        return;
+    }
+
+    let targetReqId = currentReqId || null;
+    let createdReqId = null;
+    let createdReqName = null;
+    if (!targetReqId && (reqRows.length || offerRows.length)) {
         try {
-            for (const r of reqRows) {
-                await apiFetch(`/api/requisitions/${currentReqId}/requirements`, {
-                    method: 'POST',
-                    body: { primary_mpn: r.mpn, target_qty: r.qty || '1', target_price: r.price ? parseFloat(r.price) : null }
-                });
-            }
-            showToast(`${reqRows.length} requirement(s) added`, 'success');
+            const draftName = _intakeParsedContext.requisition_name || `AI Intake ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+            const created = await apiFetch('/api/requisitions', {
+                method: 'POST',
+                body: {
+                    name: draftName,
+                    customer_name: _intakeParsedContext.customer_name || null
+                }
+            });
+            targetReqId = created.id;
+            createdReqId = created.id;
+            createdReqName = created.name || draftName;
         } catch (e) {
-            showToast('Failed to add some requirements', 'error');
+            showToast('Could not create requisition for intake submit', 'error');
+            return;
         }
-    } else if (reqRows.length && !currentReqId) {
-        // If on materials view, search for these MPNs instead
-        if (_currentMainView === 'materials' || (document.getElementById('view-materials') && !document.getElementById('view-materials').classList.contains('hidden') && !document.getElementById('view-materials').classList.contains('u-hidden'))) {
-            const mpns = reqRows.map(r => r.mpn).filter(Boolean);
-            if (mpns.length) {
-                const searchBox = document.getElementById('materialSearch');
-                if (searchBox) { searchBox.value = mpns.join(', '); }
-                showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
-                if (typeof loadMaterialList === 'function') loadMaterialList();
+    }
+
+    let reqCreated = 0;
+    let offerCreated = 0;
+    let offerFailed = 0;
+
+    if (reqRows.length && targetReqId) {
+        try {
+            const reqResp = await apiFetch(`/api/requisitions/${targetReqId}/requirements`, { method: 'POST', body: reqRows });
+            reqCreated = (reqResp?.created || []).length || reqRows.length;
+        } catch (e) {
+            showToast('Failed to save one or more RFQ lines', 'error');
+        }
+    }
+
+    if (offerRows.length && targetReqId) {
+        for (const row of offerRows) {
+            try {
+                await apiFetch(`/api/requisitions/${targetReqId}/offers`, { method: 'POST', body: row });
+                offerCreated += 1;
+            } catch (e) {
+                offerFailed += 1;
             }
-        } else {
-            showToast('Open a requisition first to add requirements', 'warn');
         }
     }
-    // For sightings and offers, log them (placeholder for full implementation)
-    const otherRows = _intakeParsedRows.filter(r => r.type !== 'requirement');
-    if (otherRows.length) {
-        showToast(`${otherRows.length} sighting/offer items logged (intake processing)`, 'info');
-    }
+
+    const parts = [];
+    if (reqCreated) parts.push(`${reqCreated} RFQ line${reqCreated !== 1 ? 's' : ''}`);
+    if (offerCreated) parts.push(`${offerCreated} offer draft${offerCreated !== 1 ? 's' : ''}`);
+    if (parts.length) showToast(`Saved ${parts.join(' + ')}${createdReqId ? ` (RFQ-${createdReqId})` : ''}`, offerFailed ? 'warn' : 'success');
+    if (offerFailed) showToast(`${offerFailed} offer row${offerFailed !== 1 ? 's' : ''} failed to save`, 'warn');
+
     _intakeClose();
-    // Refresh requirement list if we added any
-    if (reqRows.length && currentReqId && typeof loadRequirements === 'function') {
+    if (targetReqId && targetReqId === currentReqId && typeof loadRequirements === 'function') {
         loadRequirements();
+    }
+    if (targetReqId && _ddTabCache[targetReqId]) {
+        delete _ddTabCache[targetReqId].offers;
+    }
+    if (createdReqId && typeof showDetail === 'function') {
+        showDetail(createdReqId, createdReqName || `RFQ-${createdReqId}`);
     }
 }
 

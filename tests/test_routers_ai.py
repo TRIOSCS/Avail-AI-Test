@@ -988,6 +988,55 @@ def test_parse_email_no_result(ai_client):
     assert resp.json()["parsed"] is False
 
 
+def test_intake_parse_ai_disabled(ai_client):
+    """POST /api/ai/intake-parse with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post(
+            "/api/ai/intake-parse",
+            json={"text": "customer needs LM317T qty 1000", "mode": "auto"},
+        )
+    assert resp.status_code == 403
+
+
+def test_intake_parse_success(ai_client):
+    """POST /api/ai/intake-parse returns parsed template rows."""
+    parsed = {
+        "detected_type": "offer",
+        "context": {"vendor_name": "Acme Components"},
+        "rows": [
+            {
+                "row_type": "offer",
+                "mpn": "LM317T",
+                "qty": 500,
+                "unit_price": 0.45,
+                "vendor_name": "Acme Components",
+                "confidence": 0.88,
+            }
+        ],
+        "summary": {"rows": 1, "requirements": 0, "offers": 1},
+    }
+    with (
+        patch("app.routers.ai._ai_enabled", return_value=True),
+        patch("app.services.ai_intake_service.parse_freeform_intake", new_callable=AsyncMock, return_value=parsed),
+    ):
+        resp = ai_client.post(
+            "/api/ai/intake-parse",
+            json={"text": "Acme can offer LM317T 500pcs @ $0.45", "mode": "offer"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["detected_type"] == "offer"
+    assert data["summary"]["offers"] == 1
+    assert data["rows"][0]["mpn"] == "LM317T"
+
+
+def test_intake_parse_validation(ai_client):
+    """POST /api/ai/intake-parse validates required text length."""
+    with patch("app.routers.ai._ai_enabled", return_value=True):
+        resp = ai_client.post("/api/ai/intake-parse", json={"text": "x", "mode": "auto"})
+    assert resp.status_code == 422
+
+
 def test_normalize_parts_ai_disabled(ai_client):
     """POST /api/ai/normalize-parts with AI off returns 403."""
     with patch("app.routers.ai._ai_enabled", return_value=False):
