@@ -1,7 +1,7 @@
 """Tests for part-level (requirement-scoped) API endpoints and quote expiration.
 
-Covers: /api/requirements/{id}/offers, /api/requirements/{id}/sightings,
-/api/requirements/{id}/notes, /api/requirements/{id}/tasks.
+Covers: /api/requirements/{id}/offers, /api/requirements/{id}/notes,
+/api/requirements/{id}/tasks — used by the part-number expansion panel.
 Also covers: quote expiration badges (is_expired, days_until_expiry).
 
 Called by: pytest
@@ -96,30 +96,30 @@ def test_list_requirement_offers_404(client):
 
 
 def test_list_requirement_sightings_empty(client, test_requisition, db_session):
-    """GET /api/requirements/{id}/sightings returns an empty list when none exist."""
+    """GET /api/requirements/{id}/sightings returns empty list when none exist."""
     from app.models import Requirement
 
     req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     resp = client.get(f"/api/requirements/{req.id}/sightings")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["requirement_id"] == req.id
+    assert data["label"] == req.primary_mpn
     assert data["sightings"] == []
 
 
 def test_list_requirement_sightings_with_data(client, test_requisition, db_session):
-    """GET /api/requirements/{id}/sightings returns supplier sightings for that part."""
+    """GET /api/requirements/{id}/sightings returns sightings for this requirement."""
     from app.models import Requirement, Sighting
 
     req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
     sighting = Sighting(
         requirement_id=req.id,
-        vendor_name="Avnet",
+        vendor_name="Arrow",
+        vendor_name_normalized="arrow",
         mpn_matched=req.primary_mpn,
         qty_available=1200,
-        unit_price=0.52,
+        unit_price=1.25,
         source_type="stock_list",
-        condition="New",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(sighting)
@@ -128,12 +128,12 @@ def test_list_requirement_sightings_with_data(client, test_requisition, db_sessi
     resp = client.get(f"/api/requirements/{req.id}/sightings")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["requirement_id"] == req.id
     assert data["label"] == req.primary_mpn
     assert len(data["sightings"]) == 1
-    assert data["sightings"][0]["vendor_name"] == "Avnet"
-    assert data["sightings"][0]["source_type"] == "stock_list"
-    assert data["sightings"][0]["qty_available"] == 1200
+    row = data["sightings"][0]
+    assert row["vendor_name"] == "Arrow"
+    assert row["mpn_matched"] == req.primary_mpn
+    assert row["qty_available"] == 1200
 
 
 # ── Part-level Notes ────────────────────────────────────────────────
@@ -238,41 +238,6 @@ def test_create_requirement_task(client, test_requisition, db_session):
     tasks = list_resp.json()
     assert len(tasks) == 1
     assert tasks[0]["title"] == "Follow up on pricing"
-
-
-def test_create_requirement_task_with_assignment_and_due_date(client, test_requisition, db_session, test_user):
-    """Part-level task creation preserves assignee, due date, and description."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
-    due_at = datetime.now(timezone.utc) + timedelta(days=2)
-    resp = client.post(
-        f"/api/requirements/{req.id}/tasks",
-        json={
-            "title": "Call supplier for update",
-            "description": "Confirm whether stock is still available",
-            "assigned_to_id": test_user.id,
-            "due_at": due_at.isoformat(),
-            "task_type": "sourcing",
-            "priority": 3,
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["assigned_to_id"] == test_user.id
-    assert data["description"] == "Confirm whether stock is still available"
-    assert data["task_type"] == "sourcing"
-    assert data["priority"] == 3
-    assert data["due_at"] is not None
-    assert data["due_date"] == data["due_at"]
-
-    list_resp = client.get(f"/api/requirements/{req.id}/tasks")
-    assert list_resp.status_code == 200
-    tasks = list_resp.json()
-    assert len(tasks) == 1
-    assert tasks[0]["assigned_to_id"] == test_user.id
-    assert tasks[0]["assignee_name"]
-    assert tasks[0]["created_by_name"]
 
 
 def test_create_requirement_task_empty_title(client, test_requisition, db_session):

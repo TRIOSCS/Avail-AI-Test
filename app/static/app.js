@@ -3132,13 +3132,8 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-function _normalizeMainView(view) {
-    const next = String(view || '').trim().toLowerCase();
-    if (next === 'reqs' || next === 'deals' || next === 'archive') return next;
-    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(next)) return 'reqs';
-    return 'reqs';
-}
-let _currentMainView = _normalizeMainView(localStorage.getItem('avail_main_view') || 'reqs');
+let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'purchasing' | 'archive'
+if (_currentMainView === 'sourcing') _currentMainView = 'purchasing';  // migrate legacy stored value
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3260,7 +3255,8 @@ function _applyColVisCSS() {
     // Map column keys to 1-based nth-child positions per view
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else colMap = {reqs:3,sourced:4,coverage:5,sent:6,resp:7,offers:8,quote:9,deadline:10,sales:11,age:12};
+    else if (v === 'sales') colMap = {reqs:3,quote:4,offers:5,deadline:6,sales:7,age:8};
+    else colMap = {reqs:3,sourced:4,sent:5,resp:6,offers:7,sales:8,age:9};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
         if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
@@ -3272,7 +3268,8 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'coverage',l:'Coverage'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'quote',l:'Quote'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else if (v === 'sales') cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'offers',l:'Offers'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
     for (const c of cols) {
@@ -7685,8 +7682,8 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
-    const tabLabels = { offers: 'Offers', sightings: 'Sightings', activity: 'Activity', tasks: 'Tasks', notes: 'Notes' };
+    const tabs = ['offers', 'activity'];
+    const tabLabels = { offers: 'Offers', activity: 'Activity' };
     const pills = tabs.map(t =>
         `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
     ).join('');
@@ -7699,9 +7696,8 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     _partActiveTab[key] = tabName;
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
-    const labels = { offers: 'Offers', sightings: 'Sightings', activity: 'Activity', tasks: 'Tasks', notes: 'Notes' };
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.textContent === labels[tabName]);
+        t.classList.toggle('on', t.textContent === { offers: 'Offers', activity: 'Activity' }[tabName]);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7721,18 +7717,10 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
-            case 'sightings':
-                data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
-                break;
-            case 'activity':
+            case 'activity': {
                 data = await apiFetch(`/api/requirements/${requirementId}/history`).catch(() => []);
                 break;
-            case 'tasks':
-                data = await apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []);
-                break;
-            case 'notes':
-                data = await apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({}));
-                break;
+            }
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
@@ -7742,17 +7730,11 @@ async function _loadPartTab(reqId, requirementId, tabName) {
 }
 
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
-    const origPartId = _rfqActivePartId;
-    _rfqActivePartId = requirementId;
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
-        case 'sightings': _rfqRenderSightings(data, contentEl); break;
-        case 'activity': _rfqRenderActivity(data, contentEl); break;
-        case 'tasks': _rfqRenderTasks(data, contentEl); break;
-        case 'notes': _rfqRenderNotes(data, contentEl); break;
+        case 'activity': _renderPartActivity(reqId, requirementId, data, contentEl); break;
         default: contentEl.textContent = '';
     }
-    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
 }
 
 // ── Part-level Offers renderer ──
@@ -7800,8 +7782,16 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
-// _renderPartActivity removed — tabs now rendered via _renderPartTab which
-// delegates to _rfqRenderActivity, _rfqRenderTasks, _rfqRenderNotes directly.
+// ── Part-level Activity renderer (merged notes + tasks) ──
+function _renderPartActivity(reqId, requirementId, data, contentEl) {
+    // Reuse the RFQ activity renderer — same data shape { notes, tasks, history }
+    _rfqRenderActivity(data, contentEl);
+    // Override the partId references for inline forms to use this requirement
+    const origPartId = _rfqActivePartId;
+    _rfqActivePartId = requirementId;
+    // Restore after a tick so any event handlers bind correctly
+    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
+}
 
 // Keep _addPartNote for backward compat (editDrillCell uses it)
 function _addPartNote(reqId, requirementId) {
@@ -9322,7 +9312,7 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'reqs' ? 'open' : '';
+            const viewLabel = v === 'sales' ? 'sales' : v === 'purchasing' ? 'purchasing' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
@@ -9346,8 +9336,21 @@ function renderReqList() {
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
+    } else if (v === 'sales') {
+        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
+        thead = `<thead><tr>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
+            ${_thIcons}
+        </tr></thead>`;
     } else {
-        // Unified requisition view: sourcing + quoting metrics in one table
+        // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
         thead = `<thead><tr>
             <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
@@ -9357,15 +9360,13 @@ function renderReqList() {
             <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status and value">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
     }
 
-    // Priority lane grouping for active requisition views (skip if column sort is active)
+    // Priority lane grouping for sales/sourcing views (skip if column sort is active)
     let rowsHtml;
     if (v === 'archive' && !_reqSortCol) {
         // Group by customer when no column sort is active
@@ -9681,8 +9682,8 @@ function _renderReqRow(r) {
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
-    } else {
-        // Unified view: sourcing coverage, RFQ progress, offer review, quote readiness
+    } else if (v === 'sales') {
+        // Sales view: Parts, Quote (with value), Offers, Bid Due, Sales, Age
         let qCell = '<span style="color:var(--muted)" title="No quote created yet">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
         else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
@@ -9701,18 +9702,44 @@ function _renderReqRow(r) {
 
         // Coverage: offers vs total parts (can exceed 100% with multiple offers per part)
         const _covOffer = r.offer_count || 0;
-        const _srcCovPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
-        const _srcCovBarPct = Math.min(_srcCovPct, 100);
-        const _srcCovLabel = _srcCovPct > 100 ? _srcCovPct + '% (multi)' : _srcCovPct + '%';
-        const _srcCovTip = _covOffer + ' offer' + (_covOffer !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_srcCovPct > 100 ? ' \u2014 multiple offers per part' : '');
-        const _covPct = _srcCovPct;
+        const _covPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
+        const _covBarPct = Math.min(_covPct, 100);
+        const _covLabel = _covPct > 100 ? _covPct + '% (multi)' : _covPct + '%';
+        const _covTip = _covOffer + ' offer' + (_covOffer !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_covPct > 100 ? ' \u2014 multiple offers per part' : '');
         let covCell;
         if (total === 0) covCell = '<span style="color:var(--muted)">\u2014</span>';
         else {
-            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
-            covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_srcCovTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovLabel}</span></div>`;
+            const covColor = _covPct >= 80 ? 'var(--green)' : _covPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_covTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covLabel}</span></div>`;
         }
 
+        dataCells = `
+            <td class="mono" style="text-align:right">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+            <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+            <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
+
+        // Sales actions: context-aware primary action
+        let salesBtn;
+        if (r.has_new_offers && (r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
+        } else if (r.quote_status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
+        } else if (r.quote_status === 'sent') {
+            salesBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+        } else if ((r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
+        } else if (r.status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source</button>`;
+        } else {
+            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+        }
+        actions = `<td style="white-space:nowrap">${salesBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 9;
+    } else {
+        // Sourcing view: Parts, Sourced bar, RFQs sent, Response rate, Offers, Age
         const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
         let srcCell;
         if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
@@ -9728,42 +9755,59 @@ function _renderReqRow(r) {
             ? `<span class="mono" style="font-size:11px">${respPct}% <span style="color:var(--muted)">(${replied}/${sent})</span></span>`
             : '<span style="color:var(--muted)">\u2014</span>';
 
+        let offCell = '<span style="color:var(--muted)">\u2014</span>';
+        const _oCnt = r.offer_count || 0;
+        if (_oCnt > 0) {
+            let qsBadge = '';
+            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
+            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
+            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
+            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
+            offCell = `<b>${_oCnt}</b>${qsBadge}`;
+        }
+
+        // Coverage: offers vs total parts (can exceed 100% with multiple offers per part)
+        const _srcCovPct = total > 0 ? Math.round((_oCnt / total) * 100) : 0;
+        const _srcCovBarPct = Math.min(_srcCovPct, 100);
+        const _srcCovLabel = _srcCovPct > 100 ? _srcCovPct + '% (multi)' : _srcCovPct + '%';
+        const _srcCovTip = _oCnt + ' offer' + (_oCnt !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_srcCovPct > 100 ? ' \u2014 multiple offers per part' : '');
+        let srcCovCell;
+        if (total === 0) srcCovCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCovCell = `<div style="display:flex;align-items:center;gap:4px" title="${_srcCovTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovLabel}</span></div>`;
+        }
+
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${srcCovCell}</td>
             <td class="mono" style="font-size:11px">${sent}</td>
             <td style="font-size:11px;white-space:nowrap">${respCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
 
-        // Unified actions: prioritize the next best sourcing/sales step
-        let primaryBtn;
-        if (r.has_new_offers && (r.offer_count || 0) > 0) {
-            primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
-        } else if (r.quote_status === 'draft') {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
-        } else if (r.quote_status === 'sent') {
-            primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-        } else if ((r.offer_count || 0) > 0) {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
+        // Purchasing actions: context-aware primary action
+        let srcBtn;
+        if (r.status === 'draft') {
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
+        } else if (_oCnt > 0 && r.has_new_offers) {
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
         } else if (sourced > 0 && sent === 0) {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
-        } else if (r.status === 'draft') {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source All</button>`;
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
         } else if (sent > 0 && _oCnt === 0) {
             const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
             const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
             const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
-            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+        } else if (_oCnt > 0) {
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
         } else {
-            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
         }
-        actions = `<td style="white-space:nowrap">${primaryBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 13;
+        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 10;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -10210,20 +10254,19 @@ function _cancelTabInflight() {
 }
 
 function setMainView(view, btn) {
-    const normalizedView = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
-    // Ensure the requisition list container is visible (reqs/deals/archive all render into view-list)
+    // Ensure the requisition list container is visible (deals/archive/sales all render into view-list)
     showView('view-list');
 
     // Clear stale data from previous tab so we always fetch fresh for the new view
     _reqListData = [];
     _reqFullyLoaded = false;
 
-    _currentMainView = normalizedView;
+    _currentMainView = view;
     // Persist view preference (not archive — that's a temporary view)
-    if (normalizedView !== 'archive') localStorage.setItem('avail_main_view', normalizedView);
+    if (view !== 'archive') localStorage.setItem('avail_main_view', view);
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
@@ -10232,7 +10275,7 @@ function setMainView(view, btn) {
     // Sync whichever pill strip the click didn't originate from
     ['mainPills', 'mobilePills'].forEach(id => {
         const cont = document.getElementById(id);
-        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === normalizedView));
+        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     });
     _toolbarQuickFilter = '';
     const maBtn = document.getElementById('myAccountsBtn');
@@ -10242,19 +10285,26 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on the unified requisition view, hide on archive/deals
+    // Show status filter pills on sales/sourcing views, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = normalizedView === 'reqs' ? '' : 'none';
-    if (normalizedView === 'reqs') {
+    if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
+    if (view === 'sales' || view === 'purchasing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
         loadFollowUpsPanel();
-    } else if (normalizedView === 'deals') {
+    } else if (view === 'deals') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
-    } else if (normalizedView === 'archive') {
+    } else if (view === 'active' || view === 'rfq') {
+        // Legacy: redirect old view names to sales
+        _currentMainView = 'sales';
+        _reqStatusFilter = 'all';
+        _serverSearchActive = false;
+        loadRequisitions();
+        loadFollowUpsPanel();
+    } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
         _archivePage = 1;
@@ -10571,8 +10621,8 @@ async function _dealCardClick(reqId) {
         _openMobileDrillDown(reqId);
         return;
     }
-    const reqsBtn = document.querySelector('#mainPills .fp[data-view="reqs"]');
-    setMainView('reqs', reqsBtn);
+    const salesBtn = document.querySelector('#mainPills .fp[data-view="sales"]');
+    setMainView('sales', salesBtn);
     const drow = await waitForElement('#d-' + reqId, 3000);
     if (drow) {
         toggleDrillDown(reqId);
@@ -10821,8 +10871,8 @@ async function requoteFromList(reqId) {
                 await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
             }
             showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
-            const reqsBtn = document.querySelector('#mainPills .fp[data-view="reqs"]');
-            if (reqsBtn) setMainView('reqs', reqsBtn);
+            const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
+            if (srcBtn) setMainView('purchasing', srcBtn);
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
@@ -15281,17 +15331,17 @@ document.addEventListener('keydown', function(e) {
         if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault(); openNewReqModal(); return;
         }
-        // 1/2/3 — Switch tabs: Reqs / Deals / Archive (only when on list view)
+        // 1/2/3 — Switch tabs: Open / Sourcing / Archive (only when on list view)
         if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="reqs"]');
-            if (btn) setMainView('reqs', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
+            if (btn) setMainView('rfq', btn);
             return;
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="deals"]');
-            if (btn) setMainView('deals', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
+            if (btn) setMainView('purchasing', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
@@ -16505,17 +16555,19 @@ async function _rfqLoadTab(tab) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${partId}/offers`);
                 break;
-            case 'activity':
-                data = await apiFetch(`/api/requirements/${partId}/history`).catch(() => []);
+            case 'activity': {
+                // Timeline-only activity stream (tasks/notes have dedicated tabs).
+                data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
+            }
             case 'sightings':
-                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                data = await apiFetch(`/api/requirements/${partId}/sightings`);
                 break;
             case 'tasks':
-                data = await apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []);
+                data = await apiFetch(`/api/requirements/${partId}/tasks`);
                 break;
             case 'notes':
-                data = await apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({}));
+                data = await apiFetch(`/api/requirements/${partId}/notes`);
                 break;
         }
         // Abort if part changed while loading
@@ -16531,8 +16583,8 @@ async function _rfqLoadTab(tab) {
 function _rfqRenderTab(tab, data, body) {
     switch (tab) {
         case 'offers': _rfqRenderOffers(data, body); break;
-        case 'sightings': _rfqRenderSightings(data, body); break;
         case 'activity': _rfqRenderActivity(data, body); break;
+        case 'sightings': _rfqRenderSightings(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
         default: body.innerHTML = '';
@@ -16677,20 +16729,28 @@ async function rfqToggleOfferSelection(offerId) {
     }
 }
 
-// ── ACTIVITY TAB (history timeline only) ──────────────────────────────
+// ── ACTIVITY TAB (timeline only) ───────────────────────────────────────
 
 function _rfqRenderActivity(data, body) {
-    const history = Array.isArray(data) ? data : [];
+    const history = Array.isArray(data) ? data : (Array.isArray(data?.history) ? data.history : []);
+    const timeline = history
+        .map(ev => ({ event: ev, ts: ev.created_at ? new Date(ev.created_at).getTime() : 0 }))
+        .sort((a, b) => b.ts - a.ts);
 
-    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Activity Timeline</div>';
+    let html = '<div class="activity-section">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += `<span style="font-size:12px;font-weight:600">${timeline.length} Event${timeline.length !== 1 ? 's' : ''}</span>`;
+    html += '</div>';
     html += '<div class="activity-timeline">';
 
-    if (history.length === 0) {
+    if (!timeline.length) {
         html += '<div class="empty-placeholder" style="font-size:11px">No activity yet</div>';
     }
 
-    history.forEach(ev => {
-        let icon = '', text = '';
+    timeline.forEach(item => {
+        const ev = item.event || {};
+        let icon = '';
+        let text = '';
         switch (ev.type) {
             case 'change':
                 icon = '\u270f\ufe0f';
@@ -16713,15 +16773,11 @@ function _rfqRenderActivity(data, body) {
                 icon = '\u2705';
                 text = `Task completed: <b>${esc(ev.title || '')}</b>`;
                 break;
-            case 'note_added':
-                icon = '\ud83d\udcdd';
-                text = `Note added`;
-                if (ev.summary) text += `: ${esc(ev.summary)}`;
-                break;
             default:
                 icon = '\u2022';
                 text = esc(ev.summary || ev.type || 'Event');
         }
+
         html += `<div class="activity-item activity-item-event">
             <div style="display:flex;gap:6px;align-items:flex-start">
                 <span>${icon}</span>
@@ -16733,119 +16789,7 @@ function _rfqRenderActivity(data, body) {
         </div>`;
     });
 
-    html += '</div>';
-    body.innerHTML = html;
-}
-
-// ── TASKS TAB ─────────────────────────────────────────────────────────
-
-function _rfqRenderTasks(data, body) {
-    const tasks = Array.isArray(data) ? data : [];
-    const openTasks = tasks.filter(t => t.status !== 'done');
-    const doneTasks = tasks.filter(t => t.status === 'done');
-
-    let html = '';
-
-    html += '<div class="activity-section">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    html += `<span style="font-size:12px;font-weight:600">${openTasks.length ? openTasks.length + ' Open Task' + (openTasks.length > 1 ? 's' : '') : 'No open tasks'}</span>`;
-    html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
-    html += '</div>';
-
-    html += '<div id="rfqTaskFormSlot"></div>';
-
-    openTasks.forEach(t => {
-        const due = t.due_at || t.due_date;
-        let dueHtml = '';
-        if (due) {
-            const d = new Date(due);
-            const overdue = d < new Date() && t.status !== 'done';
-            dueHtml = `<span class="${overdue ? 'task-overdue' : ''}" style="font-size:10px">${overdue ? 'OVERDUE \u2014 ' : 'Due '}${fmtDate(due)}</span>`;
-        }
-        html += `<div class="activity-item activity-item-task-open">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div style="flex:1">
-                    <div style="font-size:11px;font-weight:600">${esc(t.title)}</div>
-                    <div style="font-size:10px;color:var(--muted);margin-top:2px">
-                        Assigned to <b>${esc(t.assignee_name || 'Unassigned')}</b>
-                        ${t.creator_name ? ' by ' + esc(t.creator_name) : ''}
-                        ${dueHtml ? ' \u2014 ' + dueHtml : ''}
-                    </div>
-                    ${t.ai_risk_flag ? '<div class="task-risk-flag" style="margin-top:3px">' + esc(t.ai_risk_flag) + '</div>' : ''}
-                </div>
-                <button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="rfqShowCompleteForm(${t.id})">Complete</button>
-            </div>
-            <div id="rfqCompleteSlot-${t.id}"></div>
-        </div>`;
-    });
-
-    if (doneTasks.length > 0) {
-        html += '<div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">Completed</div>';
-        doneTasks.forEach(t => {
-            html += `<div class="activity-item activity-item-task-done">
-                <div style="font-size:10px;font-weight:600;color:var(--green)">Completed</div>
-                <div style="font-size:11px;margin-top:2px">${esc(t.title)}</div>
-                ${t.completion_note ? '<div style="font-size:11px;margin-top:2px;color:var(--muted);font-style:italic">"' + esc(t.completion_note) + '"</div>' : ''}
-                <div style="font-size:10px;color:var(--muted);margin-top:2px">${t.assignee_name ? 'by ' + esc(t.assignee_name) : ''} ${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
-            </div>`;
-        });
-    }
-
-    html += '</div>';
-    body.innerHTML = html;
-}
-
-// ── NOTES TAB ─────────────────────────────────────────────────────────
-
-function _rfqRenderNotes(data, body) {
-    const notesData = data || {};
-
-    let html = '';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-    html += '<span style="font-size:12px;font-weight:600">Notes</span>';
-    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
-    html += '</div>';
-    html += '<div id="rfqNoteFormSlot"></div>';
-
-    const noteItems = [];
-
-    if (notesData.requirement_notes) {
-        const lines = notesData.requirement_notes.split('\n').filter(l => l.trim());
-        lines.forEach(line => {
-            const match = line.match(/^\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s/);
-            const ts = match ? new Date(match[1]).getTime() : 0;
-            noteItems.push({ type: 'req_note', text: line, ts });
-        });
-    }
-
-    if (notesData.notes && notesData.notes.length > 0) {
-        notesData.notes.forEach(n => {
-            const ts = n.created_at ? new Date(n.created_at).getTime() : 0;
-            noteItems.push({ type: 'offer_note', vendor: n.vendor_name, text: n.note, ts, created_at: n.created_at });
-        });
-    }
-
-    noteItems.sort((a, b) => b.ts - a.ts);
-
-    if (noteItems.length === 0) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No notes yet</div>';
-    }
-
-    noteItems.forEach(item => {
-        if (item.type === 'req_note') {
-            html += `<div class="activity-item activity-item-note">
-                <div style="font-size:10px;font-weight:600;color:var(--muted)">Requirement Note</div>
-                <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-            </div>`;
-        } else {
-            html += `<div class="activity-item activity-item-note">
-                <div style="font-size:10px;font-weight:600;color:var(--muted)">Offer Note \u2014 ${esc(item.vendor || '')}</div>
-                <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-                ${item.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(item.created_at) + '</div>' : ''}
-            </div>`;
-        }
-    });
-
+    html += '</div></div>';
     body.innerHTML = html;
 }
 
@@ -16902,9 +16846,9 @@ async function rfqSubmitTask() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title, description, assigned_to_id: parseInt(assignee), due_at: dueAt }),
         });
-        delete _rfqPanelCache.tasks;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('tasks');
+        delete _rfqPanelCache.tasks;
+        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
     } catch(e) {
         alert('Failed to create task: ' + (e.message || e));
     }
@@ -16935,9 +16879,9 @@ async function rfqSubmitComplete(taskId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ completion_note: note }),
         });
-        delete _rfqPanelCache.tasks;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('tasks');
+        delete _rfqPanelCache.tasks;
+        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
     } catch(e) {
         alert('Failed to complete task: ' + (e.message || e));
     }
@@ -16968,34 +16912,117 @@ async function rfqSubmitNote() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text }),
         });
-        delete _rfqPanelCache.notes;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('notes');
+        delete _rfqPanelCache.notes;
+        await _rfqLoadTab(_rfqPanelTab === 'notes' ? 'notes' : 'activity');
     } catch(e) {
         console.error('Add note failed:', e);
     }
 }
 window.rfqSubmitNote = rfqSubmitNote;
 
+// ── TASKS TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderTasks(tasks, body) {
+    const allTasks = Array.isArray(tasks) ? tasks : [];
+    const openTasks = allTasks.filter(t => t.status !== 'done');
+    const doneTasks = allTasks.filter(t => t.status === 'done');
+    let html = '<div class="activity-section">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += `<span style="font-size:12px;font-weight:600">${allTasks.length} Task${allTasks.length !== 1 ? 's' : ''}</span>`;
+    html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
+    html += '</div>';
+    html += '<div id="rfqTaskFormSlot"></div>';
+
+    if (!allTasks.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No tasks for this part yet</div>';
+    } else {
+        if (openTasks.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Open</div>';
+            openTasks.forEach(t => {
+                const due = t.due_at || t.due_date;
+                const dueLabel = due ? ` · Due ${fmtDate(due)}` : '';
+                html += `<div class="activity-item activity-item-task-open">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                        <div style="flex:1">
+                            <div style="font-size:11px;font-weight:600">${esc(t.title || '')}</div>
+                            <div style="font-size:10px;color:var(--muted)">
+                                ${esc(t.assignee_name || t.assigned_to || 'Unassigned')}${dueLabel}
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="rfqShowCompleteForm(${t.id})">Complete</button>
+                    </div>
+                    <div id="rfqCompleteSlot-${t.id}"></div>
+                </div>`;
+            });
+        }
+        if (doneTasks.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Completed</div>';
+            doneTasks.forEach(t => {
+                html += `<div class="activity-item activity-item-task-done">
+                    <div style="font-size:11px">${esc(t.title || '')}</div>
+                    <div style="font-size:10px;color:var(--muted)">${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
+                </div>`;
+            });
+        }
+    }
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+// ── NOTES TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderNotes(notesData, body) {
+    const reqNotes = (notesData && notesData.requirement_notes) ? String(notesData.requirement_notes) : '';
+    const offerNotes = Array.isArray(notesData?.notes) ? notesData.notes : [];
+    const reqLines = reqNotes.split('\n').map(x => x.trim()).filter(Boolean);
+    let html = '<div class="activity-section">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += `<span style="font-size:12px;font-weight:600">${reqLines.length + offerNotes.length} Note${(reqLines.length + offerNotes.length) !== 1 ? 's' : ''}</span>`;
+    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
+    html += '</div>';
+    html += '<div id="rfqNoteFormSlot"></div>';
+
+    if (!reqLines.length && !offerNotes.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No notes for this part yet</div>';
+    } else {
+        if (reqLines.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Requirement Notes</div>';
+            reqLines.forEach(line => {
+                html += `<div class="activity-item activity-item-note"><div style="font-size:11px">${esc(line)}</div></div>`;
+            });
+        }
+        if (offerNotes.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Offer Notes</div>';
+            offerNotes.forEach(n => {
+                html += `<div class="activity-item activity-item-note">
+                    <div style="font-size:10px;font-weight:600;color:var(--muted)">${esc(n.vendor_name || 'Vendor')}</div>
+                    <div style="font-size:11px;margin-top:2px">${esc(n.note || '')}</div>
+                    ${n.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(n.created_at) + '</div>' : ''}
+                </div>`;
+            });
+        }
+    }
+
+    html += '</div>';
+    body.innerHTML = html;
+}
+
 // ── SIGHTINGS TAB ─────────────────────────────────────────────────────
 
-function _rfqRenderSightings(data, body) {
-    if (!data) { body.innerHTML = '<div class="empty-placeholder">No sightings data</div>'; return; }
-
-    // Filter sightings to current part only
-    const partId = _rfqActivePartId;
-    const partData = data[String(partId)];
+function _rfqRenderSightings(partData, body) {
     if (!partData || !partData.sightings || partData.sightings.length === 0) {
         body.innerHTML = '<div class="empty-placeholder">No sightings for this part. Run a search to find sources.</div>';
         return;
     }
 
+    const partId = _rfqActivePartId;
     const sightings = partData.sightings.slice();
     const blCount = partData.blacklisted_count || 0;
 
     // Sort: exact MPN match first, then by score/qty descending
     const part = _rfqPartsData.find(p => p.id === partId);
-    const partMpn = (part?.mpn || partData.label || '').trim().toUpperCase();
+    const partMpn = (part?.primary_mpn || part?.mpn || partData.label || '').trim().toUpperCase();
     sightings.sort((a, b) => {
         const aExact = (a.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;
         const bExact = (b.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;

@@ -938,43 +938,77 @@ async def import_stock_list(
 # Used by the part-number expansion panel in the frontend.
 
 
-def _get_requirement_for_user_or_404(db: Session, user: User, requirement_id: int) -> Requirement:
-    """Fetch a requirement only if the current user can access its parent requisition."""
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
-    if not get_req_for_user(db, user, req_item.requisition_id):
-        raise HTTPException(404, "Requirement not found")
-    return req_item
-
-
 @router.get("/api/requirements/{requirement_id}/sightings")
 async def list_requirement_sightings(
     requirement_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List saved supplier sightings for a single requirement."""
-    from . import sighting_to_dict
+    """Return saved sightings for one requirement, enriched for part-level UI."""
+    from . import (
+        _deduplicate_sightings,
+        _enrich_with_vendor_cards,
+        _get_material_history,
+        _history_to_result,
+        sighting_to_dict,
+    )
 
-    req_item = _get_requirement_for_user_or_404(db, user, requirement_id)
-    sightings = (
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
+    if not get_req_for_user(db, user, req_item.requisition_id):
+        raise HTTPException(403, "Not authorized")
+
+    rows = (
         db.query(Sighting)
         .filter(Sighting.requirement_id == requirement_id)
         .order_by(Sighting.created_at.desc())
-        .limit(250)
+        .limit(1000)
         .all()
     )
-    rows = []
-    for sighting in sightings:
-        row = sighting_to_dict(sighting)
-        row["is_historical"] = False
-        rows.append(row)
-    return {
-        "requirement_id": req_item.id,
-        "label": req_item.primary_mpn or f"Req #{req_item.id}",
-        "sightings": rows,
+
+    sighting_dicts = []
+    for s in rows:
+        d = sighting_to_dict(s)
+        d["is_historical"] = False
+        d["is_material_history"] = False
+        sighting_dicts.append(d)
+
+    # Include material history for this part and substitutes so part-level
+    # sourcing context mirrors the requisition-level sourcing view.
+    card_ids: set[int] = set()
+    if req_item.material_card_id:
+        card_ids.add(req_item.material_card_id)
+    sub_keys = []
+    for sub in req_item.substitutes or []:
+        sub_str = (sub if isinstance(sub, str) else "").strip()
+        if sub_str:
+            sub_key = normalize_mpn_key(sub_str)
+            if sub_key:
+                sub_keys.append(sub_key)
+    if sub_keys:
+        sub_rows = (
+            db.query(MaterialCard.id)
+            .filter(MaterialCard.normalized_mpn.in_(sub_keys))
+            .all()
+        )
+        card_ids |= {row[0] for row in sub_rows}
+
+    fresh_vendors = {s.vendor_name.lower() for s in rows if s.vendor_name}
+    for h in _get_material_history(list(card_ids), fresh_vendors, db):
+        sighting_dicts.append(_history_to_result(h, datetime.now(timezone.utc)))
+
+    sighting_dicts = _deduplicate_sightings(sighting_dicts)
+    sighting_dicts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    payload = {
+        str(requirement_id): {
+            "label": req_item.primary_mpn or f"Req #{requirement_id}",
+            "sightings": sighting_dicts,
+        }
     }
+    _enrich_with_vendor_cards(payload, db)
+    return payload[str(requirement_id)]
 
 
 @router.get("/api/requirements/{requirement_id}/offers")
@@ -989,7 +1023,9 @@ async def list_requirement_offers(
     historical offers (from other requisitions for the same material card).
     Each row carries is_historical and is_substitute flags for the UI.
     """
-    req_item = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
 
     def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
         age_days = 0
@@ -1101,7 +1137,9 @@ async def list_requirement_notes(
     db: Session = Depends(get_db),
 ):
     """Return the requirement's own notes plus notes from its offers."""
-    req = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
     # Gather notes from offers that have non-empty notes
     offer_notes = (
         db.query(Offer)
@@ -1131,7 +1169,9 @@ async def add_requirement_note(
     db: Session = Depends(get_db),
 ):
     """Append text to the requirement's notes field."""
-    req = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
     new_text = (body.get("text") or "").strip()
     if not new_text:
         raise HTTPException(422, "Note text is required")
@@ -1155,9 +1195,10 @@ async def list_requirement_tasks(
     (source_ref=offer:{offer_id} where the offer belongs to this requirement).
     """
     from ...models import RequisitionTask
-    from ...services import task_service
 
-    req_item = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
 
     # Part-level tasks
     part_ref = f"requirement:{requirement_id}"
@@ -1169,11 +1210,6 @@ async def list_requirement_tasks(
     all_refs = [part_ref] + offer_refs
     tasks = (
         db.query(RequisitionTask)
-        .options(
-            joinedload(RequisitionTask.assignee),
-            joinedload(RequisitionTask.creator),
-            joinedload(RequisitionTask.requisition),
-        )
         .filter(
             RequisitionTask.requisition_id == req_item.requisition_id,
             RequisitionTask.source_ref.in_(all_refs),
@@ -1181,15 +1217,34 @@ async def list_requirement_tasks(
         .order_by(RequisitionTask.created_at.desc())
         .all()
     )
-    rows = []
-    for task in tasks:
-        row = task_service.task_to_response(task)
-        # Keep legacy aliases so older UI code keeps working.
-        row["assigned_to"] = row.get("assignee_name") or ""
-        row["created_by_name"] = row.get("creator_name") or ""
-        row["due_date"] = row.get("due_at")
-        rows.append(row)
-    return rows
+
+    # Look up assignee names
+    user_ids = {t.assigned_to_id for t in tasks if t.assigned_to_id}
+    user_ids |= {t.created_by for t in tasks if t.created_by}
+    user_map = {}
+    if user_ids:
+        for u in db.query(User).filter(User.id.in_(user_ids)).all():
+            user_map[u.id] = u.name or u.email
+
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": t.description,
+            "task_type": t.task_type,
+            "status": t.status,
+            "priority": t.priority,
+            "assigned_to": user_map.get(t.assigned_to_id, ""),
+            "created_by_name": user_map.get(t.created_by, ""),
+            "source_ref": t.source_ref,
+            "ai_risk_flag": t.ai_risk_flag,
+            "source": t.source,
+            "due_date": t.due_at.isoformat() if t.due_at else None,
+            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+            "created_at": t.created_at.isoformat() if t.created_at else None,
+        }
+        for t in tasks
+    ]
 
 
 @router.post("/api/requirements/{requirement_id}/tasks")
@@ -1200,69 +1255,32 @@ async def create_requirement_task(
     db: Session = Depends(get_db),
 ):
     """Create a task linked to a specific requirement."""
-    from ...services import task_service
+    from ...models import RequisitionTask
 
-    req = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req:
+        raise HTTPException(404, "Requirement not found")
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Task title is required")
-    description = (body.get("description") or "").strip() or None
-    task_type = (body.get("task_type") or "general").strip() or "general"
-    if task_type not in {"general", "sales", "sourcing"}:
-        raise HTTPException(422, "Invalid task type")
-    priority_raw = body.get("priority", 2)
-    try:
-        priority = int(priority_raw)
-    except (TypeError, ValueError):
-        raise HTTPException(422, "Priority must be 1, 2, or 3") from None
-    if priority not in {1, 2, 3}:
-        raise HTTPException(422, "Priority must be 1, 2, or 3")
-    assigned_to_id = body.get("assigned_to_id")
-    if assigned_to_id in ("", None):
-        assigned_to_id = None
-    else:
-        try:
-            assigned_to_id = int(assigned_to_id)
-        except (TypeError, ValueError):
-            raise HTTPException(422, "assigned_to_id must be an integer") from None
-    due_at = None
-    due_raw = body.get("due_at")
-    if due_raw:
-        try:
-            due_at = datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
-        except ValueError:
-            raise HTTPException(422, "Invalid due_at datetime") from None
-    try:
-        task = task_service.create_task(
-            db,
-            requisition_id=req.requisition_id,
-            title=title,
-            description=description,
-            task_type=task_type,
-            priority=priority,
-            assigned_to_id=assigned_to_id,
-            created_by=user.id,
-            source="manual",
-            source_ref=f"requirement:{requirement_id}",
-            due_at=due_at,
-        )
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
-    task = (
-        db.query(task.__class__)
-        .options(
-            joinedload(task.__class__.assignee),
-            joinedload(task.__class__.creator),
-            joinedload(task.__class__.requisition),
-        )
-        .filter(task.__class__.id == task.id)
-        .first()
+    task = RequisitionTask(
+        requisition_id=req.requisition_id,
+        title=title,
+        task_type="general",
+        status="todo",
+        source="manual",
+        source_ref=f"requirement:{requirement_id}",
+        created_by=user.id,
     )
-    row = task_service.task_to_response(task)
-    row["assigned_to"] = row.get("assignee_name") or ""
-    row["created_by_name"] = row.get("creator_name") or ""
-    row["due_date"] = row.get("due_at")
-    return row
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
 
 
 @router.get("/api/requirements/{requirement_id}/history")
@@ -1277,7 +1295,9 @@ async def list_requirement_history(
     """
     from ...models import RequisitionTask
 
-    req_item = _get_requirement_for_user_or_404(db, user, requirement_id)
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
 
     events = []
 
