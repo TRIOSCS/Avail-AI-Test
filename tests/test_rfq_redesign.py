@@ -1,9 +1,8 @@
 """
 tests/test_rfq_redesign.py — Tests for the RFQ layout redesign (v8).
 
-Covers: Template raw content with unified requisition pipeline modes
-(pipeline/deals/archive),
-API endpoints still return correct data for the redesigned UI.
+Covers: Template raw content with the unified requisition views
+(reqs/deals/archive), plus API endpoints still returning data for the updated UI.
 
 Called by: pytest
 Depends on: app/templates/index.html, routers/requisitions
@@ -22,9 +21,9 @@ def index_html():
 # ── Template Rendering ─────────────────────────────────────────────────
 
 
-def test_index_template_has_pipeline_view(index_html):
-    """Index template includes the unified requisition pipeline view button."""
-    assert 'data-view="sales"' in index_html
+def test_index_template_has_reqs_view(index_html):
+    """Index template includes the unified requisition view pill button."""
+    assert 'data-view="reqs"' in index_html
 
 
 def test_index_template_has_deals_view(index_html):
@@ -55,8 +54,8 @@ def test_index_template_has_inline_rfq_css(index_html):
 def test_index_no_old_active_view(index_html):
     """Index template should NOT have the old 'Active' view pill as primary."""
     # The old "Active" button with data-view="active" should be gone
-    # (replaced by unified pipeline/deals/archive)
-    assert 'data-view="active"' not in index_html or 'data-view="sales"' in index_html
+    # (replaced by the unified reqs view)
+    assert 'data-view="active"' not in index_html or 'data-view="reqs"' in index_html
 
 
 # ── API Endpoints Still Work ───────────────────────────────────────────

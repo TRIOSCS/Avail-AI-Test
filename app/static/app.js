@@ -1,14 +1,5 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
-import {
-    loadFollowUpsPanelImpl,
-    sendBulkFollowUpImpl,
-    sendFollowUpImpl,
-    updateBulkFollowUpBtnImpl,
-} from './rfq/followups.js';
-import { fetchActivityData } from './rfq/activity.js';
-import { fetchRfqWorkspaceTabData } from './rfq/workspace.js';
-
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
 const TEST_PATTERNS = [/QA\s+VALIDATION\s+TEST/i, /DELETE\s+ME/i, /\(clone\).*\(clone\)/i];
@@ -48,12 +39,6 @@ window.validateRfqName = validateRfqName;
     window.onerror = function(msg, src, line, col) {
         push({msg: String(msg), src: src, line: line, col: col, ts: Date.now()});
     };
-    // Catch unhandled promise rejections (async errors)
-    window.addEventListener('unhandledrejection', function(event) {
-        var reason = event.reason;
-        var msg = reason instanceof Error ? reason.message : String(reason || 'Unknown async error');
-        push({msg: '[unhandledrejection] ' + msg, ts: Date.now()});
-    });
     var origWarn = console.warn, origErr = console.error;
     console.warn = function() {
         push({msg: '[warn] ' + Array.prototype.join.call(arguments, ' '), ts: Date.now()});
@@ -198,9 +183,6 @@ function toggleMobileMore(btn) {
 }
 
 function mobileBack() {
-    // If a mobile drill-down is open, close it first
-    var dd = document.getElementById('mobileDrillDown');
-    if (dd) { _closeMobileDrillDown(); return; }
     if (_mobileNavStack.length > 1) {
         _mobileNavStack.pop();
         var prev = _mobileNavStack[_mobileNavStack.length - 1];
@@ -626,14 +608,11 @@ function _timeAgo(iso) {
 }
 export function fmtDate(iso) {
     if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d)) return '\u2014';
-    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
+    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 export function fmtDateTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
-    if (isNaN(d)) return '\u2014';
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 function stars(avg, count) {
@@ -888,10 +867,6 @@ export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    // Skip init when app shell not present (e.g. login page — scripts may load in some edge cases)
-    if (!document.getElementById('view-list') || !document.getElementById('mainSearch')) {
-        return;
-    }
     // Wire scroll-end detection on static table wraps so CSS fade-out hint disappears
     document.querySelectorAll('.crm-table-wrap').forEach(el => {
         el.addEventListener('scroll', () => {
@@ -3157,8 +3132,13 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'sourcing' | 'archive'
-if (_currentMainView === 'purchasing') _currentMainView = 'sourcing';  // migrate legacy stored value
+function _normalizeMainView(view) {
+    const next = String(view || '').trim().toLowerCase();
+    if (next === 'reqs' || next === 'deals' || next === 'archive') return next;
+    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(next)) return 'reqs';
+    return 'reqs';
+}
+let _currentMainView = _normalizeMainView(localStorage.getItem('avail_main_view') || 'reqs');
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3216,9 +3196,6 @@ export async function loadRequisitions(query = '', append = false) {
             _partActiveTab = {};
             _partDetailCache = {};
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
-            // Clear per-req filters so they don't bleed across list reloads
-            for (const k of Object.keys(_ddSightingFilters)) delete _ddSightingFilters[k];
-            for (const k of Object.keys(_ddScoreCache)) delete _ddScoreCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         if (_currentMainView === 'archive') _archiveTotal = resp.total || items.length;
@@ -3283,8 +3260,7 @@ function _applyColVisCSS() {
     // Map column keys to 1-based nth-child positions per view
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else if (v === 'sales') colMap = {reqs:3,quote:4,offers:5,deadline:6,sales:7,age:8};
-    else colMap = {reqs:3,sourced:4,sent:5,resp:6,offers:7,sales:8,age:9};
+    else colMap = {reqs:3,sourced:4,coverage:5,sent:6,resp:7,offers:8,quote:9,deadline:10,sales:11,age:12};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
         if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
@@ -3296,8 +3272,7 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else if (v === 'sales') cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'offers',l:'Offers'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'coverage',l:'Coverage'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'quote',l:'Quote'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
     for (const c of cols) {
@@ -3328,25 +3303,6 @@ function sortReqList(col) {
 const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers: data, ... }
 window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
-const _ddTabLoadSeq = {};  // reqId → monotonic counter to prevent stale async renders
-
-// Clean up all per-requisition state (call on archive/delete)
-function _cleanupReqState(reqId) {
-    delete _ddTabCache[reqId];
-    delete _ddActiveTab[reqId];
-    delete _ddTabLoadSeq[reqId];
-    delete _ddReqCache[reqId];
-    delete _ddSightingsCache[reqId];
-    delete _ddScoreCache[reqId];
-    if (_ddSelectedSightings[reqId]) delete _ddSelectedSightings[reqId];
-    if (_ddSightingFilters && _ddSightingFilters[reqId]) delete _ddSightingFilters[reqId];
-    // Clean up tier state keys for this req
-    for (const k of Object.keys(_ddTierState)) { if (k.startsWith(reqId + '-')) delete _ddTierState[k]; }
-    // Unbind context panel if bound to this req
-    if (_ctxBoundObject && _ctxBoundObject.type === 'requisition' && _ctxBoundObject.id === reqId) {
-        unbindContextPanel();
-    }
-}
 
 function _ddSubTabs(mainView) {
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['workspace', 'quote', 'activity'];
@@ -3484,10 +3440,6 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     }
     if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
 
-    // Race condition guard: track load sequence so stale responses don't render
-    if (!_ddTabLoadSeq[reqId]) _ddTabLoadSeq[reqId] = 0;
-    const seq = ++_ddTabLoadSeq[reqId];
-
     panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
     try {
         let data;
@@ -3524,16 +3476,6 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
                 break;
-            case 'quote':
-                // Lightweight summary + full quotes list for unified Quote tab
-                {
-                    const [summary, quotes] = await Promise.all([
-                        apiFetch(`/api/requisitions/${reqId}/quote-summary`),
-                        apiFetch(`/api/requisitions/${reqId}/quotes`),
-                    ]);
-                    data = { summary, quotes };
-                }
-                break;
             case 'quotes':
                 try {
                     data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
@@ -3553,12 +3495,9 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
         }
-        // Only render if this is still the latest request for this req
-        if (_ddTabLoadSeq[reqId] !== seq) return;
         _ddTabCache[reqId][tabName] = data;
         _renderDdTab(reqId, tabName, data, panel);
     } catch(e) {
-        if (_ddTabLoadSeq[reqId] !== seq) return;
         panel.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
     }
 }
@@ -3575,7 +3514,6 @@ function _renderDdTab(reqId, tabName, data, panel) {
                 break;
             case 'activity': _renderMobileActivityList(reqId, data, panel); break;
             case 'offers': _renderMobileOffersList(data, reqId, panel); break;
-            case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
             case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
             case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
             case 'tasks': _renderDdTasks(reqId, data, panel); break;
@@ -3612,7 +3550,6 @@ function _renderDdTab(reqId, tabName, data, panel) {
             }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
-        case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
@@ -4632,12 +4569,6 @@ function toggleMyTasksSidebar() {
     if (!sidebar) return;
     var isOpen = sidebar.classList.toggle('open');
     document.body.classList.toggle('tasks-open', isOpen);
-    try {
-        if (isOpen) localStorage.setItem('myTasksOpen', '1');
-        else localStorage.removeItem('myTasksOpen');
-    } catch (e) {
-        // Ignore storage failures (private mode / quota limits).
-    }
     if (isOpen) loadMyTasks();
 }
 
@@ -4776,18 +4707,8 @@ function _renderMyTaskItem(task) {
     setTimeout(function() {
         var sidebar = document.getElementById('myTasksSidebar');
         if (!sidebar) return;
-        var shouldOpen = false;
-        try {
-            shouldOpen = localStorage.getItem('myTasksOpen') === '1';
-        } catch (e) {
-            shouldOpen = false;
-        }
-        sidebar.classList.toggle('open', shouldOpen);
-        document.body.classList.toggle('tasks-open', shouldOpen);
-        if (shouldOpen) {
-            loadMyTasks();
-            return;
-        }
+        sidebar.classList.remove('open');
+        document.body.classList.remove('tasks-open');
         (async function() {
             try {
                 var summary = await apiFetch('/api/tasks/mine/summary');
@@ -5343,16 +5264,6 @@ function _renderDdOffers(reqId, data, panel) {
                 confBadge = ` <span class="badge" style="background:${cc}15;color:${cc};font-size:8px;padding:1px 4px" title="AI parse confidence: ${o.parse_confidence}%">${cl} ${o.parse_confidence}%</span>`;
             }
 
-            // Risk flag badges — surface AI risk flags directly on offer cards
-            let riskBadges = '';
-            if (o.risk_flags && o.risk_flags.length) {
-                for (const rf of o.risk_flags) {
-                    const rc = rf.severity === 'critical' ? 'var(--red)' : rf.severity === 'warning' ? 'var(--amber)' : 'var(--blue)';
-                    const rl = rf.type ? rf.type.replace(/_/g, ' ') : 'risk';
-                    riskBadges += ` <span class="badge" style="background:${rc}15;color:${rc};font-size:8px;padding:1px 4px;cursor:help" title="${esc(rf.message || rl)}">\u26a0 ${esc(rl)}</span>`;
-                }
-            }
-
             // Edited-by info
             let editedInfo = '';
             if (o.updated_at) {
@@ -5362,7 +5273,7 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${riskBadges}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${editedInfo}</td>
                 <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
@@ -6101,97 +6012,6 @@ async function ddDeleteOffer(reqId, offerId) {
             showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
         }
     }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
-}
-
-// ── Unified Quote Tab (summary + quotes list + buy plan link) ─────────
-function _renderDdQuoteTab(reqId, data, panel) {
-    const summary = data?.summary || {};
-    const quotes = data?.quotes || [];
-    let html = '';
-
-    // ── Risk flags banner (if any) ──
-    const flags = summary.risk_flags || [];
-    if (flags.length) {
-        html += '<div style="background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:6px;padding:8px 12px;margin-bottom:10px">';
-        html += '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:4px">Risk Flags</div>';
-        for (const f of flags) {
-            const icon = f.severity === 'critical' ? '\u{1F6A8}' : f.severity === 'warning' ? '\u26a0\ufe0f' : '\u{2139}\ufe0f';
-            const color = f.severity === 'critical' ? 'var(--red)' : f.severity === 'warning' ? 'var(--amber)' : 'var(--muted)';
-            html += `<div style="font-size:10px;color:${color};padding:2px 0">${icon} <b>${esc(f.type.replace(/_/g, ' '))}</b>: ${esc(f.message)}</div>`;
-        }
-        html += '</div>';
-    }
-
-    // ── Quote status summary card ──
-    if (summary.has_quote) {
-        const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
-        const statusLabel = statusMap[summary.quote_status] || summary.quote_status || 'Draft';
-        html += `<div style="background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                <div>
-                    <span style="font-weight:700;font-size:13px;color:var(--blue)">${esc(summary.quote_number || '')}</span>
-                    <span style="font-size:10px;color:var(--muted);margin-left:6px">Rev ${summary.quote_revision || 1}</span>
-                    <span class="status-badge status-${summary.quote_status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px">${statusLabel}</span>
-                </div>
-                <div style="text-align:right;font-size:10px;color:var(--muted)">${summary.quote_updated_at ? 'Updated ' + fmtRelative(summary.quote_updated_at) : ''}</div>
-            </div>
-            <div style="display:flex;gap:16px;font-size:11px">
-                <div><span style="color:var(--muted)">Lines:</span> <b>${summary.line_count || 0}</b></div>
-                <div><span style="color:var(--muted)">Subtotal:</span> <b>$${Number(summary.subtotal || 0).toLocaleString(undefined,{minimumFractionDigits:2})}</b></div>
-                <div><span style="color:var(--muted)">Margin:</span> <b style="color:${(summary.total_margin_pct||0) >= 20 ? 'var(--green)' : (summary.total_margin_pct||0) >= 10 ? 'var(--amber)' : 'var(--red)'}">${Number(summary.total_margin_pct || 0).toFixed(1)}%</b></div>
-                <div><span style="color:var(--muted)">Offers:</span> <b>${summary.selected_offer_count}/${summary.total_offer_count}</b> selected</div>
-            </div>
-        </div>`;
-    } else {
-        html += `<div style="background:var(--bg2);border-radius:8px;padding:16px;margin-bottom:10px;border:1px dashed var(--border);text-align:center">
-            <div style="font-size:12px;color:var(--muted);margin-bottom:6px">No quote created yet</div>
-            <div style="font-size:11px;color:var(--muted)">Select offers in the <b>Parts</b> tab and click <b>Build Quote</b>, or log offers first.</div>
-        </div>`;
-    }
-
-    // ── Buy Plan CTA ──
-    html += '<div style="display:flex;gap:8px;margin-bottom:12px">';
-    if (summary.has_buy_plan) {
-        const bpStatusMap = {draft:'Draft',pending:'Pending',active:'Active',halted:'Halted',completed:'Completed',cancelled:'Cancelled'};
-        const bpLabel = bpStatusMap[summary.buy_plan_status] || summary.buy_plan_status || '';
-        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();window.location.hash='buyplans';if(window.loadBuyPlansV3)loadBuyPlansV3()">Open Buy Plan <span style="font-size:10px;opacity:.8">(${bpLabel} \u00b7 ${summary.buy_plan_line_count || 0} lines)</span></button>`;
-    } else if (summary.has_quote) {
-        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddCreateBuyPlan(${reqId})">Create Buy Plan</button>`;
-    }
-    if (summary.has_quote) {
-        html += `<button class="btn btn-ghost" style="font-size:11px" onclick="event.stopPropagation();_switchDdTab(${reqId},'quotes')">View All Quotes</button>`;
-    }
-    html += '</div>';
-
-    // ── Inline quotes list (collapsed) ──
-    if (quotes.length) {
-        // Re-use existing quotes renderer in a sub-panel
-        const subPanel = document.createElement('div');
-        panel.innerHTML = html;
-        panel.appendChild(subPanel);
-        _renderDdQuotes(reqId, quotes, subPanel);
-        return;
-    }
-
-    panel.innerHTML = html;
-}
-
-// Create buy plan from requisition context
-async function ddCreateBuyPlan(reqId) {
-    try {
-        showToast('Creating buy plan...', 'info');
-        const result = await apiFetch(`/api/requisitions/${reqId}/buy-plan`, { method: 'POST' });
-        if (result.buy_plan_id) {
-            showToast(result.created ? 'Buy plan created' : 'Opening existing buy plan', 'success');
-            // Refresh quote tab to show the new buy plan link
-            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quote;
-            const drow = document.getElementById('d-' + reqId);
-            const panel = drow?.querySelector('.dd-panel');
-            if (panel) await _loadDdSubTab(reqId, 'quote', panel);
-        }
-    } catch(e) {
-        showToast('Failed to create buy plan \u2014 ' + friendlyError(e, 'please try again'), 'error');
-    }
 }
 
 function _renderDdQuotes(reqId, data, panel) {
@@ -8779,10 +8599,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
             }
             _renderSourcingDrillDown(reqId); // re-render with scores
-        }).catch(e => {
-            console.warn('score fetch error:', e);
-            delete _ddScoreCache[reqId]; // clear sentinel so retry is possible
-        });
+        }).catch(e => console.warn('score fetch error:', e));
         _ddScoreCache[reqId] = { _loading: true }; // sentinel to prevent duplicate fetches
     }
     const scoreMap = _ddScoreCache[reqId] || {};
@@ -9424,7 +9241,6 @@ function renderReqList() {
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     const el = document.getElementById('reqList');
-    if (!el) return;
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
     if (!_serverSearchActive) {
@@ -9503,7 +9319,7 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'sales' ? 'sales' : v === 'sourcing' ? 'sourcing' : '';
+            const viewLabel = v === 'reqs' ? 'open' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
@@ -9527,21 +9343,8 @@ function renderReqList() {
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
-    } else if (v === 'sales') {
-        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
-        thead = `<thead><tr>
-            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
-            <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
-            ${_thIcons}
-        </tr></thead>`;
     } else {
-        // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
+        // Unified requisition view: sourcing + quoting metrics in one table
         thead = `<thead><tr>
             <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
@@ -9551,13 +9354,15 @@ function renderReqList() {
             <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} title="Quote status and value">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
     }
 
-    // Priority lane grouping for sales/sourcing views (skip if column sort is active)
+    // Priority lane grouping for active requisition views (skip if column sort is active)
     let rowsHtml;
     if (v === 'archive' && !_reqSortCol) {
         // Group by customer when no column sort is active
@@ -9873,8 +9678,8 @@ function _renderReqRow(r) {
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
-    } else if (v === 'sales') {
-        // Sales view: Parts, Quote (with value), Offers, Bid Due, Sales, Age
+    } else {
+        // Unified view: sourcing coverage, RFQ progress, offer review, quote readiness
         let qCell = '<span style="color:var(--muted)" title="No quote created yet">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
         else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
@@ -9893,44 +9698,18 @@ function _renderReqRow(r) {
 
         // Coverage: offers vs total parts (can exceed 100% with multiple offers per part)
         const _covOffer = r.offer_count || 0;
-        const _covPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
-        const _covBarPct = Math.min(_covPct, 100);
-        const _covLabel = _covPct > 100 ? _covPct + '% (multi)' : _covPct + '%';
-        const _covTip = _covOffer + ' offer' + (_covOffer !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_covPct > 100 ? ' \u2014 multiple offers per part' : '');
+        const _srcCovPct = total > 0 ? Math.round((_covOffer / total) * 100) : 0;
+        const _srcCovBarPct = Math.min(_srcCovPct, 100);
+        const _srcCovLabel = _srcCovPct > 100 ? _srcCovPct + '% (multi)' : _srcCovPct + '%';
+        const _srcCovTip = _covOffer + ' offer' + (_covOffer !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_srcCovPct > 100 ? ' \u2014 multiple offers per part' : '');
+        const _covPct = _srcCovPct;
         let covCell;
         if (total === 0) covCell = '<span style="color:var(--muted)">\u2014</span>';
         else {
-            const covColor = _covPct >= 80 ? 'var(--green)' : _covPct >= 40 ? 'var(--amber)' : 'var(--red)';
-            covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_covTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covLabel}</span></div>`;
+            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_srcCovTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovLabel}</span></div>`;
         }
 
-        dataCells = `
-            <td class="mono" style="text-align:right">${total}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-            <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
-
-        // Sales actions: context-aware primary action
-        let salesBtn;
-        if (r.has_new_offers && (r.offer_count || 0) > 0) {
-            salesBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
-        } else if (r.quote_status === 'draft') {
-            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
-        } else if (r.quote_status === 'sent') {
-            salesBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-        } else if ((r.offer_count || 0) > 0) {
-            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
-        } else if (r.status === 'draft') {
-            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source</button>`;
-        } else {
-            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
-        }
-        actions = `<td style="white-space:nowrap">${salesBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 9;
-    } else {
-        // Sourcing view: Parts, Sourced bar, RFQs sent, Response rate, Offers, Age
         const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
         let srcCell;
         if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
@@ -9946,59 +9725,42 @@ function _renderReqRow(r) {
             ? `<span class="mono" style="font-size:11px">${respPct}% <span style="color:var(--muted)">(${replied}/${sent})</span></span>`
             : '<span style="color:var(--muted)">\u2014</span>';
 
-        let offCell = '<span style="color:var(--muted)">\u2014</span>';
-        const _oCnt = r.offer_count || 0;
-        if (_oCnt > 0) {
-            let qsBadge = '';
-            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
-            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
-            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
-            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
-            offCell = `<b>${_oCnt}</b>${qsBadge}`;
-        }
-
-        // Coverage: offers vs total parts (can exceed 100% with multiple offers per part)
-        const _srcCovPct = total > 0 ? Math.round((_oCnt / total) * 100) : 0;
-        const _srcCovBarPct = Math.min(_srcCovPct, 100);
-        const _srcCovLabel = _srcCovPct > 100 ? _srcCovPct + '% (multi)' : _srcCovPct + '%';
-        const _srcCovTip = _oCnt + ' offer' + (_oCnt !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_srcCovPct > 100 ? ' \u2014 multiple offers per part' : '');
-        let srcCovCell;
-        if (total === 0) srcCovCell = '<span style="color:var(--muted)">\u2014</span>';
-        else {
-            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
-            srcCovCell = `<div style="display:flex;align-items:center;gap:4px" title="${_srcCovTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovLabel}</span></div>`;
-        }
-
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:70px">${srcCovCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
             <td class="mono" style="font-size:11px">${sent}</td>
             <td style="font-size:11px;white-space:nowrap">${respCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
 
-        // Purchasing actions: context-aware primary action
-        let srcBtn;
-        if (r.status === 'draft') {
-            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
-        } else if (_oCnt > 0 && r.has_new_offers) {
-            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
+        // Unified actions: prioritize the next best sourcing/sales step
+        let primaryBtn;
+        if (r.has_new_offers && (r.offer_count || 0) > 0) {
+            primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
+        } else if (r.quote_status === 'draft') {
+            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
+        } else if (r.quote_status === 'sent') {
+            primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+        } else if ((r.offer_count || 0) > 0) {
+            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
         } else if (sourced > 0 && sent === 0) {
-            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+        } else if (r.status === 'draft') {
+            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source All</button>`;
         } else if (sent > 0 && _oCnt === 0) {
             const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
             const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
             const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
-        } else if (_oCnt > 0) {
-            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
+            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
         } else {
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
         }
-        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 10;
+        actions = `<td style="white-space:nowrap">${primaryBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 13;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -10445,22 +10207,20 @@ function _cancelTabInflight() {
 }
 
 function setMainView(view, btn) {
-    // Backward compatibility: old UI used "purchasing" for the sourcing view.
-    if (view === 'purchasing') view = 'sourcing';
-
+    const normalizedView = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
-    // Ensure the requisition list container is visible (deals/archive/sales all render into view-list)
+    // Ensure the requisition list container is visible (reqs/deals/archive all render into view-list)
     showView('view-list');
 
     // Clear stale data from previous tab so we always fetch fresh for the new view
     _reqListData = [];
     _reqFullyLoaded = false;
 
-    _currentMainView = view;
+    _currentMainView = normalizedView;
     // Persist view preference (not archive — that's a temporary view)
-    if (view !== 'archive') localStorage.setItem('avail_main_view', view);
+    if (normalizedView !== 'archive') localStorage.setItem('avail_main_view', normalizedView);
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
@@ -10469,7 +10229,7 @@ function setMainView(view, btn) {
     // Sync whichever pill strip the click didn't originate from
     ['mainPills', 'mobilePills'].forEach(id => {
         const cont = document.getElementById(id);
-        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === normalizedView));
     });
     _toolbarQuickFilter = '';
     const maBtn = document.getElementById('myAccountsBtn');
@@ -10479,26 +10239,19 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on sales/sourcing views, hide on archive/deals
+    // Show status filter pills on the unified requisition view, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'sales' || view === 'sourcing') ? '' : 'none';
-    if (view === 'sales' || view === 'sourcing') {
+    if (stEl) stEl.style.display = normalizedView === 'reqs' ? '' : 'none';
+    if (normalizedView === 'reqs') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
         loadFollowUpsPanel();
-    } else if (view === 'deals') {
+    } else if (normalizedView === 'deals') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
-    } else if (view === 'active' || view === 'rfq') {
-        // Legacy: redirect old view names to sales
-        _currentMainView = 'sales';
-        _reqStatusFilter = 'all';
-        _serverSearchActive = false;
-        loadRequisitions();
-        loadFollowUpsPanel();
-    } else if (view === 'archive') {
+    } else if (normalizedView === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
         _archivePage = 1;
@@ -10705,18 +10458,16 @@ function setMainPill(view) {
 const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 
 async function sendFollowUp(contactId, vendorName) {
-    sendFollowUpImpl(
-        {
-            confirmAction,
-            apiFetch,
-            showToast,
-            loadActivityFn: typeof loadActivity === 'function' ? loadActivity : null,
-            loadFollowUpsPanelFn: loadFollowUpsPanel,
-        },
-        contactId,
-        vendorName,
-        sendFollowUp,
-    );
+    confirmAction('Send Follow-Up', 'Send follow-up email to ' + vendorName + '?', async function() {
+        if (sendFollowUp._busy) return; sendFollowUp._busy = true;
+        try {
+            const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
+            showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
+            if (typeof loadActivity === 'function') loadActivity();
+            loadFollowUpsPanel();
+        } catch (e) { showToast('Failed to send follow-up', 'error'); }
+        finally { sendFollowUp._busy = false; }
+    });
 }
 
 // ── Deal Board ─────────────────────────────────────────────────────────
@@ -10817,8 +10568,8 @@ async function _dealCardClick(reqId) {
         _openMobileDrillDown(reqId);
         return;
     }
-    const salesBtn = document.querySelector('#mainPills .fp[data-view="sales"]');
-    setMainView('sales', salesBtn);
+    const reqsBtn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+    setMainView('reqs', reqsBtn);
     const drow = await waitForElement('#d-' + reqId, 3000);
     if (drow) {
         toggleDrillDown(reqId);
@@ -10827,28 +10578,68 @@ async function _dealCardClick(reqId) {
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
 async function loadFollowUpsPanel() {
-    await loadFollowUpsPanelImpl({
-        apiFetch,
-        esc,
-        escAttr,
-        getCurrentMainView: () => _currentMainView,
-        getAbortController: () => _followUpsAbort,
-        setAbortController: (controller) => {
-            _followUpsAbort = controller;
-        },
-    });
+    const panel = document.getElementById('followUpsPanel');
+    if (!panel) return;
+    if (_currentMainView === 'archive') { panel.style.display = 'none'; return; }
+    if (_followUpsAbort) try { _followUpsAbort.abort(); } catch(e){}
+    _followUpsAbort = new AbortController();
+    try {
+        const data = await apiFetch('/api/follow-ups', { signal: _followUpsAbort.signal });
+        if (_currentMainView === 'archive') return; // stale — user switched tabs
+        const followUps = data.follow_ups || [];
+        if (!followUps.length) { panel.style.display = 'none'; return; }
+        // Group by requisition
+        const groups = {};
+        for (const fu of followUps) {
+            const key = fu.requisition_id || 0;
+            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown Requirement', items: [] };
+            groups[key].items.push(fu);
+        }
+        let html = `<div class="card" style="margin:0 16px 12px;padding:12px;border-left:3px solid var(--amber)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-weight:700;font-size:13px;color:var(--amber)">Awaiting Vendor Replies (${followUps.length})</span>
+                <button class="btn btn-warning btn-sm" id="bulkFollowUpBtn" onclick="sendBulkFollowUp()" style="font-size:10px;display:none">Send Selected</button>
+            </div>`;
+        for (const [rfqId, g] of Object.entries(groups)) {
+            html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${esc(g.name)}</span></div>`;
+            for (const fu of g.items) {
+                const dayColor = fu.days_waiting > 5 ? 'var(--red)' : fu.days_waiting > 2 ? 'var(--amber)' : 'var(--green)';
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px">
+                    ${fu.contact_id ? `<input type="checkbox" class="fu-cb" data-contact-id="${fu.contact_id}" onchange="_updateBulkFollowUpBtn()">` : ''}
+                    <span style="color:var(--text2)">${esc(fu.vendor_name)}</span>
+                    <span style="color:var(--muted)">${esc(fu.vendor_email || '')}</span>
+                    <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
+                    ${fu.parts && fu.parts.length ? `<span style="color:var(--muted)">${esc(Array.isArray(fu.parts) ? fu.parts.join(', ') : String(fu.parts))}</span>` : ''}
+                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Send Now</button>` : ''}
+                </div>`;
+            }
+        }
+        html += '</div>';
+        panel.innerHTML = html;
+        panel.style.display = '';
+    } catch(e) { if (e.name !== 'AbortError') panel.style.display = 'none'; }
 }
 
 function _updateBulkFollowUpBtn() {
-    updateBulkFollowUpBtnImpl();
+    const checked = document.querySelectorAll('.fu-cb:checked').length;
+    const btn = document.getElementById('bulkFollowUpBtn');
+    if (btn) {
+        btn.style.display = checked > 0 ? '' : 'none';
+        btn.textContent = `Send ${checked} Follow-up${checked > 1 ? 's' : ''}`;
+    }
 }
 
 async function sendBulkFollowUp() {
-    await sendBulkFollowUpImpl({
-        apiFetch,
-        guardBtn,
-        showToast,
-        loadFollowUpsPanelFn: loadFollowUpsPanel,
+    const checked = [...document.querySelectorAll('.fu-cb:checked')];
+    const contactIds = checked.map(cb => parseInt(cb.dataset.contactId)).filter(Boolean);
+    if (!contactIds.length) return;
+    const btn = document.getElementById('bulkFollowUpBtn');
+    await guardBtn(btn, 'Sending…', async () => {
+        const data = await apiFetch('/api/follow-ups/send-batch', {
+            method: 'POST', body: { contact_ids: contactIds }
+        });
+        showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
+        loadFollowUps();
     });
 }
 
@@ -10931,7 +10722,6 @@ async function archiveFromList(reqId) {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
             _reqListData = _reqListData.filter(r => r.id !== reqId);
-            _cleanupReqState(reqId);
             const drow = document.getElementById('d-' + reqId);
             if (drow) drow.remove();
             const arow = document.getElementById('a-' + reqId);
@@ -10989,8 +10779,6 @@ async function _archiveWithOutcome(reqId, outcome) {
             await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
         }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
-        // Clean up all per-requisition state on archive
-        _cleanupReqState(reqId);
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
@@ -11030,8 +10818,8 @@ async function requoteFromList(reqId) {
                 await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
             }
             showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
-            const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
-            if (srcBtn) setMainView('sourcing', srcBtn);
+            const reqsBtn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+            if (reqsBtn) setMainView('reqs', reqsBtn);
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
@@ -14446,9 +14234,25 @@ let actStatFilter = null; // null = all, 'replied', 'opened', 'awaiting'
 async function loadActivity() {
     if (!currentReqId) return;
     const reqId = currentReqId;
-    const data = await fetchActivityData({ apiFetch }, reqId);
-    if (!data) return;
-    activityData = data;
+    try {
+        activityData = await apiFetch(`/api/requisitions/${reqId}/activity`);
+    } catch {
+        // Fallback to old endpoint
+        let contacts;
+        try { contacts = await apiFetch(`/api/requisitions/${reqId}/contacts`); }
+        catch { return; }
+        // Convert to vendor-grouped format
+        const vmap = {};
+        for (const c of contacts) {
+            const vk = (c.vendor_name||'').trim().toLowerCase();
+            if (!vmap[vk]) vmap[vk] = { vendor_name: c.vendor_name, status: 'awaiting', contact_count: 0, contact_types: [], all_parts: [], contacts: [], responses: [], last_contacted_at: c.created_at, last_contacted_by: c.user_name, last_contact_email: c.vendor_contact };
+            vmap[vk].contacts.push(c);
+            vmap[vk].contact_count++;
+            if (!vmap[vk].contact_types.includes(c.contact_type)) vmap[vk].contact_types.push(c.contact_type);
+            for (const p of (c.parts_included || [])) { if (!vmap[vk].all_parts.includes(p)) vmap[vk].all_parts.push(p); }
+        }
+        activityData = { vendors: Object.values(vmap), summary: { sent: Object.keys(vmap).length, replied: 0, awaiting: Object.keys(vmap).length } };
+    }
     if (currentReqId !== reqId) return; // RFQ changed while loading
     renderActivityCards();
 }
@@ -14628,12 +14432,10 @@ function renderActivityCards() {
 }
 
 export function fmtRelative(iso) {
-    if (!iso) return '\u2014';
+    if (!iso) return '—';
     const d = new Date(iso);
-    if (isNaN(d)) return '\u2014';
     const now = new Date();
     const diff = Math.floor((now - d) / 1000);
-    if (diff < 0) return d.toLocaleDateString();
     if (diff < 60) return 'just now';
     if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
@@ -14844,10 +14646,10 @@ async function _retryRfq(contactId) {
         if (r.status === 'sent') {
             showToast('RFQ resent successfully', 'success');
         } else {
-            showToast(r.error || r.detail || 'Retry failed', 'error');
+            showToast(r.error || 'Retry failed', 'error');
         }
     } catch(e) {
-        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Retry failed: ' + e.message, 'error');
     }
 }
 
@@ -14860,7 +14662,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Failed: ' + e.message, 'error');
     }
 }
 
@@ -15476,17 +15278,17 @@ document.addEventListener('keydown', function(e) {
         if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault(); openNewReqModal(); return;
         }
-        // 1/2/3 — Switch tabs: Open / Sourcing / Archive (only when on list view)
+        // 1/2/3 — Switch tabs: Reqs / Deals / Archive (only when on list view)
         if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
-            if (btn) setMainView('rfq', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+            if (btn) setMainView('reqs', btn);
             return;
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="sourcing"]');
-            if (btn) setMainView('sourcing', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="deals"]');
+            if (btn) setMainView('deals', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
@@ -16693,7 +16495,25 @@ async function _rfqLoadTab(tab) {
 
     body.innerHTML = '<span class="loading-placeholder">Loading\u2026</span>';
     try {
-        const data = await fetchRfqWorkspaceTabData({ apiFetch }, tab, partId, _rfqActiveReqId);
+        let data;
+        switch (tab) {
+            case 'offers':
+                data = await apiFetch(`/api/requirements/${partId}/offers`);
+                break;
+            case 'activity': {
+                // Fetch notes, tasks, and history in parallel
+                const [notes, tasks, history] = await Promise.all([
+                    apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({})),
+                    apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []),
+                    apiFetch(`/api/requirements/${partId}/history`).catch(() => []),
+                ]);
+                data = { notes, tasks, history };
+                break;
+            }
+            case 'sightings':
+                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                break;
+        }
         // Abort if part changed while loading
         if (_rfqActivePartId !== partId) return;
         _rfqPanelCache[tab] = data;
