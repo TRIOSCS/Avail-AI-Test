@@ -230,6 +230,9 @@ class TestListSuggested:
         assert item["similar_customers"] == [{"name": "Existing Co"}]
         assert item["ai_writeup"] == "Strong fit due to industry alignment."
         assert item["import_priority"] == "priority"
+        assert item["buyer_ready_score"] >= 70
+        assert item["is_buyer_ready"] is True
+        assert len(item["priority_reasons"]) >= 1
 
     def test_status_filter_claimed(self, client, db_session):
         _make_prospect(db_session, name="Sugg", domain="sugg.com", status="suggested")
@@ -256,6 +259,53 @@ class TestListSuggested:
         assert data["total"] == 1
         assert data["items"][0]["name"] == "Match"
 
+    def test_filter_buyer_ready_only(self, client, db_session):
+        _make_prospect(
+            db_session,
+            name="Strong Lead",
+            domain="stronglead.com",
+            fit_score=78,
+            readiness_score=62,
+            readiness_signals={"intent": {"strength": "strong"}},
+            contacts_preview=[{"name": "Jane Buyer", "verified": True, "seniority": "decision_maker"}],
+        )
+        _make_prospect(
+            db_session,
+            name="Weak Lead",
+            domain="weaklead.com",
+            fit_score=92,
+            readiness_score=70,
+            readiness_signals={},
+            contacts_preview=[],
+        )
+        resp = client.get("/api/prospects/suggested?buyer_ready_only=true&sort=buyer_ready_desc")
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "Strong Lead"
+
+    def test_sort_buyer_ready_desc_prefers_actionable_signals(self, client, db_session):
+        _make_prospect(
+            db_session,
+            name="Actionable",
+            domain="actionable.com",
+            fit_score=78,
+            readiness_score=62,
+            readiness_signals={"intent": {"strength": "moderate"}},
+            contacts_preview=[{"name": "Alex Buyer", "verified": True, "seniority": "decision_maker"}],
+        )
+        _make_prospect(
+            db_session,
+            name="Abstract Fit",
+            domain="abstractfit.com",
+            fit_score=95,
+            readiness_score=60,
+            readiness_signals={},
+            contacts_preview=[],
+        )
+        resp = client.get("/api/prospects/suggested?sort=buyer_ready_desc")
+        items = resp.json()["items"]
+        assert items[0]["name"] == "Actionable"
+
 
 # ── suggested_stats ──────────────────────────────────────────────────────
 
@@ -281,6 +331,29 @@ class TestSuggestedStats:
         assert data["call_now_count"] == 1
         assert data["nurture_count"] == 1
         assert data["high_fit_count"] == 1
+
+    def test_stats_includes_buyer_ready_count(self, client, db_session):
+        _make_prospect(
+            db_session,
+            name="Buyer Ready",
+            domain="buyerready.com",
+            fit_score=76,
+            readiness_score=60,
+            readiness_signals={"intent": {"strength": "strong"}},
+            contacts_preview=[{"name": "Buyer", "verified": True, "seniority": "decision_maker"}],
+        )
+        _make_prospect(
+            db_session,
+            name="Not Ready",
+            domain="notready.com",
+            fit_score=90,
+            readiness_score=65,
+            readiness_signals={},
+            contacts_preview=[],
+        )
+        resp = client.get("/api/prospects/suggested/stats")
+        data = resp.json()
+        assert data["buyer_ready_count"] == 1
 
     def test_claimed_this_month(self, client, db_session, test_user):
         p = _make_prospect(db_session, name="Claimed", domain="claimed.com", status="claimed")

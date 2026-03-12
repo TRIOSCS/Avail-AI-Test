@@ -617,12 +617,17 @@
                 <option value="1">Any Signal (1+)</option>
             </select>
             <select id="suggestedSort" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="buyer_ready_desc">Sort: Buyer Ready</option>
                 <option value="readiness_desc">Sort: Readiness</option>
                 <option value="fit_desc">Sort: Fit Score</option>
                 <option value="composite_desc">Sort: Composite</option>
                 <option value="name_asc">Sort: Name</option>
                 <option value="recent_desc">Sort: Recently Added</option>
             </select>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text);white-space:nowrap">
+                <input id="suggestedBuyerReadyOnly" type="checkbox" checked onchange="debouncedLoadSuggested()">
+                Strong leads only
+            </label>
             <span id="suggestedPager" style="font-size:11px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px;margin-left:auto"></span>
         </div>
         <div id="suggestedLegend" class="scoring-legend hidden">

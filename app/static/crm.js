@@ -7045,8 +7045,10 @@ async function showSuggested() {
     if (fit) fit.value = '0';
     const readiness = document.getElementById('suggestedReadinessScore');
     if (readiness) readiness.value = '0';
+    const buyerReadyOnly = document.getElementById('suggestedBuyerReadyOnly');
+    if (buyerReadyOnly) buyerReadyOnly.checked = true;
     const sort = document.getElementById('suggestedSort');
-    if (sort) sort.value = 'fit_desc';
+    if (sort) sort.value = 'buyer_ready_desc';
     const industryEl = document.getElementById('suggestedIndustry');
     if (industryEl) industryEl.value = '';
     const revenueEl = document.getElementById('suggestedRevenue');
@@ -7074,7 +7076,8 @@ async function loadSuggested() {
     const revenue = document.getElementById('suggestedRevenue')?.value || '';
     const region = document.getElementById('suggestedRegion')?.value || '';
     const source = document.getElementById('suggestedSource')?.value || '';
-    const sort = document.getElementById('suggestedSort')?.value || 'fit_desc';
+    const buyerReadyOnly = document.getElementById('suggestedBuyerReadyOnly')?.checked;
+    const sort = document.getElementById('suggestedSort')?.value || 'buyer_ready_desc';
     const params = new URLSearchParams({ page: _suggestedPage, per_page: 100, sort });
     if (search) params.set('search', search);
     if (size) params.set('employee_size', size);
@@ -7084,6 +7087,7 @@ async function loadSuggested() {
     if (revenue) params.set('revenue_range', revenue);
     if (region) params.set('region', region);
     if (source) params.set('discovery_source', source);
+    if (buyerReadyOnly) params.set('buyer_ready_only', 'true');
 
     try {
         const [data, stats] = await Promise.all([
@@ -7142,6 +7146,7 @@ function renderSuggestedStats(stats) {
     if (!el) return;
     el.innerHTML = `
         <span class="stat-item"><span class="stat-val">${stats.total_available}</span> available</span>
+        <span class="stat-item"><span class="stat-val">${stats.buyer_ready_count || 0}</span> strong leads</span>
         <span class="stat-item"><span class="stat-val">${stats.call_now_count}</span> call now</span>
         <span class="stat-item"><span class="stat-val">${stats.nurture_count}</span> nurture</span>
         <span class="stat-item"><span class="stat-val">${stats.high_fit_count}</span> high fit</span>
@@ -7172,6 +7177,9 @@ function renderSuggestedGrid(data) {
         const sourceBadge = a.discovery_source
             ? '<span class="suggested-badge" style="background:var(--border);color:var(--text);font-size:9px">' + esc(a.discovery_source) + '</span>'
             : '';
+        const buyerReadyBadge = a.is_buyer_ready
+            ? `<span class="suggested-badge" style="background:#dbeafe;color:#1d4ed8">Buyer Ready ${a.buyer_ready_score}</span>`
+            : `<span class="suggested-badge" style="background:#f3f4f6;color:#4b5563">Lead Score ${a.buyer_ready_score}</span>`;
 
         // Domain link
         const domainLink = a.domain
@@ -7192,6 +7200,12 @@ function renderSuggestedGrid(data) {
             <div class="score-bar"><div class="score-bar-label"><span>Fit</span><span>${a.fit_score}</span></div><div class="score-bar-track"><div class="score-bar-fill fit" style="width:${fitPct}%"></div></div></div>
             <div class="score-bar"><div class="score-bar-label"><span>Readiness</span><span>${a.readiness_score}</span></div><div class="score-bar-track"><div class="score-bar-fill readiness" style="width:${readPct}%"></div></div></div>
         </div>`;
+
+        const reasonHtml = a.priority_reasons && a.priority_reasons.length
+            ? `<div style="margin:6px 0 2px 0;font-size:11px;color:var(--text)">
+                ${a.priority_reasons.map(r => `<div style="margin:2px 0">• ${esc(r)}</div>`).join('')}
+            </div>`
+            : '';
 
         // Signal tags
         let signalHtml = '';
@@ -7242,11 +7256,12 @@ function renderSuggestedGrid(data) {
                     <div class="suggested-card-name" style="cursor:pointer" onclick="openSuggestedDetail(${a.id})">${esc(a.name)}</div>
                     ${domainLink}
                 </div>
-                <div class="suggested-card-badges">${warmBadge}${tierBadge}${sfBadge}${sourceBadge}</div>
+                <div class="suggested-card-badges">${buyerReadyBadge}${warmBadge}${tierBadge}${sfBadge}${sourceBadge}</div>
             </div>
             ${oneLinerHtml}
             ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
             ${scoreBars}
+            ${reasonHtml}
             ${signalHtml}
             ${contactsHtml}
             ${similarHtml}

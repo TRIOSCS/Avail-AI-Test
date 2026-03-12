@@ -23,6 +23,7 @@ from ..services.prospect_claim import (
     claim_prospect,
     trigger_deep_enrichment_bg,
 )
+from ..services.prospect_priority import build_priority_snapshot
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter()
@@ -39,8 +40,9 @@ async def list_suggested(
     min_fit_score: int = 0,
     min_readiness_score: int = 0,
     readiness_level: str = "",
+    buyer_ready_only: bool = False,
     status: str = "suggested",
-    sort: str = "readiness_desc",
+    sort: str = "buyer_ready_desc",
     page: int = 1,
     per_page: int = 20,
     user: User = Depends(require_user),
@@ -50,8 +52,9 @@ async def list_suggested(
 
     Filters: search, region, industry, employee_size, revenue_range,
              discovery_source, min_fit_score, min_readiness_score,
-             readiness_level, status.
-    Sort: readiness_desc (default), fit_desc, composite_desc, name_asc, recent_desc.
+             readiness_level, buyer_ready_only, status.
+    Sort: buyer_ready_desc (default), readiness_desc, fit_desc,
+          composite_desc, name_asc, recent_desc.
     """
     page = max(1, page)
     per_page = min(max(1, per_page), 100)
@@ -103,25 +106,32 @@ async def list_suggested(
         elif readiness_level == "monitor":
             query = query.filter(ProspectAccount.readiness_score < 40)
 
-    total = query.count()
-
-    # Sort
-    if sort == "fit_desc":
-        query = query.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
-    elif sort == "name_asc":
-        query = query.order_by(ProspectAccount.name)
-    elif sort == "composite_desc":
-        # 60% fit + 40% readiness
-        query = query.order_by((ProspectAccount.fit_score * 0.6 + ProspectAccount.readiness_score * 0.4).desc())
-    elif sort == "recent_desc":
-        query = query.order_by(ProspectAccount.created_at.desc())
-    else:  # readiness_desc (default)
-        query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
-
     offset = (page - 1) * per_page
-    prospects = query.offset(offset).limit(per_page).all()
+    needs_python_sort = sort == "buyer_ready_desc" or buyer_ready_only
 
-    items = [_serialize_prospect(p) for p in prospects]
+    if needs_python_sort:
+        items = [_serialize_prospect(p) for p in query.all()]
+        if buyer_ready_only:
+            items = [item for item in items if item["is_buyer_ready"]]
+        items = _sort_serialized_prospects(items, sort)
+        total = len(items)
+        items = items[offset : offset + per_page]
+    else:
+        total = query.count()
+
+        if sort == "fit_desc":
+            query = query.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
+        elif sort == "name_asc":
+            query = query.order_by(ProspectAccount.name)
+        elif sort == "composite_desc":
+            query = query.order_by((ProspectAccount.fit_score * 0.6 + ProspectAccount.readiness_score * 0.4).desc())
+        elif sort == "recent_desc":
+            query = query.order_by(ProspectAccount.created_at.desc())
+        else:
+            query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
+
+        prospects = query.offset(offset).limit(per_page).all()
+        items = [_serialize_prospect(p) for p in prospects]
 
     return {
         "items": items,
@@ -177,8 +187,11 @@ async def suggested_stats(
         if r[0]
     )
 
+    buyer_ready = sum(1 for p in base.all() if build_priority_snapshot(p)["is_buyer_ready"])
+
     return {
         "total_available": total,
+        "buyer_ready_count": buyer_ready,
         "call_now_count": call_now,
         "nurture_count": nurture,
         "high_fit_count": high_fit,
@@ -410,6 +423,7 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
     signals = p.readiness_signals or {}
     contacts = p.contacts_preview or []
     similar = p.similar_customers or []
+    priority = build_priority_snapshot(p)
 
     # Readiness tier
     if p.readiness_score >= 70:
@@ -453,6 +467,7 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
         "name": p.name,
         "domain": p.domain,
         "website": p.website,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
         "industry": p.industry,
         "employee_count_range": p.employee_count_range,
         "revenue_range": p.revenue_range,
@@ -474,4 +489,35 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
         "discovery_source": p.discovery_source,
         "import_priority": p.import_priority,
         "company_id": p.company_id,
+        "buyer_ready_score": priority["buyer_ready_score"],
+        "priority_reasons": priority["priority_reasons"],
+        "is_buyer_ready": priority["is_buyer_ready"],
     }
+
+
+def _sort_serialized_prospects(items: list[dict], sort: str) -> list[dict]:
+    """Sort serialized prospects, including buyer-ready ranking."""
+    if sort == "fit_desc":
+        return sorted(items, key=lambda item: (-item["fit_score"], -item["readiness_score"], item["name"]))
+    if sort == "name_asc":
+        return sorted(items, key=lambda item: item["name"] or "")
+    if sort == "composite_desc":
+        return sorted(
+            items,
+            key=lambda item: (
+                -(item["fit_score"] * 0.6 + item["readiness_score"] * 0.4),
+                -item["buyer_ready_score"],
+                item["name"],
+            ),
+        )
+    if sort == "recent_desc":
+        return sorted(items, key=lambda item: item["created_at"] or "", reverse=True)
+    if sort == "readiness_desc":
+        return sorted(
+            items,
+            key=lambda item: (-item["readiness_score"], -item["fit_score"], -item["buyer_ready_score"], item["name"]),
+        )
+    return sorted(
+        items,
+        key=lambda item: (-item["buyer_ready_score"], -item["fit_score"], -item["readiness_score"], item["name"]),
+    )
