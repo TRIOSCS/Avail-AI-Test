@@ -6,6 +6,7 @@ import {
     sendFollowUpImpl,
     updateBulkFollowUpBtnImpl,
 } from './rfq/followups.js';
+import { fetchActivityData } from './rfq/activity.js';
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
@@ -14279,25 +14280,9 @@ let actStatFilter = null; // null = all, 'replied', 'opened', 'awaiting'
 async function loadActivity() {
     if (!currentReqId) return;
     const reqId = currentReqId;
-    try {
-        activityData = await apiFetch(`/api/requisitions/${reqId}/activity`);
-    } catch {
-        // Fallback to old endpoint
-        let contacts;
-        try { contacts = await apiFetch(`/api/requisitions/${reqId}/contacts`); }
-        catch { return; }
-        // Convert to vendor-grouped format
-        const vmap = {};
-        for (const c of contacts) {
-            const vk = (c.vendor_name||'').trim().toLowerCase();
-            if (!vmap[vk]) vmap[vk] = { vendor_name: c.vendor_name, status: 'awaiting', contact_count: 0, contact_types: [], all_parts: [], contacts: [], responses: [], last_contacted_at: c.created_at, last_contacted_by: c.user_name, last_contact_email: c.vendor_contact };
-            vmap[vk].contacts.push(c);
-            vmap[vk].contact_count++;
-            if (!vmap[vk].contact_types.includes(c.contact_type)) vmap[vk].contact_types.push(c.contact_type);
-            for (const p of (c.parts_included || [])) { if (!vmap[vk].all_parts.includes(p)) vmap[vk].all_parts.push(p); }
-        }
-        activityData = { vendors: Object.values(vmap), summary: { sent: Object.keys(vmap).length, replied: 0, awaiting: Object.keys(vmap).length } };
-    }
+    const data = await fetchActivityData({ apiFetch }, reqId);
+    if (!data) return;
+    activityData = data;
     if (currentReqId !== reqId) return; // RFQ changed while loading
     renderActivityCards();
 }
