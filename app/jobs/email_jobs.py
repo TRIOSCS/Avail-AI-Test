@@ -143,7 +143,7 @@ async def _job_site_ownership_sweep():
     try:
         from ..services.ownership_service import run_site_ownership_sweep
 
-        run_site_ownership_sweep(db)
+        await asyncio.get_running_loop().run_in_executor(None, run_site_ownership_sweep, db)
     except Exception as e:
         logger.error(f"Site ownership sweep error: {e}")
         db.rollback()
@@ -341,7 +341,7 @@ async def _job_email_health_update():
     db = SessionLocal()
     try:
         result = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(None, batch_update_email_health, db),
+            asyncio.get_running_loop().run_in_executor(None, batch_update_email_health, db),
             timeout=300,
         )
         logger.info(f"Email health update: {result.get('updated', 0)} vendors scored")

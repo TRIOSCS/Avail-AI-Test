@@ -47,11 +47,6 @@ def run_startup_migrations() -> None:
             "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "
             "WHERE status = 'resolved' AND resolved_at IS NULL",
         )
-        # TT-960: Fix invalid deadline 2025-02-29 (not a leap year) on req 23446
-        _exec(
-            conn,
-            "UPDATE requisitions SET deadline = NULL WHERE id = 23446 AND deadline = '2025-02-29'",
-        )
         _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()
@@ -134,7 +129,7 @@ def _seed_vinod_user(db=None) -> None:
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
-    """Execute a single DDL statement with rollback on failure."""
+    """Execute a single SQL statement (data fix / runtime operation) with rollback on failure."""
     try:
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
@@ -331,9 +326,6 @@ def _backfill_normalized_mpn() -> None:
         except Exception as e:
             logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
-
-
-# ── One-time backfills ───────────────────────────────────────────────
 
 
 def _backfill_sighting_offer_normalized_mpn() -> None:

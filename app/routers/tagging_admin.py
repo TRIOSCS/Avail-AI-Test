@@ -127,7 +127,7 @@ async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run_backfill)
+    asyncio.get_running_loop().run_in_executor(None, _run_backfill)
     return {"ok": True, "message": "Backfill triggered in background"}
 
 
@@ -281,7 +281,7 @@ async def repair_visibility(_user=Depends(require_user)):
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run)
+    asyncio.get_running_loop().run_in_executor(None, _run)
     return {"ok": True, "message": "Entity tag visibility repair started in background"}
 
 
@@ -303,7 +303,7 @@ async def trigger_sighting_backfill(_user=Depends(require_user)):
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run)
+    asyncio.get_running_loop().run_in_executor(None, _run)
     return {"ok": True, "message": "Sighting manufacturer mining started in background"}
 
 
@@ -328,7 +328,7 @@ async def boost_confidence(db: Session = Depends(get_db), _user=Depends(require_
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run)
+    asyncio.get_running_loop().run_in_executor(None, _run)
     return {"ok": True, "message": "Internal confidence boost started (no API calls)"}
 
 
@@ -499,7 +499,7 @@ async def purge_unknown_tags(_user=Depends(require_user)):
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run)
+    asyncio.get_running_loop().run_in_executor(None, _run)
     return {"ok": True, "message": "Purging 'Unknown' junk tags in background"}
 
 
@@ -551,7 +551,7 @@ async def trigger_boost_cascade(_user=Depends(require_user)):
         finally:
             session.close()
 
-    asyncio.get_event_loop().run_in_executor(None, _run)
+    asyncio.get_running_loop().run_in_executor(None, _run)
     return {"ok": True, "message": "Boost cascade started (confidence boost → sighting mining → prefix backfill)"}
 
 

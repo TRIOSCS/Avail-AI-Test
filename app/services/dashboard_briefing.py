@@ -712,7 +712,7 @@ def _stale_accounts(db: Session, now: datetime) -> dict:
                     owner = db.get(User, c.account_owner_id)
                     owner_name = owner.name if owner and hasattr(owner, "name") else "Unknown"
                 except Exception:
-                    pass
+                    logger.debug("Failed to look up owner for company %s", c.id, exc_info=True)
             items.append(
                 {
                     "title": "{} — {:.0f}d idle".format(c.name, idle_days),
