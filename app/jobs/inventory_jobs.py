@@ -319,7 +319,9 @@ async def _download_and_import_stock_list(
         )
 
         source_type = "excess_list" if is_excess_list else "email_auto_import"
-        imported_mpns_upper = sorted({item["display_mpn"].upper() for item in imported_for_matching if item["display_mpn"]})
+        imported_mpns_upper = sorted(
+            {item["display_mpn"].upper() for item in imported_for_matching if item["display_mpn"]}
+        )
         matches = []
         if imported_mpns_upper:
             matches = (

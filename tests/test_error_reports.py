@@ -60,3 +60,15 @@ def test_trouble_tickets_alias(client):
     resp = client.post("/api/trouble-tickets", json={"message": "Via alias"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "created"
+
+
+def test_create_error_report_screenshot_too_large(client):
+    """Reject screenshots larger than 2MB."""
+    resp = client.post(
+        "/api/error-reports",
+        json={
+            "message": "Bug",
+            "screenshot": "x" * (2 * 1024 * 1024 + 1),
+        },
+    )
+    assert resp.status_code == 422

@@ -7,8 +7,6 @@ Called by: search_service via BaseConnector.search()
 Depends on: http_client, utils, sources.BaseConnector
 """
 
-import asyncio
-
 from loguru import logger
 
 from ..http_client import http
@@ -50,8 +48,7 @@ class MouserConnector(BaseConnector):
         # 403 — Mouser uses this for rate limiting / quota exceeded
         if r.status_code == 403:
             logger.warning(
-                f"Mouser: 403 Forbidden for {part_number} — rate limited or quota near limit, "
-                "returning empty results"
+                f"Mouser: 403 Forbidden for {part_number} — rate limited or quota near limit, returning empty results"
             )
             return []
 

@@ -8,8 +8,6 @@ Called by: routers/ai.py (parse-freeform-rfq, parse-freeform-offer)
 Depends on: utils/claude_client, utils/llm_router
 """
 
-from loguru import logger
-
 from app.utils.llm_router import routed_structured
 from app.utils.normalization import (
     detect_currency,
@@ -140,7 +138,7 @@ async def parse_freeform_offer(raw_text: str, rfq_context: list | None = None) -
         return None
     ctx_str = ""
     if rfq_context:
-        parts = ", ".join(f"{p.get('mpn','?')} x{p.get('qty',1)}" for p in rfq_context[:10])
+        parts = ", ".join(f"{p.get('mpn', '?')} x{p.get('qty', 1)}" for p in rfq_context[:10])
         ctx_str = f"\nParts we asked about: {parts}\n"
     result = await routed_structured(
         prompt=f"{ctx_str}Vendor text:\n\n{text}",

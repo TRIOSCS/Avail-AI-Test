@@ -10,11 +10,9 @@ Depends on: app/routers/materials.py, app/search_service.py
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard, MaterialVendorHistory, VendorCard
-
+from app.models import MaterialCard, MaterialVendorHistory
 
 # ── Validation tests ──────────────────────────────────────────────────────
 
@@ -91,9 +89,12 @@ def test_quick_search_returns_results(mock_fetch, client, db_session: Session):
 @patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
 def test_quick_search_empty_results(mock_fetch, client):
     """Should return empty sightings when no results found."""
-    mock_fetch.return_value = ([], [
-        {"source": "nexar", "results": 0, "ms": 300, "error": None, "status": "ok"},
-    ])
+    mock_fetch.return_value = (
+        [],
+        [
+            {"source": "nexar", "results": 0, "ms": 300, "error": None, "status": "ok"},
+        ],
+    )
 
     resp = client.post("/api/quick-search", json={"mpn": "NONEXISTENT123"})
     assert resp.status_code == 200

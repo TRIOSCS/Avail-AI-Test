@@ -223,11 +223,17 @@ class TestScoreSightingV2:
     def test_strong_lead_beats_junk_lead(self):
         """Strong leads must always outscore junk leads by a wide margin."""
         strong, _ = score_sighting_v2(
-            vendor_score=80.0, is_authorized=False,
-            unit_price=1.0, median_price=1.0,
-            qty_available=1000, target_qty=1000,
+            vendor_score=80.0,
+            is_authorized=False,
+            unit_price=1.0,
+            median_price=1.0,
+            qty_available=1000,
+            target_qty=1000,
             age_hours=0.0,
-            has_price=True, has_qty=True, has_lead_time=True, has_condition=True,
+            has_price=True,
+            has_qty=True,
+            has_lead_time=True,
+            has_condition=True,
         )
         junk, _ = score_sighting_v2(vendor_score=None, is_authorized=False)
         assert strong - junk > 30, "Strong leads must clearly separate from noise"

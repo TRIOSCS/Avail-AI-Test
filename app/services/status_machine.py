@@ -85,7 +85,9 @@ def validate_transition(
     if current_status is None or current_status not in transitions:
         logger.warning(
             "Unknown {} status '{}' — allowing transition to '{}'",
-            entity_type, current_status, new_status,
+            entity_type,
+            current_status,
+            new_status,
         )
         return True
 

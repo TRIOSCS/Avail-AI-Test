@@ -3097,7 +3097,7 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-const _statusLabels = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',reopened:'Reopened',won:'Won',lost:'Lost',archived:'Archived'};
+const _statusLabels = {draft:'Draft',active:'Active',sourcing:'Active',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',reopened:'Reopened',won:'Won',lost:'Lost',archived:'Archived'};
 function updateDetailStatus(status) {
     const chip = document.getElementById('detailStatus');
     if (!chip) return;
@@ -3132,8 +3132,9 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'purchasing' | 'archive'
-if (_currentMainView === 'sourcing') _currentMainView = 'purchasing';  // migrate legacy stored value
+// Main view: 'reqs' (Pipeline), 'deals', 'archive'. Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'.
+let _currentMainView = localStorage.getItem('avail_main_view') || 'reqs';
+if (_currentMainView === 'sales' || _currentMainView === 'sourcing' || _currentMainView === 'purchasing') _currentMainView = 'reqs';
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3252,10 +3253,9 @@ function _applyColVisCSS() {
     let style = document.getElementById('colVisStyle');
     if (!style) { style = document.createElement('style'); style.id = 'colVisStyle'; document.head.appendChild(style); }
     const v = _currentMainView;
-    // Map column keys to 1-based nth-child positions per view
+    // Map column keys to 1-based nth-child positions per view (reqs/deals = pipeline columns)
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else if (v === 'sales') colMap = {reqs:3,quote:4,offers:5,deadline:6,sales:7,age:8};
     else colMap = {reqs:3,sourced:4,sent:5,resp:6,offers:7,sales:8,age:9};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
@@ -3268,7 +3268,6 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else if (v === 'sales') cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'offers',l:'Offers'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
@@ -9223,8 +9222,8 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'sales' ? 'sales' : v === 'purchasing' ? 'purchasing' : '';
-            const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
+            const viewLabel = (v === 'reqs' || v === 'deals') ? 'pipeline' : '';
+            const labels = {all:'',draft:'Draft',active:'Active',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
         return;
@@ -9247,21 +9246,8 @@ function renderReqList() {
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
-    } else if (v === 'sales') {
-        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
-        thead = `<thead><tr>
-            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
-            <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
-            ${_thIcons}
-        </tr></thead>`;
     } else {
-        // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
+        // Pipeline view (reqs/deals): Part coverage, RFQs, response rate prominent
         thead = `<thead><tr>
             <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
@@ -9844,7 +9830,7 @@ function _renderReqCardMobile(r) {
     // Status chip
     var chipMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-amber',offers_received:'m-chip-amber',quoted:'m-chip-green',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
     var chipCls = chipMap[r.status] || 'm-chip';
-    var labelMap = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',offers_received:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+    var labelMap = {draft:'Draft',active:'Active',sourcing:'Active',closed:'Closed',offers:'Offers',offers_received:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
     var statusLabel = labelMap[r.status] || esc(r.status || '');
 
     // Customer + buyer initials
@@ -10196,10 +10182,10 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on sales/sourcing views, hide on archive/deals
+    // Show status filter pills on Pipeline (reqs), hide on archive/deals
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
-    if (view === 'sales' || view === 'purchasing') {
+    if (stEl) stEl.style.display = (view === 'reqs') ? '' : 'none';
+    if (view === 'reqs') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -10209,8 +10195,8 @@ function setMainView(view, btn) {
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
     } else if (view === 'active' || view === 'rfq') {
-        // Legacy: redirect old view names to sales
-        _currentMainView = 'sales';
+        // Legacy: redirect old view names to Pipeline (reqs)
+        _currentMainView = 'reqs';
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -10532,8 +10518,8 @@ async function _dealCardClick(reqId) {
         _openMobileDrillDown(reqId);
         return;
     }
-    const salesBtn = document.querySelector('#mainPills .fp[data-view="sales"]');
-    setMainView('sales', salesBtn);
+    const pipelineBtn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+    setMainView('reqs', pipelineBtn);
     const drow = await waitForElement('#d-' + reqId, 3000);
     if (drow) {
         toggleDrillDown(reqId);
@@ -15089,14 +15075,14 @@ document.addEventListener('keydown', function(e) {
         // 1/2/3 — Switch tabs: Open / Sourcing / Archive (only when on list view)
         if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
-            if (btn) setMainView('rfq', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+            if (btn) setMainView('reqs', btn);
             return;
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
-            if (btn) setMainView('purchasing', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="reqs"]');
+            if (btn) setMainView('reqs', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
@@ -15108,7 +15094,7 @@ document.addEventListener('keydown', function(e) {
         // ? — Show keyboard shortcuts help
         if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
-            showToast('Shortcuts: / Search, n New Req, 1 Open, 2 Sourcing, 3 Archive, ? Help', 'info', 5000);
+            showToast('Shortcuts: / Search, n New Req, 1 Pipeline, 2 Pipeline, 3 Archive, ? Help', 'info', 5000);
             return;
         }
     }

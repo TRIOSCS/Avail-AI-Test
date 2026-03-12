@@ -45,9 +45,7 @@ def build_priority_snapshot(prospect) -> dict:
 
     verified_contacts = sum(1 for c in contacts if isinstance(c, dict) and c.get("verified"))
     verified_dms = sum(
-        1
-        for c in contacts
-        if isinstance(c, dict) and c.get("verified") and c.get("seniority") == "decision_maker"
+        1 for c in contacts if isinstance(c, dict) and c.get("verified") and c.get("seniority") == "decision_maker"
     )
     if verified_dms:
         score += 9 if verified_dms == 1 else 11

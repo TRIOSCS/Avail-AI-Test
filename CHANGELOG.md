@@ -2,6 +2,21 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
+
+### Applied
+- **Task 1 (security):** `_resolve_user` in `teams_bot_service.py` — fixed column name `azure_ad_id` → `azure_id`; already returned `None` when no match (no fallback to arbitrary user). Added tests in `tests/test_teams_bot.py`.
+- **Tasks 3 & 4 (data):** `replace_vendor` already atomic (savepoint); migration 066 already added partial unique index. Removed redundant `UniqueConstraint` from `app/models/strategic.py` so model matches DB.
+- **Task 7:** Strategic router already used `_vendor_to_dict` with `_ensure_utc` and `JSONResponse` for errors.
+- **Task 9:** Upgraded strategic vendor clock reset failure in `email_service.py` from `logger.debug` to `logger.warning`.
+- **Task 10:** No unused `and_` in `strategic_vendor_service.py` (already clean).
+- **Task 12:** Added screenshot size limit (2MB) to error report create schema and test `test_create_error_report_screenshot_too_large`.
+
+### Skipped (modules removed)
+- Tasks 2, 5, 6, 8, 11: `routers/teams_bot.py`, `services/notify_intelligence.py`, `routers/trouble_tickets.py`, and `jobs/selfheal_jobs.py` are stubbed as "REMOVED" — no code to change.
+
+---
+
 ## 2026-03-12 — System optimization & tech debt cleanup
 
 ### Bug Fixes

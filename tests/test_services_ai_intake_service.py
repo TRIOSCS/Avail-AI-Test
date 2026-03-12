@@ -7,7 +7,6 @@ backfill, requisition name generation, and the full parse pipeline.
 Covers: app/services/ai_intake_parser.py
 """
 
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -23,7 +22,6 @@ from app.services.ai_intake_parser import (
     _normalize_top_level,
     parse_freeform_intake,
 )
-
 
 # ---------------------------------------------------------------------------
 # _clean_text

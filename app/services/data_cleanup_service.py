@@ -64,11 +64,13 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
     reqs = db.query(Requisition).filter(Requisition.status != "archive").limit(5000).all()
     for r in reqs:
         if _is_test_data(r.name) or _is_test_data(r.customer_name):
-            results["requisitions"].append({
-                "id": r.id,
-                "name": r.name,
-                "reason": "matches test/junk pattern",
-            })
+            results["requisitions"].append(
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "reason": "matches test/junk pattern",
+                }
+            )
             if not dry_run:
                 r.status = "archive"
                 r.name = f"[QUARANTINED] {r.name}"
@@ -83,13 +85,15 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
             if _is_test_data(val):
                 flagged_fields.append(field)
         if flagged_fields:
-            results["offers"].append({
-                "id": o.id,
-                "mpn": o.mpn,
-                "vendor_name": o.vendor_name,
-                "flagged_fields": flagged_fields,
-                "reason": "contains test/junk/XSS content",
-            })
+            results["offers"].append(
+                {
+                    "id": o.id,
+                    "mpn": o.mpn,
+                    "vendor_name": o.vendor_name,
+                    "flagged_fields": flagged_fields,
+                    "reason": "contains test/junk/XSS content",
+                }
+            )
             if not dry_run:
                 o.status = "rejected"
                 o.notes = f"[QUARANTINED: {', '.join(flagged_fields)}] {o.notes or ''}"
@@ -99,11 +103,13 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
     cards = db.query(VendorCard).limit(5000).all()
     for c in cards:
         if _is_test_data(c.display_name):
-            results["vendor_cards"].append({
-                "id": c.id,
-                "display_name": c.display_name,
-                "reason": "matches test/junk pattern",
-            })
+            results["vendor_cards"].append(
+                {
+                    "id": c.id,
+                    "display_name": c.display_name,
+                    "reason": "matches test/junk pattern",
+                }
+            )
             if not dry_run:
                 c.is_blacklisted = True
                 c.display_name = f"[QUARANTINED] {c.display_name}"

@@ -17,7 +17,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import relationship
@@ -52,7 +51,6 @@ class StrategicVendor(Base):
             unique=True,
             postgresql_where=text("released_at IS NULL"),
         ),
-        UniqueConstraint("user_id", "vendor_card_id", name="uq_user_vendor_strategic"),
         Index("ix_strategic_user_released", "user_id", "released_at"),
         Index("ix_strategic_expires_released", "expires_at", "released_at"),
         Index("ix_strategic_vendor_released", "vendor_card_id", "released_at"),

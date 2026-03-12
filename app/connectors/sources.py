@@ -126,9 +126,7 @@ class BaseConnector(ABC):
                 # _do_search can override to handle gracefully)
                 if status in (401, 403, 422):
                     self._breaker.record_failure()
-                    logger.warning(
-                        f"{self.__class__.__name__} auth error {status} for {part_number} — not retrying"
-                    )
+                    logger.warning(f"{self.__class__.__name__} auth error {status} for {part_number} — not retrying")
                     raise
 
                 self._breaker.record_failure()

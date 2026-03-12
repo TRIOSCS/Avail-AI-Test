@@ -17,10 +17,10 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from .connectors.ai_live_web import AIWebSearchConnector
 from .connectors.digikey import DigiKeyConnector
 from .connectors.ebay import EbayConnector
 from .connectors.element14 import Element14Connector
-from .connectors.ai_live_web import AIWebSearchConnector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
@@ -231,7 +231,8 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
     before_count = len(results)
     results = [
-        r for r in results
+        r
+        for r in results
         if not is_weak_lead(
             score=r.get("score", 0),
             is_authorized=r.get("is_authorized", False),
@@ -275,6 +276,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
     vendor_score_map = {}
     if needed_names:
         from .models import VendorCard
+
         vendor_cards = (
             db.query(VendorCard.normalized_name, VendorCard.vendor_score)
             .filter(VendorCard.normalized_name.in_(needed_names))
@@ -307,43 +309,47 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
         base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
         tier = tier_for_sighting(r.get("source_type"), is_auth)
 
-        results.append({
-            "id": None,
-            "requirement_id": None,
-            "vendor_name": clean_vendor,
-            "vendor_email": r.get("vendor_email"),
-            "vendor_phone": r.get("vendor_phone"),
-            "mpn_matched": clean_mpn_r,
-            "manufacturer": r.get("manufacturer"),
-            "qty_available": clean_qty,
-            "unit_price": clean_price,
-            "currency": clean_currency,
-            "source_type": r.get("source_type"),
-            "is_authorized": is_auth,
-            "confidence": norm_conf,
-            "score": base_score,
-            "octopart_url": r.get("octopart_url"),
-            "click_url": r.get("click_url"),
-            "vendor_url": r.get("vendor_url"),
-            "vendor_sku": r.get("vendor_sku"),
-            "condition": normalize_condition(r.get("condition")),
-            "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
-            "date_code": normalize_date_code(r.get("date_code")),
-            "packaging": normalize_packaging(r.get("packaging")),
-            "lead_time_days": normalize_lead_time(r.get("lead_time")),
-            "lead_time": r.get("lead_time"),
-            "evidence_tier": tier,
-            "created_at": now.isoformat(),
-            "is_historical": False,
-            "is_material_history": False,
-            "country": r.get("country"),
-            "lead_quality": classify_lead(
-                score=base_score, is_authorized=is_auth,
-                has_price=clean_price is not None, has_qty=clean_qty is not None,
-                has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-                evidence_tier=tier,
-            ),
-        })
+        results.append(
+            {
+                "id": None,
+                "requirement_id": None,
+                "vendor_name": clean_vendor,
+                "vendor_email": r.get("vendor_email"),
+                "vendor_phone": r.get("vendor_phone"),
+                "mpn_matched": clean_mpn_r,
+                "manufacturer": r.get("manufacturer"),
+                "qty_available": clean_qty,
+                "unit_price": clean_price,
+                "currency": clean_currency,
+                "source_type": r.get("source_type"),
+                "is_authorized": is_auth,
+                "confidence": norm_conf,
+                "score": base_score,
+                "octopart_url": r.get("octopart_url"),
+                "click_url": r.get("click_url"),
+                "vendor_url": r.get("vendor_url"),
+                "vendor_sku": r.get("vendor_sku"),
+                "condition": normalize_condition(r.get("condition")),
+                "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+                "date_code": normalize_date_code(r.get("date_code")),
+                "packaging": normalize_packaging(r.get("packaging")),
+                "lead_time_days": normalize_lead_time(r.get("lead_time")),
+                "lead_time": r.get("lead_time"),
+                "evidence_tier": tier,
+                "created_at": now.isoformat(),
+                "is_historical": False,
+                "is_material_history": False,
+                "country": r.get("country"),
+                "lead_quality": classify_lead(
+                    score=base_score,
+                    is_authorized=is_auth,
+                    has_price=clean_price is not None,
+                    has_qty=clean_qty is not None,
+                    has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+                    evidence_tier=tier,
+                ),
+            }
+        )
 
     # 4. v2 scoring with median price context
     prices = [r["unit_price"] for r in results if r.get("unit_price") and r["unit_price"] > 0]
@@ -377,7 +383,8 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
     # 6. Dedupe, filter weak leads, sort
     results = _deduplicate_sightings(results)
     results = [
-        r for r in results
+        r
+        for r in results
         if not is_weak_lead(
             score=r.get("score", 0),
             is_authorized=r.get("is_authorized", False),
@@ -392,6 +399,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
     card_summary = None
     if card:
         from .models import Offer
+
         sighting_ct = db.query(Sighting).filter(Sighting.material_card_id == card.id).count()
         offer_ct = db.query(Offer).filter(Offer.material_card_id == card.id).count()
         card_summary = {

@@ -23,7 +23,9 @@ def upgrade() -> None:
     op.create_table(
         "risk_flags",
         sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("buy_plan_line_id", sa.Integer(), sa.ForeignKey("buy_plan_lines.id", ondelete="CASCADE"), nullable=True),
+        sa.Column(
+            "buy_plan_line_id", sa.Integer(), sa.ForeignKey("buy_plan_lines.id", ondelete="CASCADE"), nullable=True
+        ),
         sa.Column("source_offer_id", sa.Integer(), sa.ForeignKey("offers.id", ondelete="CASCADE"), nullable=True),
         sa.Column("requisition_id", sa.Integer(), sa.ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=True),
         sa.Column("type", sa.String(50), nullable=False),

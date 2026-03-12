@@ -75,6 +75,7 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+
 class TaskSummary(BaseModel):
     assigned_to_me: int = 0
     waiting_on: int = 0

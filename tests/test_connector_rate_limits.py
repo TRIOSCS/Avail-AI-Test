@@ -7,7 +7,6 @@ and _parse_retry_after helper.
 All external HTTP calls are mocked — no real API requests.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -23,9 +22,7 @@ def _mock_response(status_code=200, json_data=None, text="", headers=None):
     resp.headers = headers or {}
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
-        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "error", request=MagicMock(), response=resp
-        )
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=MagicMock(), response=resp)
     return resp
 
 
@@ -205,9 +202,7 @@ class TestOEMSecrets401:
     async def test_401_quota_returns_empty(self):
         """OEMSecrets 401 quota exhaustion returns empty, no exception."""
         c = self._make_connector()
-        resp_401 = _mock_response(
-            401, text="User is not accepted or has run out of api calls"
-        )
+        resp_401 = _mock_response(401, text="User is not accepted or has run out of api calls")
 
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp_401)

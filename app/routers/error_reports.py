@@ -24,10 +24,13 @@ from ..models.trouble_ticket import TroubleTicket
 router = APIRouter(tags=["error-reports"])
 
 
+MAX_SCREENSHOT_B64_BYTES = 2 * 1024 * 1024  # 2MB
+
+
 class ErrorReportCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000)
     current_url: Optional[str] = None
-    screenshot: Optional[str] = None
+    screenshot: Optional[str] = Field(None, max_length=MAX_SCREENSHOT_B64_BYTES)
 
 
 def _next_ticket_number(db: Session) -> str:

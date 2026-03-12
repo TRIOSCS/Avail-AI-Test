@@ -352,7 +352,9 @@ async def list_buy_plans_v3(
     if status and status not in _valid_statuses:
         raise HTTPException(400, f"Invalid status: {status}. Must be one of: {', '.join(sorted(_valid_statuses))}")
     if so_status and so_status not in _valid_so_statuses:
-        raise HTTPException(400, f"Invalid so_status: {so_status}. Must be one of: {', '.join(sorted(_valid_so_statuses))}")
+        raise HTTPException(
+            400, f"Invalid so_status: {so_status}. Must be one of: {', '.join(sorted(_valid_so_statuses))}"
+        )
 
     if status:
         q = q.filter(BuyPlanV3.status == status)

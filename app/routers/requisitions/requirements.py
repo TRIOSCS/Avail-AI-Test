@@ -1054,11 +1054,7 @@ async def list_requirement_sightings(
             if sub_key:
                 sub_keys.append(sub_key)
     if sub_keys:
-        sub_rows = (
-            db.query(MaterialCard.id)
-            .filter(MaterialCard.normalized_mpn.in_(sub_keys))
-            .all()
-        )
+        sub_rows = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(sub_keys)).all()
         card_ids |= {row[0] for row in sub_rows}
 
     fresh_vendors = {s.vendor_name.lower() for s in rows if s.vendor_name}

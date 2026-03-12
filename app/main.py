@@ -623,8 +623,8 @@ from .routers.requisitions import router as reqs_router
 from .routers.rfq import router as rfq_router
 from .routers.sources import router as sources_router
 from .routers.strategic import router as strategic_router
-from .routers.tags import router as tags_router
 from .routers.tagging_admin import router as tagging_admin_router
+from .routers.tags import router as tags_router
 from .routers.task import my_tasks_router
 from .routers.task import router as task_router
 from .routers.teams_actions import router as teams_actions_router

@@ -11,15 +11,13 @@ Depends on: routers/requisitions, conftest fixtures
 
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_admin, require_buyer, require_user
 from app.main import app
-from app.models import Requirement, Requisition, User
-
+from app.models import Requisition, User
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

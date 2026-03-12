@@ -75,7 +75,7 @@ async def _handle_buyplan_action(plan_id: int, action: str) -> dict:
     except Exception as e:
         logger.error("Teams card action %s failed: %s", verb, e)
         db.rollback()
-        return _response_card("Error", f"Failed to process action. Please try again or contact support.", "attention")
+        return _response_card("Error", "Failed to process action. Please try again or contact support.", "attention")
     finally:
         db.close()
 

@@ -91,7 +91,9 @@ async def list_requisitions(
     """List requisitions with filtering, search, and sourcing scores."""
     from ...cache.decorators import cached_endpoint
 
-    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "sort", "order", "limit", "offset"])
+    @cached_endpoint(
+        prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "sort", "order", "limit", "offset"]
+    )
     def _fetch(q, status, sort, order, limit, offset, user, db):
         return _build_requisition_list(q, status, sort, order, limit, offset, user, db)
 

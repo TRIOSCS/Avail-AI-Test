@@ -52,9 +52,7 @@ def test_admin_table_created_before_linked(tickets_js):
     linked_pos = tickets_js.find("// Linked count badge")
     assert created_pos > 0, "Could not find Created cell in table builder"
     assert linked_pos > 0, "Could not find Linked cell in table builder"
-    assert created_pos < linked_pos, (
-        "Created cell must come before Linked cell to match header order"
-    )
+    assert created_pos < linked_pos, "Created cell must come before Linked cell to match header order"
 
 
 def test_source_labels_handle_agent_and_playwright(tickets_js):

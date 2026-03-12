@@ -8,9 +8,8 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
+from app.services.data_cleanup_service import _is_test_data, scan_junk_data
 from app.services.status_machine import validate_transition
-from app.services.data_cleanup_service import _is_test_data, scan_junk_data, fix_sentinel_dates
-
 
 # ── Status Machine ──────────────────────────────────────────────────────
 
@@ -26,11 +25,13 @@ class TestStatusMachine:
 
     def test_offer_invalid_transition(self):
         import pytest
+
         with pytest.raises(ValueError, match="Invalid offer status transition"):
             validate_transition("offer", "sold", "active")
 
     def test_offer_terminal_state(self):
         import pytest
+
         with pytest.raises(ValueError):
             validate_transition("offer", "rejected", "active")
 
@@ -41,6 +42,7 @@ class TestStatusMachine:
 
     def test_quote_invalid_transition(self):
         import pytest
+
         with pytest.raises(ValueError):
             validate_transition("quote", "won", "draft")
 
@@ -52,6 +54,7 @@ class TestStatusMachine:
 
     def test_buy_plan_invalid_transition(self):
         import pytest
+
         with pytest.raises(ValueError):
             validate_transition("buy_plan", "completed", "active")
 
@@ -237,13 +240,15 @@ class TestQuoteUpdateSanitization:
         resp = client.put(
             f"/api/quotes/{quote['id']}",
             json={
-                "line_items": [{
-                    "mpn": "<script>alert('xss')</script>LM317T",
-                    "manufacturer": "TI",
-                    "qty": 100,
-                    "cost_price": 1.0,
-                    "sell_price": 1.5,
-                }],
+                "line_items": [
+                    {
+                        "mpn": "<script>alert('xss')</script>LM317T",
+                        "manufacturer": "TI",
+                        "qty": 100,
+                        "cost_price": 1.0,
+                        "sell_price": 1.5,
+                    }
+                ],
             },
         )
         assert resp.status_code == 200

@@ -100,7 +100,9 @@ Rules:
 - Return only valid JSON matching the schema"""
 
 
-async def parse_freeform_intake(text: str, requisition_context: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+async def parse_freeform_intake(
+    text: str, requisition_context: list[dict[str, Any]] | None = None
+) -> dict[str, Any] | None:
     """Classify pasted text and extract an RFQ or offer draft."""
     cleaned = _clean_text(text)
     if not cleaned:

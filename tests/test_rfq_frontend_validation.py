@@ -109,9 +109,9 @@ class TestPriorityLanes:
         assert "_archiveGroupsOpen" in app_js
 
     def test_sales_lanes_defined(self, app_js):
-        """Sales view uses deadline urgency and status-based grouping."""
-        assert "In Progress" in app_js
+        """Pipeline/req list uses status and response indicators (unified view)."""
         assert "Awaiting" in app_js
+        assert "Sourced" in app_js or "coverage" in app_js
 
     def test_sourcing_lanes_defined(self, app_js):
         """Sourcing view uses coverage and RFQ status indicators."""
@@ -390,6 +390,7 @@ class TestRequirementPanelTabs:
     def test_rfq_workspace_tab_order(self, app_js):
         """RFQ workspace panel tabs are: Offers, Sightings, Activity, Tasks, Notes."""
         import re
+
         tabs_block = re.search(
             r'<div class="rfq-panel-tabs">(.*?)</div>',
             app_js,
@@ -397,7 +398,7 @@ class TestRequirementPanelTabs:
         )
         assert tabs_block, "rfq-panel-tabs block not found"
         tabs_html = tabs_block.group(1)
-        tab_names = re.findall(r'>(\w+)</button>', tabs_html)
+        tab_names = re.findall(r">(\w+)</button>", tabs_html)
         assert tab_names == ["Offers", "Sightings", "Activity", "Tasks", "Notes"]
 
     def test_rfq_load_tab_handles_all_tabs(self, app_js):

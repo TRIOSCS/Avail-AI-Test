@@ -727,11 +727,7 @@ async def ai_parse_freeform_offer(
     rfq_context = None
     if payload.requisition_id:
         reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
-        rfq_context = [
-            {"mpn": r.primary_mpn, "qty": r.target_qty or 1}
-            for r in reqs
-            if r.primary_mpn
-        ]
+        rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
 
     from app.services.freeform_parser_service import parse_freeform_offer
 
@@ -744,13 +740,14 @@ async def ai_parse_freeform_offer(
 @router.post("/api/ai/apply-freeform-rfq")
 @limiter.limit("5/minute")
 async def ai_apply_freeform_rfq(
+    request: Request,
     payload: ApplyFreeformRfqRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Create requisition + requirements from edited RFQ template."""
-    from ...cache.decorators import invalidate_prefix
-    from ...dependencies import get_req_for_user
+    from app.cache.decorators import invalidate_prefix
+
     from ...utils.normalization import normalize_mpn_key
 
     if not payload.customer_site_id:
@@ -771,8 +768,8 @@ async def ai_apply_freeform_rfq(
     db.add(req)
     db.flush()
 
-    from ...search_service import resolve_material_card
     from ...schemas.requisitions import RequirementCreate
+    from ...search_service import resolve_material_card
 
     for item in payload.requirements[:50]:
         try:
@@ -804,12 +801,14 @@ async def ai_apply_freeform_rfq(
 @router.post("/api/ai/save-freeform-offers")
 @limiter.limit("5/minute")
 async def ai_save_freeform_offers(
+    request: Request,
     payload: SaveFreeformOffersRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Save freeform-parsed offers to a requisition (after user review)."""
-    from ...dependencies import get_req_for_user
+    from app.dependencies import get_req_for_user
+
     from ...utils.normalization import fuzzy_mpn_match, normalize_mpn_key
     from ...vendor_utils import normalize_vendor_name
 

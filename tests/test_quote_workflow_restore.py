@@ -11,7 +11,6 @@ Depends on: conftest.py (client, db_session, test_user fixtures)
 from app.models.risk_flag import RiskFlag, RiskFlagSeverity, RiskFlagType
 from app.utils.sanitize import sanitize_dict, sanitize_text
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -156,9 +155,16 @@ class TestRiskFlagModel:
     def test_risk_flag_types(self):
         """All expected risk flag types are defined."""
         expected = {
-            "price_increase", "lead_time_risk", "vendor_reliability",
-            "qty_shortfall", "geo_risk", "stale_offer",
-            "margin_below_threshold", "single_source", "counterfeit_risk", "other",
+            "price_increase",
+            "lead_time_risk",
+            "vendor_reliability",
+            "qty_shortfall",
+            "geo_risk",
+            "stale_offer",
+            "margin_below_threshold",
+            "single_source",
+            "counterfeit_risk",
+            "other",
         }
         actual = {t.value for t in RiskFlagType}
         assert expected == actual
@@ -236,7 +242,7 @@ class TestSanitization:
         assert "onerror=" not in result
 
     def test_sanitize_strips_javascript_uri(self):
-        result = sanitize_text('javascript:alert(1)')
+        result = sanitize_text("javascript:alert(1)")
         assert "javascript:" not in result
 
     def test_sanitize_preserves_normal_text(self):

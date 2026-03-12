@@ -1034,7 +1034,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
 
                         sv_record(db, offer.vendor_card_id)
                     except Exception:
-                        logger.debug("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
+                        logger.warning("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
 
                 # Deduplicated notification — update existing if unread, else create new
                 if owner_id:

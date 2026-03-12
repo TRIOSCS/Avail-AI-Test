@@ -14,7 +14,7 @@ def _resolve_user(user_aad_id: str, db):
     try:
         from app.models.auth import User
 
-        return db.query(User).filter(User.azure_ad_id == user_aad_id).first()
+        return db.query(User).filter(User.azure_id == user_aad_id).first()
     except Exception:
         logger.warning("Failed to resolve Teams user %s", user_aad_id, exc_info=True)
         return None
