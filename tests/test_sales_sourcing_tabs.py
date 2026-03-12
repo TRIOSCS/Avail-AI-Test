@@ -1,8 +1,8 @@
 """
-tests/test_sales_sourcing_tabs.py — Tests that sales/sourcing tab views are wired correctly.
+tests/test_sales_sourcing_tabs.py — Tests the unified requisition tab wiring.
 
-Validates: Desktop and mobile pill buttons use consistent data-view values that
-match the JS setMainView() logic (which expects 'sales' and 'purchasing').
+Validates: Desktop and mobile pill buttons use a single unified `reqs` view, and
+legacy stored values from the old sales/sourcing split still normalize into it.
 
 Called by: pytest
 Depends on: app/templates/index.html, app/static/app.js
@@ -26,60 +26,61 @@ def app_js():
 
 
 class TestMainViewPills:
-    """Desktop and mobile pill buttons must use 'purchasing' (not 'sourcing') as data-view."""
+    """Desktop and mobile pill buttons should expose a single unified requisition view."""
 
-    def test_desktop_pills_no_sourcing_data_view(self, index_html):
-        """The desktop #mainPills buttons should not use data-view='sourcing'."""
+    def test_desktop_pills_no_split_views(self, index_html):
+        """The desktop #mainPills should not keep separate sales/sourcing pills."""
         # Extract the mainPills div content
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
-        assert 'data-view="sourcing"' not in pills_html, (
-            "Desktop mainPills still uses data-view='sourcing' — should be 'purchasing'"
-        )
+        assert 'data-view="sales"' not in pills_html
+        assert 'data-view="purchasing"' not in pills_html
+        assert 'data-view="sourcing"' not in pills_html
 
-    def test_desktop_pills_has_purchasing_view(self, index_html):
-        """The desktop #mainPills should have a purchasing button."""
+    def test_desktop_pills_has_unified_reqs_view(self, index_html):
+        """The desktop #mainPills should have a unified reqs button."""
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
-        assert 'data-view="purchasing"' in pills_html, "Desktop mainPills missing data-view='purchasing' button"
+        assert 'data-view="reqs"' in pills_html, "Desktop mainPills missing data-view='reqs' button"
 
-    def test_desktop_sourcing_button_calls_purchasing(self, index_html):
-        """The desktop Sourcing button onclick must call setMainView('purchasing')."""
+    def test_desktop_reqs_button_calls_reqs(self, index_html):
+        """The desktop Reqs button onclick must call setMainView('reqs')."""
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
-        assert "setMainView('purchasing'" in pills_html, "Desktop Sourcing button should call setMainView('purchasing')"
+        assert "setMainView('reqs'" in pills_html, "Desktop Reqs button should call setMainView('reqs')"
 
-    def test_mobile_pills_use_purchasing(self, index_html):
-        """The mobile #mobilePills buttons should use 'purchasing' not 'sourcing'."""
+    def test_mobile_pills_use_reqs(self, index_html):
+        """The mobile #mobilePills buttons should use 'reqs' for the unified list."""
         match = re.search(r'id="mobilePills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mobilePills element not found"
         pills_html = match.group(1)
+        assert 'data-view="sales"' not in pills_html
+        assert 'data-view="purchasing"' not in pills_html
         assert 'data-view="sourcing"' not in pills_html, "Mobile pills still uses data-view='sourcing'"
-        assert 'data-view="purchasing"' in pills_html
+        assert 'data-view="reqs"' in pills_html
 
-    def test_mobile_req_pills_use_purchasing(self, index_html):
-        """The mobile #mobileReqPills should use 'purchasing' not 'sourcing'."""
+    def test_mobile_req_pills_use_reqs(self, index_html):
+        """The mobile #mobileReqPills should use the unified reqs view."""
         match = re.search(r'id="mobileReqPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mobileReqPills element not found"
         pills_html = match.group(1)
+        assert 'data-view="sales"' not in pills_html
+        assert 'data-view="purchasing"' not in pills_html
         assert 'data-view="sourcing"' not in pills_html
-        assert 'data-view="purchasing"' in pills_html
+        assert 'data-view="reqs"' in pills_html
 
 
 class TestSetMainViewLogic:
-    """The JS setMainView function must handle 'purchasing' view correctly."""
+    """The JS main-view logic should normalize old split views into reqs."""
 
-    def test_setmainview_handles_purchasing(self, app_js):
-        """setMainView should have a branch for view === 'purchasing'."""
-        assert "view === 'purchasing'" in app_js or 'view === "purchasing"' in app_js, (
-            "setMainView does not check for 'purchasing' view"
-        )
+    def test_main_view_has_normalizer(self, app_js):
+        """The frontend should normalize legacy main view values."""
+        assert "function _normalizeMainView(view)" in app_js
 
-    def test_legacy_sourcing_migrated(self, app_js):
-        """Stored 'sourcing' value should be migrated to 'purchasing'."""
-        assert "sourcing') _currentMainView = 'purchasing'" in app_js, (
-            "Missing legacy migration from 'sourcing' to 'purchasing'"
-        )
+    def test_legacy_sales_and_purchasing_migrate_to_reqs(self, app_js):
+        """Old split-view values should route into the unified reqs tab."""
+        assert "'sales', 'purchasing', 'sourcing', 'active', 'rfq'" in app_js
+        assert "return 'reqs';" in app_js

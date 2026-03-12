@@ -66,15 +66,15 @@ class TestTemplateParsing:
         assert t is not None
 
 
-# ── View Mode Toggle (Sales / Sourcing / Archive) ────────────────────────
+# ── View Mode Toggle (Reqs / Deals / Archive) ────────────────────────────
 
 
 class TestViewModeToggle:
-    def test_sales_view_pill(self, index_html):
-        assert 'data-view="sales"' in index_html
+    def test_reqs_view_pill(self, index_html):
+        assert 'data-view="reqs"' in index_html
 
-    def test_sourcing_view_pill(self, index_html):
-        assert 'data-view="sourcing"' in index_html
+    def test_deals_view_pill(self, index_html):
+        assert 'data-view="deals"' in index_html
 
     def test_archive_view_pill(self, index_html):
         assert 'data-view="archive"' in index_html
@@ -85,8 +85,8 @@ class TestViewModeToggle:
     def test_localStorage_persistence(self, app_js):
         assert "avail_main_view" in app_js
 
-    def test_default_view_is_sales(self, app_js):
-        assert "'sales'" in app_js
+    def test_default_view_is_reqs(self, app_js):
+        assert "localStorage.getItem('avail_main_view') || 'reqs'" in app_js
 
 
 # ── Priority Lanes ───────────────────────────────────────────────────────
