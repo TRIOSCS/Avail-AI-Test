@@ -280,3 +280,45 @@ def test_list_requirements_step_new(client, test_requisition):
     resp = client.get(f"/api/requisitions/{req.id}/requirements")
     data = resp.json()
     assert data[0]["step"] == "new"
+
+
+# ── Standalone Notes Endpoint ─────────────────────────────────────────
+
+
+def test_requirement_notes_empty(client, test_requisition):
+    """GET /api/requirements/{id}/notes returns empty data when no notes."""
+    req = test_requisition
+    r = req.requirements[0]
+    resp = client.get(f"/api/requirements/{r.id}/notes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "requirement_notes" in data or "notes" in data
+
+
+def test_requirement_notes_add_and_list(client, test_requisition):
+    """POST then GET /api/requirements/{id}/notes round-trip."""
+    req = test_requisition
+    r = req.requirements[0]
+    resp = client.post(
+        f"/api/requirements/{r.id}/notes",
+        json={"text": "Test note for standalone tab"},
+    )
+    assert resp.status_code == 200
+
+    resp2 = client.get(f"/api/requirements/{r.id}/notes")
+    assert resp2.status_code == 200
+    data = resp2.json()
+    assert "Test note for standalone tab" in str(data)
+
+
+# ── Standalone Tasks Endpoint ─────────────────────────────────────────
+
+
+def test_requirement_tasks_empty(client, test_requisition):
+    """GET /api/requirements/{id}/tasks returns empty list when no tasks."""
+    req = test_requisition
+    r = req.requirements[0]
+    resp = client.get(f"/api/requirements/{r.id}/tasks")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)

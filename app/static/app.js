@@ -7682,8 +7682,8 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'activity'];
-    const tabLabels = { offers: 'Offers', activity: 'Activity' };
+    const tabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
+    const tabLabels = { offers: 'Offers', sightings: 'Sightings', activity: 'Activity', tasks: 'Tasks', notes: 'Notes' };
     const pills = tabs.map(t =>
         `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
     ).join('');
@@ -7696,8 +7696,9 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     _partActiveTab[key] = tabName;
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
+    const labels = { offers: 'Offers', sightings: 'Sightings', activity: 'Activity', tasks: 'Tasks', notes: 'Notes' };
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.textContent === { offers: 'Offers', activity: 'Activity' }[tabName]);
+        t.classList.toggle('on', t.textContent === labels[tabName]);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7717,14 +7718,18 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
-            case 'activity': {
-                const [notes, tasks] = await Promise.all([
-                    apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []),
-                ]);
-                data = { notes, tasks, history: [] };
+            case 'sightings':
+                data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
                 break;
-            }
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${requirementId}/history`).catch(() => []);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({}));
+                break;
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
@@ -7734,11 +7739,17 @@ async function _loadPartTab(reqId, requirementId, tabName) {
 }
 
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
+    const origPartId = _rfqActivePartId;
+    _rfqActivePartId = requirementId;
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
-        case 'activity': _renderPartActivity(reqId, requirementId, data, contentEl); break;
+        case 'sightings': _rfqRenderSightings(data, contentEl); break;
+        case 'activity': _rfqRenderActivity(data, contentEl); break;
+        case 'tasks': _rfqRenderTasks(data, contentEl); break;
+        case 'notes': _rfqRenderNotes(data, contentEl); break;
         default: contentEl.textContent = '';
     }
+    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
 }
 
 // ── Part-level Offers renderer ──
@@ -7786,16 +7797,8 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
-// ── Part-level Activity renderer (merged notes + tasks) ──
-function _renderPartActivity(reqId, requirementId, data, contentEl) {
-    // Reuse the RFQ activity renderer — same data shape { notes, tasks, history }
-    _rfqRenderActivity(data, contentEl);
-    // Override the partId references for inline forms to use this requirement
-    const origPartId = _rfqActivePartId;
-    _rfqActivePartId = requirementId;
-    // Restore after a tick so any event handlers bind correctly
-    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
-}
+// _renderPartActivity removed — tabs now rendered via _renderPartTab which
+// delegates to _rfqRenderActivity, _rfqRenderTasks, _rfqRenderNotes directly.
 
 // Keep _addPartNote for backward compat (editDrillCell uses it)
 function _addPartNote(reqId, requirementId) {
@@ -16507,8 +16510,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
-            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
+            <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
+            <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16557,18 +16562,17 @@ async function _rfqLoadTab(tab) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${partId}/offers`);
                 break;
-            case 'activity': {
-                // Fetch notes, tasks, and history in parallel
-                const [notes, tasks, history] = await Promise.all([
-                    apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []),
-                    apiFetch(`/api/requirements/${partId}/history`).catch(() => []),
-                ]);
-                data = { notes, tasks, history };
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${partId}/history`).catch(() => []);
                 break;
-            }
             case 'sightings':
                 data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({}));
                 break;
         }
         // Abort if part changed while loading
@@ -16584,8 +16588,10 @@ async function _rfqLoadTab(tab) {
 function _rfqRenderTab(tab, data, body) {
     switch (tab) {
         case 'offers': _rfqRenderOffers(data, body); break;
-        case 'activity': _rfqRenderActivity(data, body); break;
         case 'sightings': _rfqRenderSightings(data, body); break;
+        case 'activity': _rfqRenderActivity(data, body); break;
+        case 'tasks': _rfqRenderTasks(data, body); break;
+        case 'notes': _rfqRenderNotes(data, body); break;
         default: body.innerHTML = '';
     }
 }
@@ -16728,26 +16734,81 @@ async function rfqToggleOfferSelection(offerId) {
     }
 }
 
-// ── ACTIVITY TAB (merged tasks + notes + history) ─────────────────────
+// ── ACTIVITY TAB (history timeline only) ──────────────────────────────
 
 function _rfqRenderActivity(data, body) {
-    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-    const notesData = data.notes || {};
-    const history = Array.isArray(data.history) ? data.history : [];
+    const history = Array.isArray(data) ? data : [];
 
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">Activity Timeline</div>';
+    html += '<div class="activity-timeline">';
+
+    if (history.length === 0) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No activity yet</div>';
+    }
+
+    history.forEach(ev => {
+        let icon = '', text = '';
+        switch (ev.type) {
+            case 'change':
+                icon = '\u270f\ufe0f';
+                text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity || '')} <b>${esc(ev.field || '')}</b>`;
+                if (ev.old_value || ev.new_value) {
+                    const fv = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+                    text += `<div style="font-size:10px;color:var(--muted)">${esc(fv(ev.old_value))} \u2192 ${esc(fv(ev.new_value))}</div>`;
+                }
+                break;
+            case 'offer_created':
+                icon = '\ud83d\udcb0';
+                text = `Offer from <b>${esc(ev.vendor_name || '')}</b>`;
+                if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
+                break;
+            case 'rfq_sent':
+                icon = '\u2709\ufe0f';
+                text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name || '')}</b>`;
+                break;
+            case 'task_done':
+                icon = '\u2705';
+                text = `Task completed: <b>${esc(ev.title || '')}</b>`;
+                break;
+            case 'note_added':
+                icon = '\ud83d\udcdd';
+                text = `Note added`;
+                if (ev.summary) text += `: ${esc(ev.summary)}`;
+                break;
+            default:
+                icon = '\u2022';
+                text = esc(ev.summary || ev.type || 'Event');
+        }
+        html += `<div class="activity-item activity-item-event">
+            <div style="display:flex;gap:6px;align-items:flex-start">
+                <span>${icon}</span>
+                <div>
+                    <div style="font-size:11px">${text}</div>
+                    ${ev.created_at ? '<div style="font-size:10px;color:var(--muted)">' + fmtDateTime(ev.created_at) + '</div>' : ''}
+                </div>
+            </div>
+        </div>`;
+    });
+
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+// ── TASKS TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderTasks(data, body) {
+    const tasks = Array.isArray(data) ? data : [];
     const openTasks = tasks.filter(t => t.status !== 'done');
     const doneTasks = tasks.filter(t => t.status === 'done');
 
     let html = '';
 
-    // ── Pinned open tasks ──
     html += '<div class="activity-section">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
     html += `<span style="font-size:12px;font-weight:600">${openTasks.length ? openTasks.length + ' Open Task' + (openTasks.length > 1 ? 's' : '') : 'No open tasks'}</span>`;
     html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
     html += '</div>';
 
-    // Inline task creation form placeholder
     html += '<div id="rfqTaskFormSlot"></div>';
 
     openTasks.forEach(t => {
@@ -16774,128 +16835,74 @@ function _rfqRenderActivity(data, body) {
             <div id="rfqCompleteSlot-${t.id}"></div>
         </div>`;
     });
-    html += '</div>';
 
-    // ── Inline add-note ──
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 6px">';
-    html += '<span style="font-size:12px;font-weight:600">Timeline</span>';
+    if (doneTasks.length > 0) {
+        html += '<div style="font-size:12px;font-weight:600;margin-top:12px;margin-bottom:6px">Completed</div>';
+        doneTasks.forEach(t => {
+            html += `<div class="activity-item activity-item-task-done">
+                <div style="font-size:10px;font-weight:600;color:var(--green)">Completed</div>
+                <div style="font-size:11px;margin-top:2px">${esc(t.title)}</div>
+                ${t.completion_note ? '<div style="font-size:11px;margin-top:2px;color:var(--muted);font-style:italic">"' + esc(t.completion_note) + '"</div>' : ''}
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">${t.assignee_name ? 'by ' + esc(t.assignee_name) : ''} ${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
+            </div>`;
+        });
+    }
+
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+// ── NOTES TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderNotes(data, body) {
+    const notesData = data || {};
+
+    let html = '';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    html += '<span style="font-size:12px;font-weight:600">Notes</span>';
     html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
     html += '</div>';
     html += '<div id="rfqNoteFormSlot"></div>';
 
-    // ── Timeline: notes + completed tasks + history events ──
-    html += '<div class="activity-timeline">';
+    const noteItems = [];
 
-    // Build a unified timeline array
-    const timeline = [];
-
-    // Requirement notes
     if (notesData.requirement_notes) {
         const lines = notesData.requirement_notes.split('\n').filter(l => l.trim());
         lines.forEach(line => {
-            // Try to parse timestamp from "[YYYY-MM-DD HH:MM user@email] text" format
             const match = line.match(/^\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s/);
             const ts = match ? new Date(match[1]).getTime() : 0;
-            timeline.push({ type: 'req_note', text: line, ts });
+            noteItems.push({ type: 'req_note', text: line, ts });
         });
     }
 
-    // Offer notes
     if (notesData.notes && notesData.notes.length > 0) {
         notesData.notes.forEach(n => {
             const ts = n.created_at ? new Date(n.created_at).getTime() : 0;
-            timeline.push({ type: 'offer_note', vendor: n.vendor_name, text: n.note, ts, created_at: n.created_at });
+            noteItems.push({ type: 'offer_note', vendor: n.vendor_name, text: n.note, ts, created_at: n.created_at });
         });
     }
 
-    // Completed tasks
-    doneTasks.forEach(t => {
-        const ts = t.completed_at ? new Date(t.completed_at).getTime() : (t.updated_at ? new Date(t.updated_at).getTime() : 0);
-        timeline.push({ type: 'task_done', task: t, ts });
-    });
+    noteItems.sort((a, b) => b.ts - a.ts);
 
-    // History events
-    history.forEach(ev => {
-        const ts = ev.created_at ? new Date(ev.created_at).getTime() : 0;
-        timeline.push({ type: 'history', event: ev, ts });
-    });
-
-    // Sort newest first
-    timeline.sort((a, b) => b.ts - a.ts);
-
-    if (timeline.length === 0) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No activity yet</div>';
+    if (noteItems.length === 0) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No notes yet</div>';
     }
 
-    timeline.forEach(item => {
-        switch (item.type) {
-            case 'req_note':
-                html += `<div class="activity-item activity-item-note">
-                    <div style="font-size:10px;font-weight:600;color:var(--muted)">Requirement Note</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-                </div>`;
-                break;
-            case 'offer_note':
-                html += `<div class="activity-item activity-item-note">
-                    <div style="font-size:10px;font-weight:600;color:var(--muted)">Offer Note \u2014 ${esc(item.vendor || '')}</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-                    ${item.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(item.created_at) + '</div>' : ''}
-                </div>`;
-                break;
-            case 'task_done': {
-                const t = item.task;
-                html += `<div class="activity-item activity-item-task-done">
-                    <div style="font-size:10px;font-weight:600;color:var(--green)">Task Completed</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(t.title)}</div>
-                    ${t.completion_note ? '<div style="font-size:11px;margin-top:2px;color:var(--muted);font-style:italic">"' + esc(t.completion_note) + '"</div>' : ''}
-                    <div style="font-size:10px;color:var(--muted);margin-top:2px">${t.assignee_name ? 'by ' + esc(t.assignee_name) : ''} ${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
-                </div>`;
-                break;
-            }
-            case 'history': {
-                const ev = item.event;
-                let icon = '', text = '';
-                switch (ev.type) {
-                    case 'change':
-                        icon = '\u270f\ufe0f';
-                        text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity || '')} <b>${esc(ev.field || '')}</b>`;
-                        if (ev.old_value || ev.new_value) {
-                            const fv = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
-                            text += `<div style="font-size:10px;color:var(--muted)">${esc(fv(ev.old_value))} \u2192 ${esc(fv(ev.new_value))}</div>`;
-                        }
-                        break;
-                    case 'offer_created':
-                        icon = '\ud83d\udcb0';
-                        text = `Offer from <b>${esc(ev.vendor_name || '')}</b>`;
-                        if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
-                        break;
-                    case 'rfq_sent':
-                        icon = '\u2709\ufe0f';
-                        text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name || '')}</b>`;
-                        break;
-                    case 'task_done':
-                        icon = '\u2705';
-                        text = `Task completed: <b>${esc(ev.title || '')}</b>`;
-                        break;
-                    default:
-                        icon = '\u2022';
-                        text = esc(ev.summary || ev.type || 'Event');
-                }
-                html += `<div class="activity-item activity-item-event">
-                    <div style="display:flex;gap:6px;align-items:flex-start">
-                        <span>${icon}</span>
-                        <div>
-                            <div style="font-size:11px">${text}</div>
-                            ${ev.created_at ? '<div style="font-size:10px;color:var(--muted)">' + fmtDateTime(ev.created_at) + '</div>' : ''}
-                        </div>
-                    </div>
-                </div>`;
-                break;
-            }
+    noteItems.forEach(item => {
+        if (item.type === 'req_note') {
+            html += `<div class="activity-item activity-item-note">
+                <div style="font-size:10px;font-weight:600;color:var(--muted)">Requirement Note</div>
+                <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
+            </div>`;
+        } else {
+            html += `<div class="activity-item activity-item-note">
+                <div style="font-size:10px;font-weight:600;color:var(--muted)">Offer Note \u2014 ${esc(item.vendor || '')}</div>
+                <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
+                ${item.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(item.created_at) + '</div>' : ''}
+            </div>`;
         }
     });
 
-    html += '</div>';
     body.innerHTML = html;
 }
 
@@ -16952,8 +16959,9 @@ async function rfqSubmitTask() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ title, description, assigned_to_id: parseInt(assignee), due_at: dueAt }),
         });
+        delete _rfqPanelCache.tasks;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        await _rfqLoadTab('tasks');
     } catch(e) {
         alert('Failed to create task: ' + (e.message || e));
     }
@@ -16984,8 +16992,9 @@ async function rfqSubmitComplete(taskId) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ completion_note: note }),
         });
+        delete _rfqPanelCache.tasks;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        await _rfqLoadTab('tasks');
     } catch(e) {
         alert('Failed to complete task: ' + (e.message || e));
     }
@@ -17016,8 +17025,9 @@ async function rfqSubmitNote() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text }),
         });
+        delete _rfqPanelCache.notes;
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        await _rfqLoadTab('notes');
     } catch(e) {
         console.error('Add note failed:', e);
     }

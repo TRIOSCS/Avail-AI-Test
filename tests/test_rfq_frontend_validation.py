@@ -379,3 +379,56 @@ class TestScrollEndDetection:
         """Scroll-end detection uses scrollLeft + clientWidth >= scrollWidth."""
         assert "scrollWidth" in app_js
         assert "clientWidth" in app_js
+
+
+# ── Requirement Panel Tab Layout ───────────────────────────────────────
+
+
+class TestRequirementPanelTabs:
+    """Verify the requirement detail panel has five tabs in correct order."""
+
+    def test_rfq_workspace_tab_order(self, app_js):
+        """RFQ workspace panel tabs are: Offers, Sightings, Activity, Tasks, Notes."""
+        import re
+        tabs_block = re.search(
+            r'<div class="rfq-panel-tabs">(.*?)</div>',
+            app_js,
+            re.DOTALL,
+        )
+        assert tabs_block, "rfq-panel-tabs block not found"
+        tabs_html = tabs_block.group(1)
+        tab_names = re.findall(r'>(\w+)</button>', tabs_html)
+        assert tab_names == ["Offers", "Sightings", "Activity", "Tasks", "Notes"]
+
+    def test_rfq_load_tab_handles_all_tabs(self, app_js):
+        """_rfqLoadTab switch covers offers, sightings, activity, tasks, notes."""
+        for tab in ["'offers'", "'sightings'", "'activity'", "'tasks'", "'notes'"]:
+            assert f"case {tab}:" in app_js
+
+    def test_rfq_render_tab_handles_all_tabs(self, app_js):
+        """_rfqRenderTab dispatches to all five renderers."""
+        assert "_rfqRenderOffers" in app_js
+        assert "_rfqRenderSightings" in app_js
+        assert "_rfqRenderActivity" in app_js
+        assert "_rfqRenderTasks" in app_js
+        assert "_rfqRenderNotes" in app_js
+
+    def test_inline_part_expand_tabs(self, app_js):
+        """Inline part expansion has all five tabs."""
+        assert "['offers', 'sightings', 'activity', 'tasks', 'notes']" in app_js
+
+    def test_tasks_tab_has_create_button(self, app_js):
+        """Tasks tab includes the + Assign Task button."""
+        assert "rfqShowTaskForm" in app_js
+
+    def test_notes_tab_has_add_button(self, app_js):
+        """Notes tab includes the + Add Note button."""
+        assert "rfqShowNoteForm" in app_js
+
+    def test_task_submit_invalidates_tasks_cache(self, app_js):
+        """rfqSubmitTask invalidates the tasks cache."""
+        assert "delete _rfqPanelCache.tasks" in app_js
+
+    def test_note_submit_invalidates_notes_cache(self, app_js):
+        """rfqSubmitNote invalidates the notes cache."""
+        assert "delete _rfqPanelCache.notes" in app_js
