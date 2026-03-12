@@ -358,6 +358,14 @@
         <div class="modal modal-lg">
             <h2>Log Confirmed Offer</h2>
             <div id="loReqContext" style="display:none;padding:6px 12px;background:var(--bg);border-radius:6px;margin-bottom:8px;font-size:13px"></div>
+            <details class="lo-paste-section" style="margin-bottom:12px;">
+                <summary style="cursor:pointer;font-size:13px;color:var(--teal)">Paste from vendor</summary>
+                <div style="margin-top:8px;">
+                    <textarea id="loPasteText" rows="4" placeholder="Paste vendor email, quote, or stock list..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical"></textarea>
+                    <button type="button" class="btn btn-ghost btn-sm" id="loParseBtn" onclick="parseFreeformOffer()" style="margin-top:6px">Parse with AI</button>
+                    <div id="loParsedOffers" class="u-hidden" style="margin-top:10px;max-height:240px;overflow-y:auto"></div>
+                </div>
+            </details>
             <form id="logOfferForm" onsubmit="event.preventDefault();submitLogOffer()">
                 <input type="hidden" id="loReqId">
                 <div class="lo-form">
@@ -745,6 +753,14 @@
 <div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
     <div class="modal">
         <h2>New Requisition</h2>
+        <details class="nr-paste-section" style="margin-bottom:12px;">
+            <summary style="cursor:pointer;font-size:13px;color:var(--teal)">Paste from customer</summary>
+            <div style="margin-top:8px;">
+                <textarea id="nrPasteText" rows="4" placeholder="Paste customer email, chat, or document text..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical"></textarea>
+                <button type="button" class="btn btn-ghost btn-sm" id="nrParseBtn" onclick="parseFreeformRfq()" style="margin-top:6px">Parse with AI</button>
+                <div id="nrParsedReqs" class="u-hidden" style="margin-top:10px;max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px"></div>
+            </div>
+        </details>
         <div class="field"><label for="nrName">Name <span style="color:var(--red)">*</span></label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required><span class="field-error text-danger" id="nrNameError" style="display:none;font-size:0.8rem;color:#dc3545;margin-top:2px"></span></div>
         <div class="field" style="margin-top:10px">
             <label>Customer Account <span style="color:var(--red)">*</span></label>

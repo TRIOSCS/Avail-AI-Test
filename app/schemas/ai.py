@@ -207,3 +207,36 @@ class CompareQuotesRequest(BaseModel):
     part_number: str = Field(min_length=1)
     quotes: list[QuoteForAnalysis] = Field(min_length=2)
     required_qty: int | None = None
+
+
+# ── Freeform paste parsing ────────────────────────────────────────────────
+
+
+class ParseFreeformRfqRequest(BaseModel):
+    """Input for AI freeform RFQ parsing (customer text)."""
+
+    raw_text: str = Field(min_length=1)
+
+
+class ParseFreeformOfferRequest(BaseModel):
+    """Input for AI freeform offer parsing (vendor text)."""
+
+    raw_text: str = Field(min_length=1)
+    requisition_id: int | None = None  # Optional: pass for RFQ context to improve matching
+
+
+class ApplyFreeformRfqRequest(BaseModel):
+    """Apply edited RFQ template — create requisition + requirements."""
+
+    name: str = Field(min_length=1)
+    customer_site_id: int | None = None
+    customer_name: str | None = None
+    deadline: str | None = None
+    requirements: list[dict] = Field(min_length=1)  # [{primary_mpn, target_qty, target_price, substitutes, notes}]
+
+
+class SaveFreeformOffersRequest(BaseModel):
+    """Save freeform-parsed offers to a requisition."""
+
+    requisition_id: int = Field(ge=1)
+    offers: list[DraftOfferItem] = Field(min_length=1)

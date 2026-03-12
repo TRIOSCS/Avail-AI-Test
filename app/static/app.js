@@ -9097,6 +9097,12 @@ async function openLogOfferFromList(reqId) {
     _s('loVendor', ''); _s('loQty', ''); _s('loPrice', ''); _s('loLead', '');
     _s('loMoq', ''); _s('loCond', 'new'); _s('loDc', ''); _s('loPkg', '');
     _s('loMfr', ''); _s('loWarranty', ''); _s('loCOO', ''); _s('loNotes', '');
+    _s('loPasteText', '');
+    _loParsedOffers = null;
+    const loParsed = document.getElementById('loParsedOffers');
+    if (loParsed) { loParsed.classList.add('u-hidden'); loParsed.innerHTML = ''; }
+    const loForm = document.getElementById('logOfferForm');
+    if (loForm) loForm.style.display = '';
     openModal('logOfferModal', 'loVendor');
 }
 
@@ -9104,6 +9110,102 @@ function closeLogOfferModal() {
     closeModal('logOfferModal');
     const dd = document.getElementById('loVendorSuggestions');
     if (dd) dd.classList.remove('open');
+    _loParsedOffers = null;
+}
+
+let _loParsedOffers = null;
+
+async function parseFreeformOffer() {
+    const ta = document.getElementById('loPasteText');
+    const btn = document.getElementById('loParseBtn');
+    const container = document.getElementById('loParsedOffers');
+    const reqId = parseInt(document.getElementById('loReqId')?.value || '0');
+    const text = (ta && ta.value || '').trim();
+    if (!text) { showToast('Paste vendor text first', 'error'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
+    try {
+        const body = { raw_text: text };
+        if (reqId) body.requisition_id = reqId;
+        const resp = await apiFetch('/api/ai/parse-freeform-offer', { method: 'POST', body });
+        if (!resp.parsed || !resp.template) { showToast(resp.reason || 'Parse failed', 'error'); return; }
+        _loParsedOffers = resp.template;
+        const offers = resp.template.offers || [];
+        const vendor = resp.template.vendor_name || '';
+        if (offers.length === 1) {
+            const o = offers[0];
+            document.getElementById('loVendor').value = vendor;
+            _loVendorCardId = null;
+            document.getElementById('loQty').value = o.qty_available != null ? o.qty_available : '';
+            document.getElementById('loPrice').value = o.unit_price != null ? o.unit_price : '';
+            document.getElementById('loLead').value = o.lead_time || '';
+            document.getElementById('loMoq').value = o.moq != null ? o.moq : '';
+            document.getElementById('loCond').value = o.condition || 'new';
+            document.getElementById('loDc').value = o.date_code || '';
+            document.getElementById('loPkg').value = o.packaging || '';
+            document.getElementById('loMfr').value = o.manufacturer || '';
+            document.getElementById('loNotes').value = o.notes || '';
+            if (reqId && document.getElementById('loReqPart')) {
+                const reqs = _ddReqCache[reqId] || [];
+                const match = reqs.find(function(r) { return (r.primary_mpn || '').toUpperCase() === (o.mpn || '').toUpperCase(); });
+                if (match) document.getElementById('loReqPart').value = String(match.id);
+            }
+            container.classList.add('u-hidden');
+            container.innerHTML = '';
+            showToast('Parsed — review and log offer', 'success');
+        } else if (offers.length > 1) {
+            let html = '<p style="margin:0 0 8px;font-size:12px"><b>' + esc(vendor) + '</b> — ' + offers.length + ' offers. Review and save.</p>';
+            html += '<table class="tbl" style="font-size:11px"><thead><tr><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th></tr></thead><tbody>';
+            offers.forEach(function(o) {
+                html += '<tr><td>' + esc(o.mpn || '') + '</td><td>' + (o.qty_available != null ? o.qty_available : '—') + '</td><td>' + (o.unit_price != null ? o.unit_price : '—') + '</td><td>' + esc(o.lead_time || '') + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button type="button" class="btn btn-primary btn-sm" onclick="saveFreeformOffers()">Save ' + offers.length + ' offers</button><a href="#" onclick="event.preventDefault();_loParsedOffers=null;document.getElementById(\'loParsedOffers\').classList.add(\'u-hidden\');document.getElementById(\'loParsedOffers\').innerHTML=\'\';document.getElementById(\'logOfferForm\').style.display=\'\';" style="font-size:11px;color:var(--muted)">Enter manually</a></div>';
+            container.innerHTML = html;
+            container.classList.remove('u-hidden');
+            document.getElementById('logOfferForm').style.display = 'none';
+            showToast('Parsed — review and save', 'success');
+        } else {
+            showToast('No offers found in text', 'warn');
+        }
+    } catch (e) { showToast('Parse failed — ' + (e.message || 'try again'), 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; } }
+}
+
+async function saveFreeformOffers() {
+    if (!_loParsedOffers || !_loParsedOffers.offers || _loParsedOffers.offers.length === 0) return;
+    const reqId = parseInt(document.getElementById('loReqId')?.value || '0');
+    if (!reqId) { showToast('Requisition context lost', 'error'); return; }
+    const vendor = _loParsedOffers.vendor_name || 'Unknown';
+    const offers = _loParsedOffers.offers.map(function(o) {
+        return {
+            vendor_name: vendor,
+            mpn: o.mpn || '',
+            manufacturer: o.manufacturer || null,
+            qty_available: o.qty_available != null ? o.qty_available : null,
+            unit_price: o.unit_price != null ? o.unit_price : null,
+            currency: o.currency || 'USD',
+            lead_time: o.lead_time || null,
+            date_code: o.date_code || null,
+            condition: o.condition || 'new',
+            packaging: o.packaging || null,
+            moq: o.moq != null ? o.moq : null,
+            notes: o.notes || null,
+        };
+    });
+    try {
+        const data = await apiFetch('/api/ai/save-freeform-offers', { method: 'POST', body: { requisition_id: reqId, offers } });
+        _loParsedOffers = null;
+        document.getElementById('loParsedOffers').classList.add('u-hidden');
+        document.getElementById('loParsedOffers').innerHTML = '';
+        document.getElementById('logOfferForm').style.display = '';
+        document.getElementById('loPasteText').value = '';
+        closeLogOfferModal();
+        showToast('Saved ' + data.created + ' offer(s)', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+        const reqInfo = _reqListData.find(function(r) { return r.id === reqId; });
+        if (reqInfo) { reqInfo.offer_count = (reqInfo.offer_count || 0) + data.created; reqInfo.has_new_offers = true; }
+        renderReqList();
+    } catch (e) { showToast('Save failed — ' + (e.message || 'try again'), 'error'); }
 }
 
 // ── Vendor autocomplete for Log Offer ───────────────────────────────────
@@ -10700,6 +10802,42 @@ async function sendBulkFollowUp() {
     });
 }
 
+let _nrParsedTemplate = null;
+
+async function parseFreeformRfq() {
+    const ta = document.getElementById('nrPasteText');
+    const btn = document.getElementById('nrParseBtn');
+    const reqsEl = document.getElementById('nrParsedReqs');
+    const text = (ta && ta.value || '').trim();
+    if (!text) { showToast('Paste customer text first', 'error'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
+    try {
+        const resp = await apiFetch('/api/ai/parse-freeform-rfq', { method: 'POST', body: { raw_text: text } });
+        if (!resp.parsed || !resp.template) { showToast(resp.reason || 'Parse failed', 'error'); return; }
+        _nrParsedTemplate = resp.template;
+        const t = resp.template;
+        const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        _s('nrName', t.name || '');
+        _s('nrDeadline', (t.deadline && t.deadline !== 'ASAP') ? t.deadline : '');
+        document.getElementById('nrAsap').checked = (t.deadline === 'ASAP' || !t.deadline);
+        if (t.customer_name && !document.getElementById('nrSiteSearch')?.value) {
+            document.getElementById('nrSiteSearch').value = t.customer_name;
+            debouncedFilterSites(t.customer_name);
+        }
+        const reqs = t.requirements || [];
+        let html = '<p style="margin:0 0 6px;font-size:11px;color:var(--muted)">' + reqs.length + ' part(s) — review and select customer account, then click Create</p>';
+        html += '<table class="tbl" style="font-size:11px"><thead><tr><th>Part</th><th>Qty</th><th>Target $</th></tr></thead><tbody>';
+        reqs.forEach(function(r) {
+            html += '<tr><td>' + esc(r.primary_mpn || '') + '</td><td>' + (r.target_qty || 1) + '</td><td>' + (r.target_price != null ? r.target_price : '—') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+        reqsEl.innerHTML = html;
+        reqsEl.classList.remove('u-hidden');
+        showToast('Parsed — review and create', 'success');
+    } catch (e) { showToast('Parse failed — ' + (e.message || 'try again'), 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; } }
+}
+
 async function createRequisition() {
     const name = document.getElementById('nrName')?.value?.trim() || '';
     if (!name) { showToast('Please enter a requisition name', 'error'); return; }
@@ -10709,27 +10847,57 @@ async function createRequisition() {
     const dlVal = document.getElementById('nrDeadline')?.value || '';
     const deadline = isAsap ? 'ASAP' : (dlVal || null);
     try {
-        const data = await apiFetch('/api/requisitions', {
-            method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
-        });
-        closeModal('newReqModal');
-        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
-        _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
-        _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
-        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
-        const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
-        await loadRequisitions();
-        expandToSubTab(data.id, 'sightings');
-        showToast('Requisition created — add parts below', 'info');
+        if (_nrParsedTemplate && (_nrParsedTemplate.requirements || []).length > 0) {
+            const data = await apiFetch('/api/ai/apply-freeform-rfq', {
+                method: 'POST',
+                body: {
+                    name,
+                    customer_site_id: parseInt(siteId),
+                    customer_name: _nrParsedTemplate.customer_name || null,
+                    deadline: deadline || null,
+                    requirements: _nrParsedTemplate.requirements,
+                },
+            });
+            _nrParsedTemplate = null;
+            const nrParsedReqs = document.getElementById('nrParsedReqs');
+            if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
+            closeModal('newReqModal');
+            _clearNrForm();
+            await loadRequisitions();
+            expandToSubTab(data.id, 'sightings');
+            showToast('Requisition created with ' + data.requirements_added + ' parts', 'success');
+        } else {
+            const data = await apiFetch('/api/requisitions', {
+                method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
+            });
+            _nrParsedTemplate = null;
+            closeModal('newReqModal');
+            _clearNrForm();
+            await loadRequisitions();
+            expandToSubTab(data.id, 'sightings');
+            showToast('Requisition created — add parts below', 'info');
+        }
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
-function _clearNrValidation() {
+function _clearNrForm() {
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
     _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
+    _s('nrPasteText', 'value', '');
     const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
     const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+    const nrParsedReqs = document.getElementById('nrParsedReqs'); if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
+}
+
+function _clearNrValidation() {
+    _nrParsedTemplate = null;
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
+    _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false); _s('nrPasteText', 'value', '');
+    const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
+    const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+    const nrParsedReqs = document.getElementById('nrParsedReqs'); if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
     ['nrNameError', 'nrSiteError'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.textContent = ''; } });
 }
 

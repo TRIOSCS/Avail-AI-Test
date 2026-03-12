@@ -25,6 +25,7 @@ from ..models import (
     Offer,
     ProspectContact,
     Requirement,
+    Requisition,
     SiteContact,
     User,
     VendorCard,
@@ -32,14 +33,18 @@ from ..models import (
     VendorResponse,
 )
 from ..schemas.ai import (
+    ApplyFreeformRfqRequest,
     CompareQuotesRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
+    ParseFreeformOfferRequest,
+    ParseFreeformRfqRequest,
     ProspectContactSave,
     ProspectFinderRequest,
     RfqDraftEmailRequest,
     RfqDraftRequest,
     SaveDraftOffersRequest,
+    SaveFreeformOffersRequest,
 )
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
@@ -683,3 +688,183 @@ async def ai_compare_quotes(
     if not result:
         return {"available": False, "reason": "Comparison not available"}
     return {"available": True, **result}
+
+
+# ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
+
+
+@router.post("/api/ai/parse-freeform-rfq")
+@limiter.limit("10/minute")
+async def ai_parse_freeform_rfq(
+    payload: ParseFreeformRfqRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse free-form customer text into RFQ template (name, requirements)."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.freeform_parser_service import parse_freeform_rfq
+
+    result = await parse_freeform_rfq(payload.raw_text)
+    if not result:
+        return {"parsed": False, "reason": "Parser returned no result"}
+    return {"parsed": True, "template": result}
+
+
+@router.post("/api/ai/parse-freeform-offer")
+@limiter.limit("10/minute")
+async def ai_parse_freeform_offer(
+    payload: ParseFreeformOfferRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse free-form vendor text into offer template(s)."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    rfq_context = None
+    if payload.requisition_id:
+        reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
+        rfq_context = [
+            {"mpn": r.primary_mpn, "qty": r.target_qty or 1}
+            for r in reqs
+            if r.primary_mpn
+        ]
+
+    from app.services.freeform_parser_service import parse_freeform_offer
+
+    result = await parse_freeform_offer(payload.raw_text, rfq_context)
+    if not result:
+        return {"parsed": False, "reason": "Parser returned no result"}
+    return {"parsed": True, "template": result}
+
+
+@router.post("/api/ai/apply-freeform-rfq")
+@limiter.limit("5/minute")
+async def ai_apply_freeform_rfq(
+    payload: ApplyFreeformRfqRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create requisition + requirements from edited RFQ template."""
+    from ...cache.decorators import invalidate_prefix
+    from ...dependencies import get_req_for_user
+    from ...utils.normalization import normalize_mpn_key
+
+    if not payload.customer_site_id:
+        raise HTTPException(400, "customer_site_id required")
+
+    site = db.query(CustomerSite).filter(CustomerSite.id == payload.customer_site_id).first()
+    if not site:
+        raise HTTPException(404, "Customer site not found")
+
+    req = Requisition(
+        name=payload.name.strip() or "Untitled",
+        customer_site_id=payload.customer_site_id,
+        customer_name=payload.customer_name or site.site_name or site.company.name if site.company else None,
+        deadline=payload.deadline,
+        created_by=user.id,
+        status="draft",
+    )
+    db.add(req)
+    db.flush()
+
+    from ...search_service import resolve_material_card
+    from ...schemas.requisitions import RequirementCreate
+
+    for item in payload.requirements[:50]:
+        try:
+            parsed = RequirementCreate.model_validate(item)
+        except (ValueError, TypeError):
+            continue
+        mat_card = resolve_material_card(parsed.primary_mpn, db) if parsed.primary_mpn else None
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=parsed.primary_mpn,
+            normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
+            material_card_id=mat_card.id if mat_card else None,
+            target_qty=parsed.target_qty,
+            target_price=parsed.target_price,
+            substitutes=parsed.substitutes[:20],
+            condition=parsed.condition or "",
+            date_codes=parsed.date_codes or "",
+            firmware=parsed.firmware or "",
+            hardware_codes=parsed.hardware_codes or "",
+            packaging=parsed.packaging or "",
+            notes=parsed.notes or "",
+        )
+        db.add(r)
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"id": req.id, "name": req.name, "requirements_added": len(payload.requirements)}
+
+
+@router.post("/api/ai/save-freeform-offers")
+@limiter.limit("5/minute")
+async def ai_save_freeform_offers(
+    payload: SaveFreeformOffersRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save freeform-parsed offers to a requisition (after user review)."""
+    from ...dependencies import get_req_for_user
+    from ...utils.normalization import fuzzy_mpn_match, normalize_mpn_key
+    from ...vendor_utils import normalize_vendor_name
+
+    req = get_req_for_user(db, user, payload.requisition_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
+    created = []
+    for o in payload.offers:
+        req_id = None
+        if o.mpn:
+            for r in reqs:
+                if fuzzy_mpn_match(o.mpn, r.primary_mpn):
+                    req_id = r.id
+                    break
+        from ...search_service import resolve_material_card
+
+        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
+        norm_name = normalize_vendor_name(o.vendor_name or "")
+        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
+        if not card:
+            card = VendorCard(
+                normalized_name=norm_name,
+                display_name=o.vendor_name or "Unknown",
+                emails=[],
+                phones=[],
+            )
+            db.add(card)
+            db.flush()
+        offer = Offer(
+            requisition_id=payload.requisition_id,
+            requirement_id=req_id,
+            material_card_id=mat_card.id if mat_card else None,
+            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
+            vendor_card_id=card.id,
+            vendor_name=card.display_name,
+            vendor_name_normalized=card.normalized_name,
+            mpn=o.mpn,
+            manufacturer=o.manufacturer,
+            qty_available=o.qty_available,
+            unit_price=o.unit_price,
+            currency=o.currency or "USD",
+            lead_time=o.lead_time,
+            date_code=o.date_code,
+            condition=o.condition or "new",
+            packaging=o.packaging,
+            moq=o.moq,
+            source="freeform_parsed",
+            entered_by_id=user.id,
+            notes=o.notes,
+            status="active",
+        )
+        db.add(offer)
+        db.flush()
+        created.append(offer.id)
+    db.commit()
+    return {"created": len(created), "offer_ids": created}
