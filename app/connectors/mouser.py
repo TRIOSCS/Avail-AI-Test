@@ -1,4 +1,13 @@
-"""Mouser Search API connector."""
+"""Mouser Search API connector.
+
+Handles 403 Forbidden as rate limiting (Mouser returns 403 when daily
+API quota is approached). Returns empty results instead of raising.
+
+Called by: search_service via BaseConnector.search()
+Depends on: http_client, utils, sources.BaseConnector
+"""
+
+import asyncio
 
 from loguru import logger
 
@@ -37,6 +46,21 @@ class MouserConnector(BaseConnector):
             headers={"Content-Type": "application/json"},
             timeout=self.timeout,
         )
+
+        # 403 — Mouser uses this for rate limiting / quota exceeded
+        if r.status_code == 403:
+            logger.warning(
+                f"Mouser: 403 Forbidden for {part_number} — rate limited or quota near limit, "
+                "returning empty results"
+            )
+            return []
+
+        # 429 — explicit rate limit (handled by BaseConnector too, but
+        # return empty here to avoid raising)
+        if r.status_code == 429:
+            logger.warning(f"Mouser: 429 rate limited for {part_number}, returning empty results")
+            return []
+
         r.raise_for_status()
         data = r.json()
 
@@ -44,6 +68,11 @@ class MouserConnector(BaseConnector):
         errors = data.get("Errors") or []
         if errors:
             msg = errors[0].get("Message", "Unknown Mouser API error")
+            code = errors[0].get("Code", "")
+            # Quota/rate errors in body — return empty instead of raising
+            if "too many" in msg.lower() or "rate" in msg.lower() or "quota" in msg.lower():
+                logger.warning(f"Mouser: rate/quota error for {part_number}: {msg}")
+                return []
             logger.warning(f"Mouser API errors for {part_number}: {errors}")
             raise RuntimeError(f"Mouser API: {msg}")
 

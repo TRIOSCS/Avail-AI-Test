@@ -1049,6 +1049,7 @@ class TestDigiKeyConnector:
 
         c = DigiKeyConnector(client_id="test-id", client_secret="test-secret")
         c._token = "cached-token"
+        c._token_expires_at = 9999999999  # far future — skip refresh
         return c
 
     def test_parse_products(self):
@@ -1168,7 +1169,7 @@ class TestDigiKeyConnector:
         c = self._make_connector()
         resp_401 = _mock_response(401, text="Unauthorized")
         resp_401.raise_for_status = MagicMock()  # Don't raise for first 401
-        token_resp = _mock_response(200, {"access_token": "new-token"})
+        token_resp = _mock_response(200, {"access_token": "new-token", "expires_in": 600})
         search_resp = _mock_response(200, {"Products": []})
 
         with patch("app.connectors.digikey.http") as mock_http:
