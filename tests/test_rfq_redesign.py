@@ -1,7 +1,8 @@
 """
 tests/test_rfq_redesign.py — Tests for the RFQ layout redesign (v8).
 
-Covers: Template raw content with new view modes (sales/sourcing/archive),
+Covers: Template raw content with unified requisition pipeline modes
+(pipeline/deals/archive),
 API endpoints still return correct data for the redesigned UI.
 
 Called by: pytest
@@ -21,14 +22,14 @@ def index_html():
 # ── Template Rendering ─────────────────────────────────────────────────
 
 
-def test_index_template_has_sales_view(index_html):
-    """Index template includes the Sales view pill button."""
+def test_index_template_has_pipeline_view(index_html):
+    """Index template includes the unified requisition pipeline view button."""
     assert 'data-view="sales"' in index_html
 
 
-def test_index_template_has_sourcing_view(index_html):
-    """Index template includes the Sourcing view pill button."""
-    assert 'data-view="sourcing"' in index_html
+def test_index_template_has_deals_view(index_html):
+    """Index template includes the Deals view pill button."""
+    assert 'data-view="deals"' in index_html
 
 
 def test_index_template_has_archive_view(index_html):
@@ -54,7 +55,7 @@ def test_index_template_has_inline_rfq_css(index_html):
 def test_index_no_old_active_view(index_html):
     """Index template should NOT have the old 'Active' view pill as primary."""
     # The old "Active" button with data-view="active" should be gone
-    # (replaced by sales/sourcing)
+    # (replaced by unified pipeline/deals/archive)
     assert 'data-view="active"' not in index_html or 'data-view="sales"' in index_html
 
 
