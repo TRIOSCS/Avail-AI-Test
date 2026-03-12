@@ -128,7 +128,7 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
             if is_intelligence_enabled():
                 record_engagement(user_id, event_type, entity_id, "delivered", ai_priority=ai_priority, db=db)
         except Exception:
-            pass
+            logger.debug("Failed to record engagement for alert %s:%s", event_type, entity_id, exc_info=True)
         return True
 
     # Fallback: webhook URL
@@ -149,7 +149,7 @@ async def send_alert(db, user_id: int, message: str, event_type: str = "", entit
                         db=db,
                     )
             except Exception:
-                pass
+                logger.debug("Failed to record webhook engagement for alert %s:%s", event_type, entity_id, exc_info=True)
             return True
 
     _log_alert(db, event_type, entity_id, False, "No delivery method available", user_id=user_id)

@@ -7,7 +7,6 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -398,14 +397,6 @@ async def api_version_middleware(request: Request, call_next):
 # ── Health Check ──────────────────────────────────────────────────────
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
 BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
-CLEAR_SITE_DATA_UNTIL = datetime(2026, 3, 17, 23, 59, 59, tzinfo=timezone.utc)
-
-
-def _should_set_clear_site_data(now_utc: datetime | None = None) -> bool:
-    """Return True while temporary cache-busting header is active."""
-    if now_utc is None:
-        now_utc = datetime.now(timezone.utc)
-    return now_utc <= CLEAR_SITE_DATA_UNTIL
 
 
 def _check_backup_freshness() -> str:
@@ -510,381 +501,19 @@ async def health(request: Request, db: Session = Depends(get_db)):
 # ── Seed API Sources ─────────────────────────────────────────────────────
 def _seed_api_sources():
     """Seed the api_sources table with all known data sources.
-    Uses a version hash so it only writes when the source list changes."""
+    Uses a version hash so it only writes when the source list changes.
+    Source definitions live in app/data/api_sources.json."""
     import hashlib
+    import json
+    from pathlib import Path
 
     from .database import SessionLocal
 
+    sources_path = Path(__file__).parent / "data" / "api_sources.json"
+    SOURCES = json.loads(sources_path.read_text())
+
     db = SessionLocal()
     try:
-        SOURCES = [
-            # ── LIVE (have connectors built) ──
-            {
-                "name": "nexar",
-                "display_name": "Octopart (Nexar)",
-                "category": "api",
-                "source_type": "aggregator",
-                "description": "GraphQL API — searches across authorized distributors and brokers via Octopart data. Returns seller, price, qty, authorized status.",
-                "signup_url": "https://nexar.com/api",
-                "env_vars": ["NEXAR_CLIENT_ID", "NEXAR_CLIENT_SECRET"],
-                "setup_notes": "Create app at nexar.com → get client_id + client_secret. Free tier: 1000 queries/month.",
-            },
-            {
-                "name": "brokerbin",
-                "display_name": "BrokerBin",
-                "category": "api",
-                "source_type": "broker",
-                "description": "REST API v2 — searches independent broker/distributor inventories. Returns company, MPN, qty, price.",
-                "signup_url": "https://www.brokerbin.com",
-                "env_vars": ["BROKERBIN_API_KEY", "BROKERBIN_API_SECRET"],
-                "setup_notes": "Contact BrokerBin sales for API access. Need API key (token) + username.",
-            },
-            {
-                "name": "ebay",
-                "display_name": "eBay",
-                "category": "api",
-                "source_type": "marketplace",
-                "description": "Browse API — searches eBay listings for electronic components. Returns seller, price, condition, qty. Good for surplus/used parts.",
-                "signup_url": "https://developer.ebay.com",
-                "env_vars": ["EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET"],
-                "setup_notes": "Create app at developer.ebay.com → get client_id + secret. OAuth client credentials. Need production access approval.",
-            },
-            {
-                "name": "digikey",
-                "display_name": "DigiKey",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Product Search v4 — real-time pricing and inventory from DigiKey's catalog. Authorized distributor.",
-                "signup_url": "https://developer.digikey.com",
-                "env_vars": ["DIGIKEY_CLIENT_ID", "DIGIKEY_CLIENT_SECRET"],
-                "setup_notes": "Register at developer.digikey.com → create organization → create app → get OAuth2 credentials. Free tier available.",
-            },
-            {
-                "name": "mouser",
-                "display_name": "Mouser",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Search API v2 — real-time pricing and stock from Mouser's catalog. Authorized distributor.",
-                "signup_url": "https://www.mouser.com/api-hub/",
-                "env_vars": ["MOUSER_API_KEY"],
-                "setup_notes": "Register at mouser.com → go to API Hub → request Search API key. Choose country/language/currency at signup.",
-            },
-            {
-                "name": "oemsecrets",
-                "display_name": "OEMSecrets",
-                "category": "api",
-                "source_type": "aggregator",
-                "description": "Meta-aggregator — ONE API call returns pricing from 140+ distributors (DigiKey, Mouser, Arrow, Avnet, Farnell, RS, Future, TME, etc).",
-                "signup_url": "https://www.oemsecrets.com/api",
-                "env_vars": ["OEMSECRETS_API_KEY"],
-                "setup_notes": "Request API access at oemsecrets.com/api. Provides JSON + JavaScript APIs. Covers 40M+ parts.",
-            },
-            {
-                "name": "sourcengine",
-                "display_name": "Sourcengine",
-                "category": "api",
-                "source_type": "aggregator",
-                "description": "B2B marketplace API — search MPN across global supplier network with real-time offers.",
-                "signup_url": "https://dev.sourcengine.com",
-                "env_vars": ["SOURCENGINE_API_KEY"],
-                "setup_notes": "Register at dev.sourcengine.com for API access. Bearer token auth.",
-            },
-            {
-                "name": "email_mining",
-                "display_name": "Email Intelligence (M365)",
-                "category": "email",
-                "source_type": "internal",
-                "description": "Scans team Outlook/M365 inbox for vendor offers, stock lists, and contact info. Extracts emails, phones, and part numbers from correspondence.",
-                "signup_url": "",
-                "env_vars": ["EMAIL_MINING_ENABLED"],
-                "setup_notes": "Already authenticated via Azure OAuth. Set EMAIL_MINING_ENABLED=true to activate. Uses existing Graph API token.",
-            },
-            # ── PLATFORM SERVICES ──
-            {
-                "name": "azure_oauth",
-                "display_name": "Azure OAuth (M365)",
-                "category": "platform",
-                "source_type": "auth",
-                "description": "Azure AD OAuth2 — handles Microsoft 365 login, Graph API tokens for email mining, calendar, and Teams integration.",
-                "signup_url": "https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps",
-                "env_vars": ["AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"],
-                "setup_notes": "Azure Portal → App registrations → New registration. Set redirect URI to your app URL + /auth/callback. Grant Mail.Read, User.Read, Calendars.Read permissions.",
-            },
-            {
-                "name": "anthropic_ai",
-                "display_name": "Anthropic AI (Claude)",
-                "category": "platform",
-                "source_type": "ai",
-                "description": "Claude API — powers RFQ response parsing, attachment column mapping, AI chat, and intelligent data extraction.",
-                "signup_url": "https://console.anthropic.com",
-                "env_vars": ["ANTHROPIC_API_KEY"],
-                "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-6 (configurable via ANTHROPIC_MODEL).",
-            },
-            {
-                "name": "teams_notifications",
-                "display_name": "Teams Notifications",
-                "category": "platform",
-                "source_type": "notification",
-                "description": "Microsoft Teams — sends RFQ alerts, vendor response notifications, and system alerts to a Teams channel.",
-                "signup_url": "https://teams.microsoft.com",
-                "env_vars": ["TEAMS_WEBHOOK_URL", "TEAMS_TEAM_ID", "TEAMS_CHANNEL_ID"],
-                "setup_notes": "Teams → Channel → Connectors → Incoming Webhook → copy URL. Team/Channel IDs from Teams admin or Graph API.",
-            },
-            # ── ENRICHMENT SERVICES ──
-            {
-                "name": "apollo_enrichment",
-                "display_name": "Apollo.io",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Contact and company enrichment — finds decision-maker emails, phone numbers, titles, and company firmographics for vendor outreach.",
-                "signup_url": "https://www.apollo.io",
-                "env_vars": ["APOLLO_API_KEY"],
-                "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts.",
-            },
-            {
-                "name": "explorium_enrichment",
-                "display_name": "Explorium",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "B2B data enrichment — company technographics, intent signals, and contact data for supplier intelligence and lead scoring.",
-                "signup_url": "https://www.explorium.ai",
-                "env_vars": ["EXPLORIUM_API_KEY"],
-                "setup_notes": "Contact Explorium for API access. Enterprise-grade enrichment with intent data and predictive signals.",
-            },
-            {
-                "name": "lusha_enrichment",
-                "display_name": "Lusha",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Contact enrichment — direct dial phone numbers, verified emails, and contact discovery. Primary enrichment source for high-value phone data.",
-                "signup_url": "https://www.lusha.com",
-                "env_vars": ["LUSHA_API_KEY"],
-                "setup_notes": "Sign up at lusha.com → API → Get API key. 6,400 credits/month. Phone pool (70%): 4,480 credits. Discovery pool (30%): 1,920 credits.",
-            },
-            {
-                "name": "hunter_enrichment",
-                "display_name": "Hunter.io",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Email verification and domain contact discovery — finds verified email addresses and contacts at any company domain.",
-                "signup_url": "https://hunter.io",
-                "env_vars": ["HUNTER_API_KEY"],
-                "setup_notes": "Sign up at hunter.io → API → Get API key. Free tier: 25 searches + 50 verifications/month.",
-            },
-            {
-                "name": "rocketreach_enrichment",
-                "display_name": "RocketReach",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Contact lookup and search — finds emails, phone numbers, and social profiles for decision-makers at target companies.",
-                "signup_url": "https://rocketreach.co",
-                "env_vars": ["ROCKETREACH_API_KEY"],
-                "setup_notes": "Sign up at rocketreach.co → API → Generate Key. Credits-based pricing with free trial.",
-            },
-            {
-                "name": "clearbit_enrichment",
-                "display_name": "Clearbit (HubSpot)",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Company and person enrichment — firmographic data (industry, size, revenue, tech stack) and person data (name, title, social profiles).",
-                "signup_url": "https://clearbit.com",
-                "env_vars": ["CLEARBIT_API_KEY"],
-                "setup_notes": "Sign up at clearbit.com (now part of HubSpot) → API → Get key. Free tier available for basic enrichment.",
-            },
-            # ── PENDING (no connector yet — scraping or future API) ──
-            {
-                "name": "netcomponents",
-                "display_name": "NetComponents",
-                "category": "scraper",
-                "source_type": "broker",
-                "description": "60M+ line items from hundreds of suppliers. Non-anonymous — shows vendor name and contact info. No public API.",
-                "signup_url": "https://www.netcomponents.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Need browser automation (Perplexity/Playwright) to search with your membership credentials. High-value target — shows vendor contacts directly.",
-            },
-            {
-                "name": "icsource",
-                "display_name": "IC Source",
-                "category": "scraper",
-                "source_type": "broker",
-                "description": "Broker marketplace with 65M+ inventory listings and vendor contacts. Browser-automated search.",
-                "signup_url": "https://www.icsource.com",
-                "env_vars": ["ICS_USERNAME", "ICS_PASSWORD"],
-                "setup_notes": "Browser automation with membership login. Run ICS worker as systemd service alongside NC worker.",
-            },
-            {
-                "name": "thebrokersite",
-                "display_name": "The Broker Forum (TBF)",
-                "category": "scraper",
-                "source_type": "broker",
-                "description": "60M+ line items from broker/distributor network. Has XML Search service (possible API). Escrow services available.",
-                "signup_url": "https://www.brokerforum.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Investigate XML Search — may have API. Otherwise browser automation. 100K+ parts searched daily by members.",
-            },
-            {
-                "name": "findchips",
-                "display_name": "FindChips (Supplyframe)",
-                "category": "scraper",
-                "source_type": "aggregator",
-                "description": "Aggregates authorized distributor pricing and inventory. Parametric search, part alerts, and trend data.",
-                "signup_url": "https://www.findchips.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: No public API. Owned by Supplyframe (Siemens). Well-structured pages for scraping.",
-            },
-            {
-                "name": "arrow",
-                "display_name": "Arrow Electronics",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Major authorized distributor ($28B revenue). Has API program for pricing and inventory.",
-                "signup_url": "https://developers.arrow.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Register at developers.arrow.com for API access. OAuth2 flow. Need to apply for production access.",
-            },
-            {
-                "name": "avnet",
-                "display_name": "Avnet",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Global authorized distributor with API program. Design support and logistics services.",
-                "signup_url": "https://www.avnet.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Contact Avnet for API partnership. May require business relationship.",
-            },
-            {
-                "name": "lcsc",
-                "display_name": "LCSC Electronics",
-                "category": "scraper",
-                "source_type": "authorized",
-                "description": "Chinese distributor with internal JSON API (unofficial). Low prices, wide SMD selection.",
-                "signup_url": "https://www.lcsc.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: No official API. Internal JSON API can be reverse-engineered. No auth required. Use at own risk.",
-            },
-            {
-                "name": "partfuse",
-                "display_name": "PartFuse (Unified API)",
-                "category": "api",
-                "source_type": "aggregator",
-                "description": "Unified API on RapidAPI — DigiKey + Mouser + TME in one JSON shape. Simple integration.",
-                "signup_url": "https://rapidapi.com/partfuse/api/partfuse",
-                "env_vars": [],
-                "setup_notes": "PENDING: Sign up on RapidAPI → subscribe to PartFuse. Header-based auth. Good as backup/redundancy for DigiKey+Mouser.",
-            },
-            {
-                "name": "stock_list_import",
-                "display_name": "Vendor Stock List Import",
-                "category": "manual",
-                "source_type": "internal",
-                "description": "Buyers upload Excel/CSV stock lists from vendors. Auto-parsed and imported as sightings + vendor card enrichment.",
-                "signup_url": "",
-                "env_vars": [],
-                "setup_notes": "PENDING: Build upload UI. Parse common stock list formats (MPN, Qty, Price, Manufacturer). Dedupe against existing data.",
-            },
-            # ── PENDING (additional authorized distributors) ──
-            {
-                "name": "element14",
-                "display_name": "Newark / element14 / Farnell",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Major authorized distributor (part of Avnet). element14 API covers Newark (Americas), Farnell (Europe), element14 (APAC).",
-                "signup_url": "https://partner.element14.com/docs",
-                "env_vars": ["ELEMENT14_API_KEY"],
-                "setup_notes": "PENDING: Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands.",
-            },
-            {
-                "name": "ai_live_web",
-                "display_name": "AI Live Internet Search",
-                "category": "ai",
-                "source_type": "aggregator",
-                "description": "Claude-powered live web search for supplier listings. Finds broker/distributor offers from current internet pages and extracts stock, price, and contact signals.",
-                "signup_url": "https://console.anthropic.com",
-                "env_vars": ["ANTHROPIC_API_KEY"],
-                "setup_notes": "Uses Anthropic web search tool through existing AI credentials. Best used as a fallback source to expand long-tail supplier discovery.",
-            },
-            {
-                "name": "rs_components",
-                "display_name": "RS Components",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Global authorized distributor with Product Search API. 700K+ products across electronics, industrial, and maintenance.",
-                "signup_url": "https://developerportal.rs-online.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Register at RS Developer Portal. REST API with OAuth2. Covers pricing, stock, and product specs.",
-            },
-            {
-                "name": "future",
-                "display_name": "Future Electronics",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Top 3 global authorized distributor. Has developer API program for inventory and pricing.",
-                "signup_url": "https://www.futureelectronics.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Contact Future Electronics for API partnership. May require established business account.",
-            },
-            {
-                "name": "rochester",
-                "display_name": "Rochester Electronics",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Specialist in EOL/obsolete and hard-to-find semiconductors. Licensed manufacturer of discontinued ICs. Critical for legacy parts.",
-                "signup_url": "https://www.rocelec.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Contact Rochester for API access. Essential for obsolete/EOL part sourcing. Also manufactures discontinued parts under license.",
-            },
-            {
-                "name": "verical",
-                "display_name": "Verical (Arrow Marketplace)",
-                "category": "api",
-                "source_type": "marketplace",
-                "description": "Arrow Electronics' open marketplace. Connects buyers with verified suppliers beyond Arrow's own stock.",
-                "signup_url": "https://www.verical.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Check if Verical offers API access through Arrow's developer program. Marketplace model with supplier verification.",
-            },
-            {
-                "name": "heilind",
-                "display_name": "Heilind Electronics",
-                "category": "api",
-                "source_type": "authorized",
-                "description": "Authorized distributor specializing in connectors, relays, sensors, switches, and thermal management.",
-                "signup_url": "https://www.heilind.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Contact Heilind for API or EDI integration. Strong in interconnect and electromechanical components.",
-            },
-            {
-                "name": "winsource",
-                "display_name": "WIN SOURCE",
-                "category": "api",
-                "source_type": "broker",
-                "description": "Global electronic component distributor with 1M+ SKUs. Strong in China-sourced components and hard-to-find parts.",
-                "signup_url": "https://www.win-source.net",
-                "env_vars": [],
-                "setup_notes": "PENDING: Check WIN SOURCE for API access. Large inventory, competitive pricing on Asian-sourced components.",
-            },
-            {
-                "name": "siliconexpert",
-                "display_name": "SiliconExpert / Z2Data",
-                "category": "api",
-                "source_type": "intelligence",
-                "description": "Component lifecycle intelligence — EOL risk, cross-references, compliance (RoHS/REACH), market availability trends. Not a seller, but critical for material card enrichment.",
-                "signup_url": "https://www.siliconexpert.com/api",
-                "env_vars": [],
-                "setup_notes": "PENDING: API available for component lifecycle data, cross-refs, and compliance. Enriches material cards with lifecycle risk and alternates.",
-            },
-            {
-                "name": "aliexpress",
-                "display_name": "AliExpress",
-                "category": "scraper",
-                "source_type": "marketplace",
-                "description": "Chinese marketplace with electronic components at reference pricing. Useful for cost benchmarking and identifying Chinese suppliers.",
-                "signup_url": "https://developers.aliexpress.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: AliExpress has affiliate API. Useful for reference pricing and Chinese supplier discovery. Not for mission-critical procurement.",
-            },
-        ]
-
         # Version hash — skip if source list hasn't changed
         source_hash = hashlib.md5(
             str([(s["name"], s["description"]) for s in SOURCES]).encode(),
@@ -920,10 +549,7 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                new_source = ApiSource(status=status, is_active=is_active, **src)
-                db.add(new_source)
-                # Keep local map synchronized for follow-up quota backfill.
-                existing_map[src["name"]] = new_source
+                db.add(ApiSource(status=status, is_active=is_active, **src))
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -937,17 +563,15 @@ def _seed_api_sources():
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
-            "hunter": 500,  # legacy row name support
             "lusha_enrichment": 6400,
             "clearbit_enrichment": 1000,
-            "clearbit": 1000,  # legacy row name support
             "digikey": 1000,
             "mouser": 1000,
             "oemsecrets": 5000,
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = existing_map.get(name)
+            src = db.query(ApiSource).filter_by(name=name).first()
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 
@@ -961,141 +585,95 @@ def _seed_api_sources():
 
 # _seed_api_sources() is called from lifespan after startup migrations
 
-# ── Shared dependencies (auth, query helpers) ────────────────────────────
-
-
-# Auth routes moved to routers/auth.py
-from .routers.auth import router as auth_router
-
-app.include_router(auth_router)
-
-from .routers.materials import router as materials_router
-from .routers.vendor_analytics import router as vendor_analytics_router
-from .routers.vendor_contacts import router as vendor_contacts_router
-from .routers.vendors_crud import router as vendors_crud_router
-
-app.include_router(vendors_crud_router)
-app.include_router(vendor_contacts_router)
-app.include_router(materials_router)
-app.include_router(vendor_analytics_router)
-from .routers.crm import router as crm_router
-
-app.include_router(crm_router)
-from .routers.sources import router as sources_router
-
-app.include_router(sources_router)
-from .routers.ai import router as ai_router
-
-app.include_router(ai_router)
-from .routers.v13_features import router as v13_router
-
-app.include_router(v13_router)
-from .routers.requisitions import router as reqs_router
-
-app.include_router(reqs_router)
-from .routers.rfq import router as rfq_router
-
-app.include_router(rfq_router)
-from .routers.proactive import router as proactive_router
-
-app.include_router(proactive_router)
-from .routers.performance import router as performance_router
-
-app.include_router(performance_router)
-from .routers.admin import router as admin_router
-
-app.include_router(admin_router)
-from .routers.emails import router as emails_router
-
-app.include_router(emails_router)
-from .routers.enrichment import router as enrichment_router
-
-app.include_router(enrichment_router)
-from .routers.documents import router as documents_router
-
-app.include_router(documents_router)
-from .routers.error_reports import router as error_reports_router
-
-app.include_router(error_reports_router)
-
-from .routers.command_center import router as command_center_router
-
-app.include_router(command_center_router)
-from .routers.dashboard import router as dashboard_router
-
-app.include_router(dashboard_router)
-from .routers.prospect_pool import router as prospect_pool_router
-from .routers.prospect_suggested import router as prospect_suggested_router
-
-app.include_router(prospect_pool_router)
-app.include_router(prospect_suggested_router)
-
-from .routers.apollo_sync import router as apollo_sync_router
-
-app.include_router(apollo_sync_router)
-
-try:
-    from .routers.explorium import router as explorium_router
-
-    app.include_router(explorium_router)
-except ModuleNotFoundError:
-    pass  # explorium router not in this branch / optional
-
-from .routers.nc_admin import router as nc_admin_router
-
-app.include_router(nc_admin_router)
-
-from .routers.ics_admin import router as ics_admin_router
-
-app.include_router(ics_admin_router)
-
-
-from .routers.notifications import router as notifications_router
-
-app.include_router(notifications_router)
-
-from .routers.teams_actions import router as teams_actions_router
-
-app.include_router(teams_actions_router)
-
-from .routers.tagging_admin import router as tagging_admin_router
-
-app.include_router(tagging_admin_router)
-
-from .routers.tags import router as tags_router
-
-app.include_router(tags_router)
+# ── Router Registration ──────────────────────────────────────────────────
+# Imports grouped by domain, then registered. MVP-gated routers at the end.
 
 from .routers.activity import router as activity_router
-
-app.include_router(activity_router)
-
-from .routers.teams_alerts import router as teams_alerts_router
-
-app.include_router(teams_alerts_router)
-
+from .routers.admin import router as admin_router
+from .routers.ai import router as ai_router
+from .routers.apollo_sync import router as apollo_sync_router
+from .routers.auth import router as auth_router
+from .routers.command_center import router as command_center_router
+from .routers.crm import router as crm_router
+from .routers.dashboard import router as dashboard_router
+from .routers.documents import router as documents_router
+from .routers.emails import router as emails_router
+from .routers.enrichment import router as enrichment_router
+from .routers.error_reports import router as error_reports_router
+from .routers.ics_admin import router as ics_admin_router
 from .routers.knowledge import insights_router as knowledge_insights_router
 from .routers.knowledge import router as knowledge_router
 from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
+from .routers.materials import router as materials_router
+from .routers.nc_admin import router as nc_admin_router
+from .routers.notifications import router as notifications_router
+from .routers.outreach import router as outreach_router
+from .routers.performance import router as performance_router
+from .routers.proactive import router as proactive_router
+from .routers.prospect_pool import router as prospect_pool_router
+from .routers.prospect_suggested import router as prospect_suggested_router
+from .routers.requisitions import router as reqs_router
+from .routers.rfq import router as rfq_router
+from .routers.sources import router as sources_router
+from .routers.strategic import router as strategic_router
+from .routers.tags import router as tags_router
+from .routers.tagging_admin import router as tagging_admin_router
+from .routers.task import my_tasks_router
+from .routers.task import router as task_router
+from .routers.teams_actions import router as teams_actions_router
+from .routers.teams_alerts import router as teams_alerts_router
+from .routers.v13_features import router as v13_router
+from .routers.vendor_analytics import router as vendor_analytics_router
+from .routers.vendor_contacts import router as vendor_contacts_router
+from .routers.vendor_inquiry import router as vendor_inquiry_router
+from .routers.vendors_crud import router as vendors_crud_router
 
+# Core routers (always active)
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(ai_router)
+app.include_router(activity_router)
+app.include_router(command_center_router)
+app.include_router(crm_router)
+app.include_router(documents_router)
+app.include_router(emails_router)
+app.include_router(error_reports_router)
+app.include_router(ics_admin_router)
 app.include_router(knowledge_router)
 app.include_router(knowledge_insights_router)
 app.include_router(knowledge_sprinkles_router)
-
-from .routers.task import my_tasks_router
-from .routers.task import router as task_router
-
+app.include_router(materials_router)
+app.include_router(nc_admin_router)
+app.include_router(notifications_router)
+app.include_router(outreach_router)
+app.include_router(proactive_router)
+app.include_router(prospect_pool_router)
+app.include_router(prospect_suggested_router)
+app.include_router(reqs_router)
+app.include_router(rfq_router)
+app.include_router(sources_router)
+app.include_router(strategic_router)
+app.include_router(tags_router)
+app.include_router(tagging_admin_router)
 app.include_router(task_router)
 app.include_router(my_tasks_router)
-
-# Strategic Vendors (per-buyer assignments with 39-day TTL)
-from .routers.strategic import router as strategic_router
-
-app.include_router(strategic_router)
-
-from .routers.outreach import router as outreach_router
-
-app.include_router(outreach_router)
-from .routers.vendor_inquiry import router as vendor_inquiry_router
-
+app.include_router(v13_router)
+app.include_router(vendor_analytics_router)
+app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
+app.include_router(vendors_crud_router)
+
+# Full-version routers (disabled in MVP mode)
+if not settings.mvp_mode:
+    app.include_router(apollo_sync_router)
+    app.include_router(dashboard_router)
+    app.include_router(enrichment_router)
+    app.include_router(performance_router)
+    app.include_router(teams_actions_router)
+    app.include_router(teams_alerts_router)
+    try:
+        from .routers.explorium import router as explorium_router
+
+        app.include_router(explorium_router)
+    except ModuleNotFoundError:
+        pass

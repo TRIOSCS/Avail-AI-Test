@@ -67,7 +67,7 @@ def _is_rate_limited(event_type: str, entity_id: int | str) -> bool:
         try:
             return r.exists(f"{_REDIS_PREFIX}{key}") > 0
         except Exception:
-            pass
+            logger.debug("Redis rate-limit check failed, falling back to in-memory", exc_info=True)
     # Fallback to in-memory
     last = _rate_limits.get(key)
     if last and (datetime.now(timezone.utc) - last).total_seconds() < _RATE_LIMIT_SECONDS:
@@ -87,7 +87,7 @@ def _mark_posted(event_type: str, entity_id: int | str):
             r.setex(f"{_REDIS_PREFIX}{key}", _RATE_LIMIT_SECONDS, "1")
             return
         except Exception:
-            pass
+            logger.debug("Redis rate-limit set failed, falling back to in-memory", exc_info=True)
     # In-memory fallback — prune stale entries periodically to prevent unbounded growth
     now = datetime.now(timezone.utc)
     if len(_rate_limits) > 1000:

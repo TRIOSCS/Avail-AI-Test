@@ -391,6 +391,7 @@ async def _enrich_vendors_batch(
         try:
             db.commit()
         except Exception:
+            logger.warning("Failed to commit partial batch enrichment results", exc_info=True)
             db.rollback()
 
 
