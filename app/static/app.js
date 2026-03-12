@@ -7,6 +7,7 @@ import {
     updateBulkFollowUpBtnImpl,
 } from './rfq/followups.js';
 import { fetchActivityData } from './rfq/activity.js';
+import { fetchRfqWorkspaceTabData } from './rfq/workspace.js';
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
@@ -16525,25 +16526,7 @@ async function _rfqLoadTab(tab) {
 
     body.innerHTML = '<span class="loading-placeholder">Loading\u2026</span>';
     try {
-        let data;
-        switch (tab) {
-            case 'offers':
-                data = await apiFetch(`/api/requirements/${partId}/offers`);
-                break;
-            case 'activity': {
-                // Fetch notes, tasks, and history in parallel
-                const [notes, tasks, history] = await Promise.all([
-                    apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []),
-                    apiFetch(`/api/requirements/${partId}/history`).catch(() => []),
-                ]);
-                data = { notes, tasks, history };
-                break;
-            }
-            case 'sightings':
-                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
-                break;
-        }
+        const data = await fetchRfqWorkspaceTabData({ apiFetch }, tab, partId, _rfqActiveReqId);
         // Abort if part changed while loading
         if (_rfqActivePartId !== partId) return;
         _rfqPanelCache[tab] = data;

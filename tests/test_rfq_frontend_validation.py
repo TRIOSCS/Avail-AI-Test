@@ -52,6 +52,13 @@ def rfq_activity_js():
         return f.read()
 
 
+@pytest.fixture(scope="module")
+def rfq_workspace_js():
+    """Read workspace.js raw content."""
+    with open("app/static/rfq/workspace.js", "r") as f:
+        return f.read()
+
+
 # ── JS Syntax Validation ─────────────────────────────────────────────────
 
 
@@ -74,6 +81,11 @@ class TestJSSyntax:
     def test_rfq_activity_js_parses(self):
         """rfq/activity.js passes Node.js syntax check."""
         result = subprocess.run(["node", "-c", "app/static/rfq/activity.js"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"JS syntax error: {result.stderr}"
+
+    def test_rfq_workspace_js_parses(self):
+        """rfq/workspace.js passes Node.js syntax check."""
+        result = subprocess.run(["node", "-c", "app/static/rfq/workspace.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
 
@@ -224,6 +236,14 @@ class TestRfqActivityModuleWireup:
 
     def test_activity_module_exports_fetcher(self, rfq_activity_js):
         assert "export async function fetchActivityData" in rfq_activity_js
+
+
+class TestRfqWorkspaceModuleWireup:
+    def test_app_imports_workspace_module(self, app_js):
+        assert "./rfq/workspace.js" in app_js
+
+    def test_workspace_module_exports_tab_fetcher(self, rfq_workspace_js):
+        assert "export async function fetchRfqWorkspaceTabData" in rfq_workspace_js
 
 
 # ── Notification Bar ─────────────────────────────────────────────────────
