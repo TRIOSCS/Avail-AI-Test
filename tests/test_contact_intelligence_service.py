@@ -495,7 +495,8 @@ class TestGenerateContactSummary:
         vc.relationship_score = 65.0
         db_session.commit()
 
-        result = generate_contact_summary(db_session, card.id, vc.id)
+        with patch("app.config.settings.do_gradient_api_key", None):
+            result = generate_contact_summary(db_session, card.id, vc.id)
         assert "Template Person" in result
         assert "10" in result
         assert "steady" in result  # stable → "steady"

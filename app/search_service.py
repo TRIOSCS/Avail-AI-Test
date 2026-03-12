@@ -248,6 +248,165 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     return {"sightings": results, "source_stats": source_stats}
 
 
+async def quick_search_mpn(mpn: str, db: Session) -> dict:
+    """Ad-hoc MPN search — hits supplier APIs without needing a Requirement.
+
+    Returns live API results + material card history, scored and deduped.
+    Does NOT persist sightings (read-only quick check).
+
+    Called by: routers/materials.py (POST /api/quick-search)
+    Depends on: _fetch_fresh, _get_material_history, scoring, normalization
+    """
+    from .evidence_tiers import tier_for_sighting
+
+    clean_mpn = normalize_mpn(mpn) or mpn.strip().upper()
+    if not clean_mpn:
+        return {"sightings": [], "source_stats": [], "material_card": None}
+
+    pns = [clean_mpn]
+    now = datetime.now(timezone.utc)
+
+    # 1. Hit all supplier APIs
+    fresh, source_stats = await _fetch_fresh(pns, db)
+
+    # 2. Build vendor score lookup
+    needed_names = {normalize_vendor_name((r.get("vendor_name") or "").strip()) for r in fresh if r.get("vendor_name")}
+    needed_names.discard("")
+    vendor_score_map = {}
+    if needed_names:
+        from .models import VendorCard
+        vendor_cards = (
+            db.query(VendorCard.normalized_name, VendorCard.vendor_score)
+            .filter(VendorCard.normalized_name.in_(needed_names))
+            .all()
+        )
+        vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+
+    # 3. Score raw results into sighting-like dicts (no DB persist)
+    results = []
+    for r in fresh:
+        raw_mpn = r.get("mpn_matched")
+        clean_mpn_r = normalize_mpn(raw_mpn) or raw_mpn
+        raw_vendor = r.get("vendor_name", "Unknown")
+        clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
+
+        clean_qty = normalize_quantity(r.get("qty_available"))
+        if clean_qty is None and isinstance(r.get("qty_available"), (int, float)) and r["qty_available"] > 0:
+            clean_qty = int(r["qty_available"])
+
+        clean_price = normalize_price(r.get("unit_price"))
+        if clean_price is None and isinstance(r.get("unit_price"), (int, float)) and r["unit_price"] > 0:
+            clean_price = float(r["unit_price"])
+
+        raw_currency = r.get("currency") or "USD"
+        clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
+        raw_conf = r.get("confidence", 0) or 0
+        norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
+        is_auth = r.get("is_authorized", False)
+        norm_name = normalize_vendor_name(clean_vendor)
+        base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
+        tier = tier_for_sighting(r.get("source_type"), is_auth)
+
+        results.append({
+            "id": None,
+            "requirement_id": None,
+            "vendor_name": clean_vendor,
+            "vendor_email": r.get("vendor_email"),
+            "vendor_phone": r.get("vendor_phone"),
+            "mpn_matched": clean_mpn_r,
+            "manufacturer": r.get("manufacturer"),
+            "qty_available": clean_qty,
+            "unit_price": clean_price,
+            "currency": clean_currency,
+            "source_type": r.get("source_type"),
+            "is_authorized": is_auth,
+            "confidence": norm_conf,
+            "score": base_score,
+            "octopart_url": r.get("octopart_url"),
+            "click_url": r.get("click_url"),
+            "vendor_url": r.get("vendor_url"),
+            "vendor_sku": r.get("vendor_sku"),
+            "condition": normalize_condition(r.get("condition")),
+            "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+            "date_code": normalize_date_code(r.get("date_code")),
+            "packaging": normalize_packaging(r.get("packaging")),
+            "lead_time_days": normalize_lead_time(r.get("lead_time")),
+            "lead_time": r.get("lead_time"),
+            "evidence_tier": tier,
+            "created_at": now.isoformat(),
+            "is_historical": False,
+            "is_material_history": False,
+            "country": r.get("country"),
+            "lead_quality": classify_lead(
+                score=base_score, is_authorized=is_auth,
+                has_price=clean_price is not None, has_qty=clean_qty is not None,
+                has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+                evidence_tier=tier,
+            ),
+        })
+
+    # 4. v2 scoring with median price context
+    prices = [r["unit_price"] for r in results if r.get("unit_price") and r["unit_price"] > 0]
+    median_price = sorted(prices)[len(prices) // 2] if prices else None
+    for r in results:
+        norm_name = normalize_vendor_name(r["vendor_name"])
+        v2_total, _ = score_sighting_v2(
+            vendor_score=vendor_score_map.get(norm_name),
+            is_authorized=r["is_authorized"],
+            unit_price=r["unit_price"],
+            median_price=median_price,
+            qty_available=r["qty_available"],
+            target_qty=None,
+            age_hours=0.0,
+            has_price=r["unit_price"] is not None,
+            has_qty=r["qty_available"] is not None,
+            has_lead_time=r.get("lead_time_days") is not None,
+            has_condition=r.get("condition") is not None,
+        )
+        r["score"] = v2_total
+
+    # 5. Material card history
+    norm_key = normalize_mpn_key(clean_mpn)
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm_key).filter(MaterialCard.deleted_at.is_(None)).first()
+    card_ids = [card.id] if card else []
+    fresh_vendors = {(r["vendor_name"] or "").lower() for r in results}
+    history = _get_material_history(card_ids, fresh_vendors, db)
+    for h in history:
+        results.append(_history_to_result(h, now))
+
+    # 6. Dedupe, filter weak leads, sort
+    results = _deduplicate_sightings(results)
+    results = [
+        r for r in results
+        if not is_weak_lead(
+            score=r.get("score", 0),
+            is_authorized=r.get("is_authorized", False),
+            has_price=r.get("unit_price") is not None,
+            has_qty=r.get("qty_available") is not None,
+            evidence_tier=r.get("evidence_tier"),
+        )
+    ]
+    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    # 7. Material card summary (if exists)
+    card_summary = None
+    if card:
+        from .models import Offer
+        sighting_ct = db.query(Sighting).filter(Sighting.material_card_id == card.id).count()
+        offer_ct = db.query(Offer).filter(Offer.material_card_id == card.id).count()
+        card_summary = {
+            "id": card.id,
+            "mpn": card.display_mpn,
+            "manufacturer": card.manufacturer,
+            "description": card.description,
+            "lifecycle_status": card.lifecycle_status,
+            "sighting_count": sighting_ct,
+            "offer_count": offer_ct,
+        }
+
+    return {"sightings": results, "source_stats": source_stats, "material_card": card_summary}
+
+
 # ── Sighting deduplication ───────────────────────────────────────────────
 
 

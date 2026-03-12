@@ -5,7 +5,9 @@
     "build": "vite build",
     "postbuild": "if [ -f scripts/smoke-test-bundles.mjs ]; then node scripts/smoke-test-bundles.mjs; fi",
     "preview": "vite preview",
-    "test:frontend": "vitest run"
+    "test:frontend": "vitest run",
+    "test:frontend:unit": "node --test tests/frontend/*.unit.test.mjs",
+    "test:frontend:e2e": "node --test tests/frontend/*.e2e.test.mjs"
   },
   "devDependencies": {
     "jsdom": "^28.1.0",
