@@ -84,64 +84,6 @@ class SaveDraftOffersRequest(BaseModel):
         return v
 
 
-class IntakeRequirementItem(BaseModel):
-    mpn: str
-    quantity: int = Field(default=1, ge=1)
-    manufacturer: str | None = None
-    target_price: float | None = Field(default=None, ge=0)
-    condition: str | None = None
-    date_codes: str | None = None
-    packaging: str | None = None
-    notes: str | None = None
-
-    @field_validator("mpn")
-    @classmethod
-    def normalize_requirement_mpn(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("mpn required")
-        return normalize_mpn(v) or v
-
-    @field_validator("condition")
-    @classmethod
-    def normalize_requirement_condition(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_condition(v) or v
-
-    @field_validator("packaging")
-    @classmethod
-    def normalize_requirement_packaging(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_packaging(v) or v
-
-
-class IntakeDraftRequest(BaseModel):
-    text: str = Field(min_length=1)
-    requisition_id: int | None = None
-
-    @field_validator("text")
-    @classmethod
-    def text_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("text required")
-        return v
-
-
-class IntakeDraftResponse(BaseModel):
-    document_type: Literal["rfq", "offer", "unclear"] = "unclear"
-    confidence: float = Field(default=0.0, ge=0, le=1)
-    summary: str | None = None
-    requisition_name: str | None = None
-    customer_name: str | None = None
-    vendor_name: str | None = None
-    notes: str | None = None
-    requirements: list[IntakeRequirementItem] = Field(default_factory=list)
-    offers: list[DraftOfferItem] = Field(default_factory=list)
-
-
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)
@@ -267,72 +209,34 @@ class CompareQuotesRequest(BaseModel):
     required_qty: int | None = None
 
 
-# ── Free-Text RFQ/Offer Parsing ────────────────────────────────────
+# ── Freeform paste parsing ────────────────────────────────────────────────
 
 
-class FreeTextParseRequest(BaseModel):
-    """Input for AI free-text RFQ/Offer parsing."""
+class ParseFreeformRfqRequest(BaseModel):
+    """Input for AI freeform RFQ parsing (customer text)."""
 
-    text: str = Field(min_length=1)
-
-
-class FreeTextLineItem(BaseModel):
-    """Single line item extracted from free-form text."""
-
-    mpn: str
-    manufacturer: str | None = None
-    quantity: int = 1
-    target_price: float | None = None
-    currency: str = "USD"
-    condition: str | None = None
-    date_code: str | None = None
-    lead_time: str | None = None
-    packaging: str | None = None
-    moq: int | None = None
-    notes: str | None = None
-
-    @field_validator("mpn")
-    @classmethod
-    def normalize_mpn_field(cls, v: str) -> str:
-        if not v:
-            return v
-        return normalize_mpn(v) or v
-
-    @field_validator("condition")
-    @classmethod
-    def normalize_condition_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_condition(v) or v
-
-    @field_validator("packaging")
-    @classmethod
-    def normalize_packaging_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_packaging(v) or v
+    raw_text: str = Field(min_length=1)
 
 
-class FreeTextSaveRfqRequest(BaseModel):
-    """Save parsed free-text as an RFQ (Requisition + Requirements)."""
+class ParseFreeformOfferRequest(BaseModel):
+    """Input for AI freeform offer parsing (vendor text)."""
 
-    name: str = "Untitled"
-    customer_name: str | None = None
+    raw_text: str = Field(min_length=1)
+    requisition_id: int | None = None  # Optional: pass for RFQ context to improve matching
+
+
+class ApplyFreeformRfqRequest(BaseModel):
+    """Apply edited RFQ template — create requisition + requirements."""
+
+    name: str = Field(min_length=1)
     customer_site_id: int | None = None
-    notes: str | None = None
-    line_items: list[FreeTextLineItem] = Field(min_length=1)
+    customer_name: str | None = None
+    deadline: str | None = None
+    requirements: list[dict] = Field(min_length=1)  # [{primary_mpn, target_qty, target_price, substitutes, notes}]
 
 
-class FreeTextSaveOffersRequest(BaseModel):
-    """Save parsed free-text as Offers on an existing Requisition."""
+class SaveFreeformOffersRequest(BaseModel):
+    """Save freeform-parsed offers to a requisition."""
 
-    requisition_id: int
-    vendor_name: str = Field(min_length=1)
-    line_items: list[FreeTextLineItem] = Field(min_length=1)
-
-    @field_validator("requisition_id")
-    @classmethod
-    def req_id_positive(cls, v: int) -> int:
-        if v < 1:
-            raise ValueError("requisition_id must be positive")
-        return v
+    requisition_id: int = Field(ge=1)
+    offers: list[DraftOfferItem] = Field(min_length=1)

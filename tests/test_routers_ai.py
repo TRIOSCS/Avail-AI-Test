@@ -1385,3 +1385,200 @@ def test_find_contacts_websearch_fallback(ai_client, db_session):
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 2  # Apollo + web search combined
+
+
+# ---------------------------------------------------------------------------
+# Freeform paste parsing (6 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_freeform_rfq_ai_disabled(ai_client):
+    """POST /api/ai/parse-freeform-rfq with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-rfq",
+            json={"raw_text": "Need LM317T x500, LM7805 x1000"},
+        )
+    assert resp.status_code == 403
+
+
+def test_parse_freeform_rfq_success(ai_client):
+    """POST /api/ai/parse-freeform-rfq returns RFQ template."""
+    template = {
+        "name": "Acme Project - Feb 2026",
+        "customer_name": "Acme Corp",
+        "deadline": "2026-02-28",
+        "requirements": [
+            {"primary_mpn": "LM317T", "target_qty": 500, "target_price": 0.50},
+            {"primary_mpn": "LM7805", "target_qty": 1000},
+        ],
+    }
+    with (
+        patch("app.routers.ai._ai_enabled", return_value=True),
+        patch(
+            "app.services.freeform_parser_service.parse_freeform_rfq",
+            new_callable=AsyncMock,
+            return_value=template,
+        ),
+    ):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-rfq",
+            json={"raw_text": "Acme needs LM317T x500 at $0.50, LM7805 x1000. Due Feb 28."},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["parsed"] is True
+    assert data["template"]["name"] == "Acme Project - Feb 2026"
+    assert len(data["template"]["requirements"]) == 2
+
+
+def test_parse_freeform_rfq_no_result(ai_client):
+    """POST /api/ai/parse-freeform-rfq returns parsed=False when parser returns None."""
+    with (
+        patch("app.routers.ai._ai_enabled", return_value=True),
+        patch(
+            "app.services.freeform_parser_service.parse_freeform_rfq",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-rfq",
+            json={"raw_text": ""},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["parsed"] is False
+
+
+def test_parse_freeform_offer_ai_disabled(ai_client):
+    """POST /api/ai/parse-freeform-offer with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "LM317T 500pcs @ $0.45"},
+        )
+    assert resp.status_code == 403
+
+
+def test_parse_freeform_offer_success(ai_client, db_session):
+    """POST /api/ai/parse-freeform-offer returns offer template."""
+    from app.models import Requisition
+
+    req = Requisition(
+        name="REQ-OFFER",
+        customer_name="Test",
+        status="open",
+        created_by=1,
+    )
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+
+    template = {
+        "vendor_name": "Acme Vendor",
+        "offers": [
+            {"mpn": "LM317T", "qty_available": 500, "unit_price": 0.45, "currency": "USD"},
+            {"mpn": "LM7805", "qty_available": 1000, "unit_price": 0.30},
+        ],
+    }
+    with (
+        patch("app.routers.ai._ai_enabled", return_value=True),
+        patch(
+            "app.services.freeform_parser_service.parse_freeform_offer",
+            new_callable=AsyncMock,
+            return_value=template,
+        ),
+    ):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "LM317T 500 @ $0.45, LM7805 1000 @ $0.30", "requisition_id": req.id},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["parsed"] is True
+    assert data["template"]["vendor_name"] == "Acme Vendor"
+    assert len(data["template"]["offers"]) == 2
+
+
+def test_apply_freeform_rfq_success(ai_client, db_session, ai_test_user):
+    """POST /api/ai/apply-freeform-rfq creates requisition + requirements."""
+    from app.models import Company, CustomerSite, Requirement, Requisition
+
+    co = Company(name="Apply Co", is_active=True)
+    db_session.add(co)
+    db_session.flush()
+    site = CustomerSite(company_id=co.id, site_name="Apply HQ")
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+
+    payload = {
+        "name": "Apply Test RFQ",
+        "customer_site_id": site.id,
+        "customer_name": "Apply Co",
+        "deadline": "2026-03-15",
+        "requirements": [
+            {"primary_mpn": "LM317T", "target_qty": 500, "target_price": 0.50},
+            {"primary_mpn": "LM7805", "target_qty": 1000},
+        ],
+    }
+    resp = ai_client.post("/api/ai/apply-freeform-rfq", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["id"] is not None
+    assert data["name"] == "Apply Test RFQ"
+    assert data["requirements_added"] == 2
+
+    req = db_session.get(Requisition, data["id"])
+    assert req is not None
+    assert req.customer_site_id == site.id
+    reqs = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).all()
+    assert len(reqs) == 2
+    mpns = {r.primary_mpn for r in reqs}
+    assert "LM317T" in mpns
+    assert "LM7805" in mpns
+
+
+def test_apply_freeform_rfq_no_site(ai_client):
+    """POST /api/ai/apply-freeform-rfq without customer_site_id returns 400."""
+    resp = ai_client.post(
+        "/api/ai/apply-freeform-rfq",
+        json={
+            "name": "Test",
+            "requirements": [{"primary_mpn": "LM317T", "target_qty": 100}],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_save_freeform_offers_success(ai_client, db_session, ai_test_user):
+    """POST /api/ai/save-freeform-offers creates Offer records."""
+    from app.models import Offer, Requisition
+
+    req = Requisition(
+        name="REQ-FREEFORM",
+        customer_name="Test",
+        status="open",
+        created_by=ai_test_user.id,
+    )
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+
+    payload = {
+        "requisition_id": req.id,
+        "offers": [
+            {"vendor_name": "Freeform Vendor", "mpn": "LM317T", "qty_available": 500, "unit_price": 0.45},
+            {"vendor_name": "Freeform Vendor", "mpn": "LM7805", "qty_available": 1000, "unit_price": 0.30},
+        ],
+    }
+    resp = ai_client.post("/api/ai/save-freeform-offers", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["created"] == 2
+    assert len(data["offer_ids"]) == 2
+
+    offers = db_session.query(Offer).filter(Offer.requisition_id == req.id).all()
+    assert len(offers) == 2
+    assert all(o.source == "freeform_parsed" for o in offers)
+    assert all(o.entered_by_id == ai_test_user.id for o in offers)
