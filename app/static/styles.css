@@ -3358,3 +3358,89 @@ div[style*="display:flex"] > .status-strip .status-strip-label { font-size: 8px;
   .rfq-right { width:100%; max-width:100%; min-height:50vh; }
 }
 
+/* Readability polish (non-structural): improve scanability, reduce visual noise */
+body { line-height: 1.42; }
+
+.toparea { padding: 6px 20px; gap: 16px; }
+.topcontrols { gap: 10px; }
+.main-scroll { padding: 12px 32px 14px; }
+.toolbar-stats { gap: 8px; }
+
+.card,
+.act-card,
+.offer-group,
+.proactive-group,
+.proactive-offer-card,
+.src-card,
+.cust-card {
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.card:hover,
+.act-card:hover,
+.src-card:hover,
+.cust-card:hover,
+.proactive-group:hover {
+  transform: none;
+  box-shadow: var(--shadow-md);
+}
+
+.card,
+.act-card,
+.offer-group,
+.proactive-group,
+.proactive-offer-card,
+.src-card,
+.cust-card {
+  animation: none;
+}
+
+.tbl { border-spacing: 0 8px; font-size: 13px; }
+.tbl th {
+  font-size: 12px;
+  letter-spacing: .35px;
+  color: #64748b;
+  padding: 10px 14px 9px;
+}
+.tbl td { padding: 11px 14px; line-height: 1.45; }
+
+.col-headers { font-size: 11px; padding: 6px 20px; letter-spacing: .03em; }
+.req-row { padding: 9px 20px; font-size: 13px; line-height: 1.35; }
+.c-user, .c-date, .c-qty, .c-val { font-size: 12px; }
+
+.sbox {
+  font-size: 14px;
+  border-width: 1px;
+  padding: 10px 16px;
+}
+.sbox:focus { box-shadow: 0 0 0 3px rgba(59,110,168,.14); }
+.search-hint { font-size: 10px; opacity: .75; }
+
+.fp, .tb-action, .btn { font-size: 13px; }
+.fp-sm, .btn-sm { font-size: 12px; }
+
+.field label { font-size: 11px; letter-spacing: .35px; }
+.field input,
+.field textarea,
+.field select {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.badge,
+.status-badge,
+.req-badge,
+.src-badge,
+.signal-tag {
+  font-size: 10px;
+  letter-spacing: .2px;
+}
+.sc-badges .badge { font-size: 9px; padding: 2px 5px; }
+
+.empty,
+.card-empty {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #64748b;
+}
