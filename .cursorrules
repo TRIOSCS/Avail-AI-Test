@@ -195,3 +195,13 @@ After every meaningful coding session, provide:
 - **Customer data:** 8 years of Legendary Supply Chain Salesforce history in AVAIL
 - **ERP:** Acctivate (back-office); AVAIL handles sourcing/CRM
 - **Key staff in system:** Marcus, Martina (EMEA Sales), Derrick, Aniket, David, Sally, Angel, Eric, Katy, Myrna
+
+---
+
+## 10. GIT SOURCE-OF-TRUTH WORKFLOW (LIVE SAFETY)
+
+- `main` is the deploy/source-of-truth branch for AVAIL live updates.
+- At the end of each coding session, ensure all completed work is pushed and merged to `main`.
+- Verify before handoff: `git status` clean, branch is `main`, and `origin/main` matches local `HEAD`.
+- Keep files organized in existing AVAIL structure (`app/`, `tests/`, `alembic/`, `scripts/`, `docs/`) so runtime and tooling discover the correct code paths.
+- Always provide one copy-paste deploy command after merge/push so live rollout uses the latest `main`.
