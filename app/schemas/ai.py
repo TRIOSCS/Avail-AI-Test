@@ -84,6 +84,64 @@ class SaveDraftOffersRequest(BaseModel):
         return v
 
 
+class IntakeRequirementItem(BaseModel):
+    mpn: str
+    quantity: int = Field(default=1, ge=1)
+    manufacturer: str | None = None
+    target_price: float | None = Field(default=None, ge=0)
+    condition: str | None = None
+    date_codes: str | None = None
+    packaging: str | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_requirement_mpn(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("mpn required")
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_requirement_condition(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_requirement_packaging(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class IntakeDraftRequest(BaseModel):
+    text: str = Field(min_length=1)
+    requisition_id: int | None = None
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text required")
+        return v
+
+
+class IntakeDraftResponse(BaseModel):
+    document_type: Literal["rfq", "offer", "unclear"] = "unclear"
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    summary: str | None = None
+    requisition_name: str | None = None
+    customer_name: str | None = None
+    vendor_name: str | None = None
+    notes: str | None = None
+    requirements: list[IntakeRequirementItem] = Field(default_factory=list)
+    offers: list[DraftOfferItem] = Field(default_factory=list)
+
+
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)

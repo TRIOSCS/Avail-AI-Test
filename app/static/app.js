@@ -16094,6 +16094,28 @@ function ctxAttachFile() {
 
 let _intakeParsedRows = [];
 let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
+let _intakeDraftMeta = null;
+let _intakeLoading = false;
+let _intakeParseSeq = 0;
+let _intakeLastParsedText = '';
+
+function _blankIntakeMeta() {
+    return {
+        document_type: 'unclear',
+        confidence: 0,
+        summary: '',
+        requisition_name: '',
+        customer_name: '',
+        vendor_name: '',
+        notes: '',
+        source: 'legacy'
+    };
+}
+
+function _intakeShouldParse(text) {
+    const trimmed = (text || '').trim();
+    return trimmed.length >= 20 && (trimmed.includes('\n') || trimmed.includes('\t') || trimmed.length >= 60);
+}
 
 function showIntakeBar() {
     const bar = document.getElementById('intakeBar');
@@ -16107,15 +16129,14 @@ function hideIntakeBar() {
 }
 
 function _intakeInputChange(value) {
-    // Multi-line paste triggers review
-    if (value.includes('\n') || value.includes('\t')) {
+    if (_intakeShouldParse(value)) {
         _intakeParseText(value);
     }
 }
 
 function _intakePaste(event) {
     const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
-    if (text.includes('\n') || text.includes('\t')) {
+    if (_intakeShouldParse(text)) {
         event.preventDefault();
         const input = document.getElementById('intakeInput');
         if (input) input.value = text;
@@ -16124,10 +16145,72 @@ function _intakePaste(event) {
 }
 
 function _intakeParseText(text) {
-    // Parse tab/newline separated data into rows
+    void _intakeParseTextAsync(text);
+}
+
+async function _intakeParseTextAsync(text) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
+
+    if (trimmed === _intakeLastParsedText && _intakeParsedRows.length && !_intakeLoading) {
+        _intakeRenderDrawer();
+        return;
+    }
+
+    const parseSeq = ++_intakeParseSeq;
+    _intakeLoading = true;
+    _intakeParsedRows = [];
+    _intakeDraftMeta = { ..._blankIntakeMeta(), summary: 'AI is reviewing the pasted text…', source: 'ai' };
+    _intakeRenderDrawer();
+
+    try {
+        const data = await apiFetch('/api/ai/intake-draft', {
+            method: 'POST',
+            body: { text: trimmed, requisition_id: currentReqId || null }
+        });
+        if (parseSeq !== _intakeParseSeq) return;
+        const rows = _intakeRowsFromDraft(data || {});
+        if (rows.length) {
+            _intakeParsedRows = rows;
+            _intakeDraftMeta = {
+                ..._blankIntakeMeta(),
+                document_type: data.document_type || 'unclear',
+                confidence: Number(data.confidence) || 0,
+                summary: data.summary || '',
+                requisition_name: data.requisition_name || '',
+                customer_name: data.customer_name || '',
+                vendor_name: data.vendor_name || '',
+                notes: data.notes || '',
+                source: 'ai'
+            };
+            _intakeLoading = false;
+            _intakeLastParsedText = trimmed;
+            _intakeRenderDrawer();
+            return;
+        }
+        showToast('AI could not confidently structure that text — showing a quick manual draft.', 'warn');
+    } catch (e) {
+        if (parseSeq !== _intakeParseSeq) return;
+        showToast('AI review failed — falling back to a quick pasted-row draft.', 'warn');
+    }
+
+    if (parseSeq !== _intakeParseSeq) return;
+    _intakeLoading = false;
+    _intakeLastParsedText = trimmed;
+    _intakeLegacyParseText(trimmed);
+}
+
+function _intakeLegacyParseText(text) {
     const lines = text.trim().split('\n').filter(l => l.trim());
     if (lines.length === 0) return;
     _intakeParsedRows = [];
+    _intakeDraftMeta = {
+        ..._blankIntakeMeta(),
+        document_type: 'rfq',
+        confidence: 0.55,
+        summary: 'Structured rows detected from the pasted text. Review the draft before saving.',
+        source: 'legacy'
+    };
     // Detect header row
     const firstLine = lines[0].toLowerCase();
     const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
@@ -16140,13 +16223,21 @@ function _intakeParseText(text) {
             qty: cols[1]?.trim() || '',
             price: cols[2]?.trim() || '',
             manufacturer: cols[3]?.trim() || '',
-            confidence: 'high',
+            vendor_name: '',
+            currency: 'USD',
+            lead_time: '',
+            date_code: '',
+            condition: '',
+            packaging: '',
+            moq: '',
+            notes: '',
+            confidence: 0.95,
             type: _intakeTargetType,
             duplicate: false
         };
         // Simple confidence heuristic
-        if (!row.mpn || row.mpn.length < 3) row.confidence = 'low';
-        else if (!row.qty && !row.price) row.confidence = 'med';
+        if (!row.mpn || row.mpn.length < 3) row.confidence = 0.3;
+        else if (!row.qty && !row.price) row.confidence = 0.65;
         _intakeParsedRows.push(row);
     }
     _intakeRenderDrawer();
@@ -16156,21 +16247,42 @@ function _intakeRenderDrawer() {
     const drawer = document.getElementById('intakeDrawer');
     const body = document.getElementById('intakeDrawerBody');
     const titleEl = document.getElementById('intakeDrawerTitle');
+    const btn = document.getElementById('intakeConfirmBtn');
     if (!drawer || !body) return;
     drawer.classList.add('open');
-    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} items detected`;
+    if (_intakeLoading) {
+        if (titleEl) titleEl.textContent = 'AI Review — analyzing pasted text';
+        body.innerHTML = `<div class="empty" style="padding:20px">AI is cleaning up the pasted text and building a draft for review…</div>`;
+        if (btn) { btn.textContent = 'Analyzing…'; btn.disabled = true; }
+        return;
+    }
+    const reqCount = _intakeParsedRows.filter(r => r.type === 'requirement').length;
+    const offerCount = _intakeParsedRows.filter(r => r.type === 'offer').length;
+    if (titleEl) titleEl.textContent = `AI Review — ${reqCount} RFQ line${reqCount === 1 ? '' : 's'}${offerCount ? ` · ${offerCount} offer draft${offerCount === 1 ? '' : 's'}` : ''}`;
+    if (btn) {
+        btn.disabled = !_intakeParsedRows.length;
+        btn.textContent = _intakeConfirmLabel(reqCount, offerCount);
+    }
+    if (!_intakeParsedRows.length) {
+        body.innerHTML = `<div class="empty" style="padding:20px">Paste customer or vendor text to build a draft for review.</div>`;
+        return;
+    }
     let html = '';
+    html += _intakeRenderMetaCard(reqCount, offerCount);
     for (let i = 0; i < _intakeParsedRows.length; i++) {
         const r = _intakeParsedRows[i];
-        const confClass = r.confidence === 'high' ? 'high' : r.confidence === 'med' ? 'med' : 'low';
-        const confPct = r.confidence === 'high' ? '95' : r.confidence === 'med' ? '65' : '30';
-        html += `<div class="intake-row">
+        const confClass = _intakeConfidenceClass(r.confidence);
+        const confPct = _intakeConfidencePct(r.confidence);
+        const typeTag = r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer';
+        html += `<div class="intake-row" style="align-items:flex-start">
             <div class="intake-row-confidence ${confClass}" title="Confidence: ${r.confidence}">${confPct}%</div>
-            <div class="intake-row-data">
-                <div class="intake-row-mpn">${esc(r.mpn)}</div>
-                <div class="intake-row-detail">Qty: ${esc(r.qty || '—')} · Price: ${esc(r.price || '—')} ${r.manufacturer ? '· ' + esc(r.manufacturer) : ''}</div>
+            <div class="intake-row-data" style="display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
+                    <div class="intake-row-mpn">Line ${i + 1}</div>
+                    <span class="intake-row-tag ${typeTag}">${r.type}</span>
+                </div>
+                ${r.type === 'offer' ? _intakeRenderOfferRow(r, i) : _intakeRenderRequirementRow(r, i)}
             </div>
-            <span class="intake-row-tag ${r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer'}">${r.type}</span>
             ${r.duplicate ? '<span class="intake-row-tag dup">DUP</span>' : ''}
             <div class="intake-row-actions">
                 <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeChangeType(${i},this.value)">
@@ -16188,6 +16300,13 @@ function _intakeRenderDrawer() {
 function _intakeChangeType(idx, type) {
     if (_intakeParsedRows[idx]) {
         _intakeParsedRows[idx].type = type;
+        if (type === 'offer' && !_intakeParsedRows[idx].vendor_name && _intakeDraftMeta?.vendor_name) {
+            _intakeParsedRows[idx].vendor_name = _intakeDraftMeta.vendor_name;
+        }
+        if (type === 'requirement' && !_intakeDraftMeta?.document_type) {
+            _intakeDraftMeta = { ...(_intakeDraftMeta || _blankIntakeMeta()), document_type: 'rfq' };
+        }
+        _intakeRenderDrawer();
     }
 }
 
@@ -16200,6 +16319,8 @@ function _intakeClose() {
     const drawer = document.getElementById('intakeDrawer');
     if (drawer) drawer.classList.remove('open');
     _intakeParsedRows = [];
+    _intakeDraftMeta = null;
+    _intakeLoading = false;
     const input = document.getElementById('intakeInput');
     if (input) input.value = '';
 }
@@ -16207,44 +16328,66 @@ function _intakeClose() {
 const _intakeSubmit = () => _intakeConfirm();
 async function _intakeConfirm() {
     if (!_intakeParsedRows.length) return;
-    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement');
-    // For requirements, add them to the current requisition
-    if (reqRows.length && currentReqId) {
-        try {
-            for (const r of reqRows) {
-                await apiFetch(`/api/requisitions/${currentReqId}/requirements`, {
+    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement' && (r.mpn || '').trim());
+    const offerRows = _intakeParsedRows.filter(r => r.type === 'offer' && (r.mpn || '').trim());
+    if (!reqRows.length && !offerRows.length) {
+        showToast('Add at least one RFQ or offer line before saving', 'warn');
+        return;
+    }
+
+    const btn = document.getElementById('intakeConfirmBtn');
+    await guardBtn(btn, 'Saving…', async () => {
+        let targetReqId = currentReqId || null;
+        const useMaterialsFallback = !targetReqId && reqRows.length && !offerRows.length && _intakeDraftMeta?.source !== 'ai' && _intakeIsMaterialsView();
+        if (useMaterialsFallback) {
+            _intakeSearchMaterials(reqRows);
+            _intakeClose();
+            return;
+        }
+
+        if (!targetReqId) {
+            targetReqId = await _intakeCreateDraftRequisition();
+        }
+
+        if (reqRows.length) {
+            for (const row of reqRows) {
+                await apiFetch(`/api/requisitions/${targetReqId}/requirements`, {
                     method: 'POST',
-                    body: { primary_mpn: r.mpn, target_qty: r.qty || '1', target_price: r.price ? parseFloat(r.price) : null }
+                    body: _intakeRequirementPayload(row)
                 });
             }
-            showToast(`${reqRows.length} requirement(s) added`, 'success');
-        } catch (e) {
-            showToast('Failed to add some requirements', 'error');
         }
-    } else if (reqRows.length && !currentReqId) {
-        // If on materials view, search for these MPNs instead
-        if (_currentMainView === 'materials' || (document.getElementById('view-materials') && !document.getElementById('view-materials').classList.contains('hidden') && !document.getElementById('view-materials').classList.contains('u-hidden'))) {
-            const mpns = reqRows.map(r => r.mpn).filter(Boolean);
-            if (mpns.length) {
-                const searchBox = document.getElementById('materialSearch');
-                if (searchBox) { searchBox.value = mpns.join(', '); }
-                showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
-                if (typeof loadMaterialList === 'function') loadMaterialList();
+
+        if (offerRows.length) {
+            if (!currentReqId) {
+                await _intakeEnsureOfferRequirements(targetReqId, offerRows);
             }
-        } else {
-            showToast('Open a requisition first to add requirements', 'warn');
+            const offerPayloads = offerRows
+                .map(row => _intakeOfferPayload(row, _intakeDraftMeta?.vendor_name || ''))
+                .filter(row => row.vendor_name && row.mpn);
+            if (!offerPayloads.length) {
+                throw new Error('Each offer line needs a vendor name and part number');
+            }
+            await apiFetch('/api/ai/save-parsed-offers', {
+                method: 'POST',
+                body: { response_id: null, requisition_id: targetReqId, offers: offerPayloads }
+            });
         }
-    }
-    // For sightings and offers, log them (placeholder for full implementation)
-    const otherRows = _intakeParsedRows.filter(r => r.type !== 'requirement');
-    if (otherRows.length) {
-        showToast(`${otherRows.length} sighting/offer items logged (intake processing)`, 'info');
-    }
-    _intakeClose();
-    // Refresh requirement list if we added any
-    if (reqRows.length && currentReqId && typeof loadRequirements === 'function') {
-        loadRequirements();
-    }
+
+        _intakeClose();
+        await loadRequisitions();
+        if (targetReqId) {
+            delete _ddReqCache[targetReqId];
+            if (_ddTabCache[targetReqId]) delete _ddTabCache[targetReqId];
+            delete _ddSightingsCache[targetReqId];
+            delete _ddScoreCache[targetReqId];
+            await expandToSubTab(targetReqId, offerRows.length ? 'offers' : 'sightings');
+        }
+        const savedBits = [];
+        if (reqRows.length) savedBits.push(`${reqRows.length} RFQ line${reqRows.length === 1 ? '' : 's'}`);
+        if (offerRows.length) savedBits.push(`${offerRows.length} offer draft${offerRows.length === 1 ? '' : 's'}`);
+        showToast(`Saved ${savedBits.join(' and ')}`, 'success');
+    });
 }
 
 function _intakeUpload() {
@@ -16272,6 +16415,283 @@ function _intakeFileSelected(input) {
 
 function _intakeImportApi() {
     showToast('API import: use Search to pull live availability from supplier APIs', 'info');
+}
+
+function _intakeRowsFromDraft(data) {
+    const rows = [];
+    const baseConfidence = Number(data.confidence) || 0;
+    for (const item of (data.requirements || [])) {
+        rows.push({
+            type: 'requirement',
+            mpn: item.mpn || '',
+            qty: item.quantity != null ? String(item.quantity) : '1',
+            price: item.target_price != null ? String(item.target_price) : '',
+            manufacturer: item.manufacturer || '',
+            vendor_name: '',
+            currency: 'USD',
+            lead_time: '',
+            date_code: item.date_codes || '',
+            condition: item.condition || '',
+            packaging: item.packaging || '',
+            moq: '',
+            notes: item.notes || '',
+            confidence: baseConfidence || 0.8,
+            duplicate: false
+        });
+    }
+    for (const item of (data.offers || [])) {
+        rows.push({
+            type: 'offer',
+            mpn: item.mpn || '',
+            qty: item.qty_available != null ? String(item.qty_available) : '',
+            price: item.unit_price != null ? String(item.unit_price) : '',
+            manufacturer: item.manufacturer || '',
+            vendor_name: item.vendor_name || data.vendor_name || '',
+            currency: item.currency || 'USD',
+            lead_time: item.lead_time || '',
+            date_code: item.date_code || '',
+            condition: item.condition || '',
+            packaging: item.packaging || '',
+            moq: item.moq != null ? String(item.moq) : '',
+            notes: item.notes || '',
+            confidence: baseConfidence || 0.8,
+            duplicate: false
+        });
+    }
+    return rows;
+}
+
+function _intakeConfidenceClass(score) {
+    const value = Number(score) || 0;
+    if (value >= 0.8) return 'high';
+    if (value >= 0.5) return 'med';
+    return 'low';
+}
+
+function _intakeConfidencePct(score) {
+    const value = Number(score) || 0;
+    return Math.max(1, Math.min(99, Math.round(value * 100)));
+}
+
+function _intakeConfirmLabel(reqCount, offerCount) {
+    if (reqCount && offerCount) return currentReqId ? 'Save Draft Lines' : 'Create Draft Requisition + Save';
+    if (offerCount) return currentReqId ? 'Save Offer Drafts' : 'Create Draft Requisition + Save Offers';
+    if (reqCount) return currentReqId ? 'Add RFQ Draft' : (_intakeIsMaterialsView() && _intakeDraftMeta?.source !== 'ai' ? 'Confirm & Add' : 'Create Draft Requisition');
+    return 'Review & Save';
+}
+
+function _intakeRenderMetaCard(reqCount, offerCount) {
+    const meta = _intakeDraftMeta || _blankIntakeMeta();
+    const confClass = _intakeConfidenceClass(meta.confidence);
+    const confPct = _intakeConfidencePct(meta.confidence);
+    const docLabel = meta.document_type === 'offer' ? 'Vendor offer draft' : meta.document_type === 'rfq' ? 'Customer RFQ draft' : 'Draft review';
+    const createHint = !currentReqId && (offerCount > 0 || (reqCount > 0 && meta.source === 'ai'))
+        ? `<div style="font-size:11px;color:var(--text2)">No requisition is open, so saving will create a draft requisition first.</div>`
+        : '';
+    return `<div class="intake-row" style="background:var(--bg2)">
+        <div class="intake-row-confidence ${confClass}" title="AI confidence">${confPct}%</div>
+        <div class="intake-row-data" style="display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap">
+                <div>
+                    <div class="intake-row-mpn">${esc(docLabel)}</div>
+                    <div class="intake-row-detail">${esc(meta.summary || 'Review the extracted draft before saving.')}</div>
+                </div>
+                <span class="intake-row-tag ${meta.source === 'ai' ? 'offer' : 'req'}">${meta.source === 'ai' ? 'ai draft' : 'quick parse'}</span>
+            </div>
+            ${reqCount ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Requisition name
+                    <input value="${escAttr(meta.requisition_name || '')}" onchange="_intakeUpdateMeta('requisition_name',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Customer name
+                    <input value="${escAttr(meta.customer_name || '')}" onchange="_intakeUpdateMeta('customer_name',this.value)" placeholder="Optional customer name">
+                </label>
+            </div>` : ''}
+            ${offerCount ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Vendor name
+                    <input value="${escAttr(meta.vendor_name || '')}" onchange="_intakeUpdateMeta('vendor_name',this.value)" placeholder="Vendor name">
+                </label>
+            </div>` : ''}
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Draft notes
+                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateMeta('notes',this.value)" placeholder="Optional context to keep with the draft">${esc(meta.notes || '')}</textarea>
+            </label>
+            ${createHint}
+        </div>
+    </div>`;
+}
+
+function _intakeRenderRequirementRow(r, idx) {
+    return `<div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MPN
+                <input value="${escAttr(r.mpn || '')}" onchange="_intakeUpdateField(${idx},'mpn',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Qty
+                <input type="number" min="1" value="${escAttr(r.qty || '1')}" onchange="_intakeUpdateField(${idx},'qty',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Target price
+                <input type="number" min="0" step="0.0001" value="${escAttr(r.price || '')}" onchange="_intakeUpdateField(${idx},'price',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Manufacturer
+                <input value="${escAttr(r.manufacturer || '')}" onchange="_intakeUpdateField(${idx},'manufacturer',this.value)">
+            </label>
+        </div>
+        <details>
+            <summary style="font-size:11px;color:var(--teal);cursor:pointer">More RFQ fields</summary>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:8px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Condition
+                    <input value="${escAttr(r.condition || '')}" onchange="_intakeUpdateField(${idx},'condition',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Date codes
+                    <input value="${escAttr(r.date_code || '')}" onchange="_intakeUpdateField(${idx},'date_code',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Packaging
+                    <input value="${escAttr(r.packaging || '')}" onchange="_intakeUpdateField(${idx},'packaging',this.value)">
+                </label>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2);margin-top:8px">Notes
+                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateField(${idx},'notes',this.value)">${esc(r.notes || '')}</textarea>
+            </label>
+        </details>
+    </div>`;
+}
+
+function _intakeRenderOfferRow(r, idx) {
+    return `<div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Vendor
+                <input value="${escAttr(r.vendor_name || _intakeDraftMeta?.vendor_name || '')}" onchange="_intakeUpdateField(${idx},'vendor_name',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MPN
+                <input value="${escAttr(r.mpn || '')}" onchange="_intakeUpdateField(${idx},'mpn',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Qty available
+                <input type="number" min="0" value="${escAttr(r.qty || '')}" onchange="_intakeUpdateField(${idx},'qty',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Unit price
+                <input type="number" min="0" step="0.0001" value="${escAttr(r.price || '')}" onchange="_intakeUpdateField(${idx},'price',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Currency
+                <input value="${escAttr(r.currency || 'USD')}" maxlength="3" onchange="_intakeUpdateField(${idx},'currency',this.value)">
+            </label>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Manufacturer
+                <input value="${escAttr(r.manufacturer || '')}" onchange="_intakeUpdateField(${idx},'manufacturer',this.value)">
+            </label>
+        </div>
+        <details>
+            <summary style="font-size:11px;color:var(--teal);cursor:pointer">More offer fields</summary>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:8px">
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Lead time
+                    <input value="${escAttr(r.lead_time || '')}" onchange="_intakeUpdateField(${idx},'lead_time',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Date code
+                    <input value="${escAttr(r.date_code || '')}" onchange="_intakeUpdateField(${idx},'date_code',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Condition
+                    <input value="${escAttr(r.condition || '')}" onchange="_intakeUpdateField(${idx},'condition',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Packaging
+                    <input value="${escAttr(r.packaging || '')}" onchange="_intakeUpdateField(${idx},'packaging',this.value)">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MOQ
+                    <input type="number" min="0" value="${escAttr(r.moq || '')}" onchange="_intakeUpdateField(${idx},'moq',this.value)">
+                </label>
+            </div>
+            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2);margin-top:8px">Notes
+                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateField(${idx},'notes',this.value)">${esc(r.notes || '')}</textarea>
+            </label>
+        </details>
+    </div>`;
+}
+
+function _intakeUpdateField(idx, field, value) {
+    if (_intakeParsedRows[idx]) {
+        _intakeParsedRows[idx][field] = value;
+    }
+}
+
+function _intakeUpdateMeta(field, value) {
+    _intakeDraftMeta = { ...(_intakeDraftMeta || _blankIntakeMeta()), [field]: value };
+}
+
+function _intakeIsMaterialsView() {
+    const matView = document.getElementById('view-materials');
+    return _currentMainView === 'materials' || (matView && !matView.classList.contains('hidden') && !matView.classList.contains('u-hidden'));
+}
+
+function _intakeSearchMaterials(reqRows) {
+    const mpns = reqRows.map(r => (r.mpn || '').trim()).filter(Boolean);
+    if (!mpns.length) return;
+    const searchBox = document.getElementById('materialSearch');
+    if (searchBox) searchBox.value = mpns.join(', ');
+    showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
+    if (typeof loadMaterialList === 'function') loadMaterialList();
+}
+
+async function _intakeCreateDraftRequisition() {
+    const meta = _intakeDraftMeta || _blankIntakeMeta();
+    const today = new Date().toISOString().slice(0, 10);
+    const name = (meta.requisition_name || '').trim()
+        || (meta.document_type === 'offer'
+            ? `${(meta.vendor_name || 'Vendor').trim() || 'Vendor'} offer intake ${today}`
+            : `${(meta.customer_name || 'Customer').trim() || 'Customer'} RFQ intake ${today}`);
+    const data = await apiFetch('/api/requisitions', {
+        method: 'POST',
+        body: { name, customer_name: (meta.customer_name || '').trim() || null }
+    });
+    return data.id;
+}
+
+function _intakeRequirementPayload(row) {
+    const qty = parseInt(row.qty, 10);
+    const price = row.price === '' || row.price == null ? null : parseFloat(row.price);
+    return {
+        primary_mpn: (row.mpn || '').trim(),
+        target_qty: Number.isInteger(qty) && qty > 0 ? qty : 1,
+        target_price: Number.isFinite(price) ? price : null,
+        condition: (row.condition || '').trim() || null,
+        date_codes: (row.date_code || '').trim() || null,
+        packaging: (row.packaging || '').trim() || null,
+        notes: (row.notes || '').trim() || null
+    };
+}
+
+function _intakeOfferPayload(row, fallbackVendorName) {
+    const qty = row.qty === '' || row.qty == null ? null : parseInt(row.qty, 10);
+    const price = row.price === '' || row.price == null ? null : parseFloat(row.price);
+    const moq = row.moq === '' || row.moq == null ? null : parseInt(row.moq, 10);
+    return {
+        vendor_name: ((row.vendor_name || fallbackVendorName || '') + '').trim(),
+        mpn: (row.mpn || '').trim(),
+        manufacturer: (row.manufacturer || '').trim() || null,
+        qty_available: Number.isInteger(qty) && qty >= 0 ? qty : null,
+        unit_price: Number.isFinite(price) ? price : null,
+        currency: ((row.currency || 'USD') + '').trim().toUpperCase().slice(0, 3) || 'USD',
+        lead_time: (row.lead_time || '').trim() || null,
+        date_code: (row.date_code || '').trim() || null,
+        condition: (row.condition || '').trim() || null,
+        packaging: (row.packaging || '').trim() || null,
+        moq: Number.isInteger(moq) && moq >= 0 ? moq : null,
+        notes: (row.notes || '').trim() || null
+    };
+}
+
+async function _intakeEnsureOfferRequirements(reqId, offerRows) {
+    const existing = await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(() => []);
+    const existingMpns = new Set((existing || []).map(r => String(r.primary_mpn || '').trim().toUpperCase()).filter(Boolean));
+    const added = new Set();
+    for (const row of offerRows) {
+        const mpn = String(row.mpn || '').trim().toUpperCase();
+        if (!mpn || existingMpns.has(mpn) || added.has(mpn)) continue;
+        await apiFetch(`/api/requisitions/${reqId}/requirements`, {
+            method: 'POST',
+            body: {
+                primary_mpn: row.mpn,
+                target_qty: Math.max(1, parseInt(row.qty, 10) || 1),
+                notes: 'Auto-created from pasted vendor offer draft'
+            }
+        });
+        added.add(mpn);
+    }
 }
 
 
@@ -17454,6 +17874,7 @@ Object.assign(window, {
     // Universal intake bar
     showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit,
     _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
+    _intakeUpdateField, _intakeUpdateMeta,
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
