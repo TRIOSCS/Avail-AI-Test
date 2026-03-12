@@ -994,6 +994,10 @@ async function checkM365Status() {
 
         // Apply role-based UI visibility
         applyRoleGating();
+        // Re-render list once role is known so pipeline columns/actions are role-prioritized.
+        if (_currentViewId === 'view-list' && _currentMainView === 'sales' && Array.isArray(_reqListData) && _reqListData.length) {
+            renderReqList();
+        }
 
         if (d.connected) {
             const connectedCount = (d.users || []).filter(u => u.status === 'connected').length;
@@ -3235,6 +3239,10 @@ const _defaultHiddenCols = {};
 let _hiddenCols = JSON.parse(localStorage.getItem('reqHiddenCols') || '{}');
 
 function _isColHidden(col) { return !!_hiddenCols[col]; }
+function _isSalesPipelineProfile() {
+    // Keep unified data visible for everyone; only prioritize ordering/actions by role.
+    return window.userRole === 'sales';
+}
 function toggleColVisibility(col) {
     _hiddenCols[col] = !_hiddenCols[col];
     if (!_hiddenCols[col]) delete _hiddenCols[col];
@@ -3258,6 +3266,7 @@ function _applyColVisCSS() {
     // Map column keys to 1-based nth-child positions per view
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
+    else if (_isSalesPipelineProfile()) colMap = {reqs:3,quote:4,offers:5,deadline:6,sourced:7,coverage:8,sent:9,resp:10,sales:11,age:12};
     else colMap = {reqs:3,sourced:4,coverage:5,sent:6,resp:7,quote:8,offers:9,deadline:10,sales:11,age:12};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
@@ -3270,6 +3279,18 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else if (_isSalesPipelineProfile()) cols = [
+        {k:'reqs',l:'Parts'},
+        {k:'quote',l:'Quote'},
+        {k:'offers',l:'Offers'},
+        {k:'deadline',l:'Bid Due'},
+        {k:'sourced',l:'Sourced'},
+        {k:'coverage',l:'Coverage'},
+        {k:'sent',l:'RFQs'},
+        {k:'resp',l:'Response'},
+        {k:'sales',l:'Sales'},
+        {k:'age',l:'Age'}
+    ];
     else cols = [
         {k:'reqs',l:'Parts'},
         {k:'sourced',l:'Sourced'},
@@ -9353,22 +9374,41 @@ function renderReqList() {
             ${_thIcons}
         </tr></thead>`;
     } else {
-        // Unified pipeline view: sourcing + quote progression in one table
-        thead = `<thead><tr>
-            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
-            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-            <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
-            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
-            <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
-            <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
-            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
-            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            ${_thIcons}
-        </tr></thead>`;
+        // Unified pipeline view: same data, role-prioritized column order.
+        const isSalesProfile = _isSalesPipelineProfile();
+        if (isSalesProfile) {
+            thead = `<thead><tr>
+                <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
+                <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
+                <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+                <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
+                <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
+                <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
+                <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
+                <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
+                <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
+                <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
+                <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+                <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+                ${_thIcons}
+            </tr></thead>`;
+        } else {
+            thead = `<thead><tr>
+                <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
+                <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
+                <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+                <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
+                <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
+                <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
+                <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
+                <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
+                <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
+                <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
+                <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+                <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+                ${_thIcons}
+            </tr></thead>`;
+        }
     }
 
     // Priority lane grouping for pipeline/archive views (skip if column sort is active)
@@ -9585,6 +9625,7 @@ function _renderReqRow(r) {
     const offers = r.offer_count || 0;
     const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
     const v = _currentMainView;
+    const isSalesProfile = _isSalesPipelineProfile();
 
     // Status badge mapping
     const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',closed:'b-comp',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
@@ -9738,39 +9779,76 @@ function _renderReqRow(r) {
             covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_covTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covLabel}</span></div>`;
         }
 
-        dataCells = `
-            <td class="mono">${total}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
-            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
-            <td class="mono" style="font-size:11px">${sent}</td>
-            <td style="font-size:11px;white-space:nowrap">${respCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${offCell}</td>
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-            <td>${esc(r.created_by_name || '')}</td>
-            <td class="mono" style="font-size:11px">${age}</td>`;
+        if (isSalesProfile) {
+            dataCells = `
+                <td class="mono">${total}</td>
+                <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+                <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+                <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+                <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+                <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
+                <td class="mono" style="font-size:11px">${sent}</td>
+                <td style="font-size:11px;white-space:nowrap">${respCell}</td>
+                <td>${esc(r.created_by_name || '')}</td>
+                <td class="mono" style="font-size:11px">${age}</td>`;
+        } else {
+            dataCells = `
+                <td class="mono">${total}</td>
+                <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+                <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
+                <td class="mono" style="font-size:11px">${sent}</td>
+                <td style="font-size:11px;white-space:nowrap">${respCell}</td>
+                <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+                <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+                <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+                <td>${esc(r.created_by_name || '')}</td>
+                <td class="mono" style="font-size:11px">${age}</td>`;
+        }
 
         // Unified actions: sourcing + quoting + close workflow
         let primaryBtn;
-        if (r.has_new_offers && (r.offer_count || 0) > 0) {
-            primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
-        } else if (r.quote_status === 'sent') {
-            primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-        } else if (_oCnt > 0 && (r.quote_status === 'draft' || r.quote_status === 'revised')) {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
-        } else if ((r.offer_count || 0) > 0) {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
-        } else if (r.status === 'draft') {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
-        } else if (sourced > 0 && sent === 0) {
-            primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
-        } else if (sent > 0 && _oCnt === 0) {
-            const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
-            const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
-            const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
-            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+        if (isSalesProfile) {
+            if (r.quote_status === 'sent') {
+                primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+            } else if (r.has_new_offers && _oCnt > 0) {
+                primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${_oCnt})</button>`;
+            } else if (_oCnt > 0 && (r.quote_status === 'draft' || r.quote_status === 'revised')) {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
+            } else if (_oCnt > 0) {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
+            } else if (sourced > 0 && sent === 0) {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+            } else if (r.status === 'draft') {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
+            } else if (sent > 0 && _oCnt === 0) {
+                const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
+                const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
+                const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
+                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+            } else {
+                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+            }
         } else {
-            primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+            if (r.status === 'draft') {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
+            } else if (_oCnt > 0 && r.has_new_offers) {
+                primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
+            } else if (sourced > 0 && sent === 0) {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+            } else if (sent > 0 && _oCnt === 0) {
+                const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
+                const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
+                const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
+                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+            } else if (_oCnt > 0 && (r.quote_status === 'draft' || r.quote_status === 'revised')) {
+                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
+            } else if (_oCnt > 0) {
+                primaryBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
+            } else if (r.quote_status === 'sent') {
+                primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+            } else {
+                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+            }
         }
         actions = `<td style="white-space:nowrap">${primaryBtn} <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Offer</button> <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
         colspan = 13;
