@@ -798,6 +798,16 @@ def _seed_api_sources():
                 "setup_notes": "PENDING: Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands.",
             },
             {
+                "name": "ai_live_web",
+                "display_name": "AI Live Internet Search",
+                "category": "ai",
+                "source_type": "aggregator",
+                "description": "Claude-powered live web search for supplier listings. Finds broker/distributor offers from current internet pages and extracts stock, price, and contact signals.",
+                "signup_url": "https://console.anthropic.com",
+                "env_vars": ["ANTHROPIC_API_KEY"],
+                "setup_notes": "Uses Anthropic web search tool through existing AI credentials. Best used as a fallback source to expand long-tail supplier discovery.",
+            },
+            {
                 "name": "rs_components",
                 "display_name": "RS Components",
                 "category": "api",
