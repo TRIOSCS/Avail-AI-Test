@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: routers/requisitions/requirements.py, conftest fixtures
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from app.models import ChangeLog, Offer, RequisitionTask
 
@@ -187,6 +187,60 @@ def test_requirement_tasks_merges_offer_tasks(client, test_requisition, db_sessi
     assert "task_type" in data[0]
     assert "assigned_to" in data[0]
     assert "source_ref" in data[0]
+
+
+def test_requirement_tasks_include_assignee_alias_fields(client, test_requisition, db_session):
+    """Part-task list includes assignee_name/creator_name aliases for RFQ UI."""
+    req = test_requisition
+    r = req.requirements[0]
+    t = RequisitionTask(
+        requisition_id=req.id,
+        title="Alias field task",
+        task_type="general",
+        status="todo",
+        source="manual",
+        source_ref=f"requirement:{r.id}",
+        assigned_to_id=req.created_by,
+        created_by=req.created_by,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(t)
+    db_session.commit()
+
+    resp = client.get(f"/api/requirements/{r.id}/tasks")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+    row = next(x for x in data if x["id"] == t.id)
+    assert "assignee_name" in row
+    assert "creator_name" in row
+    assert row["assignee_name"] == row["assigned_to"]
+
+
+def test_create_requirement_task_persists_assignment_due_and_description(client, test_requisition, test_user):
+    """Creating part task preserves assigned_to_id, due_at, and description."""
+    req = test_requisition
+    r = req.requirements[0]
+    due = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
+
+    create_resp = client.post(
+        f"/api/requirements/{r.id}/tasks",
+        json={
+            "title": "RFQ follow-up task",
+            "description": "Call vendor and confirm lead time",
+            "assigned_to_id": test_user.id,
+            "due_at": due.isoformat(),
+        },
+    )
+    assert create_resp.status_code == 200
+
+    list_resp = client.get(f"/api/requirements/{r.id}/tasks")
+    assert list_resp.status_code == 200
+    rows = list_resp.json()
+    created = next(x for x in rows if x["title"] == "RFQ follow-up task")
+    assert created["description"] == "Call vendor and confirm lead time"
+    assert created["assignee_name"] == test_user.name
+    assert created["due_at"] is not None
 
 
 # ── Requirement History Timeline ──────────────────────────────────────
