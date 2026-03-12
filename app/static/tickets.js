@@ -239,8 +239,8 @@ async function renderAdminDashboard(container) {
 
     // Filter pills
     var pills = el('div', { className: 'fpills fpills-sm', style: 'margin-bottom:12px;' });
-    var filters = ['', 'submitted', 'diagnosed', 'fix_queued', 'escalated', 'resolved'];
-    var labels = ['All', 'Submitted', 'Diagnosed', 'Fix Queued', 'Escalated', 'Resolved'];
+    var filters = ['', 'submitted', 'diagnosed', 'fix_queued', 'in_progress', 'escalated', 'resolved', 'rejected'];
+    var labels = ['All', 'Submitted', 'Diagnosed', 'Fix Queued', 'In Progress', 'Escalated', 'Resolved', 'Rejected'];
     filters.forEach(function(f, i) {
         var btn = el('button', {
             type: 'button',
@@ -351,6 +351,11 @@ function buildTicketTable(tickets, isAdmin) {
             riskTd.appendChild(txt('—'));
         }
         row.appendChild(riskTd);
+        // Created
+        row.appendChild(el('td', {
+            textContent: t.created_at ? new Date(t.created_at).toLocaleDateString() : '—',
+            style: 'font-size:12px;color:var(--muted);',
+        }));
         // Linked count badge (admin only)
         if (isAdmin) {
             var linkedTd = el('td');
@@ -361,11 +366,6 @@ function buildTicketTable(tickets, isAdmin) {
             }
             row.appendChild(linkedTd);
         }
-        // Created
-        row.appendChild(el('td', {
-            textContent: t.created_at ? new Date(t.created_at).toLocaleDateString() : '—',
-            style: 'font-size:12px;color:var(--muted);',
-        }));
 
         tbody.appendChild(row);
     });

@@ -19,7 +19,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
-from ...dependencies import get_req_for_user, require_user
+from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
     ActivityLog,
     Contact,
@@ -91,9 +91,7 @@ async def list_requisitions(
     """List requisitions with filtering, search, and sourcing scores."""
     from ...cache.decorators import cached_endpoint
 
-    @cached_endpoint(
-        prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "sort", "order", "limit", "offset"]
-    )
+    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "sort", "order", "limit", "offset"])
     def _fetch(q, status, sort, order, limit, offset, user, db):
         return _build_requisition_list(q, status, sort, order, limit, offset, user, db)
 
@@ -472,7 +470,7 @@ async def requisition_sourcing_score(
     db: Session = Depends(get_db),
 ):
     """Get detailed per-requirement sourcing scores for a requisition."""
-    req = db.get(Requisition, req_id)
+    req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
     from ...services.sourcing_score import compute_requisition_scores
@@ -527,12 +525,7 @@ async def mark_outcome(req_id: int, body: dict, user: User = Depends(require_use
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    from ...services.requisition_state import transition
-
-    try:
-        transition(req, outcome, user, db)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    req.status = outcome
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -545,13 +538,10 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    from ...services.requisition_state import transition
-
-    target = "active" if req.status in ("archived", "won", "lost") else "archived"
-    try:
-        transition(req, target, user, db)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    if req.status in ("archived", "won", "lost"):
+        req.status = "active"
+    else:
+        req.status = "archived"
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -560,24 +550,13 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
 @router.put("/api/requisitions/bulk-archive")
 async def bulk_archive(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Archive all active requisitions NOT created by the current user."""
-    from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    reqs = (
-        db.query(Requisition)
-        .filter(
-            Requisition.created_by != user.id,
-            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-        )
-        .all()
+    q = db.query(Requisition).filter(
+        Requisition.created_by != user.id,
+        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
     )
-    count = 0
-    for req in reqs:
-        try:
-            transition(req, "archived", user, db)
-            count += 1
-        except ValueError:
-            pass  # skip invalid transitions (e.g. won → archived already handled by filter)
+    count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -590,24 +569,16 @@ async def batch_archive_by_ids(
     db: Session = Depends(get_db),
 ):
     """Archive specific requisitions by ID list."""
-    from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    reqs = (
-        db.query(Requisition)
-        .filter(
-            Requisition.id.in_(payload.ids),
-            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-        )
-        .all()
+    q = db.query(Requisition).filter(
+        Requisition.id.in_(payload.ids),
+        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
     )
-    count = 0
-    for req in reqs:
-        try:
-            transition(req, "archived", user, db)
-            count += 1
-        except ValueError:
-            pass
+    # Sales users can only archive their own requisitions
+    if user.role == "sales":
+        q = q.filter(Requisition.created_by == user.id)
+    count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -616,25 +587,21 @@ async def batch_archive_by_ids(
 @router.put("/api/requisitions/batch-assign")
 async def batch_assign(
     payload: BatchAssign,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Assign owner to specific requisitions by ID list."""
-    from ...services.requirement_status import claim_requisition
+    """Assign owner to specific requisitions by ID list. Admin only."""
     from . import invalidate_prefix
 
     # Verify the target user exists
     target = db.query(User).filter(User.id == payload.owner_id).first()
     if not target:
         raise HTTPException(404, "Target user not found")
-    reqs = db.query(Requisition).filter(Requisition.id.in_(payload.ids)).all()
-    count = 0
-    for req in reqs:
-        try:
-            claim_requisition(req, target, db)
-            count += 1
-        except ValueError:
-            pass  # skip already-claimed
+    count = (
+        db.query(Requisition)
+        .filter(Requisition.id.in_(payload.ids))
+        .update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
+    )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}

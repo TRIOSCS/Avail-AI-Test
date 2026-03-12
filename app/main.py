@@ -223,13 +223,20 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Return structured JSON for request validation errors."""
     req_id = getattr(request.state, "request_id", "unknown")
+    # Sanitize errors: ctx.error may contain non-serializable ValueError objects
+    errors = []
+    for err in exc.errors():
+        clean = {k: v for k, v in err.items() if k != "ctx"}
+        if "ctx" in err and isinstance(err["ctx"], dict):
+            clean["ctx"] = {k: str(v) if isinstance(v, Exception) else v for k, v in err["ctx"].items()}
+        errors.append(clean)
     return JSONResponse(
         status_code=422,
         content={
             "error": "Validation error",
             "status_code": 422,
             "request_id": req_id,
-            "detail": exc.errors(),
+            "detail": errors,
         },
     )
 

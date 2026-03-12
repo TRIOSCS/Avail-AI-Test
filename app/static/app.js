@@ -3321,7 +3321,7 @@ function _ddTabLabel(tab) {
         activity: 'Activity',
         // Legacy tab names still supported for backward compatibility
         details: 'Details', sightings: 'Sightings', parts: 'Parts',
-        quotes: 'Quotes', buyplans: 'Buy Plans', files: 'Files'
+        quotes: 'Quotes', buyplans: 'Buy Plans', files: 'Files', tasks: 'Tasks'
     };
     return map[tab] || tab;
 }
@@ -4555,10 +4555,8 @@ function _editTaskInline(reqId, task, cardEl) {
 }
 
 // ---------------------------------------------------------------------------
-// My Tasks Sidebar Widget — two tabs: Assigned to Me / Waiting On
+// My Tasks Sidebar Widget
 // ---------------------------------------------------------------------------
-
-let _myTasksActiveTab = 'assigned';
 
 window.toggleMyTasksSidebar = toggleMyTasksSidebar;
 function toggleMyTasksSidebar() {
@@ -4569,44 +4567,30 @@ function toggleMyTasksSidebar() {
     if (isOpen) loadMyTasks();
 }
 
-window.switchMyTasksTab = switchMyTasksTab;
-function switchMyTasksTab(tab) {
-    _myTasksActiveTab = tab;
-    document.getElementById('mtTabAssigned')?.classList.toggle('active', tab === 'assigned');
-    document.getElementById('mtTabWaiting')?.classList.toggle('active', tab === 'waiting');
-    loadMyTasks();
-}
-
 async function loadMyTasks() {
     var list = document.getElementById('myTasksList');
     if (!list) return;
-    list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading...</span>';
+    list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">Loading tasks...</span>';
     try {
-        const endpoint = _myTasksActiveTab === 'waiting' ? '/api/tasks/waiting' : '/api/tasks/mine';
         var [tasksRes, summaryRes] = await Promise.allSettled([
-            apiFetch(endpoint),
+            apiFetch('/api/tasks/mine'),
             apiFetch('/api/tasks/mine/summary')
         ]);
         var tasks = (tasksRes.status === 'fulfilled' && Array.isArray(tasksRes.value)) ? tasksRes.value : [];
+        // Filter out completed auto-generated tasks (noise)
+        tasks = tasks.filter(function(t) { return !(t.source === 'auto' && t.status === 'done'); });
         var summary = (summaryRes.status === 'fulfilled' && summaryRes.value && typeof summaryRes.value === 'object') ? summaryRes.value : {};
 
-        // Update badge with total open count
+        // Update badge
         var badge = document.getElementById('myTasksBadge');
-        var total = (summary.assigned_to_me || 0) + (summary.waiting_on || 0);
+        var pending = (summary.todo || 0) + (summary.in_progress || 0);
         if (badge) {
-            badge.textContent = total;
-            badge.style.display = total > 0 ? 'flex' : 'none';
+            badge.textContent = pending;
+            badge.style.display = pending > 0 ? 'flex' : 'none';
         }
 
-        // Update tab labels with counts
-        var assignedTab = document.getElementById('mtTabAssigned');
-        var waitingTab = document.getElementById('mtTabWaiting');
-        if (assignedTab) assignedTab.textContent = 'Assigned to Me' + (summary.assigned_to_me ? ' (' + summary.assigned_to_me + ')' : '');
-        if (waitingTab) waitingTab.textContent = 'Waiting On' + (summary.waiting_on ? ' (' + summary.waiting_on + ')' : '');
-
         if (!tasks.length) {
-            const msg = _myTasksActiveTab === 'waiting' ? 'No tasks waiting on others' : 'No tasks assigned to you';
-            list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">' + msg + '</span>';
+            list.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:20px;text-align:center;display:block">No tasks assigned to you</span>';
             return;
         }
 
@@ -4649,10 +4633,13 @@ async function loadMyTasks() {
 function _renderMyTaskItem(task) {
     var item = document.createElement('div');
     item.className = 'my-task-item';
+    if (task.priority === 3) item.classList.add('pri-high');
+    else if (task.priority === 2) item.classList.add('pri-med');
+    else item.classList.add('pri-low');
 
     item.onclick = function() {
         toggleMyTasksSidebar();
-        if (typeof expandToSubTab === 'function') expandToSubTab(task.requisition_id, 'parts');
+        expandToSubTab(task.requisition_id, 'tasks');
     };
 
     var title = document.createElement('div');
@@ -4667,31 +4654,20 @@ function _renderMyTaskItem(task) {
 
     var meta = document.createElement('div');
     meta.className = 'my-task-item-meta';
-
-    // Show assignee for "Waiting On" tab, creator for "Assigned to Me"
-    if (_myTasksActiveTab === 'waiting' && task.assignee_name) {
-        var who = document.createElement('span');
-        who.textContent = 'Assigned to: ' + task.assignee_name;
-        who.style.fontWeight = '600';
-        meta.appendChild(who);
-    }
-    if (_myTasksActiveTab === 'assigned' && task.creator_name) {
-        var from = document.createElement('span');
-        from.textContent = 'From: ' + task.creator_name;
-        meta.appendChild(from);
-    }
     if (task.due_at) {
         var dateSpan = document.createElement('span');
-        var dueDate = new Date(task.due_at);
-        var isOverdue = dueDate < new Date();
-        dateSpan.textContent = (isOverdue ? 'OVERDUE \u2014 ' : 'Due ') + _shortDate(task.due_at);
-        if (isOverdue) dateSpan.style.color = 'var(--red)';
+        dateSpan.textContent = _shortDate(task.due_at);
         meta.appendChild(dateSpan);
+    }
+    if (task.task_type && task.task_type !== 'general') {
+        var pill = document.createElement('span');
+        pill.className = 'my-task-type-pill';
+        pill.textContent = task.task_type;
+        meta.appendChild(pill);
     }
     if (task.ai_risk_flag) {
         var risk = document.createElement('span');
-        risk.className = 'task-risk-flag';
-        risk.textContent = task.ai_risk_flag;
+        risk.textContent = '\u26a0 ' + task.ai_risk_flag;
         meta.appendChild(risk);
     }
     item.appendChild(meta);
@@ -4704,16 +4680,19 @@ function _renderMyTaskItem(task) {
     setTimeout(function() {
         var sidebar = document.getElementById('myTasksSidebar');
         if (!sidebar) return;
+        // Ensure closed and clear stale preference
         sidebar.classList.remove('open');
         document.body.classList.remove('tasks-open');
+        try { localStorage.removeItem('myTasksOpen'); } catch(e) {}
+        // Load badge count only
         (async function() {
             try {
                 var summary = await apiFetch('/api/tasks/mine/summary');
                 var badge = document.getElementById('myTasksBadge');
-                var total = (summary.assigned_to_me || 0) + (summary.waiting_on || 0);
+                var pending = (summary.todo || 0) + (summary.in_progress || 0);
                 if (badge) {
-                    badge.textContent = total;
-                    badge.style.display = total > 0 ? 'flex' : 'none';
+                    badge.textContent = pending;
+                    badge.style.display = pending > 0 ? 'flex' : 'none';
                 }
             } catch(e) { /* silently fail */ }
         })();
@@ -4843,7 +4822,18 @@ function searchOpenPoolVendors() {
     }, 300);
 }
 
-// claimStrategicVendor defined in vendor cards section below
+async function claimStrategicVendor(vendorCardId, vendorName) {
+    try {
+        await apiFetch('/api/strategic-vendors/claim/' + vendorCardId, { method: 'POST' });
+        showToast(vendorName + ' claimed as strategic vendor', 'success');
+        closeStrategicClaimModal();
+        loadStrategicVendors();
+    } catch (e) {
+        var msg = 'Failed to claim vendor';
+        try { msg = (await e.json ? e.json() : e).detail || msg; } catch(ex) {}
+        showToast(msg, 'error');
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Knowledge Ledger: Q&A Tab (legacy — kept for backward compat)
@@ -7682,8 +7672,8 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'activity'];
-    const tabLabels = { offers: 'Offers', activity: 'Activity' };
+    const tabs = ['offers', 'notes', 'tasks'];
+    const tabLabels = { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' };
     const pills = tabs.map(t =>
         `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
     ).join('');
@@ -7697,7 +7687,7 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.textContent === { offers: 'Offers', activity: 'Activity' }[tabName]);
+        t.classList.toggle('on', t.textContent === { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' }[tabName]);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7717,10 +7707,12 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
-            case 'activity': {
-                data = await apiFetch(`/api/requirements/${requirementId}/history`).catch(() => []);
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${requirementId}/notes`);
                 break;
-            }
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
+                break;
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
@@ -7732,7 +7724,8 @@ async function _loadPartTab(reqId, requirementId, tabName) {
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
-        case 'activity': _renderPartActivity(reqId, requirementId, data, contentEl); break;
+        case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
+        case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
         default: contentEl.textContent = '';
     }
 }
@@ -7782,32 +7775,71 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
-// ── Part-level Activity renderer (merged notes + tasks) ──
-function _renderPartActivity(reqId, requirementId, data, contentEl) {
-    // Reuse the RFQ activity renderer — same data shape { notes, tasks, history }
-    _rfqRenderActivity(data, contentEl);
-    // Override the partId references for inline forms to use this requirement
-    const origPartId = _rfqActivePartId;
-    _rfqActivePartId = requirementId;
-    // Restore after a tick so any event handlers bind correctly
-    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
+// ── Part-level Notes renderer ──
+// Shows notes on the requirement and notes on individual offers
+function _renderPartNotes(reqId, requirementId, data, contentEl) {
+    const notes = Array.isArray(data) ? data : (data?.notes || []);
+    const reqs = _ddReqCache[reqId] || [];
+    const req = reqs.find(x => x.id === requirementId);
+    let html = '';
+    // Requirement-level notes
+    html += `<div style="margin-bottom:12px">
+        <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Requirement Notes</div>
+        <div class="part-note-box dd-edit" onclick="event.stopPropagation();editDrillCell(this,${reqId},${requirementId},'notes')" style="min-height:32px;padding:6px 8px;background:var(--bg2);border-radius:4px;font-size:11px;cursor:pointer">${esc(req?.notes || 'Click to add notes\u2026')}</div>
+    </div>`;
+    // Offer notes
+    if (notes.length) {
+        html += '<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Offer Notes</div>';
+        for (const n of notes) {
+            html += `<div style="padding:4px 8px;margin-bottom:4px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--blue);font-size:11px">
+                <span style="font-weight:600">${esc(n.vendor_name || 'Offer')}</span>
+                <span style="color:var(--muted);margin-left:6px">${n.created_at ? _timeAgo(n.created_at) : ''}</span>
+                <div style="margin-top:2px">${esc(n.note || n.notes || n.text || '\u2014')}</div>
+            </div>`;
+        }
+    } else if (!req?.notes) {
+        html += '<span style="font-size:11px;color:var(--muted)">No notes yet</span>';
+    }
+    // Add note button
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartNote(${reqId},${requirementId})">+ Add Note</button>`;
+    contentEl.innerHTML = html;
 }
 
-// Keep _addPartNote for backward compat (editDrillCell uses it)
+// ── Part-level Tasks renderer ──
+// Shows tasks linked to this requirement
+function _renderPartTasks(reqId, requirementId, data, contentEl) {
+    const tasks = Array.isArray(data) ? data : (data?.tasks || []);
+    if (!tasks.length) {
+        contentEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">No tasks for this part</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:8px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+        return;
+    }
+    let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+    for (const t of tasks) {
+        const done = t.status === 'done' || t.status === 'completed';
+        const statusIcon = done ? '\u2705' : t.status === 'in_progress' ? '\ud83d\udfe1' : '\u2b1c';
+        html += `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:4px;font-size:11px${done ? ';opacity:0.6;text-decoration:line-through' : ''}">
+            <span>${statusIcon}</span>
+            <span style="flex:1">${esc(t.title || t.description || '\u2014')}</span>
+            <span style="font-size:10px;color:var(--muted)">${t.due_date ? _timeAgo(t.due_date) : ''}</span>
+        </div>`;
+    }
+    html += '</div>';
+    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+    contentEl.innerHTML = html;
+}
+
+// Placeholder for adding a note to a part — opens inline input
 function _addPartNote(reqId, requirementId) {
     const key = reqId + '-' + requirementId;
     const contentEl = document.getElementById('pdc-' + key);
     if (!contentEl) return;
-    const existing = contentEl.querySelector('.activity-add-form');
-    if (existing) return;
+    const existing = contentEl.querySelector('.part-note-input');
+    if (existing) { existing.focus(); return; }
     const wrapper = document.createElement('div');
-    wrapper.className = 'activity-add-form';
-    wrapper.style.cssText = 'margin-top:6px';
-    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();this.closest('.activity-add-form').remove()">Cancel</button>
-            <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.closest('.activity-add-form').querySelector('textarea').value)">Save</button>
-        </div>`;
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <button class="btn btn-primary btn-sm" style="font-size:10px;align-self:flex-end" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.previousElementSibling.value)">Save</button>`;
     contentEl.appendChild(wrapper);
     wrapper.querySelector('textarea').focus();
 }
@@ -7817,11 +7849,37 @@ async function _savePartNote(reqId, requirementId, text) {
     if (!text?.trim()) return;
     try {
         await apiFetch(`/api/requirements/${requirementId}/notes`, { method: 'POST', body: { text: text.trim() } });
-        delete _partDetailCache[reqId + '-' + requirementId + '-activity'];
-        await _loadPartTab(reqId, requirementId, 'activity');
+        delete _partDetailCache[reqId + '-' + requirementId + '-notes'];
+        await _loadPartTab(reqId, requirementId, 'notes');
     } catch(e) { logCatchError('_savePartNote', e); }
 }
 window._savePartNote = _savePartNote;
+
+// Placeholder for adding a task to a part
+function _addPartTask(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.part-task-input');
+    if (existing) { existing.focus(); return; }
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
+    wrapper.innerHTML = `<input class="part-task-input" placeholder="Task description\u2026" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+        <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartTask(${reqId},${requirementId},this.previousElementSibling.value)">Add</button>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('input').focus();
+}
+window._addPartTask = _addPartTask;
+
+async function _savePartTask(reqId, requirementId, title) {
+    if (!title?.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/tasks`, { method: 'POST', body: { title: title.trim() } });
+        delete _partDetailCache[reqId + '-' + requirementId + '-tasks'];
+        await _loadPartTab(reqId, requirementId, 'tasks');
+    } catch(e) { logCatchError('_savePartTask', e); }
+}
+window._savePartTask = _savePartTask;
 
 function editDrillCell(td, rfqId, reqId, field) {
     if (td.querySelector('input, select, textarea')) return;
@@ -7873,9 +7931,17 @@ function editDrillCell(td, rfqId, reqId, field) {
             _restoreDrillCell(td, r, field);
             return;
         }
+        if (field === 'primary_mpn' && !val) {
+            showToast('MPN cannot be blank', 'warn');
+            _restoreDrillCell(td, r, field);
+            return;
+        }
         const body = {};
-        if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
-        else if (field === 'target_qty') body[field] = parseInt(val) || 1;
+        if (field === 'target_price') {
+            const pf = val ? parseFloat(val) : null;
+            body[field] = (pf !== null && (isNaN(pf) || pf < 0)) ? null : pf;
+        }
+        else if (field === 'target_qty') { const pq = parseInt(val); body[field] = (pq >= 1) ? pq : 1; }
         else if (field === 'substitutes') body[field] = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
         else body[field] = val;
         try {
@@ -7940,8 +8006,12 @@ function _appendAddRow(rfqId, dd) {
     tr.className = 'add-row';
     tr.addEventListener('click', e => e.stopPropagation());
 
-    // Badge (empty for add row)
+    // Expand arrow (empty for add row)
     let td = document.createElement('td');
+    tr.appendChild(td);
+
+    // Badge (empty for add row)
+    td = document.createElement('td');
     tr.appendChild(td);
 
     // MPN (required)
@@ -8014,9 +8084,13 @@ async function _saveAddRow(rfqId) {
         return;
     }
 
-    const body = { primary_mpn: mpn, target_qty: parseInt(qtyInput?.value) || 1 };
+    const parsedQty = parseInt(qtyInput?.value);
+    const body = { primary_mpn: mpn, target_qty: (parsedQty >= 1) ? parsedQty : 1 };
     const priceVal = priceInput?.value.trim();
-    if (priceVal) body.target_price = parseFloat(priceVal);
+    if (priceVal) {
+        const pf = parseFloat(priceVal);
+        if (!isNaN(pf) && pf >= 0) body.target_price = pf;
+    }
 
     // Disable inputs during save
     _saveAddRowPending[rfqId] = true;
@@ -8465,141 +8539,6 @@ function _ddEvidenceBadge(tier) {
     return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:default" title="${c.tip}">${c.label}</span>`;
 }
 
-let _leadProvSeq = 0;
-const _leadProvenanceStore = {};
-
-function _registerLeadProvenance(reqId, groupLabel, sighting) {
-    const key = 'lp-' + (++_leadProvSeq);
-    const snap = Object.assign({}, sighting || {});
-    snap.req_id = reqId;
-    snap.group_label = groupLabel || '';
-    _leadProvenanceStore[key] = snap;
-
-    // Keep memory bounded on long sessions.
-    if (_leadProvSeq % 250 === 0) {
-        const keys = Object.keys(_leadProvenanceStore);
-        if (keys.length > 3500) {
-            const removeCount = keys.length - 2500;
-            for (let i = 0; i < removeCount; i++) delete _leadProvenanceStore[keys[i]];
-        }
-    }
-    return key;
-}
-
-function _provSourceMeta(s) {
-    const st = (s.source_type || '').toLowerCase();
-    if (st === 'historical' || s._historical) return { title: 'Historical offer', detail: 'Pulled from past requisition offer history' };
-    if (s.is_material_history) return { title: 'Material history', detail: 'Seen before on this part across prior searches' };
-    if (st === 'email_attachment') return { title: 'Email attachment parse', detail: 'Detected in vendor inventory/quote attachment' };
-    if (st === 'stock_list') return { title: 'Manual stock list import', detail: 'Uploaded stock list row matched to this requirement' };
-    if (st === 'excess_list') return { title: 'Customer excess signal', detail: 'Customer excess/inventory list contained this part' };
-    if (st === 'digikey' || st === 'mouser' || st === 'element14') return { title: 'Distributor posting', detail: 'Live distributor listing/API result' };
-    if (st === 'nexar' || st === 'octopart') return { title: 'Aggregated market API', detail: 'Live listing via component market aggregation' };
-    if (st === 'brokerbin' || st === 'sourcengine' || st === 'netcomponents' || st === 'ebay' || st === 'oemsecrets') {
-        return { title: 'Marketplace listing', detail: 'Broker/market listing, buyer verification recommended' };
-    }
-    if (st) return { title: st.toUpperCase(), detail: 'Source type captured from connector response' };
-    return { title: 'Unknown source', detail: 'Lead source metadata was not provided' };
-}
-
-function _provOutcomeMeta(outcome) {
-    if (outcome === 'offer_logged') return { label: 'Offer logged', color: 'var(--green)' };
-    if (outcome === 'unavailable_confirmed') return { label: 'Unavailable confirmed', color: 'var(--red)' };
-    return { label: 'Open (needs qualification)', color: 'var(--amber)' };
-}
-
-function _provBucketMeta(bucket) {
-    const b = (bucket || '').toLowerCase();
-    if (b === 'high') return { label: 'High confidence', color: 'var(--green)', bg: 'var(--green-light,#dcfce7)' };
-    if (b === 'medium') return { label: 'Medium confidence', color: 'var(--amber)', bg: 'var(--amber-light,#fef3c7)' };
-    return { label: 'Low confidence', color: 'var(--red)', bg: 'var(--red-light,#fee2e2)' };
-}
-
-function _provRow(label, value) {
-    return `<div style="display:grid;grid-template-columns:150px 1fr;gap:8px;padding:4px 0;border-bottom:1px dashed var(--border)"><span style="font-size:11px;color:var(--muted)">${esc(label)}</span><span style="font-size:12px;color:var(--text2)">${value}</span></div>`;
-}
-
-function openLeadProvenancePanel(key) {
-    const s = _leadProvenanceStore[key];
-    if (!s) { showToast('Lead provenance details unavailable — refresh and try again', 'warn'); return; }
-
-    const titleEl = document.getElementById('leadProvenanceTitle');
-    const bodyEl = document.getElementById('leadProvenanceBody');
-    if (!titleEl || !bodyEl) { showToast('Lead provenance panel is not available', 'error'); return; }
-
-    const sourceMeta = _provSourceMeta(s);
-    const outcome = s.buyer_outcome || (s.is_unavailable ? 'unavailable_confirmed' : 'open');
-    const outcomeMeta = _provOutcomeMeta(outcome);
-    const fallbackBucket = (s.score || 0) >= 75 ? 'high' : (s.score || 0) >= 45 ? 'medium' : 'low';
-    const bucketMeta = _provBucketMeta(s.lead_confidence_bucket || fallbackBucket);
-    const scoreText = s.score != null ? `${Math.round(s.score)}/100` : '—';
-    const qtyText = s.qty_available != null ? Number(s.qty_available).toLocaleString() : 'Unknown';
-    const priceText = s.unit_price != null
-        ? `$${Number(s.unit_price).toFixed(4)}${s.currency && s.currency !== 'USD' ? ' ' + esc(s.currency) : ''}`
-        : 'Unknown';
-    const leadTimeText = s.lead_time || (s.lead_time_days != null ? `${s.lead_time_days} days` : 'Unknown');
-    const freshnessText = s.created_at ? `${fmtRelative(s.created_at)} (${fmtDateTime(s.created_at)})` : 'Unknown';
-    const listingUrl = s.click_url || s.octopart_url || '';
-    const vendorUrl = s.vendor_url || '';
-    const evidence = s.evidence_tier ? `${esc(s.evidence_tier)}${_ddEvidenceBadge(s.evidence_tier)}` : '—';
-    const reason = esc(s.lead_confidence_reason || 'No confidence reason available');
-    const contactText = s.vendor_email || s.vendor_phone || (s.vendor_card && s.vendor_card.has_emails ? 'Email on vendor card' : 'No contact on file');
-
-    let historyBlock = '';
-    if (s._historical && s._ho) {
-        historyBlock += _provRow('From requisition', `RFQ-${esc(String(s._ho.from_requisition_id || '—'))}`);
-    }
-    if (s.is_material_history) {
-        historyBlock += _provRow('Times seen', esc(String(s.material_times_seen || 1)));
-        historyBlock += _provRow('Last seen', esc(s.material_last_seen || '—'));
-        historyBlock += _provRow('First seen', esc(s.material_first_seen || '—'));
-    }
-    if (s.merged_count > 1) {
-        historyBlock += _provRow('Merged listings', `${esc(String(s.merged_count))}${s.merged_sources ? ' (' + esc(s.merged_sources.join(', ')) + ')' : ''}`);
-    }
-
-    let links = '';
-    if (listingUrl) links += `<a href="${escAttr(listingUrl)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">Open listing</a> `;
-    if (vendorUrl) links += `<a href="${escAttr(vendorUrl)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">Vendor site</a>`;
-    if (!links) links = '<span style="font-size:11px;color:var(--muted)">No direct source links for this lead</span>';
-
-    titleEl.textContent = `Lead Provenance — ${s.vendor_name || 'Vendor'} • ${s.mpn_matched || s.group_label || 'Part'}`;
-    bodyEl.innerHTML = `
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-            <span class="badge" style="background:${bucketMeta.bg};color:${bucketMeta.color};font-weight:700">${bucketMeta.label}</span>
-            <span class="badge" style="background:rgba(59,130,246,.12);color:#1d4ed8">Score ${esc(scoreText)}</span>
-            <span class="badge" style="background:rgba(15,23,42,.08);color:var(--text2)">Source ${esc((s.source_type || 'unknown').toUpperCase())}</span>
-            <span class="badge" style="background:rgba(0,0,0,.06);color:${outcomeMeta.color}">${esc(outcomeMeta.label)}</span>
-        </div>
-        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg1);margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Why this lead appears</div>
-            <div style="font-size:12px;color:var(--text2)">${reason}</div>
-        </div>
-        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Provenance</div>
-            ${_provRow('Origin type', esc(sourceMeta.title))}
-            ${_provRow('Origin detail', esc(sourceMeta.detail))}
-            ${_provRow('Evidence tier', evidence)}
-            ${_provRow('Buyer outcome', `<span style="color:${outcomeMeta.color};font-weight:600">${esc(outcomeMeta.label)}</span>`)}
-            ${_provRow('Freshness', esc(freshnessText))}
-            ${historyBlock}
-        </div>
-        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Signal snapshot</div>
-            ${_provRow('Quantity', esc(qtyText))}
-            ${_provRow('Price', esc(priceText))}
-            ${_provRow('Lead time', esc(leadTimeText))}
-            ${_provRow('Condition', esc(s.condition || 'Unknown'))}
-            ${_provRow('Date code', esc(s.date_code || 'Unknown'))}
-            ${_provRow('Packaging', esc(s.packaging || 'Unknown'))}
-            ${_provRow('MOQ', esc(s.moq != null ? String(s.moq) : 'Unknown'))}
-            ${_provRow('Contact signal', esc(contactText))}
-        </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">${links}</div>
-    `;
-    openModal('leadProvenanceModal');
-}
-
 function _ddScoreTooltip(s) {
     const sc = s.score_components;
     if (!sc) return s.score != null ? 'Score: ' + s.score : '';
@@ -8627,7 +8566,6 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
     for (const s of sightings) {
         // Historical offer rows — rendered at same size as regular sightings
         if (s._historical) {
-            const provKey = _registerLeadProvenance(reqId, groupLabel, s);
             const ho = s._ho;
             const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
             const hSub = ho.is_substitute ? '<span class="badge b-sub">SUB</span> ' : '';
@@ -8648,12 +8586,10 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
                 <td style="color:var(--muted)">${sAge}
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
-                    <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾 Provenance</button>
                 </td>
             </tr>`;
             continue;
         }
-        const provKey = _registerLeadProvenance(reqId, groupLabel, s);
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
         const checked = sel.has(s.id) ? 'checked' : '';
         const dimStyle = !hasEmail ? 'opacity:.7' : '';
@@ -8705,7 +8641,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾</button>${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
+            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
         </tr>`;
     }
     return html;
@@ -9231,12 +9167,6 @@ async function openLogOfferFromList(reqId) {
     _s('loVendor', ''); _s('loQty', ''); _s('loPrice', ''); _s('loLead', '');
     _s('loMoq', ''); _s('loCond', 'new'); _s('loDc', ''); _s('loPkg', '');
     _s('loMfr', ''); _s('loWarranty', ''); _s('loCOO', ''); _s('loNotes', '');
-    _s('loPasteText', '');
-    _loParsedOffers = null;
-    const loParsed = document.getElementById('loParsedOffers');
-    if (loParsed) { loParsed.classList.add('u-hidden'); loParsed.innerHTML = ''; }
-    const loForm = document.getElementById('logOfferForm');
-    if (loForm) loForm.style.display = '';
     openModal('logOfferModal', 'loVendor');
 }
 
@@ -9244,102 +9174,6 @@ function closeLogOfferModal() {
     closeModal('logOfferModal');
     const dd = document.getElementById('loVendorSuggestions');
     if (dd) dd.classList.remove('open');
-    _loParsedOffers = null;
-}
-
-let _loParsedOffers = null;
-
-async function parseFreeformOffer() {
-    const ta = document.getElementById('loPasteText');
-    const btn = document.getElementById('loParseBtn');
-    const container = document.getElementById('loParsedOffers');
-    const reqId = parseInt(document.getElementById('loReqId')?.value || '0');
-    const text = (ta && ta.value || '').trim();
-    if (!text) { showToast('Paste vendor text first', 'error'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
-    try {
-        const body = { raw_text: text };
-        if (reqId) body.requisition_id = reqId;
-        const resp = await apiFetch('/api/ai/parse-freeform-offer', { method: 'POST', body });
-        if (!resp.parsed || !resp.template) { showToast(resp.reason || 'Parse failed', 'error'); return; }
-        _loParsedOffers = resp.template;
-        const offers = resp.template.offers || [];
-        const vendor = resp.template.vendor_name || '';
-        if (offers.length === 1) {
-            const o = offers[0];
-            document.getElementById('loVendor').value = vendor;
-            _loVendorCardId = null;
-            document.getElementById('loQty').value = o.qty_available != null ? o.qty_available : '';
-            document.getElementById('loPrice').value = o.unit_price != null ? o.unit_price : '';
-            document.getElementById('loLead').value = o.lead_time || '';
-            document.getElementById('loMoq').value = o.moq != null ? o.moq : '';
-            document.getElementById('loCond').value = o.condition || 'new';
-            document.getElementById('loDc').value = o.date_code || '';
-            document.getElementById('loPkg').value = o.packaging || '';
-            document.getElementById('loMfr').value = o.manufacturer || '';
-            document.getElementById('loNotes').value = o.notes || '';
-            if (reqId && document.getElementById('loReqPart')) {
-                const reqs = _ddReqCache[reqId] || [];
-                const match = reqs.find(function(r) { return (r.primary_mpn || '').toUpperCase() === (o.mpn || '').toUpperCase(); });
-                if (match) document.getElementById('loReqPart').value = String(match.id);
-            }
-            container.classList.add('u-hidden');
-            container.innerHTML = '';
-            showToast('Parsed — review and log offer', 'success');
-        } else if (offers.length > 1) {
-            let html = '<p style="margin:0 0 8px;font-size:12px"><b>' + esc(vendor) + '</b> — ' + offers.length + ' offers. Review and save.</p>';
-            html += '<table class="tbl" style="font-size:11px"><thead><tr><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th></tr></thead><tbody>';
-            offers.forEach(function(o) {
-                html += '<tr><td>' + esc(o.mpn || '') + '</td><td>' + (o.qty_available != null ? o.qty_available : '—') + '</td><td>' + (o.unit_price != null ? o.unit_price : '—') + '</td><td>' + esc(o.lead_time || '') + '</td></tr>';
-            });
-            html += '</tbody></table>';
-            html += '<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button type="button" class="btn btn-primary btn-sm" onclick="saveFreeformOffers()">Save ' + offers.length + ' offers</button><a href="#" onclick="event.preventDefault();_loParsedOffers=null;document.getElementById(\'loParsedOffers\').classList.add(\'u-hidden\');document.getElementById(\'loParsedOffers\').innerHTML=\'\';document.getElementById(\'logOfferForm\').style.display=\'\';" style="font-size:11px;color:var(--muted)">Enter manually</a></div>';
-            container.innerHTML = html;
-            container.classList.remove('u-hidden');
-            document.getElementById('logOfferForm').style.display = 'none';
-            showToast('Parsed — review and save', 'success');
-        } else {
-            showToast('No offers found in text', 'warn');
-        }
-    } catch (e) { showToast('Parse failed — ' + (e.message || 'try again'), 'error'); }
-    finally { if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; } }
-}
-
-async function saveFreeformOffers() {
-    if (!_loParsedOffers || !_loParsedOffers.offers || _loParsedOffers.offers.length === 0) return;
-    const reqId = parseInt(document.getElementById('loReqId')?.value || '0');
-    if (!reqId) { showToast('Requisition context lost', 'error'); return; }
-    const vendor = _loParsedOffers.vendor_name || 'Unknown';
-    const offers = _loParsedOffers.offers.map(function(o) {
-        return {
-            vendor_name: vendor,
-            mpn: o.mpn || '',
-            manufacturer: o.manufacturer || null,
-            qty_available: o.qty_available != null ? o.qty_available : null,
-            unit_price: o.unit_price != null ? o.unit_price : null,
-            currency: o.currency || 'USD',
-            lead_time: o.lead_time || null,
-            date_code: o.date_code || null,
-            condition: o.condition || 'new',
-            packaging: o.packaging || null,
-            moq: o.moq != null ? o.moq : null,
-            notes: o.notes || null,
-        };
-    });
-    try {
-        const data = await apiFetch('/api/ai/save-freeform-offers', { method: 'POST', body: { requisition_id: reqId, offers } });
-        _loParsedOffers = null;
-        document.getElementById('loParsedOffers').classList.add('u-hidden');
-        document.getElementById('loParsedOffers').innerHTML = '';
-        document.getElementById('logOfferForm').style.display = '';
-        document.getElementById('loPasteText').value = '';
-        closeLogOfferModal();
-        showToast('Saved ' + data.created + ' offer(s)', 'success');
-        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
-        const reqInfo = _reqListData.find(function(r) { return r.id === reqId; });
-        if (reqInfo) { reqInfo.offer_count = (reqInfo.offer_count || 0) + data.created; reqInfo.has_new_offers = true; }
-        renderReqList();
-    } catch (e) { showToast('Save failed — ' + (e.message || 'try again'), 'error'); }
 }
 
 // ── Vendor autocomplete for Log Offer ───────────────────────────────────
@@ -10936,43 +10770,9 @@ async function sendBulkFollowUp() {
     });
 }
 
-let _nrParsedTemplate = null;
-
-async function parseFreeformRfq() {
-    const ta = document.getElementById('nrPasteText');
-    const btn = document.getElementById('nrParseBtn');
-    const reqsEl = document.getElementById('nrParsedReqs');
-    const text = (ta && ta.value || '').trim();
-    if (!text) { showToast('Paste customer text first', 'error'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
-    try {
-        const resp = await apiFetch('/api/ai/parse-freeform-rfq', { method: 'POST', body: { raw_text: text } });
-        if (!resp.parsed || !resp.template) { showToast(resp.reason || 'Parse failed', 'error'); return; }
-        _nrParsedTemplate = resp.template;
-        const t = resp.template;
-        const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
-        _s('nrName', t.name || '');
-        _s('nrDeadline', (t.deadline && t.deadline !== 'ASAP') ? t.deadline : '');
-        document.getElementById('nrAsap').checked = (t.deadline === 'ASAP' || !t.deadline);
-        if (t.customer_name && !document.getElementById('nrSiteSearch')?.value) {
-            document.getElementById('nrSiteSearch').value = t.customer_name;
-            debouncedFilterSites(t.customer_name);
-        }
-        const reqs = t.requirements || [];
-        let html = '<p style="margin:0 0 6px;font-size:11px;color:var(--muted)">' + reqs.length + ' part(s) — review and select customer account, then click Create</p>';
-        html += '<table class="tbl" style="font-size:11px"><thead><tr><th>Part</th><th>Qty</th><th>Target $</th></tr></thead><tbody>';
-        reqs.forEach(function(r) {
-            html += '<tr><td>' + esc(r.primary_mpn || '') + '</td><td>' + (r.target_qty || 1) + '</td><td>' + (r.target_price != null ? r.target_price : '—') + '</td></tr>';
-        });
-        html += '</tbody></table>';
-        reqsEl.innerHTML = html;
-        reqsEl.classList.remove('u-hidden');
-        showToast('Parsed — review and create', 'success');
-    } catch (e) { showToast('Parse failed — ' + (e.message || 'try again'), 'error'); }
-    finally { if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; } }
-}
-
+let _createReqPending = false;
 async function createRequisition() {
+    if (_createReqPending) return; // prevent double-submit
     const name = document.getElementById('nrName')?.value?.trim() || '';
     if (!name) { showToast('Please enter a requisition name', 'error'); return; }
     const siteId = document.getElementById('nrSiteId')?.value || null;
@@ -10980,58 +10780,32 @@ async function createRequisition() {
     const isAsap = document.getElementById('nrAsap')?.checked;
     const dlVal = document.getElementById('nrDeadline')?.value || '';
     const deadline = isAsap ? 'ASAP' : (dlVal || null);
+    _createReqPending = true;
     try {
-        if (_nrParsedTemplate && (_nrParsedTemplate.requirements || []).length > 0) {
-            const data = await apiFetch('/api/ai/apply-freeform-rfq', {
-                method: 'POST',
-                body: {
-                    name,
-                    customer_site_id: parseInt(siteId),
-                    customer_name: _nrParsedTemplate.customer_name || null,
-                    deadline: deadline || null,
-                    requirements: _nrParsedTemplate.requirements,
-                },
-            });
-            _nrParsedTemplate = null;
-            const nrParsedReqs = document.getElementById('nrParsedReqs');
-            if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
-            closeModal('newReqModal');
-            _clearNrForm();
-            await loadRequisitions();
-            expandToSubTab(data.id, 'sightings');
-            showToast('Requisition created with ' + data.requirements_added + ' parts', 'success');
-        } else {
-            const data = await apiFetch('/api/requisitions', {
-                method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
-            });
-            _nrParsedTemplate = null;
-            closeModal('newReqModal');
-            _clearNrForm();
-            await loadRequisitions();
-            expandToSubTab(data.id, 'sightings');
-            showToast('Requisition created — add parts below', 'info');
-        }
+        const data = await apiFetch('/api/requisitions', {
+            method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
+        });
+        closeModal('newReqModal');
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
+        _s('nrDeadline', 'value', ''); _s('nrDeadline', 'disabled', false); _s('nrAsap', 'checked', false);
+        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
+        const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
+        const nrCS = document.getElementById('nrContactSelect'); if (nrCS) nrCS.innerHTML = '<option value="">— Select contact —</option>';
+        await loadRequisitions();
+        expandToSubTab(data.id, 'sightings');
+        showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
-}
-
-function _clearNrForm() {
-    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
-    _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
-    _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
-    _s('nrPasteText', 'value', '');
-    const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
-    const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
-    const nrParsedReqs = document.getElementById('nrParsedReqs'); if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
+    _createReqPending = false;
 }
 
 function _clearNrValidation() {
-    _nrParsedTemplate = null;
     const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
     _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
-    _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false); _s('nrPasteText', 'value', '');
+    _s('nrDeadline', 'value', ''); _s('nrDeadline', 'disabled', false); _s('nrAsap', 'checked', false);
     const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) { nrSS.classList.add('u-hidden'); nrSS.style.display = ''; }
     const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
-    const nrParsedReqs = document.getElementById('nrParsedReqs'); if (nrParsedReqs) { nrParsedReqs.classList.add('u-hidden'); nrParsedReqs.innerHTML = ''; }
+    const nrCS = document.getElementById('nrContactSelect'); if (nrCS) nrCS.innerHTML = '<option value="">— Select contact —</option>';
     ['nrNameError', 'nrSiteError'].forEach(id => { const el = document.getElementById(id); if (el) { el.style.display = 'none'; el.textContent = ''; } });
 }
 
@@ -11712,7 +11486,6 @@ function renderSources() {
 
             const key = `${reqId}:${i}`;
             const checked = selectedSightings.has(key) ? 'checked' : '';
-            const provKey = _registerLeadProvenance(reqId, group.label, s);
             const srcLabel = (s.source_type || '').toUpperCase();
             const cond = (s.condition || '').toUpperCase().trim();
             const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : cond === 'USED' ? 'used' : 'ref'}">${esc(cond)}</span>` : '';
@@ -11787,7 +11560,6 @@ function renderSources() {
             const listingLink = _srcListingUrl ? `<a href="${escAttr(_srcListingUrl)}" target="_blank" class="btn-link" title="Search on ${esc(s.source_type || 'web')}">🔗 Listing</a>` : '';
             const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';
             const phoneLinkHtml = s.vendor_phone ? `<a class="btn-call phone-link" href="tel:${ph}" onclick="logCallInitiated(this)" data-phone="${ph}" data-ctx="${escAttr(JSON.stringify({vendor_card_id: vc.card_id || null, requirement_id: s.requirement_id || null, origin: 'search_results'}))}">📞 ${esc(s.vendor_phone)}</a>` : '';
-            const provBtn = `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾 Provenance</button>`;
             const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
 
             // Build price HTML
@@ -11826,7 +11598,7 @@ function renderSources() {
                     <div class="sc-badges">${visibleBadges}${overflowBadge}${s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== (group.label || '').trim().toUpperCase() ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.mpn_matched)}</span>` : ''}${s.manufacturer ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.manufacturer)}</span>` : ''}</div>
                 </div>
                 <div class="sc-actions-right">
-                    ${phoneLinkHtml}${listingLink}${vendorLink}${provBtn}${unavailBtn}
+                    ${phoneLinkHtml}${listingLink}${vendorLink}${unavailBtn}
                 </div>
             </div>`;
         }
@@ -13668,53 +13440,17 @@ async function unifiedEnrichVendor(cardId) {
 // ── Vendors Tab ────────────────────────────────────────────────────────
 
 let _vendorAbort = null;
-let _vendorViewMode = 'cards'; // 'cards' or 'table'
-
-function toggleVendorView() {
-    _vendorViewMode = _vendorViewMode === 'cards' ? 'table' : 'cards';
-    const btn = document.getElementById('vendorViewToggle');
-    if (btn) btn.textContent = _vendorViewMode === 'cards' ? 'Table' : 'Cards';
-    filterVendorList();
-}
-
-function setVendorSort(val) {
-    const [col, dir] = val.split('_');
-    _vendorSortCol = col;
-    _vendorSortDir = dir || 'desc';
-    filterVendorList();
-}
-
 async function loadVendorList() {
     if (_vendorAbort) { try { _vendorAbort.abort(); } catch(e){} }
     _vendorAbort = new AbortController();
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     var vl = document.getElementById('vendorList');
-    if (vl && !_vendorListData.length) vl.innerHTML = window.skeletonRows ? window.skeletonRows(5) : '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
+    if (vl && !_vendorListData.length) vl.innerHTML = window.skeletonRows(5);
     let resp;
-    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}&limit=500`, {signal: _vendorAbort.signal}); }
+    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`, {signal: _vendorAbort.signal}); }
     catch (e) { if (e.name === 'AbortError') return; logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
     _vendorListData = resp.vendors || resp;
-    _populateVendorFilterDropdowns();
     filterVendorList();
-}
-
-function _populateVendorFilterDropdowns() {
-    const brands = new Map();
-    const commodities = new Map();
-    for (const c of _vendorListData) {
-        for (const t of (c.brand_tags || [])) brands.set(t.toLowerCase(), t);
-        for (const t of (c.commodity_tags || [])) commodities.set(t.toLowerCase(), t);
-    }
-    _fillFilterSelect('vendorBrandFilter', 'Brand', [...brands.values()].sort().slice(0, 50));
-    _fillFilterSelect('vendorCommodityFilter', 'Commodity', [...commodities.values()].sort().slice(0, 50));
-}
-
-function _fillFilterSelect(selectId, label, items) {
-    const el = document.getElementById(selectId);
-    if (!el) return;
-    const current = el.value;
-    el.innerHTML = `<option value="">${label}: All</option>` + items.map(t => `<option value="${escAttr(t)}">${esc(t)}</option>`).join('');
-    if (current) el.value = current;
 }
 
 function vendorTier(c) {
@@ -13742,34 +13478,14 @@ function filterVendorList() {
     let filtered = [..._vendorListData];
     if (q) {
         const lq = q.toLowerCase();
-        filtered = filtered.filter(c => {
-            if ((c.display_name || '').toLowerCase().includes(lq)) return true;
-            if ((c.brand_tags || []).some(t => t.toLowerCase().includes(lq))) return true;
-            if ((c.commodity_tags || []).some(t => t.toLowerCase().includes(lq))) return true;
-            if ((c.industry || '').toLowerCase().includes(lq)) return true;
-            return false;
-        });
+        filtered = filtered.filter(c => (c.display_name || '').toLowerCase().includes(lq));
     }
     if (_vendorTierFilter !== 'all') {
         filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
 
-    // Brand filter
-    const brandFilter = (document.getElementById('vendorBrandFilter') || {}).value || '';
-    if (brandFilter) filtered = filtered.filter(c => (c.brand_tags || []).some(t => t.toLowerCase() === brandFilter.toLowerCase()));
-
-    // Commodity filter
-    const commodityFilter = (document.getElementById('vendorCommodityFilter') || {}).value || '';
-    if (commodityFilter) filtered = filtered.filter(c => (c.commodity_tags || []).some(t => t.toLowerCase() === commodityFilter.toLowerCase()));
-
-    // Claimed filter
-    const claimFilter = (document.getElementById('vendorClaimFilter') || {}).value || '';
-    if (claimFilter === 'claimed') filtered = filtered.filter(c => c.claimed_by);
-    if (claimFilter === 'unclaimed') filtered = filtered.filter(c => !c.claimed_by);
-
     // Sort
-    const _tierRank = t => ({proven:1,developing:2,caution:3,new:4}[vendorTier(t)] || 4);
-    if (_vendorSortCol && _vendorSortCol !== 'tier') {
+    if (_vendorSortCol) {
         filtered.sort((a, b) => {
             let va, vb;
             switch (_vendorSortCol) {
@@ -13778,19 +13494,13 @@ function filterVendorList() {
                 case 'response': va = (a.response_rate ?? 0); vb = (b.response_rate ?? 0); break;
                 case 'pos': va = (a.total_pos ?? 0); vb = (b.total_pos ?? 0); break;
                 case 'parts': va = (a.sighting_count ?? 0); vb = (b.sighting_count ?? 0); break;
-                case 'rating': va = (a.avg_rating ?? 0); vb = (b.avg_rating ?? 0); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _vendorSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
             return _vendorSortDir === 'asc' ? va - vb : vb - va;
         });
     } else {
-        // Default: tier first (proven > developing > caution > new), then score desc
-        filtered.sort((a, b) => {
-            const ta = _tierRank(a), tb = _tierRank(b);
-            if (ta !== tb) return ta - tb;
-            return (b.vendor_score ?? -1) - (a.vendor_score ?? -1);
-        });
+        filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
     }
 
     const countEl = document.getElementById('vendorFilterCount');
@@ -13798,121 +13508,15 @@ function filterVendorList() {
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = _vendorListData.length
-            ? (typeof stateEmpty === 'function' ? stateEmpty('No vendors match filters', 'Try adjusting your search or filter criteria') : '<p class="empty">No vendors match filters</p>')
-            : (typeof stateEmpty === 'function' ? stateEmpty('No vendors yet', 'They\'ll appear automatically after your first search') : '<p class="empty">No vendors yet</p>');
+        el.innerHTML = _vendorListData.length ? stateEmpty('No vendors match filters', 'Try adjusting your search or filter criteria') : stateEmpty('No vendors yet', 'They\'ll appear automatically after your first search');
         return;
     }
 
-    // Card view (default) or table view
-    if (_vendorViewMode === 'cards' || window.__isMobile) {
-        el.innerHTML = '<div class="vendor-card-grid">' + filtered.map(c => _renderVendorCard(c)).join('') + '</div>';
-    } else {
-        _renderVendorTable(filtered, el);
-    }
-}
-
-function _renderVendorCard(c) {
-    const score = c.vendor_score != null ? Math.round(c.vendor_score) : null;
-    const tier = vendorTier(c);
-    const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : null;
-
-    // Tier badge
-    const tierBadge = `<span class="vc-badge vc-badge-${tier}">${tier}</span>`;
-    const blackBadge = c.is_blacklisted ? '<span class="vc-badge vc-badge-blocked">Blocked</span>' : '';
-
-    // Claimed badge
-    let claimBadge = '';
-    if (c.claimed_by) {
-        claimBadge = `<span class="vc-badge vc-badge-claimed" title="Claimed by ${esc(c.claimed_by.claimed_by_name || 'unknown')}">${esc(c.claimed_by.claimed_by_name || 'Claimed')}</span>`;
-    }
-
-    // Score bar
-    const scorePct = score != null ? Math.min(score, 100) : 0;
-    const scoreColor = score >= 66 ? 'var(--green,#16a34a)' : score >= 33 ? 'var(--blue)' : 'var(--amber,#d97706)';
-    const scoreHtml = score != null
-        ? `<div class="vc-score-section">
-            <div class="vc-score-label"><span>Score</span><span style="font-weight:700;font-family:'JetBrains Mono',monospace">${score}</span></div>
-            <div class="vc-score-track"><div class="vc-score-fill" style="width:${scorePct}%;background:${scoreColor}"></div></div>
-           </div>`
-        : '<div class="vc-score-section"><span style="font-size:10px;color:var(--muted)">New — no score yet</span></div>';
-
-    // Rating stars
-    let ratingHtml = '';
-    if (c.avg_rating) {
-        const fullStars = Math.floor(c.avg_rating);
-        let stars = '';
-        for (let i = 0; i < 5; i++) stars += i < fullStars ? '<span style="color:#f59e0b">&#9733;</span>' : '<span style="color:var(--border)">&#9733;</span>';
-        const ratingLabel = c.rating_source === 'auto' ? '(auto)' : `(${c.review_count})`;
-        ratingHtml = `<div class="vc-rating">${stars} <span style="font-size:10px;color:var(--muted)">${ratingLabel}</span></div>`;
-    }
-
-    // Brand tags (top 5)
-    const brands = (c.brand_tags || []).slice(0, 5);
-    const brandHtml = brands.length
-        ? '<div class="vc-tags">' + brands.map(t => `<span class="vc-tag vc-tag-brand">${esc(t)}</span>`).join('') + (c.brand_tags.length > 5 ? `<span class="vc-tag" style="color:var(--muted)">+${c.brand_tags.length - 5}</span>` : '') + '</div>'
-        : '';
-
-    // Commodity tags (top 4)
-    const commodities = (c.commodity_tags || []).slice(0, 4);
-    const commodityHtml = commodities.length
-        ? '<div class="vc-tags">' + commodities.map(t => `<span class="vc-tag vc-tag-commodity">${esc(t)}</span>`).join('') + (c.commodity_tags.length > 4 ? `<span class="vc-tag" style="color:var(--muted)">+${c.commodity_tags.length - 4}</span>` : '') + '</div>'
-        : '';
-
-    // Stats row
-    const stats = [];
-    if (c.sighting_count) stats.push(`<span><b>${c.sighting_count}</b> parts</span>`);
-    if (responseRate) stats.push(`<span><b>${responseRate}</b> response</span>`);
-    if (c.total_pos) stats.push(`<span><b>${c.total_pos}</b> POs</span>`);
-    if (c.overall_win_rate != null) stats.push(`<span><b>${Math.round(c.overall_win_rate * 100)}%</b> win rate</span>`);
-    const statsHtml = stats.length ? `<div class="vc-stats">${stats.join('')}</div>` : '';
-
-    // Top contact
-    let contactHtml = '';
-    if (c.top_contact) {
-        const tc = c.top_contact;
-        const cParts = [];
-        if (tc.name) cParts.push(`<b>${esc(tc.name)}</b>`);
-        if (tc.email) cParts.push(`<a href="mailto:${escAttr(tc.email)}" onclick="event.stopPropagation()">${esc(tc.email)}</a>`);
-        if (tc.phone) cParts.push(`<a href="tel:${escAttr(tc.phone)}" onclick="event.stopPropagation()">${esc(tc.phone)}</a>`);
-        if (cParts.length) contactHtml = `<div class="vc-contact">${cParts.join(' &middot; ')}</div>`;
-    }
-
-    // Domain link
-    const domainHtml = c.website
-        ? `<a class="vc-domain" href="${escAttr(c.website)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(c.domain || c.website.replace(/^https?:\/\//, '').replace(/\/.*/, ''))}</a>`
-        : '';
-
-    // Actions
-    const claimBtn = !c.claimed_by
-        ? `<button class="vc-btn-claim" onclick="event.stopPropagation();claimStrategicVendor(${c.id},'${escAttr(c.display_name)}')">Claim</button>`
-        : '';
-
-    return `<div class="vendor-card" onclick="openVendorDrawer(${c.id})" data-vendor-id="${c.id}">
-        <div class="vc-header">
-            <div>
-                <div class="vc-name">${esc(c.display_name)}</div>
-                ${domainHtml}
-            </div>
-            <div class="vc-badges">${claimBadge}${tierBadge}${blackBadge}</div>
-        </div>
-        ${scoreHtml}
-        ${ratingHtml}
-        ${brandHtml}
-        ${commodityHtml}
-        ${statsHtml}
-        ${contactHtml}
-        <div class="vc-footer">
-            <div class="vc-actions">${claimBtn}<button class="vc-btn-details" onclick="event.stopPropagation();openVendorPopup(${c.id})">Details</button></div>
-        </div>
-    </div>`;
-}
-
-function _renderVendorTable(filtered, el) {
-    const thSort = (col, label) => {
+    // Build table
+    const thSort = (col, label, extra = '') => {
         const active = _vendorSortCol === col;
         const arrow = active ? (_vendorSortDir === 'asc' ? ' ▲' : ' ▼') : '';
-        return `<th class="${active ? 'sorted' : ''}" onclick="sortVendorList('${col}')">${label}<span class="sort-arrow">${arrow}</span></th>`;
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortVendorList('${col}')" ${extra}>${label}<span class="sort-arrow">${arrow}</span></th>`;
     };
 
     let html = `<table class="crm-table">
@@ -13947,35 +13551,41 @@ function _renderVendorTable(filtered, el) {
         </tr>`;
     }
     html += '</tbody></table>';
-    el.innerHTML = html;
+
+    // Mobile: render cards instead of table
+    if (window.__isMobile) {
+        let mHtml = '';
+        for (const c of filtered) {
+            mHtml += _renderVendorCardMobile(c);
+        }
+        el.innerHTML = mHtml || '<p class="m-empty">No vendors match filters</p>';
+    } else {
+        el.innerHTML = html;
+    }
 }
 
 function _renderVendorCardMobile(c) {
-    // Mobile now uses the same card renderer
-    return _renderVendorCard(c);
-}
+    const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
+    const tier = vendorTier(c);
+    const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
+    const parts = c.sighting_count || 0;
+    const tierColors = {proven:'m-chip-green',developing:'m-chip-blue',caution:'m-chip-amber','new':'m-chip'};
 
-async function claimStrategicVendor(vendorId, vendorName) {
-    if (typeof confirmAction === 'function') {
-        confirmAction('Claim Strategic Vendor', 'Claim "' + vendorName + '" as your strategic vendor? You can have up to 10.', async function() {
-            await _doClaimVendor(vendorId, vendorName);
-        });
-    } else {
-        if (!confirm('Claim "' + vendorName + '" as your strategic vendor?')) return;
-        await _doClaimVendor(vendorId, vendorName);
-    }
-}
-
-async function _doClaimVendor(vendorId, vendorName) {
-    try {
-        await apiFetch('/api/strategic-vendors/claim/' + vendorId, { method: 'POST' });
-        showToast('Claimed: ' + vendorName, 'success');
-        // Refresh list to update claim badge
-        loadVendorList();
-    } catch (e) {
-        const msg = e?.error || e?.message || 'Failed to claim vendor';
-        showToast(msg, 'error');
-    }
+    return `<div class="m-card" onclick="openVendorDrawer(${c.id})">
+        <div class="m-card-header">
+            <span class="m-card-title">${esc(c.display_name)}${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px">BLOCKED</span>' : ''}</span>
+            <span class="m-chip ${tierColors[tier] || 'm-chip'}">${tier}</span>
+        </div>
+        <div class="m-card-body">
+            <span style="font-size:12px">Score: <b>${score}</b></span>
+            <span style="font-size:12px">Response: <b>${responseRate}</b></span>
+            <span style="font-size:12px"><b>${parts}</b> parts</span>
+        </div>
+        <div class="m-card-footer">
+            <span class="m-card-meta">${c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—'}</span>
+            <span class="m-card-chevron">›</span>
+        </div>
+    </div>`;
 }
 
 function sortVendorList(col) {
@@ -16811,10 +16421,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
-            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
+            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16863,19 +16473,17 @@ async function _rfqLoadTab(tab) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${partId}/offers`);
                 break;
-            case 'activity': {
-                // Timeline-only activity stream (tasks/notes have dedicated tabs).
-                data = await apiFetch(`/api/requirements/${partId}/history`);
-                break;
-            }
-            case 'sightings':
-                data = await apiFetch(`/api/requirements/${partId}/sightings`);
-                break;
             case 'tasks':
                 data = await apiFetch(`/api/requirements/${partId}/tasks`);
                 break;
             case 'notes':
                 data = await apiFetch(`/api/requirements/${partId}/notes`);
+                break;
+            case 'history':
+                data = await apiFetch(`/api/requirements/${partId}/history`);
+                break;
+            case 'sightings':
+                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
                 break;
         }
         // Abort if part changed while loading
@@ -16891,10 +16499,10 @@ async function _rfqLoadTab(tab) {
 function _rfqRenderTab(tab, data, body) {
     switch (tab) {
         case 'offers': _rfqRenderOffers(data, body); break;
-        case 'activity': _rfqRenderActivity(data, body); break;
-        case 'sightings': _rfqRenderSightings(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
+        case 'history': _rfqRenderHistory(data, body); break;
+        case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
 }
@@ -17037,300 +16645,206 @@ async function rfqToggleOfferSelection(offerId) {
     }
 }
 
-// ── ACTIVITY TAB (timeline only) ───────────────────────────────────────
+// ── TASKS TAB ─────────────────────────────────────────────────────────
 
-function _rfqRenderActivity(data, body) {
-    const history = Array.isArray(data) ? data : (Array.isArray(data?.history) ? data.history : []);
-    const timeline = history
-        .map(ev => ({ event: ev, ts: ev.created_at ? new Date(ev.created_at).getTime() : 0 }))
-        .sort((a, b) => b.ts - a.ts);
-
-    let html = '<div class="activity-section">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    html += `<span style="font-size:12px;font-weight:600">${timeline.length} Event${timeline.length !== 1 ? 's' : ''}</span>`;
-    html += '</div>';
-    html += '<div class="activity-timeline">';
-
-    if (!timeline.length) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No activity yet</div>';
+function _rfqRenderTasks(tasks, body) {
+    if (!tasks || tasks.length === 0) {
+        body.innerHTML = `<div class="empty-placeholder">No tasks for this part</div>
+            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqAddTask()">+ Add Task</button>`;
+        return;
     }
 
-    timeline.forEach(item => {
-        const ev = item.event || {};
-        let icon = '';
-        let text = '';
-        switch (ev.type) {
-            case 'change':
-                icon = '\u270f\ufe0f';
-                text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity || '')} <b>${esc(ev.field || '')}</b>`;
-                if (ev.old_value || ev.new_value) {
-                    const fv = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
-                    text += `<div style="font-size:10px;color:var(--muted)">${esc(fv(ev.old_value))} \u2192 ${esc(fv(ev.new_value))}</div>`;
-                }
-                break;
-            case 'offer_created':
-                icon = '\ud83d\udcb0';
-                text = `Offer from <b>${esc(ev.vendor_name || '')}</b>`;
-                if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
-                break;
-            case 'rfq_sent':
-                icon = '\u2709\ufe0f';
-                text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name || '')}</b>`;
-                break;
-            case 'task_done':
-                icon = '\u2705';
-                text = `Task completed: <b>${esc(ev.title || '')}</b>`;
-                break;
-            default:
-                icon = '\u2022';
-                text = esc(ev.summary || ev.type || 'Event');
+    let html = `<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length>1?'s':''}</span>
+        <button class="btn btn-sm" onclick="rfqAddTask()">+ Add Task</button>
+    </div>`;
+
+    tasks.forEach(t => {
+        const dept = t.task_type || 'general';
+        const deptLabel = dept === 'sourcing' ? 'Purchasing' : dept === 'sales' ? 'Sales' : 'General';
+        const deptCls = dept === 'sourcing' ? 'purchasing' : dept;
+        const statusCls = 'rfq-task-status-' + (t.status || 'todo');
+
+        let dueLine = '';
+        if (t.due_date) {
+            const d = new Date(t.due_date);
+            const now = new Date();
+            const overdue = d < now && t.status !== 'done';
+            dueLine = `<span class="${overdue ? 'task-overdue' : ''}">${overdue ? '\u26a0 ' : ''}Due ${fmtDate(t.due_date)}</span>`;
         }
 
-        html += `<div class="activity-item activity-item-event">
-            <div style="display:flex;gap:6px;align-items:flex-start">
-                <span>${icon}</span>
-                <div>
-                    <div style="font-size:11px">${text}</div>
-                    ${ev.created_at ? '<div style="font-size:10px;color:var(--muted)">' + fmtDateTime(ev.created_at) + '</div>' : ''}
+        html += `<div class="rfq-task-item">
+            <div class="rfq-task-dept rfq-task-dept-${deptCls}">
+                <span style="font-weight:700;text-transform:uppercase">${deptLabel}</span>
+                <span style="font-weight:500;opacity:.85">${esc(t.assigned_to || t.created_by_name || '')}</span>
+            </div>
+            <div class="rfq-task-body">
+                <div class="rfq-task-title">${esc(t.title)}</div>
+                ${t.ai_risk_flag ? '<div class="task-risk-flag">\u26a0 ' + esc(t.ai_risk_flag) + '</div>' : ''}
+                <div class="rfq-task-meta">
+                    <span class="rfq-task-status ${statusCls}">${(t.status || 'todo').replace('_',' ')}</span>
+                    ${dueLine}
+                    ${t.source === 'ai' || t.source === 'system' ? '<span class="task-auto-tag">auto</span>' : ''}
                 </div>
             </div>
         </div>`;
     });
 
-    html += '</div></div>';
     body.innerHTML = html;
 }
 
-// ── Inline task creation form ──
-function rfqShowTaskForm() {
-    const slot = document.getElementById('rfqTaskFormSlot');
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form">
-        <input type="text" id="rfqNewTaskTitle" placeholder="Task title..." style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-        <textarea id="rfqNewTaskDesc" placeholder="Description (optional)..." rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);margin-top:4px;resize:vertical"></textarea>
-        <div style="display:flex;gap:6px;margin-top:4px">
-            <select id="rfqNewTaskAssignee" style="flex:1;font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-                <option value="">Assign to...</option>
-            </select>
-            <input type="date" id="rfqNewTaskDue" style="font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-        </div>
-        <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('rfqTaskFormSlot').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="rfqSubmitTask()">Create Task</button>
-        </div>
-    </div>`;
-    // Set min date to tomorrow
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    document.getElementById('rfqNewTaskDue').min = tomorrow.toISOString().split('T')[0];
-    // Load users for dropdown
-    apiFetch('/api/users/list').then(users => {
-        const sel = document.getElementById('rfqNewTaskAssignee');
-        if (sel && Array.isArray(users)) {
-            users.forEach(u => {
-                const opt = document.createElement('option');
-                opt.value = u.id;
-                opt.textContent = u.name || u.email;
-                sel.appendChild(opt);
-            });
-        }
-    }).catch(() => {});
-    document.getElementById('rfqNewTaskTitle').focus();
-}
-window.rfqShowTaskForm = rfqShowTaskForm;
-
-async function rfqSubmitTask() {
-    const title = document.getElementById('rfqNewTaskTitle')?.value?.trim();
-    const description = document.getElementById('rfqNewTaskDesc')?.value?.trim() || null;
-    const assignee = document.getElementById('rfqNewTaskAssignee')?.value;
-    const dueStr = document.getElementById('rfqNewTaskDue')?.value;
-    if (!title) { alert('Title is required'); return; }
-    if (!assignee) { alert('Please assign to someone'); return; }
-    if (!dueStr) { alert('Please set a due date'); return; }
-    const dueAt = new Date(dueStr + 'T17:00:00Z').toISOString();
+async function rfqAddTask() {
+    const title = prompt('Task title:');
+    if (!title || !title.trim()) return;
     try {
         await apiFetch(`/api/requirements/${_rfqActivePartId}/tasks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title, description, assigned_to_id: parseInt(assignee), due_at: dueAt }),
+            body: JSON.stringify({ title: title.trim() }),
         });
-        delete _rfqPanelCache.activity;
         delete _rfqPanelCache.tasks;
-        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
-    } catch(e) {
-        alert('Failed to create task: ' + (e.message || e));
-    }
-}
-window.rfqSubmitTask = rfqSubmitTask;
-
-// ── Inline task completion form ──
-function rfqShowCompleteForm(taskId) {
-    const slot = document.getElementById('rfqCompleteSlot-' + taskId);
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form" style="margin-top:6px">
-        <textarea id="rfqCompleteNote-${taskId}" placeholder="How was this resolved?" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('rfqCompleteSlot-${taskId}').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="rfqSubmitComplete(${taskId})">Mark Complete</button>
-        </div>
-    </div>`;
-    document.getElementById('rfqCompleteNote-' + taskId).focus();
-}
-window.rfqShowCompleteForm = rfqShowCompleteForm;
-
-async function rfqSubmitComplete(taskId) {
-    const note = document.getElementById('rfqCompleteNote-' + taskId)?.value?.trim();
-    if (!note) { alert('Please describe how this was resolved'); return; }
-    try {
-        await apiFetch(`/api/tasks/${taskId}/complete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ completion_note: note }),
-        });
-        delete _rfqPanelCache.activity;
-        delete _rfqPanelCache.tasks;
-        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
-    } catch(e) {
-        alert('Failed to complete task: ' + (e.message || e));
-    }
-}
-window.rfqSubmitComplete = rfqSubmitComplete;
-
-// ── Inline add-note form ──
-function rfqShowNoteForm() {
-    const slot = document.getElementById('rfqNoteFormSlot');
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form">
-        <textarea id="rfqNewNoteText" placeholder="Add a note..." rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="document.getElementById('rfqNoteFormSlot').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="rfqSubmitNote()">Save Note</button>
-        </div>
-    </div>`;
-    document.getElementById('rfqNewNoteText').focus();
-}
-window.rfqShowNoteForm = rfqShowNoteForm;
-
-async function rfqSubmitNote() {
-    const text = document.getElementById('rfqNewNoteText')?.value?.trim();
-    if (!text) return;
-    try {
-        await apiFetch(`/api/requirements/${_rfqActivePartId}/notes`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text }),
-        });
-        delete _rfqPanelCache.activity;
-        delete _rfqPanelCache.notes;
-        await _rfqLoadTab(_rfqPanelTab === 'notes' ? 'notes' : 'activity');
-    } catch(e) {
-        console.error('Add note failed:', e);
-    }
-}
-window.rfqSubmitNote = rfqSubmitNote;
-
-// ── TASKS TAB ─────────────────────────────────────────────────────────
-
-function _rfqRenderTasks(tasks, body) {
-    const allTasks = Array.isArray(tasks) ? tasks : [];
-    const openTasks = allTasks.filter(t => t.status !== 'done');
-    const doneTasks = allTasks.filter(t => t.status === 'done');
-    let html = '<div class="activity-section">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    html += `<span style="font-size:12px;font-weight:600">${allTasks.length} Task${allTasks.length !== 1 ? 's' : ''}</span>`;
-    html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
-    html += '</div>';
-    html += '<div id="rfqTaskFormSlot"></div>';
-
-    if (!allTasks.length) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No tasks for this part yet</div>';
-    } else {
-        if (openTasks.length) {
-            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Open</div>';
-            openTasks.forEach(t => {
-                const due = t.due_at || t.due_date;
-                const dueLabel = due ? ` · Due ${fmtDate(due)}` : '';
-                html += `<div class="activity-item activity-item-task-open">
-                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-                        <div style="flex:1">
-                            <div style="font-size:11px;font-weight:600">${esc(t.title || '')}</div>
-                            <div style="font-size:10px;color:var(--muted)">
-                                ${esc(t.assignee_name || t.assigned_to || 'Unassigned')}${dueLabel}
-                            </div>
-                        </div>
-                        <button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="rfqShowCompleteForm(${t.id})">Complete</button>
-                    </div>
-                    <div id="rfqCompleteSlot-${t.id}"></div>
-                </div>`;
-            });
+        await _rfqLoadTab('tasks');
+        // Update part chip cluster
+        const part = _rfqPartsData.find(p => p.id === _rfqActivePartId);
+        if (part) {
+            part.task_count = (part.task_count || 0) + 1;
+            _rfqRenderPartList(_rfqActiveReqId);
         }
-        if (doneTasks.length) {
-            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Completed</div>';
-            doneTasks.forEach(t => {
-                html += `<div class="activity-item activity-item-task-done">
-                    <div style="font-size:11px">${esc(t.title || '')}</div>
-                    <div style="font-size:10px;color:var(--muted)">${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
-                </div>`;
-            });
-        }
+    } catch(e) {
+        console.error('Add task failed:', e);
     }
-    html += '</div>';
-    body.innerHTML = html;
 }
 
 // ── NOTES TAB ─────────────────────────────────────────────────────────
 
-function _rfqRenderNotes(notesData, body) {
-    const reqNotes = (notesData && notesData.requirement_notes) ? String(notesData.requirement_notes) : '';
-    const offerNotes = Array.isArray(notesData?.notes) ? notesData.notes : [];
-    const reqLines = reqNotes.split('\n').map(x => x.trim()).filter(Boolean);
-    let html = '<div class="activity-section">';
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    html += `<span style="font-size:12px;font-weight:600">${reqLines.length + offerNotes.length} Note${(reqLines.length + offerNotes.length) !== 1 ? 's' : ''}</span>`;
-    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
-    html += '</div>';
-    html += '<div id="rfqNoteFormSlot"></div>';
+function _rfqRenderNotes(data, body) {
+    if (!data) { body.innerHTML = '<div class="empty-placeholder">No notes</div>'; return; }
 
-    if (!reqLines.length && !offerNotes.length) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No notes for this part yet</div>';
-    } else {
-        if (reqLines.length) {
-            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Requirement Notes</div>';
-            reqLines.forEach(line => {
-                html += `<div class="activity-item activity-item-note"><div style="font-size:11px">${esc(line)}</div></div>`;
-            });
-        }
-        if (offerNotes.length) {
-            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Offer Notes</div>';
-            offerNotes.forEach(n => {
-                html += `<div class="activity-item activity-item-note">
-                    <div style="font-size:10px;font-weight:600;color:var(--muted)">${esc(n.vendor_name || 'Vendor')}</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(n.note || '')}</div>
-                    ${n.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(n.created_at) + '</div>' : ''}
-                </div>`;
-            });
-        }
+    let html = '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
+    html += '<span style="font-size:12px;font-weight:600">Notes</span>';
+    html += '<button class="btn btn-sm" onclick="rfqAddNote()">+ Add Note</button></div>';
+
+    let hasNotes = false;
+
+    // Requirement notes (may contain multiple timestamped entries)
+    if (data.requirement_notes) {
+        hasNotes = true;
+        const lines = data.requirement_notes.split('\n').filter(l => l.trim());
+        lines.forEach(line => {
+            html += `<div class="rfq-note-item">
+                <div class="rfq-note-label rfq-note-label-req">Requirement Note</div>
+                <div class="rfq-note-text">${esc(line)}</div>
+            </div>`;
+        });
     }
 
-    html += '</div>';
+    // Offer notes
+    if (data.notes && data.notes.length > 0) {
+        hasNotes = true;
+        data.notes.forEach(n => {
+            html += `<div class="rfq-note-item">
+                <div class="rfq-note-label rfq-note-label-offer">Offer Note \u2014 ${esc(n.vendor_name)}</div>
+                <div class="rfq-note-text">${esc(n.note)}</div>
+                <div class="rfq-note-meta">${n.created_at ? fmtDateTime(n.created_at) : ''}</div>
+            </div>`;
+        });
+    }
+
+    if (!hasNotes) html += '<div class="empty-placeholder">No notes yet</div>';
+    body.innerHTML = html;
+}
+
+async function rfqAddNote() {
+    const text = prompt('Add note:');
+    if (!text || !text.trim()) return;
+    try {
+        await apiFetch(`/api/requirements/${_rfqActivePartId}/notes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text.trim() }),
+        });
+        delete _rfqPanelCache.notes;
+        await _rfqLoadTab('notes');
+    } catch(e) {
+        console.error('Add note failed:', e);
+    }
+}
+
+// ── HISTORY TAB ───────────────────────────────────────────────────────
+
+function _rfqRenderHistory(events, body) {
+    if (!events || events.length === 0) {
+        body.innerHTML = '<div class="empty-placeholder">No history events</div>';
+        return;
+    }
+
+    let html = '<div style="font-size:12px;font-weight:600;margin-bottom:8px">History Timeline</div>';
+
+    events.forEach(ev => {
+        let icon = '', iconCls = '', text = '';
+        const time = ev.created_at ? `<div class="rfq-hist-time">${fmtDateTime(ev.created_at)}</div>` : '';
+
+        switch (ev.type) {
+            case 'change':
+                icon = '\u270f\ufe0f';
+                iconCls = 'rfq-hist-icon-change';
+                text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity)} <b>${esc(ev.field)}</b>`;
+                if (ev.old_value || ev.new_value) {
+                    const _fmtVal = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+                    text += `<div style="font-size:10px;color:var(--muted);margin-top:2px">${esc(_fmtVal(ev.old_value))} \u2192 ${esc(_fmtVal(ev.new_value))}</div>`;
+                }
+                break;
+            case 'offer_created':
+                icon = '\ud83d\udcb0';
+                iconCls = 'rfq-hist-icon-offer';
+                text = `Offer from <b>${esc(ev.vendor_name)}</b>`;
+                if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
+                if (ev.qty_available) text += ` \u00d7 ${ev.qty_available}`;
+                break;
+            case 'rfq_sent':
+                icon = '\u2709\ufe0f';
+                iconCls = 'rfq-hist-icon-rfq';
+                text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name)}</b>`;
+                if (ev.status && ev.status !== 'sent') text += ` \u2014 ${ev.status}`;
+                break;
+            case 'task_done':
+                icon = '\u2705';
+                iconCls = 'rfq-hist-icon-task';
+                text = `Task completed: <b>${esc(ev.title)}</b>`;
+                break;
+            default:
+                icon = '\u2022';
+                text = JSON.stringify(ev);
+        }
+
+        html += `<div class="rfq-hist-item">
+            <div class="rfq-hist-icon ${iconCls}">${icon}</div>
+            <div class="rfq-hist-body">${text}${time}</div>
+        </div>`;
+    });
+
     body.innerHTML = html;
 }
 
 // ── SIGHTINGS TAB ─────────────────────────────────────────────────────
 
-function _rfqRenderSightings(partData, body) {
+function _rfqRenderSightings(data, body) {
+    if (!data) { body.innerHTML = '<div class="empty-placeholder">No sightings data</div>'; return; }
+
+    // Filter sightings to current part only
+    const partId = _rfqActivePartId;
+    const partData = data[String(partId)];
     if (!partData || !partData.sightings || partData.sightings.length === 0) {
         body.innerHTML = '<div class="empty-placeholder">No sightings for this part. Run a search to find sources.</div>';
         return;
     }
 
-    const partId = _rfqActivePartId;
     const sightings = partData.sightings.slice();
     const blCount = partData.blacklisted_count || 0;
 
     // Sort: exact MPN match first, then by score/qty descending
     const part = _rfqPartsData.find(p => p.id === partId);
-    const partMpn = (part?.primary_mpn || part?.mpn || partData.label || '').trim().toUpperCase();
+    const partMpn = (part?.mpn || partData.label || '').trim().toUpperCase();
     sightings.sort((a, b) => {
         const aExact = (a.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;
         const bExact = (b.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;
@@ -17408,7 +16922,7 @@ Object.assign(window, {
     logCall, markAllNotifsRead, markNotifRead, markUnavailable, openAddVendorContact,
     openEditVendorContact, openLogOfferFromList, openMaterialPopup,
     openMaterialPopupByMpn, openVendorLogNoteModal,
-    openVendorPopup, openLeadProvenancePanel, placeVendorCall, renderReqList, requoteFromList,
+    openVendorPopup, placeVendorCall, renderReqList, requoteFromList,
     rfqConfirmCustomEmail, rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
@@ -17488,5 +17002,5 @@ Object.assign(window, {
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
-    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection,
+    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
 });

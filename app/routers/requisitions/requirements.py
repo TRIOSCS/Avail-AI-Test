@@ -276,10 +276,12 @@ async def add_requirements(
     raw = await request.json()
     items = raw if isinstance(raw, list) else [raw]
     created = []
-    for item in items:
+    skipped = []
+    for idx, item in enumerate(items):
         try:
             parsed = RequirementCreate.model_validate(item)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            skipped.append({"index": idx, "error": str(exc)})
             continue
         seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
         deduped_subs = []
@@ -394,10 +396,13 @@ async def add_requirements(
                     seen.add(key)
                     duplicates.append({"mpn": mpn, "req_id": rid, "req_name": rname})
 
-    return {
+    result = {
         "created": [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created],
         "duplicates": duplicates,
     }
+    if skipped:
+        result["skipped"] = skipped
+    return result
 
 
 @router.post("/api/requisitions/{req_id}/upload")
