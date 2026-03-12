@@ -320,7 +320,7 @@ let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 var _ddTierState = {};           // tier expand/collapse state: `${reqId}-${rId}-${tier}` → bool
 let _partExpandState = {};       // `${reqId}-${requirementId}` → true if part detail is expanded
-let _partActiveTab = {};         // `${reqId}-${requirementId}` → 'offers'|'notes'|'tasks'
+let _partActiveTab = {};         // `${reqId}-${requirementId}` → active part detail tab
 let _partDetailCache = {};       // `${reqId}-${requirementId}-${tab}` → cached data
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
@@ -7682,13 +7682,22 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'activity'];
-    const tabLabels = { offers: 'Offers', activity: 'Activity' };
+    const tabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
     const pills = tabs.map(t =>
-        `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
+        `<button class="part-tab${t === activeTab ? ' on' : ''}" data-tab="${t}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${_partTabLabel(t)}</button>`
     ).join('');
     panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><span style="font-size:11px;color:var(--muted)">Loading\u2026</span></div>`;
     await _loadPartTab(reqId, requirementId, activeTab);
+}
+
+function _partTabLabel(tabName) {
+    return {
+        offers: 'Offers',
+        sightings: 'Sightings',
+        activity: 'Activity',
+        tasks: 'Tasks',
+        notes: 'Notes',
+    }[tabName] || tabName;
 }
 
 async function _switchPartTab(reqId, requirementId, tabName) {
@@ -7697,7 +7706,7 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.textContent === { offers: 'Offers', activity: 'Activity' }[tabName]);
+        t.classList.toggle('on', t.dataset.tab === tabName);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7717,14 +7726,20 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
-            case 'activity': {
-                const [notes, tasks] = await Promise.all([
-                    apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []),
-                ]);
-                data = { notes, tasks, history: [] };
+            case 'sightings':
+                data = await apiFetch(`/api/requirements/${requirementId}/sightings`);
                 break;
-            }
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${requirementId}/history`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${requirementId}/notes`);
+                break;
+            default:
+                data = null;
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
@@ -7736,7 +7751,10 @@ async function _loadPartTab(reqId, requirementId, tabName) {
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
+        case 'sightings': _renderPartSightings(reqId, requirementId, data, contentEl); break;
         case 'activity': _renderPartActivity(reqId, requirementId, data, contentEl); break;
+        case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
+        case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
         default: contentEl.textContent = '';
     }
 }
@@ -7749,7 +7767,6 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
         contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet for this part</span>';
         return;
     }
-    // Look up target price from requirement cache for price-vs-target indicator
     const _reqs = _ddReqCache[reqId] || [];
     const _req = _reqs.find(r => r.id === requirementId);
     const targetPrice = _req?.target_price ?? null;
@@ -7776,7 +7793,7 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
             <td>${esc(o.lead_time || '\u2014')}</td>
             <td>${esc(o.condition || '\u2014')}</td>
-            <td style="font-size:10px">${esc(o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
+            <td style="font-size:10px">${esc(o.source || o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
             <td style="color:${statusColor};font-weight:600;font-size:10px">${esc(status)}</td>
             <td style="font-size:10px;color:var(--muted)">${age}</td>
             <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
@@ -7786,44 +7803,345 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
-// ── Part-level Activity renderer (merged notes + tasks) ──
-function _renderPartActivity(reqId, requirementId, data, contentEl) {
-    // Reuse the RFQ activity renderer — same data shape { notes, tasks, history }
-    _rfqRenderActivity(data, contentEl);
-    // Override the partId references for inline forms to use this requirement
-    const origPartId = _rfqActivePartId;
-    _rfqActivePartId = requirementId;
-    // Restore after a tick so any event handlers bind correctly
-    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
+function _renderPartSightings(reqId, requirementId, data, contentEl) {
+    const payload = data || {};
+    const sightings = Array.isArray(payload.sightings) ? payload.sightings : [];
+    const label = payload.label || '';
+    if (!sightings.length) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No sightings yet for this part</span>';
+        return;
+    }
+    let html = `<table class="dtbl" style="font-size:11px"><thead><tr>
+        <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Lead</th><th>Age</th>
+    </tr></thead><tbody>`;
+    for (const s of sightings) {
+        const safeVendor = (s.vendor_name || '').replace(/'/g, "\\'");
+        const vendor = s.vendor_name
+            ? `<a onclick="event.stopPropagation();openVendorPopupByName('${safeVendor}')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">${esc(s.vendor_name)}</a>`
+            : '\u2014';
+        const mpn = s.mpn_matched || s.normalized_mpn || label || '\u2014';
+        const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
+        const price = s.unit_price != null ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
+        const age = s.created_at ? fmtRelative(s.created_at) : '\u2014';
+        const rowStyle = s.is_unavailable ? 'opacity:.6;background:rgba(220,38,38,.04)' : '';
+        html += `<tr style="${rowStyle}">
+            <td>${vendor}</td>
+            <td class="mono">${esc(mpn)}</td>
+            <td class="mono">${qty}</td>
+            <td class="mono">${price}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}</td>
+            <td>${esc(s.condition || '\u2014')}</td>
+            <td>${esc(s.lead_time || '\u2014')}</td>
+            <td style="font-size:10px;color:var(--muted)">${age}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    contentEl.innerHTML = html;
 }
 
-// Keep _addPartNote for backward compat (editDrillCell uses it)
-function _addPartNote(reqId, requirementId) {
-    const key = reqId + '-' + requirementId;
-    const contentEl = document.getElementById('pdc-' + key);
-    if (!contentEl) return;
-    const existing = contentEl.querySelector('.activity-add-form');
-    if (existing) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'activity-add-form';
-    wrapper.style.cssText = 'margin-top:6px';
-    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();this.closest('.activity-add-form').remove()">Cancel</button>
-            <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.closest('.activity-add-form').querySelector('textarea').value)">Save</button>
+function _renderPartActivity(reqId, requirementId, data, contentEl) {
+    const events = Array.isArray(data) ? data.slice() : [];
+    events.sort((a, b) => {
+        const aTs = new Date(a.completed_at || a.created_at || 0).getTime();
+        const bTs = new Date(b.completed_at || b.created_at || 0).getTime();
+        return bTs - aTs;
+    });
+    if (!events.length) {
+        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No activity yet for this part</span>';
+        return;
+    }
+    const fmtValue = (value) => {
+        if (value === null || value === undefined || value === '') return '\u2014';
+        return esc(typeof value === 'object' ? JSON.stringify(value) : String(value));
+    };
+    let html = '<div class="activity-timeline">';
+    for (const ev of events) {
+        const when = ev.completed_at || ev.created_at;
+        let title = 'Activity';
+        let detail = '';
+        let accent = 'var(--muted)';
+        switch (ev.type) {
+            case 'change':
+                title = `${esc(ev.user || 'System')} updated ${esc(ev.entity || 'requirement')} ${esc(ev.field || '')}`.trim();
+                detail = `<div style="font-size:10px;color:var(--muted)">${fmtValue(ev.old_value)} \u2192 ${fmtValue(ev.new_value)}</div>`;
+                accent = 'var(--blue)';
+                break;
+            case 'offer_created':
+                title = `Offer logged from ${esc(ev.vendor_name || 'vendor')}`;
+                detail = `<div style="font-size:10px;color:var(--muted)">${esc(ev.mpn || '\u2014')} \u00b7 ${ev.qty_available != null ? Number(ev.qty_available).toLocaleString() + ' pcs' : 'Qty \u2014'}${ev.unit_price != null ? ' \u00b7 $' + Number(ev.unit_price).toFixed(4) : ''}</div>`;
+                accent = 'var(--teal)';
+                break;
+            case 'rfq_sent':
+                title = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to ${esc(ev.vendor_name || 'vendor')}`;
+                detail = ev.status ? `<div style="font-size:10px;color:var(--muted)">Status: ${esc(ev.status)}</div>` : '';
+                accent = 'var(--amber)';
+                break;
+            case 'task_done':
+                title = `Task completed: ${esc(ev.title || 'Untitled task')}`;
+                accent = 'var(--green)';
+                break;
+            default:
+                title = esc(ev.summary || ev.type || 'Event');
+        }
+        html += `<div class="activity-item activity-item-event">
+            <div style="font-size:11px;font-weight:600;color:${accent}">${title}</div>
+            ${detail}
+            ${when ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${fmtDateTime(when)}</div>` : ''}
         </div>`;
-    contentEl.appendChild(wrapper);
-    wrapper.querySelector('textarea').focus();
+    }
+    html += '</div>';
+    contentEl.innerHTML = html;
+}
+
+function _renderPartTasks(reqId, requirementId, data, contentEl) {
+    const key = reqId + '-' + requirementId;
+    const tasks = Array.isArray(data) ? data : [];
+    const openTasks = tasks.filter(t => t.status !== 'done');
+    const doneTasks = tasks.filter(t => t.status === 'done');
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length === 1 ? '' : 's'}</span>
+        <button class="btn btn-sm" onclick="event.stopPropagation();_showPartTaskForm(${reqId},${requirementId})">+ Add Task</button>
+    </div>
+    <div id="partTaskForm-${key}"></div>`;
+    if (!tasks.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No tasks yet for this part</div>';
+        contentEl.innerHTML = html;
+        return;
+    }
+    html += `<div style="font-size:11px;font-weight:600;margin:8px 0 6px">${openTasks.length} Open</div>`;
+    html += openTasks.length
+        ? openTasks.map(t => _renderPartTaskItem(reqId, requirementId, t)).join('')
+        : '<div class="empty-placeholder" style="font-size:11px">No open tasks</div>';
+    html += `<div style="font-size:11px;font-weight:600;margin:10px 0 6px">${doneTasks.length} Completed</div>`;
+    html += doneTasks.length
+        ? doneTasks.map(t => _renderPartTaskItem(reqId, requirementId, t)).join('')
+        : '<div class="empty-placeholder" style="font-size:11px">No completed tasks</div>';
+    contentEl.innerHTML = html;
+}
+
+function _renderPartTaskItem(reqId, requirementId, task) {
+    const done = task.status === 'done';
+    const assignee = task.assignee_name || task.assigned_to || 'Unassigned';
+    const creator = task.creator_name || task.created_by_name || '';
+    const due = task.due_at || task.due_date;
+    const dueLabel = due ? (done ? `Due ${fmtDate(due)}` : `Due ${fmtDateTime(due)}`) : '';
+    const meta = [`Assigned to ${esc(assignee)}`];
+    if (creator) meta.push(`by ${esc(creator)}`);
+    if (dueLabel) meta.push(dueLabel);
+    return `<div class="activity-item ${done ? 'activity-item-task-done' : 'activity-item-task-open'}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div style="flex:1">
+                <div style="font-size:11px;font-weight:600">${esc(task.title || 'Untitled task')}</div>
+                ${task.description ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(task.description)}</div>` : ''}
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">${meta.join(' \u00b7 ')}</div>
+                ${task.ai_risk_flag ? `<div class="task-risk-flag" style="margin-top:4px">${esc(task.ai_risk_flag)}</div>` : ''}
+                ${done && task.completion_note ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;font-style:italic">"${esc(task.completion_note)}"</div>` : ''}
+                ${done && task.completed_at ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">Completed ${fmtDateTime(task.completed_at)}</div>` : ''}
+            </div>
+            ${done ? '<span style="font-size:10px;color:var(--green);font-weight:600">Done</span>' : `<button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="event.stopPropagation();_showPartTaskCompleteForm(${reqId},${requirementId},${task.id})">Complete</button>`}
+        </div>
+        ${done ? '' : `<div id="partTaskComplete-${task.id}"></div>`}
+    </div>`;
+}
+
+function _renderPartNotes(reqId, requirementId, data, contentEl) {
+    const key = reqId + '-' + requirementId;
+    const noteItems = _getPartNoteTimeline(data);
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600">${noteItems.length} Note${noteItems.length === 1 ? '' : 's'}</span>
+        <button class="btn btn-sm" onclick="event.stopPropagation();_showPartNoteForm(${reqId},${requirementId})">+ Add Note</button>
+    </div>
+    <div id="partNoteForm-${key}"></div>`;
+    if (!noteItems.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No notes yet for this part</div>';
+        contentEl.innerHTML = html;
+        return;
+    }
+    html += '<div class="activity-timeline">';
+    for (const item of noteItems) {
+        const label = item.type === 'offer'
+            ? `Offer Note${item.vendor ? ' \u2014 ' + esc(item.vendor) : ''}`
+            : 'Requirement Note';
+        html += `<div class="activity-item activity-item-note">
+            <div style="font-size:10px;font-weight:600;color:var(--muted)">${label}</div>
+            <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
+            ${item.meta ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(item.meta)}</div>` : ''}
+            ${item.created_at ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${fmtDateTime(item.created_at)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    contentEl.innerHTML = html;
+}
+
+function _getPartNoteTimeline(data) {
+    const notesData = data || {};
+    const items = [];
+    const rawRequirementNotes = notesData.requirement_notes || '';
+    rawRequirementNotes.split('\n').map(line => line.trim()).filter(Boolean).forEach(line => {
+        const match = line.match(/^\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s([^\]]+)\]\s*(.*)$/);
+        const createdAt = match ? match[1].replace(' ', 'T') + ':00Z' : null;
+        items.push({
+            type: 'requirement',
+            text: match ? (match[3] || line) : line,
+            meta: match ? match[2] : '',
+            created_at: createdAt,
+            ts: createdAt ? new Date(createdAt).getTime() : 0,
+        });
+    });
+    (Array.isArray(notesData.notes) ? notesData.notes : []).forEach(note => {
+        const createdAt = note.created_at || null;
+        items.push({
+            type: 'offer',
+            vendor: note.vendor_name || '',
+            text: note.note || '',
+            meta: note.offer_id ? `Offer #${note.offer_id}` : '',
+            created_at: createdAt,
+            ts: createdAt ? new Date(createdAt).getTime() : 0,
+        });
+    });
+    items.sort((a, b) => b.ts - a.ts);
+    return items;
+}
+
+function _showPartTaskForm(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const slot = document.getElementById('partTaskForm-' + key);
+    if (!slot || slot.querySelector('.activity-add-form')) return;
+    slot.innerHTML = `<div class="activity-add-form">
+        <input type="text" id="partTaskTitle-${key}" placeholder="Task title..." style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+        <textarea id="partTaskDesc-${key}" placeholder="Description (optional)..." rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);margin-top:4px;resize:vertical"></textarea>
+        <div style="display:flex;gap:6px;margin-top:4px">
+            <select id="partTaskAssignee-${key}" style="flex:1;font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+                <option value="">Assign to...</option>
+            </select>
+            <input type="date" id="partTaskDue-${key}" style="font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
+        </div>
+        <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partTaskForm-${key}').innerHTML=''">Cancel</button>
+            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_submitPartTask(${reqId},${requirementId})">Create Task</button>
+        </div>
+    </div>`;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const dueInput = document.getElementById('partTaskDue-' + key);
+    if (dueInput) dueInput.min = tomorrow.toISOString().split('T')[0];
+    apiFetch('/api/users/list').then(users => {
+        const select = document.getElementById('partTaskAssignee-' + key);
+        if (!select || !Array.isArray(users)) return;
+        users.forEach(user => {
+            const opt = document.createElement('option');
+            opt.value = user.id;
+            opt.textContent = user.name || user.email;
+            select.appendChild(opt);
+        });
+    }).catch(() => {});
+    document.getElementById('partTaskTitle-' + key)?.focus();
+}
+window._showPartTaskForm = _showPartTaskForm;
+
+async function _submitPartTask(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const title = document.getElementById('partTaskTitle-' + key)?.value?.trim();
+    const description = document.getElementById('partTaskDesc-' + key)?.value?.trim() || null;
+    const assignee = document.getElementById('partTaskAssignee-' + key)?.value;
+    const dueStr = document.getElementById('partTaskDue-' + key)?.value;
+    if (!title) { showToast('Task title is required', 'warn'); return; }
+    if (!assignee) { showToast('Please assign this task', 'warn'); return; }
+    if (!dueStr) { showToast('Please set a due date', 'warn'); return; }
+    try {
+        await apiFetch(`/api/requirements/${requirementId}/tasks`, {
+            method: 'POST',
+            body: {
+                title,
+                description,
+                assigned_to_id: parseInt(assignee, 10),
+                due_at: new Date(dueStr + 'T17:00:00Z').toISOString(),
+            },
+        });
+        delete _partDetailCache[key + '-tasks'];
+        delete _partDetailCache[key + '-activity'];
+        await _loadPartTab(reqId, requirementId, 'tasks');
+        showToast('Task created', 'success');
+    } catch (e) {
+        showToast('Failed to create task \u2014 ' + friendlyError(e, 'please try again'), 'error');
+    }
+}
+window._submitPartTask = _submitPartTask;
+
+function _showPartTaskCompleteForm(reqId, requirementId, taskId) {
+    const slot = document.getElementById('partTaskComplete-' + taskId);
+    if (!slot || slot.querySelector('.activity-add-form')) return;
+    slot.innerHTML = `<div class="activity-add-form" style="margin-top:6px">
+        <textarea id="partTaskCompleteNote-${taskId}" placeholder="How was this resolved?" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partTaskComplete-${taskId}').innerHTML=''">Cancel</button>
+            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_submitPartTaskComplete(${reqId},${requirementId},${taskId})">Mark Complete</button>
+        </div>
+    </div>`;
+    document.getElementById('partTaskCompleteNote-' + taskId)?.focus();
+}
+window._showPartTaskCompleteForm = _showPartTaskCompleteForm;
+
+async function _submitPartTaskComplete(reqId, requirementId, taskId) {
+    const note = document.getElementById('partTaskCompleteNote-' + taskId)?.value?.trim();
+    if (!note) { showToast('Add a completion note', 'warn'); return; }
+    const key = reqId + '-' + requirementId;
+    try {
+        await apiFetch(`/api/tasks/${taskId}/complete`, {
+            method: 'POST',
+            body: { completion_note: note },
+        });
+        delete _partDetailCache[key + '-tasks'];
+        delete _partDetailCache[key + '-activity'];
+        await _loadPartTab(reqId, requirementId, 'tasks');
+        showToast('Task completed', 'success');
+    } catch (e) {
+        showToast('Failed to complete task \u2014 ' + friendlyError(e, 'please try again'), 'error');
+    }
+}
+window._submitPartTaskComplete = _submitPartTaskComplete;
+
+// Keep _addPartNote for backward compat (editDrillCell uses it)
+async function _addPartNote(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    _partActiveTab[key] = 'notes';
+    const panel = document.getElementById('pdp-' + key);
+    if (!panel) return;
+    await _renderPartDetail(reqId, requirementId, panel);
+    _showPartNoteForm(reqId, requirementId);
 }
 window._addPartNote = _addPartNote;
 
+function _showPartNoteForm(reqId, requirementId) {
+    const key = reqId + '-' + requirementId;
+    const slot = document.getElementById('partNoteForm-' + key);
+    if (!slot || slot.querySelector('.activity-add-form')) return;
+    slot.innerHTML = `<div class="activity-add-form">
+        <textarea id="partNoteText-${key}" placeholder="Add a note\u2026" rows="3" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
+            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partNoteForm-${key}').innerHTML=''">Cancel</button>
+            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},document.getElementById('partNoteText-${key}').value)">Save</button>
+        </div>
+    </div>`;
+    document.getElementById('partNoteText-' + key)?.focus();
+}
+window._showPartNoteForm = _showPartNoteForm;
+
 async function _savePartNote(reqId, requirementId, text) {
-    if (!text?.trim()) return;
+    if (!text?.trim()) {
+        showToast('Note text is required', 'warn');
+        return;
+    }
+    const key = reqId + '-' + requirementId;
     try {
         await apiFetch(`/api/requirements/${requirementId}/notes`, { method: 'POST', body: { text: text.trim() } });
-        delete _partDetailCache[reqId + '-' + requirementId + '-activity'];
-        await _loadPartTab(reqId, requirementId, 'activity');
-    } catch(e) { logCatchError('_savePartNote', e); }
+        delete _partDetailCache[key + '-notes'];
+        await _loadPartTab(reqId, requirementId, 'notes');
+        showToast('Note saved', 'success');
+    } catch(e) {
+        showToast('Couldn\'t save note \u2014 ' + friendlyError(e, 'please try again'), 'error');
+        logCatchError('_savePartNote', e);
+    }
 }
 window._savePartNote = _savePartNote;
 
