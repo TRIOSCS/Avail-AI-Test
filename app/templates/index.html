@@ -323,6 +323,10 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
             API
         </button>
+        <button class="intake-bar-btn" onclick="openFreeTextModal()" title="Paste free-form text for AI parsing" style="color:var(--blue)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4z"/><circle cx="12" cy="15" r="2"/></svg>
+            AI Parse
+        </button>
         <input type="file" id="intakeFileInput" accept=".csv,.xlsx,.xls,.tsv,.txt" class="u-hidden" onchange="_intakeFileSelected(this)">
     </div>
     <!-- Intake AI Review Drawer — shows parsed preview of pasted/uploaded data -->
@@ -334,6 +338,96 @@
             <button class="btn btn-primary btn-sm" style="font-size:10px" id="intakeConfirmBtn" onclick="_intakeConfirm()">Confirm &amp; Add</button>
         </div>
         <div class="intake-drawer-body" id="intakeDrawerBody"></div>
+    </div>
+
+    <!-- Free-Text AI Parse Modal -->
+    <div id="freeTextModal" class="modal-bg" onclick="if(event.target===this)closeFreeTextModal()" style="display:none">
+        <div class="modal" style="max-width:760px;width:95%">
+            <h2 style="margin:0 0 12px;font-size:16px">AI Free-Text Parser</h2>
+            <p style="margin:0 0 10px;font-size:12px;color:var(--muted)">Paste an email, chat message, or any text containing part numbers. AI will extract and structure the data for you.</p>
+
+            <!-- Step 1: Paste -->
+            <div id="ftStep1">
+                <textarea id="ftRawText" rows="10" style="width:100%;resize:vertical;font-family:var(--font-mono,monospace);font-size:12px;padding:10px;border:1px solid var(--border);border-radius:6px;background:var(--bg-alt,#f8f9fa)" placeholder="Paste customer RFQ, vendor quote, email, chat message..."></textarea>
+                <div style="display:flex;gap:8px;margin-top:10px;justify-content:flex-end">
+                    <button class="btn btn-ghost btn-sm" onclick="closeFreeTextModal()">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="ftParseBtn" onclick="freeTextParse()">Parse with AI</button>
+                </div>
+            </div>
+
+            <!-- Step 2: Review -->
+            <div id="ftStep2" style="display:none">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <span style="font-size:11px;font-weight:600">Detected:</span>
+                        <span id="ftDocType" class="badge" style="font-size:11px"></span>
+                        <span id="ftConfidence" style="font-size:10px;color:var(--muted)"></span>
+                    </div>
+                    <span style="flex:1"></span>
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="freeTextToggleType()">Switch to <span id="ftToggleLabel">Offer</span></button>
+                </div>
+                <div id="ftCompanyRow" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                        <span style="color:var(--muted)">Company:</span>
+                        <input id="ftCompanyName" type="text" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:180px">
+                    </label>
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                        <span style="color:var(--muted)">Contact:</span>
+                        <input id="ftContactName" type="text" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:150px">
+                    </label>
+                </div>
+                <!-- RFQ-specific: requisition name -->
+                <div id="ftRfqFields" style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                        <span style="color:var(--muted)">Req Name:</span>
+                        <input id="ftReqName" type="text" value="Untitled" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:200px">
+                    </label>
+                </div>
+                <!-- Offer-specific: pick requisition + vendor -->
+                <div id="ftOfferFields" style="display:none;gap:8px;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                        <span style="color:var(--muted)">Requisition:</span>
+                        <select id="ftReqSelect" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:200px"></select>
+                    </label>
+                    <label style="font-size:11px;display:flex;align-items:center;gap:4px">
+                        <span style="color:var(--muted)">Vendor:</span>
+                        <input id="ftVendorName" type="text" style="font-size:11px;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:180px">
+                    </label>
+                </div>
+
+                <div style="overflow-x:auto;margin-bottom:10px">
+                    <table style="width:100%;font-size:11px;border-collapse:collapse" id="ftItemsTable">
+                        <thead>
+                            <tr style="background:var(--bg-alt,#f8f9fa);text-align:left">
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:30px"></th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">MPN</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Mfr</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Qty</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Price</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Cond</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Date Code</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Lead Time</th>
+                                <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ftItemsBody"></tbody>
+                    </table>
+                </div>
+                <div id="ftNotes" style="font-size:11px;color:var(--muted);margin-bottom:10px"></div>
+                <div style="display:flex;gap:8px;justify-content:flex-end">
+                    <button class="btn btn-ghost btn-sm" onclick="freeTextBack()">Back</button>
+                    <button class="btn btn-ghost btn-sm" onclick="closeFreeTextModal()">Cancel</button>
+                    <button class="btn btn-primary btn-sm" id="ftSaveBtn" onclick="freeTextSave()">Save</button>
+                </div>
+            </div>
+
+            <!-- Step 3: Done -->
+            <div id="ftStep3" style="display:none;text-align:center;padding:20px 0">
+                <div style="font-size:32px;margin-bottom:8px">&#10003;</div>
+                <div id="ftDoneMsg" style="font-size:14px;font-weight:600;margin-bottom:16px"></div>
+                <button class="btn btn-primary btn-sm" onclick="closeFreeTextModal()">Done</button>
+            </div>
+        </div>
     </div>
 
     <!-- VIEW: Requisition List (v8 — role-aware priority lanes) -->

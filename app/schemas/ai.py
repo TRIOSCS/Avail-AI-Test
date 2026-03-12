@@ -207,3 +207,74 @@ class CompareQuotesRequest(BaseModel):
     part_number: str = Field(min_length=1)
     quotes: list[QuoteForAnalysis] = Field(min_length=2)
     required_qty: int | None = None
+
+
+# ── Free-Text RFQ/Offer Parsing ────────────────────────────────────
+
+
+class FreeTextParseRequest(BaseModel):
+    """Input for AI free-text RFQ/Offer parsing."""
+
+    text: str = Field(min_length=1)
+
+
+class FreeTextLineItem(BaseModel):
+    """Single line item extracted from free-form text."""
+
+    mpn: str
+    manufacturer: str | None = None
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    packaging: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_mpn_field(cls, v: str) -> str:
+        if not v:
+            return v
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Save parsed free-text as an RFQ (Requisition + Requirements)."""
+
+    name: str = "Untitled"
+    customer_name: str | None = None
+    customer_site_id: int | None = None
+    notes: str | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Save parsed free-text as Offers on an existing Requisition."""
+
+    requisition_id: int
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+    @field_validator("requisition_id")
+    @classmethod
+    def req_id_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("requisition_id must be positive")
+        return v

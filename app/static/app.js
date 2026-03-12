@@ -16276,6 +16276,263 @@ function _intakeImportApi() {
 
 
 // ═══════════════════════════════════════════════════════════════════════
+// FREE-TEXT AI PARSER — paste free-form text, AI extracts structured data,
+// user reviews/edits, then saves as RFQ or Offers.
+// Called by: index.html freeTextModal buttons
+// Depends on: apiFetch, esc, showToast, openModal, closeModal
+// ═══════════════════════════════════════════════════════════════════════
+
+let _ftParsedData = null;
+let _ftDocType = 'rfq';
+
+function openFreeTextModal() {
+    const modal = document.getElementById('freeTextModal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    document.getElementById('ftStep1').style.display = '';
+    document.getElementById('ftStep2').style.display = 'none';
+    document.getElementById('ftStep3').style.display = 'none';
+    const ta = document.getElementById('ftRawText');
+    if (ta) { ta.value = ''; ta.focus(); }
+    _ftParsedData = null;
+    _ftDocType = 'rfq';
+}
+
+function closeFreeTextModal() {
+    const modal = document.getElementById('freeTextModal');
+    if (modal) modal.style.display = 'none';
+    _ftParsedData = null;
+}
+
+async function freeTextParse() {
+    const text = (document.getElementById('ftRawText')?.value || '').trim();
+    if (!text) { showToast('Paste some text first', 'warn'); return; }
+
+    const btn = document.getElementById('ftParseBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Parsing...'; }
+
+    try {
+        const res = await apiFetch('/api/ai/parse-free-text', {
+            method: 'POST',
+            body: { text }
+        });
+
+        if (!res.parsed || !res.line_items?.length) {
+            showToast(res.reason || 'Could not extract parts from the text', 'warn');
+            return;
+        }
+
+        _ftParsedData = res;
+        _ftDocType = res.document_type || 'rfq';
+        _ftRenderReview();
+
+        document.getElementById('ftStep1').style.display = 'none';
+        document.getElementById('ftStep2').style.display = '';
+    } catch (e) {
+        showToast('AI parsing failed: ' + (e.message || e), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; }
+    }
+}
+
+function _ftRenderReview() {
+    if (!_ftParsedData) return;
+    const items = _ftParsedData.line_items || [];
+
+    const typeEl = document.getElementById('ftDocType');
+    if (typeEl) {
+        typeEl.textContent = _ftDocType === 'rfq' ? 'RFQ (Customer Request)' : 'Offer (Vendor Quote)';
+        typeEl.style.background = _ftDocType === 'rfq' ? 'var(--blue-bg,#e8f0fe)' : 'var(--green-bg,#e6f4ea)';
+        typeEl.style.color = _ftDocType === 'rfq' ? 'var(--blue,#1a73e8)' : 'var(--green,#34a853)';
+    }
+
+    const confEl = document.getElementById('ftConfidence');
+    if (confEl) {
+        const conf = Math.round((_ftParsedData.confidence || 0) * 100);
+        confEl.textContent = `${conf}% confidence`;
+    }
+
+    const toggleLabel = document.getElementById('ftToggleLabel');
+    if (toggleLabel) toggleLabel.textContent = _ftDocType === 'rfq' ? 'Offer' : 'RFQ';
+
+    document.getElementById('ftCompanyName').value = _ftParsedData.company_name || '';
+    document.getElementById('ftContactName').value = _ftParsedData.contact_name || '';
+
+    const rfqFields = document.getElementById('ftRfqFields');
+    const offerFields = document.getElementById('ftOfferFields');
+    if (_ftDocType === 'rfq') {
+        rfqFields.style.display = 'flex';
+        offerFields.style.display = 'none';
+        const nameInput = document.getElementById('ftReqName');
+        if (nameInput && _ftParsedData.company_name) {
+            nameInput.value = _ftParsedData.company_name + ' RFQ';
+        }
+    } else {
+        rfqFields.style.display = 'none';
+        offerFields.style.display = 'flex';
+        document.getElementById('ftVendorName').value = _ftParsedData.company_name || '';
+        _ftLoadRequisitions();
+    }
+
+    const notesEl = document.getElementById('ftNotes');
+    if (notesEl && _ftParsedData.notes) {
+        notesEl.textContent = 'Notes: ' + _ftParsedData.notes;
+    } else if (notesEl) {
+        notesEl.textContent = '';
+    }
+
+    _ftRenderItems(items);
+}
+
+function _ftRenderItems(items) {
+    const tbody = document.getElementById('ftItemsBody');
+    if (!tbody) return;
+    let html = '';
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        html += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:3px 4px;text-align:center">
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:0 3px;color:var(--red)" onclick="ftRemoveItem(${i})" title="Remove">&times;</button>
+            </td>
+            <td style="padding:3px 4px"><input data-ft-field="mpn" data-ft-idx="${i}" value="${esc(it.mpn || '')}" style="width:100%;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="manufacturer" data-ft-idx="${i}" value="${esc(it.manufacturer || '')}" style="width:80px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="quantity" data-ft-idx="${i}" value="${it.quantity || 1}" type="number" min="1" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="target_price" data-ft-idx="${i}" value="${it.target_price || ''}" type="number" step="0.01" style="width:70px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="condition" data-ft-idx="${i}" value="${esc(it.condition || '')}" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="date_code" data-ft-idx="${i}" value="${esc(it.date_code || '')}" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="lead_time" data-ft-idx="${i}" value="${esc(it.lead_time || '')}" style="width:70px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+            <td style="padding:3px 4px"><input data-ft-field="notes" data-ft-idx="${i}" value="${esc(it.notes || '')}" style="width:90px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
+        </tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
+function ftRemoveItem(idx) {
+    if (!_ftParsedData?.line_items) return;
+    _ftParsedData.line_items.splice(idx, 1);
+    _ftRenderItems(_ftParsedData.line_items);
+}
+
+function freeTextToggleType() {
+    _ftDocType = _ftDocType === 'rfq' ? 'offer' : 'rfq';
+    _ftRenderReview();
+}
+
+function freeTextBack() {
+    document.getElementById('ftStep1').style.display = '';
+    document.getElementById('ftStep2').style.display = 'none';
+}
+
+function _ftCollectEdits() {
+    if (!_ftParsedData?.line_items) return [];
+    const items = [];
+    const inputs = document.querySelectorAll('[data-ft-field]');
+    const byIdx = {};
+    inputs.forEach(inp => {
+        const idx = parseInt(inp.dataset.ftIdx);
+        const field = inp.dataset.ftField;
+        if (!byIdx[idx]) byIdx[idx] = {};
+        byIdx[idx][field] = inp.value;
+    });
+    for (const idx of Object.keys(byIdx).sort((a, b) => a - b)) {
+        const d = byIdx[idx];
+        if (!d.mpn?.trim()) continue;
+        items.push({
+            mpn: d.mpn.trim(),
+            manufacturer: d.manufacturer?.trim() || null,
+            quantity: parseInt(d.quantity) || 1,
+            target_price: d.target_price ? parseFloat(d.target_price) : null,
+            condition: d.condition?.trim() || null,
+            date_code: d.date_code?.trim() || null,
+            lead_time: d.lead_time?.trim() || null,
+            notes: d.notes?.trim() || null,
+        });
+    }
+    return items;
+}
+
+async function _ftLoadRequisitions() {
+    try {
+        const res = await apiFetch('/api/requisitions?limit=50&status=active,sourcing,draft');
+        const select = document.getElementById('ftReqSelect');
+        if (!select) return;
+        select.innerHTML = '<option value="">-- Select --</option>';
+        const reqs = res.requisitions || res || [];
+        for (const r of reqs) {
+            const opt = document.createElement('option');
+            opt.value = r.id;
+            opt.textContent = `#${r.id} ${r.name || ''}`.substring(0, 60);
+            select.appendChild(opt);
+        }
+        if (currentReqId) select.value = currentReqId;
+    } catch (e) {
+        // Silent fail — user can type req ID manually
+    }
+}
+
+async function freeTextSave() {
+    const items = _ftCollectEdits();
+    if (!items.length) { showToast('No valid items to save', 'warn'); return; }
+
+    const btn = document.getElementById('ftSaveBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+    try {
+        if (_ftDocType === 'rfq') {
+            const reqName = document.getElementById('ftReqName')?.value?.trim() || 'Untitled';
+            const customerName = document.getElementById('ftCompanyName')?.value?.trim() || null;
+
+            const res = await apiFetch('/api/ai/save-free-text-rfq', {
+                method: 'POST',
+                body: {
+                    name: reqName,
+                    customer_name: customerName,
+                    line_items: items,
+                }
+            });
+
+            document.getElementById('ftStep2').style.display = 'none';
+            document.getElementById('ftStep3').style.display = '';
+            document.getElementById('ftDoneMsg').textContent =
+                `Requisition "${res.requisition_name}" created with ${res.requirements_created} requirement(s)`;
+            showToast(`RFQ created: ${res.requirements_created} parts`, 'success');
+
+            if (typeof loadReqList === 'function') loadReqList();
+
+        } else {
+            const reqSelect = document.getElementById('ftReqSelect');
+            const reqId = parseInt(reqSelect?.value);
+            const vendorName = document.getElementById('ftVendorName')?.value?.trim();
+
+            if (!reqId) { showToast('Select a requisition for offers', 'warn'); return; }
+            if (!vendorName) { showToast('Enter a vendor name', 'warn'); return; }
+
+            const res = await apiFetch('/api/ai/save-free-text-offers', {
+                method: 'POST',
+                body: {
+                    requisition_id: reqId,
+                    vendor_name: vendorName,
+                    line_items: items,
+                }
+            });
+
+            document.getElementById('ftStep2').style.display = 'none';
+            document.getElementById('ftStep3').style.display = '';
+            document.getElementById('ftDoneMsg').textContent =
+                `${res.offers_created} offer(s) saved to requisition #${reqId}`;
+            showToast(`${res.offers_created} offers saved`, 'success');
+
+            if (currentReqId === reqId && typeof loadOffers === 'function') loadOffers();
+        }
+    } catch (e) {
+        showToast('Save failed: ' + (e.message || e), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
 // SHARED PAGE HELPERS — reusable HTML builders for object headers,
 // status strips, blocker strips, AI cards, and action bars.
 // Called by: view-specific rendering functions
