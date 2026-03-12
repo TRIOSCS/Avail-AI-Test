@@ -8465,6 +8465,141 @@ function _ddEvidenceBadge(tier) {
     return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:default" title="${c.tip}">${c.label}</span>`;
 }
 
+let _leadProvSeq = 0;
+const _leadProvenanceStore = {};
+
+function _registerLeadProvenance(reqId, groupLabel, sighting) {
+    const key = 'lp-' + (++_leadProvSeq);
+    const snap = Object.assign({}, sighting || {});
+    snap.req_id = reqId;
+    snap.group_label = groupLabel || '';
+    _leadProvenanceStore[key] = snap;
+
+    // Keep memory bounded on long sessions.
+    if (_leadProvSeq % 250 === 0) {
+        const keys = Object.keys(_leadProvenanceStore);
+        if (keys.length > 3500) {
+            const removeCount = keys.length - 2500;
+            for (let i = 0; i < removeCount; i++) delete _leadProvenanceStore[keys[i]];
+        }
+    }
+    return key;
+}
+
+function _provSourceMeta(s) {
+    const st = (s.source_type || '').toLowerCase();
+    if (st === 'historical' || s._historical) return { title: 'Historical offer', detail: 'Pulled from past requisition offer history' };
+    if (s.is_material_history) return { title: 'Material history', detail: 'Seen before on this part across prior searches' };
+    if (st === 'email_attachment') return { title: 'Email attachment parse', detail: 'Detected in vendor inventory/quote attachment' };
+    if (st === 'stock_list') return { title: 'Manual stock list import', detail: 'Uploaded stock list row matched to this requirement' };
+    if (st === 'excess_list') return { title: 'Customer excess signal', detail: 'Customer excess/inventory list contained this part' };
+    if (st === 'digikey' || st === 'mouser' || st === 'element14') return { title: 'Distributor posting', detail: 'Live distributor listing/API result' };
+    if (st === 'nexar' || st === 'octopart') return { title: 'Aggregated market API', detail: 'Live listing via component market aggregation' };
+    if (st === 'brokerbin' || st === 'sourcengine' || st === 'netcomponents' || st === 'ebay' || st === 'oemsecrets') {
+        return { title: 'Marketplace listing', detail: 'Broker/market listing, buyer verification recommended' };
+    }
+    if (st) return { title: st.toUpperCase(), detail: 'Source type captured from connector response' };
+    return { title: 'Unknown source', detail: 'Lead source metadata was not provided' };
+}
+
+function _provOutcomeMeta(outcome) {
+    if (outcome === 'offer_logged') return { label: 'Offer logged', color: 'var(--green)' };
+    if (outcome === 'unavailable_confirmed') return { label: 'Unavailable confirmed', color: 'var(--red)' };
+    return { label: 'Open (needs qualification)', color: 'var(--amber)' };
+}
+
+function _provBucketMeta(bucket) {
+    const b = (bucket || '').toLowerCase();
+    if (b === 'high') return { label: 'High confidence', color: 'var(--green)', bg: 'var(--green-light,#dcfce7)' };
+    if (b === 'medium') return { label: 'Medium confidence', color: 'var(--amber)', bg: 'var(--amber-light,#fef3c7)' };
+    return { label: 'Low confidence', color: 'var(--red)', bg: 'var(--red-light,#fee2e2)' };
+}
+
+function _provRow(label, value) {
+    return `<div style="display:grid;grid-template-columns:150px 1fr;gap:8px;padding:4px 0;border-bottom:1px dashed var(--border)"><span style="font-size:11px;color:var(--muted)">${esc(label)}</span><span style="font-size:12px;color:var(--text2)">${value}</span></div>`;
+}
+
+function openLeadProvenancePanel(key) {
+    const s = _leadProvenanceStore[key];
+    if (!s) { showToast('Lead provenance details unavailable — refresh and try again', 'warn'); return; }
+
+    const titleEl = document.getElementById('leadProvenanceTitle');
+    const bodyEl = document.getElementById('leadProvenanceBody');
+    if (!titleEl || !bodyEl) { showToast('Lead provenance panel is not available', 'error'); return; }
+
+    const sourceMeta = _provSourceMeta(s);
+    const outcome = s.buyer_outcome || (s.is_unavailable ? 'unavailable_confirmed' : 'open');
+    const outcomeMeta = _provOutcomeMeta(outcome);
+    const fallbackBucket = (s.score || 0) >= 75 ? 'high' : (s.score || 0) >= 45 ? 'medium' : 'low';
+    const bucketMeta = _provBucketMeta(s.lead_confidence_bucket || fallbackBucket);
+    const scoreText = s.score != null ? `${Math.round(s.score)}/100` : '—';
+    const qtyText = s.qty_available != null ? Number(s.qty_available).toLocaleString() : 'Unknown';
+    const priceText = s.unit_price != null
+        ? `$${Number(s.unit_price).toFixed(4)}${s.currency && s.currency !== 'USD' ? ' ' + esc(s.currency) : ''}`
+        : 'Unknown';
+    const leadTimeText = s.lead_time || (s.lead_time_days != null ? `${s.lead_time_days} days` : 'Unknown');
+    const freshnessText = s.created_at ? `${fmtRelative(s.created_at)} (${fmtDateTime(s.created_at)})` : 'Unknown';
+    const listingUrl = s.click_url || s.octopart_url || '';
+    const vendorUrl = s.vendor_url || '';
+    const evidence = s.evidence_tier ? `${esc(s.evidence_tier)}${_ddEvidenceBadge(s.evidence_tier)}` : '—';
+    const reason = esc(s.lead_confidence_reason || 'No confidence reason available');
+    const contactText = s.vendor_email || s.vendor_phone || (s.vendor_card && s.vendor_card.has_emails ? 'Email on vendor card' : 'No contact on file');
+
+    let historyBlock = '';
+    if (s._historical && s._ho) {
+        historyBlock += _provRow('From requisition', `RFQ-${esc(String(s._ho.from_requisition_id || '—'))}`);
+    }
+    if (s.is_material_history) {
+        historyBlock += _provRow('Times seen', esc(String(s.material_times_seen || 1)));
+        historyBlock += _provRow('Last seen', esc(s.material_last_seen || '—'));
+        historyBlock += _provRow('First seen', esc(s.material_first_seen || '—'));
+    }
+    if (s.merged_count > 1) {
+        historyBlock += _provRow('Merged listings', `${esc(String(s.merged_count))}${s.merged_sources ? ' (' + esc(s.merged_sources.join(', ')) + ')' : ''}`);
+    }
+
+    let links = '';
+    if (listingUrl) links += `<a href="${escAttr(listingUrl)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">Open listing</a> `;
+    if (vendorUrl) links += `<a href="${escAttr(vendorUrl)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:11px">Vendor site</a>`;
+    if (!links) links = '<span style="font-size:11px;color:var(--muted)">No direct source links for this lead</span>';
+
+    titleEl.textContent = `Lead Provenance — ${s.vendor_name || 'Vendor'} • ${s.mpn_matched || s.group_label || 'Part'}`;
+    bodyEl.innerHTML = `
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="badge" style="background:${bucketMeta.bg};color:${bucketMeta.color};font-weight:700">${bucketMeta.label}</span>
+            <span class="badge" style="background:rgba(59,130,246,.12);color:#1d4ed8">Score ${esc(scoreText)}</span>
+            <span class="badge" style="background:rgba(15,23,42,.08);color:var(--text2)">Source ${esc((s.source_type || 'unknown').toUpperCase())}</span>
+            <span class="badge" style="background:rgba(0,0,0,.06);color:${outcomeMeta.color}">${esc(outcomeMeta.label)}</span>
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg1);margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Why this lead appears</div>
+            <div style="font-size:12px;color:var(--text2)">${reason}</div>
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Provenance</div>
+            ${_provRow('Origin type', esc(sourceMeta.title))}
+            ${_provRow('Origin detail', esc(sourceMeta.detail))}
+            ${_provRow('Evidence tier', evidence)}
+            ${_provRow('Buyer outcome', `<span style="color:${outcomeMeta.color};font-weight:600">${esc(outcomeMeta.label)}</span>`)}
+            ${_provRow('Freshness', esc(freshnessText))}
+            ${historyBlock}
+        </div>
+        <div style="padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--card);margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">Signal snapshot</div>
+            ${_provRow('Quantity', esc(qtyText))}
+            ${_provRow('Price', esc(priceText))}
+            ${_provRow('Lead time', esc(leadTimeText))}
+            ${_provRow('Condition', esc(s.condition || 'Unknown'))}
+            ${_provRow('Date code', esc(s.date_code || 'Unknown'))}
+            ${_provRow('Packaging', esc(s.packaging || 'Unknown'))}
+            ${_provRow('MOQ', esc(s.moq != null ? String(s.moq) : 'Unknown'))}
+            ${_provRow('Contact signal', esc(contactText))}
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${links}</div>
+    `;
+    openModal('leadProvenanceModal');
+}
+
 function _ddScoreTooltip(s) {
     const sc = s.score_components;
     if (!sc) return s.score != null ? 'Score: ' + s.score : '';
@@ -8492,6 +8627,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
     for (const s of sightings) {
         // Historical offer rows — rendered at same size as regular sightings
         if (s._historical) {
+            const provKey = _registerLeadProvenance(reqId, groupLabel, s);
             const ho = s._ho;
             const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
             const hSub = ho.is_substitute ? '<span class="badge b-sub">SUB</span> ' : '';
@@ -8512,10 +8648,12 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
                 <td style="color:var(--muted)">${sAge}
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾 Provenance</button>
                 </td>
             </tr>`;
             continue;
         }
+        const provKey = _registerLeadProvenance(reqId, groupLabel, s);
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
         const checked = sel.has(s.id) ? 'checked' : '';
         const dimStyle = !hasEmail ? 'opacity:.7' : '';
@@ -8567,7 +8705,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
+            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾</button>${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
         </tr>`;
     }
     return html;
@@ -11406,6 +11544,7 @@ function renderSources() {
 
             const key = `${reqId}:${i}`;
             const checked = selectedSightings.has(key) ? 'checked' : '';
+            const provKey = _registerLeadProvenance(reqId, group.label, s);
             const srcLabel = (s.source_type || '').toUpperCase();
             const cond = (s.condition || '').toUpperCase().trim();
             const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : cond === 'USED' ? 'used' : 'ref'}">${esc(cond)}</span>` : '';
@@ -11480,6 +11619,7 @@ function renderSources() {
             const listingLink = _srcListingUrl ? `<a href="${escAttr(_srcListingUrl)}" target="_blank" class="btn-link" title="Search on ${esc(s.source_type || 'web')}">🔗 Listing</a>` : '';
             const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';
             const phoneLinkHtml = s.vendor_phone ? `<a class="btn-call phone-link" href="tel:${ph}" onclick="logCallInitiated(this)" data-phone="${ph}" data-ctx="${escAttr(JSON.stringify({vendor_card_id: vc.card_id || null, requirement_id: s.requirement_id || null, origin: 'search_results'}))}">📞 ${esc(s.vendor_phone)}</a>` : '';
+            const provBtn = `<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px" onclick="event.stopPropagation();openLeadProvenancePanel('${provKey}')" title="Open lead provenance panel">🾾 Provenance</button>`;
             const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
 
             // Build price HTML
@@ -11518,7 +11658,7 @@ function renderSources() {
                     <div class="sc-badges">${visibleBadges}${overflowBadge}${s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== (group.label || '').trim().toUpperCase() ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.mpn_matched)}</span>` : ''}${s.manufacturer ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.manufacturer)}</span>` : ''}</div>
                 </div>
                 <div class="sc-actions-right">
-                    ${phoneLinkHtml}${listingLink}${vendorLink}${unavailBtn}
+                    ${phoneLinkHtml}${listingLink}${vendorLink}${provBtn}${unavailBtn}
                 </div>
             </div>`;
         }
@@ -17100,7 +17240,7 @@ Object.assign(window, {
     logCall, markAllNotifsRead, markNotifRead, markUnavailable, openAddVendorContact,
     openEditVendorContact, openLogOfferFromList, openMaterialPopup,
     openMaterialPopupByMpn, openVendorLogNoteModal,
-    openVendorPopup, placeVendorCall, renderReqList, requoteFromList,
+    openVendorPopup, openLeadProvenancePanel, placeVendorCall, renderReqList, requoteFromList,
     rfqConfirmCustomEmail, rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
