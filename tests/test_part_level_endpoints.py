@@ -92,6 +92,50 @@ def test_list_requirement_offers_404(client):
     assert resp.status_code == 404
 
 
+# ── Part-level Sightings ────────────────────────────────────────────
+
+
+def test_list_requirement_sightings_empty(client, test_requisition, db_session):
+    """GET /api/requirements/{id}/sightings returns empty list when none exist."""
+    from app.models import Requirement
+
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    resp = client.get(f"/api/requirements/{req.id}/sightings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["label"] == req.primary_mpn
+    assert data["sightings"] == []
+
+
+def test_list_requirement_sightings_with_data(client, test_requisition, db_session):
+    """GET /api/requirements/{id}/sightings returns sightings for this requirement."""
+    from app.models import Requirement, Sighting
+
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    sighting = Sighting(
+        requirement_id=req.id,
+        vendor_name="Arrow",
+        vendor_name_normalized="arrow",
+        mpn_matched=req.primary_mpn,
+        qty_available=1200,
+        unit_price=1.25,
+        source_type="stock_list",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(sighting)
+    db_session.commit()
+
+    resp = client.get(f"/api/requirements/{req.id}/sightings")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["label"] == req.primary_mpn
+    assert len(data["sightings"]) == 1
+    row = data["sightings"][0]
+    assert row["vendor_name"] == "Arrow"
+    assert row["mpn_matched"] == req.primary_mpn
+    assert row["qty_available"] == 1200
+
+
 # ── Part-level Notes ────────────────────────────────────────────────
 
 

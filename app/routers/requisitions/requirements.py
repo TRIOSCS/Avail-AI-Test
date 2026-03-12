@@ -938,6 +938,79 @@ async def import_stock_list(
 # Used by the part-number expansion panel in the frontend.
 
 
+@router.get("/api/requirements/{requirement_id}/sightings")
+async def list_requirement_sightings(
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return saved sightings for one requirement, enriched for part-level UI."""
+    from . import (
+        _deduplicate_sightings,
+        _enrich_with_vendor_cards,
+        _get_material_history,
+        _history_to_result,
+        sighting_to_dict,
+    )
+
+    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not req_item:
+        raise HTTPException(404, "Requirement not found")
+    if not get_req_for_user(db, user, req_item.requisition_id):
+        raise HTTPException(403, "Not authorized")
+
+    rows = (
+        db.query(Sighting)
+        .filter(Sighting.requirement_id == requirement_id)
+        .order_by(Sighting.created_at.desc())
+        .limit(1000)
+        .all()
+    )
+
+    sighting_dicts = []
+    for s in rows:
+        d = sighting_to_dict(s)
+        d["is_historical"] = False
+        d["is_material_history"] = False
+        sighting_dicts.append(d)
+
+    # Include material history for this part and substitutes so part-level
+    # sourcing context mirrors the requisition-level sourcing view.
+    card_ids: set[int] = set()
+    if req_item.material_card_id:
+        card_ids.add(req_item.material_card_id)
+    sub_keys = []
+    for sub in req_item.substitutes or []:
+        sub_str = (sub if isinstance(sub, str) else "").strip()
+        if sub_str:
+            sub_key = normalize_mpn_key(sub_str)
+            if sub_key:
+                sub_keys.append(sub_key)
+    if sub_keys:
+        sub_rows = (
+            db.query(MaterialCard.id)
+            .filter(MaterialCard.normalized_mpn.in_(sub_keys))
+            .all()
+        )
+        card_ids |= {row[0] for row in sub_rows}
+
+    fresh_vendors = {s.vendor_name.lower() for s in rows if s.vendor_name}
+    for h in _get_material_history(list(card_ids), fresh_vendors, db):
+        sighting_dicts.append(_history_to_result(h, datetime.now(timezone.utc)))
+
+    sighting_dicts = _deduplicate_sightings(sighting_dicts)
+    sighting_dicts.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    payload = {
+        str(requirement_id): {
+            "label": req_item.primary_mpn or f"Req #{requirement_id}",
+            "sightings": sighting_dicts,
+        }
+    }
+    _enrich_with_vendor_cards(payload, db)
+    return payload[str(requirement_id)]
+
+
 @router.get("/api/requirements/{requirement_id}/offers")
 async def list_requirement_offers(
     requirement_id: int,

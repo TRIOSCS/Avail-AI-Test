@@ -16507,8 +16507,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
-            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
+            <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
+            <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16568,7 +16570,13 @@ async function _rfqLoadTab(tab) {
                 break;
             }
             case 'sightings':
-                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                data = await apiFetch(`/api/requirements/${partId}/sightings`);
+                break;
+            case 'tasks':
+                data = await apiFetch(`/api/requirements/${partId}/tasks`);
+                break;
+            case 'notes':
+                data = await apiFetch(`/api/requirements/${partId}/notes`);
                 break;
         }
         // Abort if part changed while loading
@@ -16586,6 +16594,8 @@ function _rfqRenderTab(tab, data, body) {
         case 'offers': _rfqRenderOffers(data, body); break;
         case 'activity': _rfqRenderActivity(data, body); break;
         case 'sightings': _rfqRenderSightings(data, body); break;
+        case 'tasks': _rfqRenderTasks(data, body); break;
+        case 'notes': _rfqRenderNotes(data, body); break;
         default: body.innerHTML = '';
     }
 }
@@ -16953,7 +16963,8 @@ async function rfqSubmitTask() {
             body: JSON.stringify({ title, description, assigned_to_id: parseInt(assignee), due_at: dueAt }),
         });
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        delete _rfqPanelCache.tasks;
+        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
     } catch(e) {
         alert('Failed to create task: ' + (e.message || e));
     }
@@ -16985,7 +16996,8 @@ async function rfqSubmitComplete(taskId) {
             body: JSON.stringify({ completion_note: note }),
         });
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        delete _rfqPanelCache.tasks;
+        await _rfqLoadTab(_rfqPanelTab === 'tasks' ? 'tasks' : 'activity');
     } catch(e) {
         alert('Failed to complete task: ' + (e.message || e));
     }
@@ -17017,32 +17029,116 @@ async function rfqSubmitNote() {
             body: JSON.stringify({ text }),
         });
         delete _rfqPanelCache.activity;
-        await _rfqLoadTab('activity');
+        delete _rfqPanelCache.notes;
+        await _rfqLoadTab(_rfqPanelTab === 'notes' ? 'notes' : 'activity');
     } catch(e) {
         console.error('Add note failed:', e);
     }
 }
 window.rfqSubmitNote = rfqSubmitNote;
 
+// ── TASKS TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderTasks(tasks, body) {
+    const allTasks = Array.isArray(tasks) ? tasks : [];
+    const openTasks = allTasks.filter(t => t.status !== 'done');
+    const doneTasks = allTasks.filter(t => t.status === 'done');
+    let html = '<div class="activity-section">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += `<span style="font-size:12px;font-weight:600">${allTasks.length} Task${allTasks.length !== 1 ? 's' : ''}</span>`;
+    html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
+    html += '</div>';
+    html += '<div id="rfqTaskFormSlot"></div>';
+
+    if (!allTasks.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No tasks for this part yet</div>';
+    } else {
+        if (openTasks.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Open</div>';
+            openTasks.forEach(t => {
+                const due = t.due_at || t.due_date;
+                const dueLabel = due ? ` · Due ${fmtDate(due)}` : '';
+                html += `<div class="activity-item activity-item-task-open">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                        <div style="flex:1">
+                            <div style="font-size:11px;font-weight:600">${esc(t.title || '')}</div>
+                            <div style="font-size:10px;color:var(--muted)">
+                                ${esc(t.assignee_name || t.assigned_to || 'Unassigned')}${dueLabel}
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="rfqShowCompleteForm(${t.id})">Complete</button>
+                    </div>
+                    <div id="rfqCompleteSlot-${t.id}"></div>
+                </div>`;
+            });
+        }
+        if (doneTasks.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Completed</div>';
+            doneTasks.forEach(t => {
+                html += `<div class="activity-item activity-item-task-done">
+                    <div style="font-size:11px">${esc(t.title || '')}</div>
+                    <div style="font-size:10px;color:var(--muted)">${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
+                </div>`;
+            });
+        }
+    }
+    html += '</div>';
+    body.innerHTML = html;
+}
+
+// ── NOTES TAB ─────────────────────────────────────────────────────────
+
+function _rfqRenderNotes(notesData, body) {
+    const reqNotes = (notesData && notesData.requirement_notes) ? String(notesData.requirement_notes) : '';
+    const offerNotes = Array.isArray(notesData?.notes) ? notesData.notes : [];
+    const reqLines = reqNotes.split('\n').map(x => x.trim()).filter(Boolean);
+    let html = '<div class="activity-section">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
+    html += `<span style="font-size:12px;font-weight:600">${reqLines.length + offerNotes.length} Note${(reqLines.length + offerNotes.length) !== 1 ? 's' : ''}</span>`;
+    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
+    html += '</div>';
+    html += '<div id="rfqNoteFormSlot"></div>';
+
+    if (!reqLines.length && !offerNotes.length) {
+        html += '<div class="empty-placeholder" style="font-size:11px">No notes for this part yet</div>';
+    } else {
+        if (reqLines.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:8px 0 6px">Requirement Notes</div>';
+            reqLines.forEach(line => {
+                html += `<div class="activity-item activity-item-note"><div style="font-size:11px">${esc(line)}</div></div>`;
+            });
+        }
+        if (offerNotes.length) {
+            html += '<div style="font-size:11px;font-weight:600;margin:10px 0 6px">Offer Notes</div>';
+            offerNotes.forEach(n => {
+                html += `<div class="activity-item activity-item-note">
+                    <div style="font-size:10px;font-weight:600;color:var(--muted)">${esc(n.vendor_name || 'Vendor')}</div>
+                    <div style="font-size:11px;margin-top:2px">${esc(n.note || '')}</div>
+                    ${n.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(n.created_at) + '</div>' : ''}
+                </div>`;
+            });
+        }
+    }
+
+    html += '</div>';
+    body.innerHTML = html;
+}
+
 // ── SIGHTINGS TAB ─────────────────────────────────────────────────────
 
-function _rfqRenderSightings(data, body) {
-    if (!data) { body.innerHTML = '<div class="empty-placeholder">No sightings data</div>'; return; }
-
-    // Filter sightings to current part only
-    const partId = _rfqActivePartId;
-    const partData = data[String(partId)];
+function _rfqRenderSightings(partData, body) {
     if (!partData || !partData.sightings || partData.sightings.length === 0) {
         body.innerHTML = '<div class="empty-placeholder">No sightings for this part. Run a search to find sources.</div>';
         return;
     }
 
+    const partId = _rfqActivePartId;
     const sightings = partData.sightings.slice();
     const blCount = partData.blacklisted_count || 0;
 
     // Sort: exact MPN match first, then by score/qty descending
     const part = _rfqPartsData.find(p => p.id === partId);
-    const partMpn = (part?.mpn || partData.label || '').trim().toUpperCase();
+    const partMpn = (part?.primary_mpn || part?.mpn || partData.label || '').trim().toUpperCase();
     sightings.sort((a, b) => {
         const aExact = (a.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;
         const bExact = (b.mpn_matched || '').trim().toUpperCase() === partMpn ? 1 : 0;
