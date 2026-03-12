@@ -31,7 +31,7 @@ from .models import (
     Requirement,
     Sighting,
 )
-from .scoring import score_sighting, score_sighting_v2
+from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -226,6 +226,22 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                     r["score"] = max(5, r.get("score", 0) * 0.2)
 
     results = _deduplicate_sightings(results)
+
+    before_count = len(results)
+    results = [
+        r for r in results
+        if not is_weak_lead(
+            score=r.get("score", 0),
+            is_authorized=r.get("is_authorized", False),
+            has_price=r.get("unit_price") is not None,
+            has_qty=r.get("qty_available") is not None,
+            evidence_tier=r.get("evidence_tier"),
+        )
+    ]
+    filtered_count = before_count - len(results)
+    if filtered_count > 0:
+        logger.info(f"Req {req.id}: filtered {filtered_count} weak leads ({before_count} -> {len(results)})")
+
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     return {"sightings": results, "source_stats": source_stats}
 
@@ -824,6 +840,27 @@ def _history_to_result(h: dict, now: datetime) -> dict:
     bonus = min(15, (h["times_seen"] - 1) * 3)
     score = max(10, base + bonus - (age_days * 0.1))
 
+    has_price = h["unit_price"] is not None
+    has_qty = h["qty_available"] is not None
+
+    quality = classify_lead(
+        score=round(score, 1),
+        is_authorized=h["is_authorized"],
+        has_price=has_price,
+        has_qty=has_qty,
+        has_contact=False,
+        evidence_tier="T7",
+    )
+    explanation = explain_lead(
+        vendor_name=h["vendor_name"],
+        is_authorized=h["is_authorized"],
+        unit_price=h["unit_price"],
+        qty_available=h["qty_available"],
+        has_contact=False,
+        evidence_tier="T7",
+        age_days=age_days,
+    )
+
     return {
         "id": None,
         "requirement_id": None,
@@ -849,13 +886,17 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "packaging": None,
         "lead_time_days": None,
         "lead_time": None,
+        "evidence_tier": "T7",
         "created_at": last_seen.isoformat() if last_seen else None,
         "is_historical": False,
         "is_material_history": True,
+        "is_stale": age_days > 90,
         "material_last_seen": last_seen.strftime("%b %d") if last_seen else None,
         "material_times_seen": h["times_seen"],
         "material_first_seen": h["first_seen"].strftime("%b %d, %Y") if h["first_seen"] else None,
         "material_card_id": h["material_card_id"],
+        "lead_quality": quality,
+        "lead_explanation": explanation,
     }
 
 
@@ -1109,6 +1150,36 @@ def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
 
 def sighting_to_dict(s: Sighting) -> dict:
     raw = s.raw_data or {}
+    has_contact = bool(s.vendor_email or s.vendor_phone)
+    has_price = s.unit_price is not None
+    has_qty = s.qty_available is not None
+    tier = getattr(s, "evidence_tier", None)
+    score = s.score or 0
+
+    age_days = None
+    if s.created_at:
+        ca = s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at
+        age_days = (datetime.now(timezone.utc) - ca).days
+
+    quality = classify_lead(
+        score=score,
+        is_authorized=s.is_authorized,
+        has_price=has_price,
+        has_qty=has_qty,
+        has_contact=has_contact,
+        evidence_tier=tier,
+    )
+    explanation = explain_lead(
+        vendor_name=s.vendor_name,
+        is_authorized=s.is_authorized,
+        vendor_score=None,
+        unit_price=s.unit_price,
+        qty_available=s.qty_available,
+        has_contact=has_contact,
+        evidence_tier=tier,
+        source_type=s.source_type,
+        age_days=age_days,
+    )
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1123,7 +1194,7 @@ def sighting_to_dict(s: Sighting) -> dict:
         "source_type": s.source_type,
         "is_authorized": s.is_authorized,
         "confidence": s.confidence,
-        "score": s.score,
+        "score": score,
         "is_unavailable": getattr(s, "is_unavailable", False) or False,
         "octopart_url": raw.get("octopart_url"),
         "click_url": raw.get("click_url"),
@@ -1136,14 +1207,10 @@ def sighting_to_dict(s: Sighting) -> dict:
         "packaging": s.packaging,
         "lead_time_days": s.lead_time_days,
         "lead_time": s.lead_time,
-        "evidence_tier": getattr(s, "evidence_tier", None),
+        "evidence_tier": tier,
         "score_components": getattr(s, "score_components", None),
         "created_at": s.created_at.isoformat() if s.created_at else None,
-        "is_stale": (
-            datetime.now(timezone.utc)
-            - (s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at)
-        ).days
-        > 90
-        if s.created_at
-        else False,
+        "is_stale": (age_days or 0) > 90,
+        "lead_quality": quality,
+        "lead_explanation": explanation,
     }

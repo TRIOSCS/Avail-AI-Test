@@ -8469,6 +8469,19 @@ function _ddEvidenceBadge(tier) {
     return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:default" title="${c.tip}">${c.label}</span>`;
 }
 
+function _ddLeadQualityBadge(s) {
+    const q = s.lead_quality;
+    if (!q) return '';
+    const cfg = {
+        strong: { bg: '#dcfce7', color: '#166534', icon: '\u2713' },
+        moderate: { bg: '#fef3c7', color: '#92400e', icon: '\u25cb' },
+        weak: { bg: '#fee2e2', color: '#991b1b', icon: '\u25bd' },
+    };
+    const c = cfg[q] || cfg.weak;
+    const tip = s.lead_explanation || q;
+    return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:help;vertical-align:middle" title="${esc(tip)}">${c.icon} ${q}</span>`;
+}
+
 function _ddScoreTooltip(s) {
     const sc = s.score_components;
     if (!sc) return s.score != null ? 'Score: ' + s.score : '';
@@ -8477,7 +8490,7 @@ function _ddScoreTooltip(s) {
         const color = w >= 66 ? 'var(--green)' : w >= 33 ? 'var(--amber)' : 'var(--red)';
         return label + ': ' + Math.round(val) + '/100';
     };
-    return [
+    const tip = [
         'Score: ' + (s.score || 0) + '/100',
         bar('Trust', sc.trust),
         bar('Price', sc.price),
@@ -8485,6 +8498,8 @@ function _ddScoreTooltip(s) {
         bar('Fresh', sc.freshness),
         bar('Complete', sc.completeness),
     ].join(' | ');
+    if (s.lead_explanation) return tip + '\n' + s.lead_explanation;
+    return tip;
 }
 
 function _ddCopyContact(text, type) {
@@ -8529,6 +8544,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
         const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600" title="Click to add an email address for this vendor">+ add email</a>` : '';
         const ring = _ddVendorScoreRing(s);
+        const scoreTip = _ddScoreTooltip(s);
         const linkPill = _ddVendorLinkPill(s);
         const inlineBadges = _ddVendorInlineBadges(s);
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
@@ -8563,12 +8579,12 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         const staleOpacity = s.is_stale && !unavail ? 'opacity:0.55;' : '';
         html += `<tr style="${staleOpacity}${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
+            <td title="${escAttr(scoreTip)}">${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
             ${showContact !== false ? `<td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>` : ''}
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
-            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${_ddLeadQualityBadge(s)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
@@ -17814,7 +17830,7 @@ Object.assign(window, {
     _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
     ddInlineEditOffer, ddApproveOffer, ddRejectOffer, ddShowChangelog, ddRefreshTab,
     _clearSightingSelection, _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
-    _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
+    _ddLeadQualityBadge, _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
