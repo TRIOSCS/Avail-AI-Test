@@ -100,7 +100,7 @@
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
             <button type="button" class="fp on" data-view="sales" onclick="setMainView('sales',this)" title="Sales view — customer focus, quotes, deadlines, dollar values">Sales</button>
-            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)" title="Sourcing view — part coverage, sightings, RFQs, vendor responses">Sourcing</button>
+            <button type="button" class="fp" data-view="purchasing" onclick="setMainView('purchasing',this)" title="Sourcing view — part coverage, sightings, RFQs, vendor responses">Sourcing</button>
             <button type="button" class="fp" data-view="deals" onclick="setMainView('deals',this)" title="Deal Board — coverage assembly, quote readiness, deal pipeline">Deals</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)" title="Completed requisitions — won, lost, and closed RFQs">Archive</button>
         </div>
@@ -166,7 +166,7 @@
 <div class="mobile-toolbar" id="mobileToolbar">
     <div class="fpills fpills-sm" id="mobilePills">
         <button type="button" class="fp fp-sm on" data-view="sales" onclick="setMainView('sales',this);_syncMobilePills(this)" title="Sales view">Sales</button>
-        <button type="button" class="fp fp-sm" data-view="sourcing" onclick="setMainView('sourcing',this);_syncMobilePills(this)" title="Sourcing view">Sourcing</button>
+        <button type="button" class="fp fp-sm" data-view="purchasing" onclick="setMainView('purchasing',this);_syncMobilePills(this)" title="Purchasing view">Purchasing</button>
         <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)" title="Completed RFQs">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
@@ -180,7 +180,6 @@
     <button type="button" class="sb-scroll-arrow sb-scroll-up" id="sbScrollUp" onclick="document.querySelector('.sidebar-nav').scrollBy({top:-80,behavior:'smooth'})" aria-label="Scroll up"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
     <nav class="sidebar-nav">
         <!-- Command Center -->
-        {% if not mvp_mode %}
         <div class="sb-top-gradient sb-top-gradient-cc" data-section="cc"></div>
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
@@ -190,11 +189,10 @@
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn" id="navDashboard" data-tip="Dashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span><span class="sb-label"> Dashboard</span></button>
-                <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span><span class="sb-label"> Scorecard</span></button>
+                <button type="button" class="sb-nav-btn" id="navDashboard" data-tip="Dashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Dashboard</button>
+                <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span> Scorecard</button>
             </div>
         </div>
-        {% endif %}
         <!-- Opportunity -->
         <div class="sb-top-gradient" data-section="sourcing"></div>
         <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
@@ -205,10 +203,10 @@
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn active" id="navReqs" data-tip="Requirements" onclick="sidebarNav('reqs',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span><span class="sb-label"> Requirements</span></button>
-                <button type="button" class="sb-nav-btn" id="navProactive" data-tip="Proactive" onclick="sidebarNav('proactive',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span><span class="sb-label"> Proactive</span><span id="proactiveBadge" class="sb-badge hidden"></span></button>
-                <button type="button" class="sb-nav-btn" id="navMaterials" data-tip="Materials" onclick="sidebarNav('materials',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span><span class="sb-label"> Materials</span></button>
-                <button type="button" class="sb-nav-btn" id="navBuyPlans" data-tip="Buy Plans" onclick="sidebarNav('buyplans',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg></span><span class="sb-label"> Buy Plans</span></button>
+                <button type="button" class="sb-nav-btn active" id="navReqs" data-tip="Requirements" onclick="sidebarNav('reqs',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span> Requirements</button>
+                <button type="button" class="sb-nav-btn" id="navProactive" data-tip="Proactive" onclick="sidebarNav('proactive',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span> Proactive<span id="proactiveBadge" class="sb-badge hidden"></span></button>
+                <button type="button" class="sb-nav-btn" id="navMaterials" data-tip="Materials" onclick="sidebarNav('materials',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span> Materials</button>
+                <button type="button" class="sb-nav-btn" id="navBuyPlans" data-tip="Buy Plans" onclick="sidebarNav('buyplans',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg></span> Buy Plans</button>
             </div>
         </div>
         <!-- Relationships -->
@@ -221,18 +219,18 @@
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span><span class="sb-label"> Accounts</span></button>
-                <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span><span class="sb-label"> Vendors</span></button>
-                <button type="button" class="sb-nav-btn" id="navStrategic" data-tip="My Vendors" onclick="sidebarNav('strategic',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span><span class="sb-label"> My Vendors </span><span id="strategicBadge" class="sb-badge" style="display:none">0</span></button>
-                <button type="button" class="sb-nav-btn" id="navProspecting" data-tip="Prospecting" onclick="sidebarNav('prospecting',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span><span class="sb-label"> Prospecting</span></button>
-                <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span><span class="sb-label"> Contacts</span></button>
+                <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Accounts</button>
+                <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span> Vendors</button>
+                <button type="button" class="sb-nav-btn" id="navStrategic" data-tip="My Vendors" onclick="sidebarNav('strategic',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span> My Vendors <span id="strategicBadge" class="sb-badge" style="display:none">0</span></button>
+                <button type="button" class="sb-nav-btn" id="navProspecting" data-tip="Prospecting" onclick="sidebarNav('prospecting',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
+                <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
             </div>
         </div>
         <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
         {% if is_admin %}
         <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--settings-color);--section-dot:var(--settings-dot);--section-border:var(--settings-border)">
             <div class="sb-group-items" style="padding-top:4px">
-                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span><span class="sb-label"> Settings</span><span id="apiHealthBadge" class="sb-badge u-hidden" style="background:var(--red);color:#fff"></span></button>
+                <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings<span id="apiHealthBadge" class="sb-badge u-hidden" style="background:var(--red);color:#fff"></span></button>
             </div>
         </div>
         {% endif %}
@@ -240,7 +238,7 @@
     <button type="button" class="sb-scroll-arrow sb-scroll-down" id="sbScrollDown" onclick="document.querySelector('.sidebar-nav').scrollBy({top:80,behavior:'smooth'})" aria-label="Scroll down"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
     <div class="sidebar-footer">
         <div class="sb-user-menu">
-            <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
+            <span class="ui">{{ (user_name[:2]|upper) | e if user_name else 'U' }}</span>
             <span class="un">{{ user_name | e }}</span>
             <span id="roleBadge" class="hidden"></span>
             {% if is_admin %}<span class="rb">Admin</span>{% endif %}
@@ -254,8 +252,8 @@
     </div>
 </aside>
 
-<!-- My Tasks Sidebar Widget -->
-<div id="myTasksSidebar" class="my-tasks-sidebar">
+<!-- My Tasks Sidebar Widget — disabled, tasks accessible from requisition detail -->
+<div id="myTasksSidebar" class="my-tasks-sidebar" style="display:none">
     <button id="myTasksToggle" class="my-tasks-toggle" onclick="toggleMyTasksSidebar()" title="My Tasks">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3h5v5"/><path d="M8 21H3v-5"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
         <span id="myTasksBadge" class="my-tasks-badge" style="display:none">0</span>
@@ -264,10 +262,6 @@
         <div class="my-tasks-header">
             <span>My Tasks</span>
             <button class="btn btn-ghost btn-sm" onclick="toggleMyTasksSidebar()" style="font-size:16px;color:var(--muted)">&times;</button>
-        </div>
-        <div class="my-tasks-tabs">
-            <button class="my-tasks-tab active" id="mtTabAssigned" onclick="switchMyTasksTab('assigned')">Assigned to Me</button>
-            <button class="my-tasks-tab" id="mtTabWaiting" onclick="switchMyTasksTab('waiting')">Waiting On</button>
         </div>
         <div id="myTasksList" class="my-tasks-list"></div>
     </div>
@@ -286,7 +280,7 @@
     <div class="ctx-tabs" id="ctxTabs">
         <button class="ctx-tab active" data-ctx-tab="summary" onclick="switchCtxTab('summary',this)">Summary</button>
         <button class="ctx-tab" data-ctx-tab="thread" onclick="switchCtxTab('thread',this)">Thread</button>
-        <!-- Tasks tab removed for MVP — tasks visible in Activity tab and My Tasks sidebar -->
+        <button class="ctx-tab" data-ctx-tab="tasks" onclick="switchCtxTab('tasks',this)">Tasks <span id="ctxTaskBadge" class="ctx-tab-badge" style="display:none">0</span></button>
         <button class="ctx-tab" data-ctx-tab="files" onclick="switchCtxTab('files',this)">Files</button>
         <button class="ctx-tab" data-ctx-tab="history" onclick="switchCtxTab('history',this)">History</button>
     </div>
@@ -342,7 +336,7 @@
         <!-- Mobile-only pill tabs for Open/Sourcing/Archive -->
         <div class="m-tabs-scroll m-mobile-only m-req-pill-bar" id="mobileReqPills">
             <button type="button" class="m-tab-pill active" data-view="sales" onclick="mobileReqPillTap('sales',this)">Sales</button>
-            <button type="button" class="m-tab-pill" data-view="sourcing" onclick="mobileReqPillTap('sourcing',this)">Sourcing</button>
+            <button type="button" class="m-tab-pill" data-view="purchasing" onclick="mobileReqPillTap('purchasing',this)">Purchasing</button>
             <button type="button" class="m-tab-pill" data-view="archive" onclick="mobileReqPillTap('archive',this)">Archive</button>
         </div>
         <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
@@ -459,7 +453,7 @@
                 <button class="drawer-tab" onclick="switchCustDrawerTab('sites',this)">Sites</button>
                 <button class="drawer-tab" onclick="switchCustDrawerTab('activity',this)">Activity</button>
                 <button class="drawer-tab" onclick="switchCustDrawerTab('pipeline',this)">Pipeline</button>
-                <button class="drawer-tab apollo-admin-only" onclick="switchCustDrawerTab('apollo',this)" style="display:none">Apollo</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('apollo',this)">Apollo</button>
             </div>
             <div class="drawer-body" id="custDrawerBody"></div>
         </div>
@@ -587,7 +581,7 @@
     <!-- VIEW: Strategic Vendors (My Vendors — 10-slot panel) -->
     <div id="view-strategic" class="u-hidden" style="flex-direction:column;padding:24px;max-width:900px">
         <div class="crm-header" style="margin-bottom:16px">
-            <h2>My Vendors</h2>
+            <h2>My Strategic Vendors</h2>
             <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
                 <span id="strategicSlots" style="font-size:13px;color:var(--muted)">0/10 slots</span>
                 <button type="button" class="btn btn-primary btn-sm" id="strategicClaimBtn" onclick="openStrategicClaimModal()">+ Claim Vendor</button>
@@ -616,13 +610,10 @@
     <div id="view-vendors" class="u-hidden" style="flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Vendors</h2>
-            <div style="display:flex;gap:6px;margin-left:auto;align-items:center">
-                <button type="button" class="btn btn-ghost btn-sm" id="vendorViewToggle" onclick="toggleVendorView()" title="Toggle table/card view">Table</button>
-                <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()">+ Add Vendor</button>
-            </div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openNewVendorModal()" style="margin-left:auto">+ Add Vendor</button>
         </div>
-        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px;align-items:center">
-            <input class="sbox" id="vendorSearch" placeholder="Search vendors, brands, parts…" oninput="debouncedFilterVendors()" style="flex:1;min-width:140px" aria-label="Search vendors by name, brand, or commodity">
+        <div class="crm-toolbar">
+            <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
             <div class="chip-row" style="margin:0" id="vendorTierPills">
                 <span class="chip on" data-value="all" onclick="setVendorTier('all',this)">All</span>
                 <span class="chip" data-value="proven" onclick="setVendorTier('proven',this)">Proven</span>
@@ -630,29 +621,9 @@
                 <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
                 <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
             </div>
-            <select id="vendorBrandFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="">Brand: All</option>
-            </select>
-            <select id="vendorCommodityFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="">Commodity: All</option>
-            </select>
-            <select id="vendorClaimFilter" onchange="filterVendorList()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="">Claimed: All</option>
-                <option value="claimed">Claimed</option>
-                <option value="unclaimed">Unclaimed</option>
-            </select>
-            <select id="vendorSortSelect" onchange="setVendorSort(this.value)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="tier_desc" selected>Sort: Tier + Score</option>
-                <option value="score_desc">Sort: Score</option>
-                <option value="name_asc">Sort: Name</option>
-                <option value="rating_desc">Sort: Rating</option>
-                <option value="parts_desc">Sort: Parts Seen</option>
-                <option value="pos_desc">Sort: POs Sent</option>
-                <option value="response_desc">Sort: Response Rate</option>
-            </select>
             <span id="vendorFilterCount" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
         </div>
-        <div class="vendor-grid-wrap" id="vendorTableWrap">
+        <div class="crm-table-wrap" id="vendorTableWrap">
             <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
         </div>
         <!-- Vendor detail drawer -->
@@ -1329,12 +1300,11 @@
         </div>
     </div>
 
-    {% if not mvp_mode %}
     <!-- VIEW: Dashboard -->
     <div id="view-dashboard" class="hidden">
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:12px">
-                <h2 style="margin:0;font-size:18px">Dashboard</h2>
+                <h2 style="margin:0;font-size:18px">Command Center</h2>
                 <select id="dashUserSelect" class="vflt" onchange="setDashUserFilter(this.value)" style="font-size:11px;min-width:120px"></select>
             </div>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
@@ -1363,7 +1333,6 @@
         <div id="scPersonalSummary"></div>
         <div id="scContent"><p class="empty">Loading...</p></div>
     </div>
-    {% endif %}
 
 
     <!-- VIEW: Settings (admin only) -->
@@ -1412,7 +1381,7 @@
         <div id="settings-apihealth" class="settings-panel hidden">
             <div class="tabs" id="apiHealthTabs">
                 <button type="button" class="tab on" onclick="switchApiHealthTab('dashboard',this)">API Health</button>
-                {% if not mvp_mode %}<button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>{% endif %}
+                <button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>
             </div>
 
             <!-- API Health Dashboard -->
@@ -1526,7 +1495,7 @@
         <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Describe your issue — a screenshot and context are captured automatically.</p>
         <div id="troubleChatBody" style="flex:1;min-height:80px;max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;align-items:flex-end">
-            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="event.stopPropagation();if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}" onkeyup="event.stopPropagation()" onkeypress="event.stopPropagation()"></textarea>
+            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}"></textarea>
             <button type="button" class="btn btn-primary" id="troubleSendBtn" onclick="submitTrouble(this)" style="white-space:nowrap">Send</button>
         </div>
     </div>
@@ -1566,7 +1535,7 @@
 <!-- System notification bell — placeholder, wired up when notification service is registered -->
 {% endif %}
 
-<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":"{{ user_role }}","mvpMode":{{ "true" if mvp_mode else "false" }}}</script>
+<script type="application/json" id="app-config">{"userName":{{ user_name | tojson }},"userEmail":{{ user_email | tojson }},"isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":{{ user_role | tojson }}}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}

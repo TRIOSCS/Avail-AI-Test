@@ -28,16 +28,16 @@
 
   <h2>Quote Details</h2>
   <table class="meta-table">
-    <tr><td class="meta-label">Customer</td><td>{{ customer_site.site_name if customer_site else '—' }}</td></tr>
-    <tr><td class="meta-label">Company</td><td>{{ company.name if company else '—' }}</td></tr>
+    <tr><td class="meta-label">Customer</td><td>{{ (customer_site.site_name | e) if customer_site else '—' }}</td></tr>
+    <tr><td class="meta-label">Company</td><td>{{ (company.name | e) if company else '—' }}</td></tr>
     <tr><td class="meta-label">Status</td><td>{{ quote.status }}</td></tr>
     <tr><td class="meta-label">Revision</td><td>{{ quote.revision or 1 }}</td></tr>
     <tr><td class="meta-label">Valid For</td><td>{{ quote.validity_days or 7 }} days</td></tr>
     {% if quote.payment_terms %}
-    <tr><td class="meta-label">Payment Terms</td><td>{{ quote.payment_terms }}</td></tr>
+    <tr><td class="meta-label">Payment Terms</td><td>{{ quote.payment_terms | e }}</td></tr>
     {% endif %}
     {% if quote.shipping_terms %}
-    <tr><td class="meta-label">Shipping Terms</td><td>{{ quote.shipping_terms }}</td></tr>
+    <tr><td class="meta-label">Shipping Terms</td><td>{{ quote.shipping_terms | e }}</td></tr>
     {% endif %}
   </table>
 
@@ -51,8 +51,8 @@
     {% for li in line_items %}
       <tr>
         <td>{{ loop.index }}</td>
-        <td>{{ li.get('mpn', '—') }}</td>
-        <td>{{ li.get('manufacturer', '—') }}</td>
+        <td>{{ li.get('mpn', '—') | e }}</td>
+        <td>{{ li.get('manufacturer', '—') | e }}</td>
         <td>{{ '{:,}'.format(li.get('qty', 0)) }}</td>
         <td>{{ '${:,.4f}'.format(li.get('cost_each', 0)|float) }}</td>
         <td>{{ '${:,.4f}'.format(li.get('sell_each', 0)|float) }}</td>
@@ -77,7 +77,7 @@
 
   {% if quote.notes %}
   <h2>Notes</h2>
-  <p>{{ quote.notes }}</p>
+  <p>{{ quote.notes | e }}</p>
   {% endif %}
 
   <div class="footer">

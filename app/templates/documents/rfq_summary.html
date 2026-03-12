@@ -23,12 +23,12 @@
 </style>
 </head>
 <body>
-  <h1>{{ requisition.name }}</h1>
+  <h1>{{ requisition.name | e }}</h1>
   <p class="subtitle">RFQ Summary Report — Generated {{ generated_at }}</p>
 
   <h2>Requisition Details</h2>
   <table class="meta-table">
-    <tr><td class="meta-label">Customer</td><td>{{ requisition.customer_name or '—' }}</td></tr>
+    <tr><td class="meta-label">Customer</td><td>{{ (requisition.customer_name | e) or '—' }}</td></tr>
     <tr><td class="meta-label">Status</td><td><span class="badge badge-{{ 'active' if requisition.status in ('active','open','sourcing') else 'closed' }}">{{ requisition.status }}</span></td></tr>
     <tr><td class="meta-label">Created</td><td>{{ requisition.created_at.strftime('%Y-%m-%d') if requisition.created_at else '—' }}</td></tr>
     {% if requisition.deadline %}
@@ -45,7 +45,7 @@
     {% for req in requirements %}
       <tr>
         <td>{{ loop.index }}</td>
-        <td>{{ req.primary_mpn }}</td>
+        <td>{{ req.primary_mpn | e }}</td>
         <td>{{ '{:,}'.format(req.target_qty) if req.target_qty else '—' }}</td>
         <td>{{ '${:,.4f}'.format(req.target_price) if req.target_price else '—' }}</td>
       </tr>
@@ -62,8 +62,8 @@
     <tbody>
     {% for o in offers %}
       <tr>
-        <td>{{ o.vendor_name }}</td>
-        <td>{{ o.mpn }}</td>
+        <td>{{ o.vendor_name | e }}</td>
+        <td>{{ o.mpn | e }}</td>
         <td>{{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }}</td>
         <td>{{ '${:,.4f}'.format(o.unit_price|float) if o.unit_price else '—' }}</td>
         <td>{{ o.lead_time or '—' }}</td>

@@ -2054,7 +2054,8 @@ function renderOffers() {
             // Meta
             var ratingStr = o.avg_rating != null ? '<span class="offer-rating"><span style="color:var(--amber)">&#9733;</span> '+o.avg_rating+' ('+o.review_count+')</span>' : '';
             var enteredStr = o.entered_by && o.entered_by !== '?' ? esc(o.entered_by) : '';
-            var dateStr = o.created_at ? new Date(o.created_at).toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '';
+            var _d = o.created_at ? new Date(o.created_at) : null;
+            var dateStr = _d && !isNaN(_d) ? _d.toLocaleDateString('en-US', {month:'short',day:'numeric'}) : '';
             var validStr = _offerValidUntil(o.valid_until);
 
             // Notes
@@ -2684,7 +2685,8 @@ async function loadQuoteHistory() {
         if (!quotes || quotes.length <= 1) { el.innerHTML = ''; return; }
         const rows = quotes.map(q => {
             const isCurrent = crmQuote && q.id === crmQuote.id;
-            const date = q.sent_at ? new Date(q.sent_at).toLocaleDateString() : (q.created_at ? new Date(q.created_at).toLocaleDateString() : '—');
+            const _qd = q.sent_at ? new Date(q.sent_at) : (q.created_at ? new Date(q.created_at) : null);
+            const date = _qd && !isNaN(_qd) ? _qd.toLocaleDateString() : '\u2014';
             const total = q.subtotal != null ? '$' + Number(q.subtotal).toLocaleString(undefined,{minimumFractionDigits:2}) : '—';
             const margin = q.total_margin_pct != null ? Number(q.total_margin_pct).toFixed(1) + '%' : '—';
             const statusCls = q.status === 'won' ? 'color:var(--green)' : q.status === 'lost' ? 'color:var(--red)' : '';
@@ -3290,11 +3292,15 @@ function renderBuyPlanV3Status(targetId) {
         flagsHtml += '</div>';
     }
 
-    // Context
+    // Context — includes return navigation to originating requisition
     let contextHtml = '';
-    if (bp.customer_name || bp.quote_number || bp.sales_order_number) {
-        contextHtml = '<div class="info-card">'
-            + (bp.customer_name ? '<div><strong>Customer:</strong> ' + esc(bp.customer_name) + '</div>' : '')
+    if (bp.customer_name || bp.quote_number || bp.sales_order_number || bp.requisition_id) {
+        contextHtml = '<div class="info-card">';
+        if (bp.requisition_id) {
+            contextHtml += '<div><strong>Requisition:</strong> <a href="javascript:void(0)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));setTimeout(function(){goToReq(' + bp.requisition_id + ')},300)" style="color:var(--blue);text-decoration:underline;cursor:pointer">'
+                + esc(bp.requisition_name || '#' + bp.requisition_id) + '</a> \u2190 Return</div>';
+        }
+        contextHtml += (bp.customer_name ? '<div><strong>Customer:</strong> ' + esc(bp.customer_name) + '</div>' : '')
             + (bp.quote_number ? '<div><strong>Quote:</strong> ' + esc(bp.quote_number) + '</div>' : '')
             + (bp.sales_order_number ? '<div><strong>SO#:</strong> ' + esc(bp.sales_order_number) + '</div>' : '')
             + (bp.customer_po_number ? '<div><strong>Customer PO:</strong> ' + esc(bp.customer_po_number) + '</div>' : '')

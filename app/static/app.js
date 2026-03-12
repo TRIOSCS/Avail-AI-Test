@@ -48,6 +48,12 @@ window.validateRfqName = validateRfqName;
     window.onerror = function(msg, src, line, col) {
         push({msg: String(msg), src: src, line: line, col: col, ts: Date.now()});
     };
+    // Catch unhandled promise rejections (async errors)
+    window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = reason instanceof Error ? reason.message : String(reason || 'Unknown async error');
+        push({msg: '[unhandledrejection] ' + msg, ts: Date.now()});
+    });
     var origWarn = console.warn, origErr = console.error;
     console.warn = function() {
         push({msg: '[warn] ' + Array.prototype.join.call(arguments, ' '), ts: Date.now()});
@@ -192,6 +198,9 @@ function toggleMobileMore(btn) {
 }
 
 function mobileBack() {
+    // If a mobile drill-down is open, close it first
+    var dd = document.getElementById('mobileDrillDown');
+    if (dd) { _closeMobileDrillDown(); return; }
     if (_mobileNavStack.length > 1) {
         _mobileNavStack.pop();
         var prev = _mobileNavStack[_mobileNavStack.length - 1];
@@ -617,11 +626,14 @@ function _timeAgo(iso) {
 }
 export function fmtDate(iso) {
     if (!iso) return '';
-    return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
+    const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'numeric', day: 'numeric' });
 }
 export function fmtDateTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
 }
 function stars(avg, count) {
@@ -3200,6 +3212,9 @@ export async function loadRequisitions(query = '', append = false) {
             _partActiveTab = {};
             _partDetailCache = {};
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
+            // Clear per-req filters so they don't bleed across list reloads
+            for (const k of Object.keys(_ddSightingFilters)) delete _ddSightingFilters[k];
+            for (const k of Object.keys(_ddScoreCache)) delete _ddScoreCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         if (_currentMainView === 'archive') _archiveTotal = resp.total || items.length;
@@ -3309,6 +3324,25 @@ function sortReqList(col) {
 const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers: data, ... }
 window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
+const _ddTabLoadSeq = {};  // reqId → monotonic counter to prevent stale async renders
+
+// Clean up all per-requisition state (call on archive/delete)
+function _cleanupReqState(reqId) {
+    delete _ddTabCache[reqId];
+    delete _ddActiveTab[reqId];
+    delete _ddTabLoadSeq[reqId];
+    delete _ddReqCache[reqId];
+    delete _ddSightingsCache[reqId];
+    delete _ddScoreCache[reqId];
+    if (_ddSelectedSightings[reqId]) delete _ddSelectedSightings[reqId];
+    if (_ddSightingFilters && _ddSightingFilters[reqId]) delete _ddSightingFilters[reqId];
+    // Clean up tier state keys for this req
+    for (const k of Object.keys(_ddTierState)) { if (k.startsWith(reqId + '-')) delete _ddTierState[k]; }
+    // Unbind context panel if bound to this req
+    if (_ctxBoundObject && _ctxBoundObject.type === 'requisition' && _ctxBoundObject.id === reqId) {
+        unbindContextPanel();
+    }
+}
 
 function _ddSubTabs(mainView) {
     if (mainView === 'archive' || _reqStatusFilter === 'archive') return ['workspace', 'quote', 'activity'];
@@ -3446,6 +3480,10 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     }
     if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
 
+    // Race condition guard: track load sequence so stale responses don't render
+    if (!_ddTabLoadSeq[reqId]) _ddTabLoadSeq[reqId] = 0;
+    const seq = ++_ddTabLoadSeq[reqId];
+
     panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
     try {
         let data;
@@ -3482,6 +3520,16 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'offers':
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
                 break;
+            case 'quote':
+                // Lightweight summary + full quotes list for unified Quote tab
+                {
+                    const [summary, quotes] = await Promise.all([
+                        apiFetch(`/api/requisitions/${reqId}/quote-summary`),
+                        apiFetch(`/api/requisitions/${reqId}/quotes`),
+                    ]);
+                    data = { summary, quotes };
+                }
+                break;
             case 'quotes':
                 try {
                     data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
@@ -3501,9 +3549,12 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
                 break;
         }
+        // Only render if this is still the latest request for this req
+        if (_ddTabLoadSeq[reqId] !== seq) return;
         _ddTabCache[reqId][tabName] = data;
         _renderDdTab(reqId, tabName, data, panel);
     } catch(e) {
+        if (_ddTabLoadSeq[reqId] !== seq) return;
         panel.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
     }
 }
@@ -3520,6 +3571,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
                 break;
             case 'activity': _renderMobileActivityList(reqId, data, panel); break;
             case 'offers': _renderMobileOffersList(data, reqId, panel); break;
+            case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
             case 'quotes': _renderMobileQuotesList(data, reqId, panel); break;
             case 'buyplans': _renderMobileBuyPlansList(data, reqId, panel); break;
             case 'tasks': _renderDdTasks(reqId, data, panel); break;
@@ -3556,6 +3608,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
             }
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
+        case 'quote': _renderDdQuoteTab(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         case 'tasks': _renderDdTasks(reqId, data, panel); break;
         case 'files': _renderDdFiles(reqId, data, panel); break;
@@ -5286,6 +5339,16 @@ function _renderDdOffers(reqId, data, panel) {
                 confBadge = ` <span class="badge" style="background:${cc}15;color:${cc};font-size:8px;padding:1px 4px" title="AI parse confidence: ${o.parse_confidence}%">${cl} ${o.parse_confidence}%</span>`;
             }
 
+            // Risk flag badges — surface AI risk flags directly on offer cards
+            let riskBadges = '';
+            if (o.risk_flags && o.risk_flags.length) {
+                for (const rf of o.risk_flags) {
+                    const rc = rf.severity === 'critical' ? 'var(--red)' : rf.severity === 'warning' ? 'var(--amber)' : 'var(--blue)';
+                    const rl = rf.type ? rf.type.replace(/_/g, ' ') : 'risk';
+                    riskBadges += ` <span class="badge" style="background:${rc}15;color:${rc};font-size:8px;padding:1px 4px;cursor:help" title="${esc(rf.message || rl)}">\u26a0 ${esc(rl)}</span>`;
+                }
+            }
+
             // Edited-by info
             let editedInfo = '';
             if (o.updated_at) {
@@ -5295,7 +5358,7 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${confBadge}${quotedBadge}${riskBadges}${editedInfo}</td>
                 <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
@@ -6034,6 +6097,97 @@ async function ddDeleteOffer(reqId, offerId) {
             showToast('Couldn\'t delete — ' + friendlyError(e, 'please try again'), 'error');
         }
     }, {confirmClass: 'btn-danger', confirmLabel: 'Delete'});
+}
+
+// ── Unified Quote Tab (summary + quotes list + buy plan link) ─────────
+function _renderDdQuoteTab(reqId, data, panel) {
+    const summary = data?.summary || {};
+    const quotes = data?.quotes || [];
+    let html = '';
+
+    // ── Risk flags banner (if any) ──
+    const flags = summary.risk_flags || [];
+    if (flags.length) {
+        html += '<div style="background:rgba(239,68,68,.08);border:1px solid var(--red);border-radius:6px;padding:8px 12px;margin-bottom:10px">';
+        html += '<div style="font-size:11px;font-weight:700;color:var(--red);margin-bottom:4px">Risk Flags</div>';
+        for (const f of flags) {
+            const icon = f.severity === 'critical' ? '\u{1F6A8}' : f.severity === 'warning' ? '\u26a0\ufe0f' : '\u{2139}\ufe0f';
+            const color = f.severity === 'critical' ? 'var(--red)' : f.severity === 'warning' ? 'var(--amber)' : 'var(--muted)';
+            html += `<div style="font-size:10px;color:${color};padding:2px 0">${icon} <b>${esc(f.type.replace(/_/g, ' '))}</b>: ${esc(f.message)}</div>`;
+        }
+        html += '</div>';
+    }
+
+    // ── Quote status summary card ──
+    if (summary.has_quote) {
+        const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+        const statusLabel = statusMap[summary.quote_status] || summary.quote_status || 'Draft';
+        html += `<div style="background:var(--bg2);border-radius:8px;padding:12px;margin-bottom:10px;border:1px solid var(--border)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <div>
+                    <span style="font-weight:700;font-size:13px;color:var(--blue)">${esc(summary.quote_number || '')}</span>
+                    <span style="font-size:10px;color:var(--muted);margin-left:6px">Rev ${summary.quote_revision || 1}</span>
+                    <span class="status-badge status-${summary.quote_status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px;margin-left:6px">${statusLabel}</span>
+                </div>
+                <div style="text-align:right;font-size:10px;color:var(--muted)">${summary.quote_updated_at ? 'Updated ' + fmtRelative(summary.quote_updated_at) : ''}</div>
+            </div>
+            <div style="display:flex;gap:16px;font-size:11px">
+                <div><span style="color:var(--muted)">Lines:</span> <b>${summary.line_count || 0}</b></div>
+                <div><span style="color:var(--muted)">Subtotal:</span> <b>$${Number(summary.subtotal || 0).toLocaleString(undefined,{minimumFractionDigits:2})}</b></div>
+                <div><span style="color:var(--muted)">Margin:</span> <b style="color:${(summary.total_margin_pct||0) >= 20 ? 'var(--green)' : (summary.total_margin_pct||0) >= 10 ? 'var(--amber)' : 'var(--red)'}">${Number(summary.total_margin_pct || 0).toFixed(1)}%</b></div>
+                <div><span style="color:var(--muted)">Offers:</span> <b>${summary.selected_offer_count}/${summary.total_offer_count}</b> selected</div>
+            </div>
+        </div>`;
+    } else {
+        html += `<div style="background:var(--bg2);border-radius:8px;padding:16px;margin-bottom:10px;border:1px dashed var(--border);text-align:center">
+            <div style="font-size:12px;color:var(--muted);margin-bottom:6px">No quote created yet</div>
+            <div style="font-size:11px;color:var(--muted)">Select offers in the <b>Parts</b> tab and click <b>Build Quote</b>, or log offers first.</div>
+        </div>`;
+    }
+
+    // ── Buy Plan CTA ──
+    html += '<div style="display:flex;gap:8px;margin-bottom:12px">';
+    if (summary.has_buy_plan) {
+        const bpStatusMap = {draft:'Draft',pending:'Pending',active:'Active',halted:'Halted',completed:'Completed',cancelled:'Cancelled'};
+        const bpLabel = bpStatusMap[summary.buy_plan_status] || summary.buy_plan_status || '';
+        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();window.location.hash='buyplans';if(window.loadBuyPlansV3)loadBuyPlansV3()">Open Buy Plan <span style="font-size:10px;opacity:.8">(${bpLabel} \u00b7 ${summary.buy_plan_line_count || 0} lines)</span></button>`;
+    } else if (summary.has_quote) {
+        html += `<button class="btn btn-primary" style="font-size:12px;padding:6px 16px" onclick="event.stopPropagation();ddCreateBuyPlan(${reqId})">Create Buy Plan</button>`;
+    }
+    if (summary.has_quote) {
+        html += `<button class="btn btn-ghost" style="font-size:11px" onclick="event.stopPropagation();_switchDdTab(${reqId},'quotes')">View All Quotes</button>`;
+    }
+    html += '</div>';
+
+    // ── Inline quotes list (collapsed) ──
+    if (quotes.length) {
+        // Re-use existing quotes renderer in a sub-panel
+        const subPanel = document.createElement('div');
+        panel.innerHTML = html;
+        panel.appendChild(subPanel);
+        _renderDdQuotes(reqId, quotes, subPanel);
+        return;
+    }
+
+    panel.innerHTML = html;
+}
+
+// Create buy plan from requisition context
+async function ddCreateBuyPlan(reqId) {
+    try {
+        showToast('Creating buy plan...', 'info');
+        const result = await apiFetch(`/api/requisitions/${reqId}/buy-plan`, { method: 'POST' });
+        if (result.buy_plan_id) {
+            showToast(result.created ? 'Buy plan created' : 'Opening existing buy plan', 'success');
+            // Refresh quote tab to show the new buy plan link
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quote;
+            const drow = document.getElementById('d-' + reqId);
+            const panel = drow?.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quote', panel);
+        }
+    } catch(e) {
+        showToast('Failed to create buy plan \u2014 ' + friendlyError(e, 'please try again'), 'error');
+    }
 }
 
 function _renderDdQuotes(reqId, data, panel) {
@@ -8621,7 +8775,10 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
             }
             _renderSourcingDrillDown(reqId); // re-render with scores
-        }).catch(e => console.warn('score fetch error:', e));
+        }).catch(e => {
+            console.warn('score fetch error:', e);
+            delete _ddScoreCache[reqId]; // clear sentinel so retry is possible
+        });
         _ddScoreCache[reqId] = { _loading: true }; // sentinel to prevent duplicate fetches
     }
     const scoreMap = _ddScoreCache[reqId] || {};
@@ -10769,6 +10926,7 @@ async function archiveFromList(reqId) {
             const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
             const wasRestored = resp.status === 'active';
             _reqListData = _reqListData.filter(r => r.id !== reqId);
+            _cleanupReqState(reqId);
             const drow = document.getElementById('d-' + reqId);
             if (drow) drow.remove();
             const arow = document.getElementById('a-' + reqId);
@@ -10826,6 +10984,8 @@ async function _archiveWithOutcome(reqId, outcome) {
             await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
         }
         _reqListData = _reqListData.filter(r => r.id !== reqId);
+        // Clean up all per-requisition state on archive
+        _cleanupReqState(reqId);
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
@@ -14463,10 +14623,12 @@ function renderActivityCards() {
 }
 
 export function fmtRelative(iso) {
-    if (!iso) return '—';
+    if (!iso) return '\u2014';
     const d = new Date(iso);
+    if (isNaN(d)) return '\u2014';
     const now = new Date();
     const diff = Math.floor((now - d) / 1000);
+    if (diff < 0) return d.toLocaleDateString();
     if (diff < 60) return 'just now';
     if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;

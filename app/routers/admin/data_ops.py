@@ -795,3 +795,44 @@ def _upsert_config(db: Session, key: str, value: str, admin_email: str):
             description=f"Teams integration: {key}",
         )
         db.add(row)
+
+
+# ── Data Cleanup / Quarantine ─────────────────────────────────────────────
+
+
+@router.post("/api/admin/data-cleanup/scan")
+async def scan_data_quality(
+    dry_run: bool = True,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Scan production data for test/junk/XSS records.
+
+    dry_run=True (default): returns flagged records without changing anything.
+    dry_run=False: quarantines flagged records (archive reqs, reject offers, blacklist vendors).
+
+    Called by: admin panel data quality section
+    Depends on: services/data_cleanup_service.py
+    """
+    from ...services.data_cleanup_service import scan_junk_data
+
+    return scan_junk_data(db, dry_run=dry_run)
+
+
+@router.post("/api/admin/data-cleanup/fix-dates")
+async def fix_sentinel_dates_endpoint(
+    dry_run: bool = True,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Find and fix sentinel dates (1970-01-01, etc) in production data.
+
+    dry_run=True (default): returns count of fixable records.
+    dry_run=False: applies fixes.
+
+    Called by: admin panel data quality section
+    Depends on: services/data_cleanup_service.py
+    """
+    from ...services.data_cleanup_service import fix_sentinel_dates
+
+    return fix_sentinel_dates(db, dry_run=dry_run)

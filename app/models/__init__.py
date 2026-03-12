@@ -91,6 +91,9 @@ from .purchase_history import CustomerPartHistory  # noqa: F401
 # Quotes & Buy Plans (V1 — JSON line_items)
 from .quotes import BuyPlan, Quote, QuoteLine  # noqa: F401
 
+# Risk Flags (structured deal intelligence)
+from .risk_flag import RiskFlag  # noqa: F401
+
 # Core: Requisitions, Requirements & Attachments
 from .sourcing import (  # noqa: F401
     Requirement,
