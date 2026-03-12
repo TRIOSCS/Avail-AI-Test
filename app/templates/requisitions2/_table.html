@@ -52,14 +52,16 @@
   <a hx-get="/requisitions2/table?page={{ pagination.page - 1 }}"
      hx-target="#rq2-table"
      hx-include="#rq2-filters"
-     hx-push-url="/requisitions2">← Prev</a>
+     hx-push-url="/requisitions2"
+     preload>← Prev</a>
   {% endif %}
   <span>Page {{ pagination.page }} of {{ pagination.total_pages }} ({{ pagination.total }} total)</span>
   {% if pagination.page < pagination.total_pages %}
   <a hx-get="/requisitions2/table?page={{ pagination.page + 1 }}"
      hx-target="#rq2-table"
      hx-include="#rq2-filters"
-     hx-push-url="/requisitions2">Next →</a>
+     hx-push-url="/requisitions2"
+     preload>Next →</a>
   {% endif %}
 </nav>
 {% endif %}

@@ -299,3 +299,154 @@ def test_sales_user_no_owner_filter(client, db_session, sales_user):
         ).filter_by(role="buyer").first()
         if test_user_row:
             app.dependency_overrides[require_user] = lambda: test_user_row
+
+
+# ── Plugin integration ──────────────────────────────────────────────
+
+
+def test_page_loads_htmx_response_targets(client):
+    """Page shell loads response-targets extension."""
+    resp = client.get("/requisitions2")
+    assert "response-targets" in resp.text
+
+
+def test_page_loads_htmx_loading_states(client):
+    """Page shell loads loading-states extension."""
+    resp = client.get("/requisitions2")
+    assert "loading-states" in resp.text
+
+
+def test_page_loads_htmx_preload(client):
+    """Page shell loads preload extension."""
+    resp = client.get("/requisitions2")
+    assert "preload" in resp.text
+
+
+def test_page_loads_alpine_focus(client):
+    """Page shell loads Alpine.js focus plugin."""
+    resp = client.get("/requisitions2")
+    assert "@alpinejs/focus" in resp.text
+
+
+def test_page_loads_alpine_collapse(client):
+    """Page shell loads Alpine.js collapse plugin."""
+    resp = client.get("/requisitions2")
+    assert "@alpinejs/collapse" in resp.text
+
+
+def test_page_loads_alpine_persist(client):
+    """Page shell loads Alpine.js persist plugin."""
+    resp = client.get("/requisitions2")
+    assert "@alpinejs/persist" in resp.text
+
+
+def test_page_enables_hx_ext(client):
+    """Page container enables HTMX extensions via hx-ext."""
+    resp = client.get("/requisitions2")
+    assert "hx-ext=" in resp.text
+    assert "response-targets" in resp.text
+    assert "loading-states" in resp.text
+    assert "preload" in resp.text
+
+
+def test_page_has_error_target(client):
+    """Page has error display div for response-targets."""
+    resp = client.get("/requisitions2")
+    assert 'id="rq2-error"' in resp.text
+
+
+def test_filter_form_has_error_target(client):
+    """Filter form routes errors to #rq2-error."""
+    resp = client.get("/requisitions2")
+    assert 'hx-target-error="#rq2-error"' in resp.text
+
+
+def test_filter_form_has_spinner(client):
+    """Filter form shows spinner indicator."""
+    resp = client.get("/requisitions2")
+    assert "rq2-spinner" in resp.text
+
+
+def test_table_row_modal_link_has_preload(client, test_requisition):
+    """Modal links use preload for instant feel."""
+    resp = client.get("/requisitions2/table", params={"status": "all"})
+    assert 'preload="mousedown"' in resp.text
+
+
+def test_action_buttons_have_loading_states(client, test_requisition, db_session):
+    """Action buttons use data-loading-aria-busy."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active"})
+    assert "data-loading-aria-busy" in resp.text
+
+
+def test_action_buttons_have_error_target(client, test_requisition, db_session):
+    """Action buttons route errors to #rq2-error."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active"})
+    assert 'hx-target-error="#rq2-error"' in resp.text
+
+
+def test_modal_has_focus_trap(client, test_requisition):
+    """Modal uses x-trap for focus management."""
+    resp = client.get(f"/requisitions2/{test_requisition.id}/modal")
+    assert "x-trap" in resp.text
+
+
+def test_bulk_bar_has_collapse(client):
+    """Bulk bar uses x-collapse for smooth animation."""
+    resp = client.get("/requisitions2")
+    assert "x-collapse" in resp.text
+
+
+def test_bulk_bar_forms_have_error_target(client):
+    """Bulk bar forms route errors to #rq2-error."""
+    resp = client.get("/requisitions2")
+    text = resp.text
+    # Both archive and activate bulk forms have error target
+    assert text.count('hx-target-error="#rq2-error"') >= 2
+
+
+def test_bulk_bar_buttons_have_loading_states(client):
+    """Bulk bar buttons use data-loading-aria-busy."""
+    resp = client.get("/requisitions2")
+    assert "data-loading-aria-busy" in resp.text
+
+
+def test_page_has_css_loading_spinner(client):
+    """Page includes CSS for loading spinner animation."""
+    resp = client.get("/requisitions2")
+    assert "rq2-spin" in resp.text
+
+
+def test_page_has_css_swap_transitions(client):
+    """Page includes CSS for HTMX swap transitions."""
+    resp = client.get("/requisitions2")
+    assert "htmx-settling" in resp.text
+    assert "htmx-added" in resp.text
+
+
+def test_page_has_css_skeleton(client):
+    """Page includes CSS for skeleton shimmer loading."""
+    resp = client.get("/requisitions2")
+    assert "rq2-skeleton" in resp.text
+    assert "rq2-shimmer" in resp.text
+
+
+def test_pagination_links_have_preload(client, db_session, test_user):
+    """Pagination links use preload for instant navigation."""
+    from app.models import Requisition
+    for i in range(30):
+        db_session.add(Requisition(
+            name=f"PRE-{i:03d}", status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        ))
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10", "page": "2"})
+    assert "preload" in resp.text

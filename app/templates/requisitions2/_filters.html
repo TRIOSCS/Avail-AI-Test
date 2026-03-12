@@ -1,6 +1,7 @@
 <form id="rq2-filters" class="rq2-filters"
       hx-get="/requisitions2/table"
       hx-target="#rq2-table"
+      hx-target-error="#rq2-error"
       hx-trigger="change, keyup changed delay:300ms from:#rq2-search"
       hx-push-url="/requisitions2"
       hx-indicator="#rq2-loading">
@@ -46,5 +47,9 @@
   <input type="hidden" name="page" value="1">
   <input type="hidden" name="per_page" value="{{ filters.per_page }}">
 
-  <span id="rq2-loading" class="htmx-indicator">Loading...</span>
+  <span id="rq2-loading" class="htmx-indicator">
+    <span class="rq2-spinner"></span> Loading...
+  </span>
+  <span data-loading data-loading-class="rq2-loading" data-loading-target="#rq2-table">
+  </span>
 </form>

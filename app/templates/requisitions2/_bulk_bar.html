@@ -1,24 +1,27 @@
 <div id="rq2-bulk-bar" class="rq2-bulk-bar"
      x-show="selectedIds.size > 0"
+     x-collapse
      x-cloak>
 
   <span x-text="selectedIds.size + ' selected'"></span>
 
   <form hx-post="/requisitions2/bulk/archive"
         hx-target="#rq2-table"
+        hx-target-error="#rq2-error"
         hx-include="#rq2-filters"
         hx-confirm="Archive selected requisitions?"
         style="display:inline">
     <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
-    <button type="submit" class="btn-sm">Archive Selected</button>
+    <button type="submit" class="btn-sm" data-loading-aria-busy>Archive Selected</button>
   </form>
 
   <form hx-post="/requisitions2/bulk/activate"
         hx-target="#rq2-table"
+        hx-target-error="#rq2-error"
         hx-include="#rq2-filters"
         style="display:inline">
     <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
-    <button type="submit" class="btn-sm">Activate Selected</button>
+    <button type="submit" class="btn-sm" data-loading-aria-busy>Activate Selected</button>
   </form>
 
   {% if user.role != 'sales' %}
@@ -28,6 +31,7 @@
       {% for u in users %}
       <form hx-post="/requisitions2/bulk/assign"
             hx-target="#rq2-table"
+            hx-target-error="#rq2-error"
             hx-include="#rq2-filters"
             style="display:inline">
         <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
