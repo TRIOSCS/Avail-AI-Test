@@ -17200,5 +17200,5 @@ Object.assign(window, {
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
-    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection,
 });
