@@ -1,0 +1,67 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Bootstrap: dev environment",
+      "type": "shell",
+      "command": "bash scripts/bootstrap-dev.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint: ruff check",
+      "type": "shell",
+      "command": "ruff check app/ tests/",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Lint: ruff fix + format",
+      "type": "shell",
+      "command": "ruff check app/ tests/ --fix && ruff format app/ tests/",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Tests: backend quick",
+      "type": "shell",
+      "command": "pytest tests/ -q --tb=short",
+      "group": "test",
+      "options": {
+        "env": {
+          "TESTING": "1",
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Tests: backend coverage 100",
+      "type": "shell",
+      "command": "pytest tests/ -v --tb=short --cov=app --cov-report=term-missing --cov-fail-under=100",
+      "group": "test",
+      "options": {
+        "env": {
+          "TESTING": "1",
+          "PYTHONPATH": "${workspaceFolder}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Tests: frontend",
+      "type": "shell",
+      "command": "npm run test:frontend",
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Quality gate: lint + backend tests",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "Lint: ruff check",
+        "Tests: backend quick"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

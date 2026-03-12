@@ -1,0 +1,16 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "ms-azuretools.vscode-docker",
+    "eamodio.gitlens",
+    "humao.rest-client",
+    "otovo-oss.htmx-tags",
+    "adrianwilczynski.alpine-js-intellisense",
+    "wholroyd.jinja",
+    "ms-ossdata.vscode-postgresql",
+    "esbenp.prettier-vscode",
+    "redhat.vscode-yaml"
+  ]
+}
