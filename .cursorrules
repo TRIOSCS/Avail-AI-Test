@@ -1,0 +1,192 @@
+# AVAIL AI — Cursor Rules
+# Electronic Component Sourcing Platform & CRM
+# Company: Trio Supply Chain Solutions (TRIOSCS), Newport Beach, CA
+# Developer: Mike Khoury (CEO/Director of Global Trading — domain expert, citizen developer)
+# Domain: availai.trioscs.com
+# GitHub: github.com/TRIOSCS/Avail-AI-Test (private)
+
+---
+
+## 1. WHO YOU ARE TALKING TO
+
+Mike is a deep electronics-industry expert and beginner developer. He knows exactly what the
+software needs to do but may not know the "right" engineering way to do it. Your job is:
+- Build it correctly on his behalf
+- Explain non-obvious decisions using AVAIL-specific examples (not abstract CS concepts)
+- Flag tradeoffs in plain English
+- Never assume he knows what a term means — define it the first time
+
+---
+
+## 2. TECH STACK
+
+| Layer         | Technology                                                   |
+|---------------|--------------------------------------------------------------|
+| Backend       | Python 3.12 / FastAPI / SQLAlchemy (async)                  |
+| Database      | PostgreSQL 16 (Docker volume `pgdata`)                      |
+| Migrations    | Alembic — DDL changes ONLY in migrations, NEVER in startup  |
+| Frontend      | Vanilla JS SPA — app.js + crm.js + index.html (Jinja2)      |
+| Auth          | Microsoft Azure AD OAuth (M365 SSO via MSAL)                |
+| Email         | Microsoft Graph API (send/receive/poll)                     |
+| AI            | Claude API (Haiku for parsing, Sonnet for intelligence)     |
+| Hosting       | DigitalOcean droplet — 104.248.191.152                      |
+| Reverse Proxy | Caddy 2 (auto HTTPS)                                        |
+| Deployment    | Docker Compose (app + postgres + caddy containers)          |
+| Logging       | Loguru — NEVER use print()                                  |
+| Linting       | Ruff + pre-commit hooks                                     |
+| Testing       | pytest + pytest-asyncio                                     |
+| Notifications | Microsoft Teams webhooks (role-specific alert channels)     |
+| ERP           | Acctivate (SQL Server, live read-only connection)           |
+
+---
+
+## 3. PROJECT STRUCTURE
+
+```
+availai/
+├── main.py                      # App startup only (~50 lines max)
+├── config.py                    # Pydantic settings from env vars
+├── database.py                  # SQLAlchemy session factory
+├── STABLE.md                    # Registry of critical/stable files — check before refactoring
+├── CHANGELOG.md                 # All changes logged here
+├── CLAUDE.md                    # Claude Code instructions (mirrors this file)
+├── requirements.txt             # Exact-pinned dependencies
+├── .pre-commit-config.yaml      # Ruff auto-lint on commit
+├── .github/workflows/ci.yml     # Auto test + lint on push
+├── alembic/                     # Migrations — DDL changes LIVE HERE ONLY
+├── models/                      # SQLAlchemy models — one file per entity
+├── schemas/                     # Pydantic request/response models
+├── routers/                     # THIN — validate → call service → return
+├── services/                    # FAT — all business logic lives here
+├── connectors/                  # Vendor API clients (Mouser, DigiKey, etc.)
+├── specs/                       # Plain-English business rule contracts
+├── tests/                       # pytest — mirrors services/ structure
+├── test_fixtures/               # Realistic sample JSON data
+└── static/                      # app.js, crm.js, CSS
+    └── templates/index.html     # Single-page Jinja2 template
+```
+
+### Core Services (always be aware of these)
+- `services/sourcing.py` — Multi-source vendor search aggregation
+- `services/scoring.py` — Sighting scoring (price 30%, reliability 25%, lead time 20%, geography 15%, terms 10%)
+- `services/engagement_scoring.py` — Vendor engagement score (5 behavioral factors)
+- `services/routing.py` — Buyer routing, 4-factor scoring
+- `services/ownership.py` — Customer ownership, 30-day inactivity rules
+- `services/email_service.py` — Microsoft Graph API (batch RFQ, inbox poll, AI parse)
+- `services/acctivate_sync.py` — ERP sync (read-only SQL Server)
+- `services/scheduler.py` — Background jobs (inbox scan, stock import, mining)
+
+### Key Vendor Connectors
+Mouser, DigiKey, OEMSecrets, BrokerBin, Element14, Nexar/Octopart, NetComponents
+
+---
+
+## 4. HARD RULES — NEVER VIOLATE THESE
+
+### DDL / Database
+- ⚠️ ALL schema changes (CREATE TABLE, ALTER TABLE, ADD COLUMN, DROP) go in Alembic migrations ONLY
+- NEVER put DDL in startup.py, main.py, or any service
+- Every migration must have an `upgrade()` AND a `downgrade()`
+- Every table gets `id`, `created_at`, `updated_at`
+- Foreign keys with appropriate cascades
+- Add indexes on all columns used in WHERE/JOIN/ORDER BY
+
+### Code Architecture
+- **Routers are thin**: validate input → call service → return response. Zero business logic.
+- **Services are fat**: all logic, DB queries, external calls, error handling live here.
+- Never put database queries directly in routers
+- Never reference code or files not currently shown to you
+
+### Files
+- Every new file gets a header docstring with: purpose, description, business rules it enforces, called-by, depends-on
+- No placeholder comments like `# TODO: implement this` or `# ... rest of code`
+- Provide complete files or precise edits with enough surrounding context to locate them
+
+### Logging
+- Use `from loguru import logger` — never `print()`
+- Log at appropriate levels: DEBUG for dev details, INFO for business events, WARNING for degraded states, ERROR for failures
+
+### Dependencies
+- Justify every new dependency before adding it
+- Prefer stdlib or already-present packages
+- Pin exact versions in requirements.txt
+
+---
+
+## 5. RESPONSE RULES
+
+- Max ~150 lines of code per response. If a feature needs more, break it into a numbered step plan first and get Mike's approval before proceeding.
+- Always provide exact file paths for every code block
+- Always write tests alongside business logic — never ask, just include them
+- Simple over clever. 20 readable lines beats 10 clever lines.
+- Push back on big-bang requests. Break them into phases.
+
+---
+
+## 6. TRIGGER BEHAVIORS
+
+| Mike says...                    | You do...                                                                 |
+|---------------------------------|---------------------------------------------------------------------------|
+| "new feature" / "build X"       | Write a spec first. Get approval. Then code.                             |
+| "bug" / "error" / "broken"      | Ask for the full traceback before writing any code.                      |
+| "refactor" / "clean up"         | Check STABLE.md first. Require tests before changing anything.           |
+| "deploy" / "production"         | Provide checklist with backup step and rollback plan.                    |
+| "quick" / "just" / "simple"     | ⚠️ Flag if it's actually complex. Don't let it sneak past.              |
+| "I don't understand"            | Switch to teaching mode. Use AVAIL examples, not abstract CS.            |
+| ~15–20 exchanges deep           | Suggest: "Consider starting a fresh chat with updated files."            |
+| Any DROP, DELETE, or ALTER      | ⚠️ Warn explicitly. Include backup steps and rollback plan.             |
+
+---
+
+## 7. SESSION CLOSE CHECKLIST
+
+After every meaningful coding session, provide:
+1. **CHANGELOG entry** — one-line summary of what changed
+2. **Git commands** — exact `git add / commit / push` commands
+3. **Migration flag** — did this session require a new Alembic migration? (yes/no)
+4. **STABLE.md flag** — did any stable files change? (yes/no)
+5. **Test files touched** — list all test files created or modified
+6. **Tech debt noted** — anything deferred that should be revisited
+
+---
+
+## 8. CURRENT BUILD STATUS (update as features ship)
+
+### ✅ Shipped / Stable
+- Multi-source vendor search (6 APIs)
+- Sighting scoring engine
+- Microsoft Graph API email (send/receive/poll)
+- CRM (customers, offers, quotes, dashboard)
+- Requisition management with "All Reqs / Mine" toggle
+- Role/user system (UserRole enum, `require_buyer` dependency)
+- Acctivate ERP sync (read-only)
+- Avail Score system (buyer/sales leaderboards, bonus thresholds)
+- V3 Buy Plans (normalized tables, AI vendor scoring)
+- NetComponents (NC) sourcing integration
+- Salesforce historical import (~7,500 verified contacts)
+- Self-healing trouble ticket system (AI diagnosis, risk-tiered auto-repair)
+- Playwright browser agent auth (`POST /auth/agent-session`)
+- 8,000+ tests passing
+- Migration chain integrity enforced in CI (DDL grep check)
+
+### 🔧 In Progress
+- Microsoft Teams alert system (6 alerts across 3 role profiles: buyer, AM, director)
+- Microsoft Graph email integration for communication intelligence layer
+- AI agent-based QA testing loop (Claude in Chrome → ticket → Claude Code fix)
+
+### 📋 Roadmap
+- Broadcast Send (templated emails from each AM's M365 mailbox via Graph API)
+- Mailchimp integration (~7,500 contacts, quarterly market intel blasts)
+- Dynamics 365 (future — financial ops, data boundary plan documented)
+- AS9120B certification support tooling
+
+---
+
+## 9. BUSINESS CONTEXT (when it affects code decisions)
+
+- **Volume:** ~1,000 requisitions/month, team of ~10 (buyers, traders, AMs)
+- **Philosophy:** "Leave no stone unturned" — comprehensive vendor rankings, not filtered short lists
+- **Enrichment stack:** Lusha (primary, direct dials/emails), Hunter.io, Apollo (free), Clay
+- **Customer data:** 8 years of Legendary Supply Chain Salesforce history in AVAIL
+- **ERP:** Acctivate (back-office); AVAIL handles sourcing/CRM
+- **Key staff in system:** Marcus, Martina (EMEA Sales), Derrick, Aniket, David, Sally, Angel, Eric, Katy, Myrna
