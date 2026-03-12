@@ -3132,8 +3132,8 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'purchasing' | 'archive'
-if (_currentMainView === 'sourcing') _currentMainView = 'purchasing';  // migrate legacy stored value
+let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'sourcing' | 'archive'
+if (_currentMainView === 'purchasing') _currentMainView = 'sourcing';  // migrate legacy stored value
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -4566,6 +4566,12 @@ function toggleMyTasksSidebar() {
     if (!sidebar) return;
     var isOpen = sidebar.classList.toggle('open');
     document.body.classList.toggle('tasks-open', isOpen);
+    try {
+        if (isOpen) localStorage.setItem('myTasksOpen', '1');
+        else localStorage.removeItem('myTasksOpen');
+    } catch (e) {
+        // Ignore storage failures (private mode / quota limits).
+    }
     if (isOpen) loadMyTasks();
 }
 
@@ -4704,8 +4710,18 @@ function _renderMyTaskItem(task) {
     setTimeout(function() {
         var sidebar = document.getElementById('myTasksSidebar');
         if (!sidebar) return;
-        sidebar.classList.remove('open');
-        document.body.classList.remove('tasks-open');
+        var shouldOpen = false;
+        try {
+            shouldOpen = localStorage.getItem('myTasksOpen') === '1';
+        } catch (e) {
+            shouldOpen = false;
+        }
+        sidebar.classList.toggle('open', shouldOpen);
+        document.body.classList.toggle('tasks-open', shouldOpen);
+        if (shouldOpen) {
+            loadMyTasks();
+            return;
+        }
         (async function() {
             try {
                 var summary = await apiFetch('/api/tasks/mine/summary');
@@ -9316,7 +9332,7 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'sales' ? 'sales' : v === 'purchasing' ? 'purchasing' : '';
+            const viewLabel = v === 'sales' ? 'sales' : v === 'sourcing' ? 'sourcing' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
@@ -10258,6 +10274,9 @@ function _cancelTabInflight() {
 }
 
 function setMainView(view, btn) {
+    // Backward compatibility: old UI used "purchasing" for the sourcing view.
+    if (view === 'purchasing') view = 'sourcing';
+
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
@@ -10291,8 +10310,8 @@ function setMainView(view, btn) {
     if (fuPanel) fuPanel.style.display = 'none';
     // Show status filter pills on sales/sourcing views, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
-    if (view === 'sales' || view === 'purchasing') {
+    if (stEl) stEl.style.display = (view === 'sales' || view === 'sourcing') ? '' : 'none';
+    if (view === 'sales' || view === 'sourcing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -10876,7 +10895,7 @@ async function requoteFromList(reqId) {
             }
             showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
             const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
-            if (srcBtn) setMainView('purchasing', srcBtn);
+            if (srcBtn) setMainView('sourcing', srcBtn);
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
@@ -15344,8 +15363,8 @@ document.addEventListener('keydown', function(e) {
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
-            if (btn) setMainView('purchasing', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="sourcing"]');
+            if (btn) setMainView('sourcing', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
