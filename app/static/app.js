@@ -1,4 +1,11 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
+import {
+    applyDuplicateMarkers,
+    intakeFriendlyError,
+    normalizeIntakeRow,
+    offerDuplicateKey,
+    parseFallbackRows,
+} from './intake_helpers.mjs';
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
@@ -320,7 +327,7 @@ let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 var _ddTierState = {};           // tier expand/collapse state: `${reqId}-${rId}-${tier}` → bool
 let _partExpandState = {};       // `${reqId}-${requirementId}` → true if part detail is expanded
-let _partActiveTab = {};         // `${reqId}-${requirementId}` → active part detail tab
+let _partActiveTab = {};         // `${reqId}-${requirementId}` → 'offers'|'notes'|'tasks'
 let _partDetailCache = {};       // `${reqId}-${requirementId}-${tab}` → cached data
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
@@ -994,10 +1001,6 @@ async function checkM365Status() {
 
         // Apply role-based UI visibility
         applyRoleGating();
-        // Re-render list once role is known so pipeline columns/actions are role-prioritized.
-        if (_currentViewId === 'view-list' && _currentMainView === 'sales' && Array.isArray(_reqListData) && _reqListData.length) {
-            renderReqList();
-        }
 
         if (d.connected) {
             const connectedCount = (d.users || []).filter(u => u.status === 'connected').length;
@@ -3136,11 +3139,8 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
-// Canonical requisition view key remains "sales" (now used as unified Pipeline view).
-let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'deals' | 'archive'
-if (_currentMainView === 'sourcing' || _currentMainView === 'purchasing' || _currentMainView === 'active' || _currentMainView === 'rfq') {
-    _currentMainView = 'sales';  // migrate legacy stored values to unified pipeline view
-}
+let _currentMainView = localStorage.getItem('avail_main_view') || 'sales';  // 'sales' | 'purchasing' | 'archive'
+if (_currentMainView === 'sourcing') _currentMainView = 'purchasing';  // migrate legacy stored value
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -3239,10 +3239,6 @@ const _defaultHiddenCols = {};
 let _hiddenCols = JSON.parse(localStorage.getItem('reqHiddenCols') || '{}');
 
 function _isColHidden(col) { return !!_hiddenCols[col]; }
-function _isSalesPipelineProfile() {
-    // Keep unified data visible for everyone; only prioritize ordering/actions by role.
-    return window.userRole === 'sales';
-}
 function toggleColVisibility(col) {
     _hiddenCols[col] = !_hiddenCols[col];
     if (!_hiddenCols[col]) delete _hiddenCols[col];
@@ -3266,8 +3262,8 @@ function _applyColVisCSS() {
     // Map column keys to 1-based nth-child positions per view
     let colMap;
     if (v === 'archive') colMap = {reqs:3,offers:4,status:5,matches:6,sales:7,age:8};
-    else if (_isSalesPipelineProfile()) colMap = {reqs:3,quote:4,offers:5,deadline:6,sourced:7,coverage:8,sent:9,resp:10,sales:11,age:12};
-    else colMap = {reqs:3,sourced:4,coverage:5,sent:6,resp:7,quote:8,offers:9,deadline:10,sales:11,age:12};
+    else if (v === 'sales') colMap = {reqs:3,quote:4,offers:5,deadline:6,sales:7,age:8};
+    else colMap = {reqs:3,sourced:4,sent:5,resp:6,offers:7,sales:8,age:9};
     const rules = [];
     for (const [k, nth] of Object.entries(colMap)) {
         if (_isColHidden(k)) rules.push(`#reqList > table > thead > tr > th:nth-child(${nth}), #reqList > table > tbody > tr.rrow > td:nth-child(${nth}) { display: none; }`);
@@ -3279,30 +3275,8 @@ function _colGearDropdown() {
     const v = _currentMainView;
     let cols;
     if (v === 'archive') cols = [{k:'reqs',l:'Parts'},{k:'offers',l:'Offers'},{k:'status',l:'Outcome'},{k:'matches',l:'Matches'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
-    else if (_isSalesPipelineProfile()) cols = [
-        {k:'reqs',l:'Parts'},
-        {k:'quote',l:'Quote'},
-        {k:'offers',l:'Offers'},
-        {k:'deadline',l:'Bid Due'},
-        {k:'sourced',l:'Sourced'},
-        {k:'coverage',l:'Coverage'},
-        {k:'sent',l:'RFQs'},
-        {k:'resp',l:'Response'},
-        {k:'sales',l:'Sales'},
-        {k:'age',l:'Age'}
-    ];
-    else cols = [
-        {k:'reqs',l:'Parts'},
-        {k:'sourced',l:'Sourced'},
-        {k:'coverage',l:'Coverage'},
-        {k:'sent',l:'RFQs'},
-        {k:'resp',l:'Response'},
-        {k:'quote',l:'Quote'},
-        {k:'offers',l:'Offers'},
-        {k:'deadline',l:'Bid Due'},
-        {k:'sales',l:'Sales'},
-        {k:'age',l:'Age'}
-    ];
+    else if (v === 'sales') cols = [{k:'reqs',l:'Parts'},{k:'quote',l:'Quote'},{k:'offers',l:'Offers'},{k:'deadline',l:'Bid Due'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
+    else cols = [{k:'reqs',l:'Parts'},{k:'sourced',l:'Sourced'},{k:'sent',l:'RFQs Sent'},{k:'resp',l:'Response'},{k:'offers',l:'Offers'},{k:'sales',l:'Sales'},{k:'age',l:'Age'}];
     let html = '<div class="col-gear-dd" id="colGearDropdown" onclick="event.stopPropagation()">';
     html += '<div style="font-size:10px;font-weight:600;color:var(--muted);padding:4px 8px;text-transform:uppercase">Columns</div>';
     for (const c of cols) {
@@ -7715,22 +7689,13 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
+    const tabs = ['offers', 'activity'];
+    const tabLabels = { offers: 'Offers', activity: 'Activity' };
     const pills = tabs.map(t =>
-        `<button class="part-tab${t === activeTab ? ' on' : ''}" data-tab="${t}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${_partTabLabel(t)}</button>`
+        `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
     ).join('');
     panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><span style="font-size:11px;color:var(--muted)">Loading\u2026</span></div>`;
     await _loadPartTab(reqId, requirementId, activeTab);
-}
-
-function _partTabLabel(tabName) {
-    return {
-        offers: 'Offers',
-        sightings: 'Sightings',
-        activity: 'Activity',
-        tasks: 'Tasks',
-        notes: 'Notes',
-    }[tabName] || tabName;
 }
 
 async function _switchPartTab(reqId, requirementId, tabName) {
@@ -7739,7 +7704,7 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.dataset.tab === tabName);
+        t.classList.toggle('on', t.textContent === { offers: 'Offers', activity: 'Activity' }[tabName]);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7759,20 +7724,14 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
-            case 'sightings':
-                data = await apiFetch(`/api/requirements/${requirementId}/sightings`);
+            case 'activity': {
+                const [notes, tasks] = await Promise.all([
+                    apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({})),
+                    apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []),
+                ]);
+                data = { notes, tasks, history: [] };
                 break;
-            case 'activity':
-                data = await apiFetch(`/api/requirements/${requirementId}/history`);
-                break;
-            case 'tasks':
-                data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
-                break;
-            case 'notes':
-                data = await apiFetch(`/api/requirements/${requirementId}/notes`);
-                break;
-            default:
-                data = null;
+            }
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
@@ -7784,10 +7743,7 @@ async function _loadPartTab(reqId, requirementId, tabName) {
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
-        case 'sightings': _renderPartSightings(reqId, requirementId, data, contentEl); break;
         case 'activity': _renderPartActivity(reqId, requirementId, data, contentEl); break;
-        case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
-        case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
         default: contentEl.textContent = '';
     }
 }
@@ -7800,6 +7756,7 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
         contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet for this part</span>';
         return;
     }
+    // Look up target price from requirement cache for price-vs-target indicator
     const _reqs = _ddReqCache[reqId] || [];
     const _req = _reqs.find(r => r.id === requirementId);
     const targetPrice = _req?.target_price ?? null;
@@ -7826,7 +7783,7 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
             <td>${esc(o.lead_time || '\u2014')}</td>
             <td>${esc(o.condition || '\u2014')}</td>
-            <td style="font-size:10px">${esc(o.source || o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
+            <td style="font-size:10px">${esc(o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
             <td style="color:${statusColor};font-weight:600;font-size:10px">${esc(status)}</td>
             <td style="font-size:10px;color:var(--muted)">${age}</td>
             <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
@@ -7836,345 +7793,44 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
-function _renderPartSightings(reqId, requirementId, data, contentEl) {
-    const payload = data || {};
-    const sightings = Array.isArray(payload.sightings) ? payload.sightings : [];
-    const label = payload.label || '';
-    if (!sightings.length) {
-        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No sightings yet for this part</span>';
-        return;
-    }
-    let html = `<table class="dtbl" style="font-size:11px"><thead><tr>
-        <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Lead</th><th>Age</th>
-    </tr></thead><tbody>`;
-    for (const s of sightings) {
-        const safeVendor = (s.vendor_name || '').replace(/'/g, "\\'");
-        const vendor = s.vendor_name
-            ? `<a onclick="event.stopPropagation();openVendorPopupByName('${safeVendor}')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color='var(--blue)'" onmouseout="this.style.color='var(--text)'">${esc(s.vendor_name)}</a>`
-            : '\u2014';
-        const mpn = s.mpn_matched || s.normalized_mpn || label || '\u2014';
-        const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
-        const price = s.unit_price != null ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
-        const age = s.created_at ? fmtRelative(s.created_at) : '\u2014';
-        const rowStyle = s.is_unavailable ? 'opacity:.6;background:rgba(220,38,38,.04)' : '';
-        html += `<tr style="${rowStyle}">
-            <td>${vendor}</td>
-            <td class="mono">${esc(mpn)}</td>
-            <td class="mono">${qty}</td>
-            <td class="mono">${price}</td>
-            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}</td>
-            <td>${esc(s.condition || '\u2014')}</td>
-            <td>${esc(s.lead_time || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${age}</td>
-        </tr>`;
-    }
-    html += '</tbody></table>';
-    contentEl.innerHTML = html;
-}
-
+// ── Part-level Activity renderer (merged notes + tasks) ──
 function _renderPartActivity(reqId, requirementId, data, contentEl) {
-    const events = Array.isArray(data) ? data.slice() : [];
-    events.sort((a, b) => {
-        const aTs = new Date(a.completed_at || a.created_at || 0).getTime();
-        const bTs = new Date(b.completed_at || b.created_at || 0).getTime();
-        return bTs - aTs;
-    });
-    if (!events.length) {
-        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No activity yet for this part</span>';
-        return;
-    }
-    const fmtValue = (value) => {
-        if (value === null || value === undefined || value === '') return '\u2014';
-        return esc(typeof value === 'object' ? JSON.stringify(value) : String(value));
-    };
-    let html = '<div class="activity-timeline">';
-    for (const ev of events) {
-        const when = ev.completed_at || ev.created_at;
-        let title = 'Activity';
-        let detail = '';
-        let accent = 'var(--muted)';
-        switch (ev.type) {
-            case 'change':
-                title = `${esc(ev.user || 'System')} updated ${esc(ev.entity || 'requirement')} ${esc(ev.field || '')}`.trim();
-                detail = `<div style="font-size:10px;color:var(--muted)">${fmtValue(ev.old_value)} \u2192 ${fmtValue(ev.new_value)}</div>`;
-                accent = 'var(--blue)';
-                break;
-            case 'offer_created':
-                title = `Offer logged from ${esc(ev.vendor_name || 'vendor')}`;
-                detail = `<div style="font-size:10px;color:var(--muted)">${esc(ev.mpn || '\u2014')} \u00b7 ${ev.qty_available != null ? Number(ev.qty_available).toLocaleString() + ' pcs' : 'Qty \u2014'}${ev.unit_price != null ? ' \u00b7 $' + Number(ev.unit_price).toFixed(4) : ''}</div>`;
-                accent = 'var(--teal)';
-                break;
-            case 'rfq_sent':
-                title = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to ${esc(ev.vendor_name || 'vendor')}`;
-                detail = ev.status ? `<div style="font-size:10px;color:var(--muted)">Status: ${esc(ev.status)}</div>` : '';
-                accent = 'var(--amber)';
-                break;
-            case 'task_done':
-                title = `Task completed: ${esc(ev.title || 'Untitled task')}`;
-                accent = 'var(--green)';
-                break;
-            default:
-                title = esc(ev.summary || ev.type || 'Event');
-        }
-        html += `<div class="activity-item activity-item-event">
-            <div style="font-size:11px;font-weight:600;color:${accent}">${title}</div>
-            ${detail}
-            ${when ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${fmtDateTime(when)}</div>` : ''}
-        </div>`;
-    }
-    html += '</div>';
-    contentEl.innerHTML = html;
+    // Reuse the RFQ activity renderer — same data shape { notes, tasks, history }
+    _rfqRenderActivity(data, contentEl);
+    // Override the partId references for inline forms to use this requirement
+    const origPartId = _rfqActivePartId;
+    _rfqActivePartId = requirementId;
+    // Restore after a tick so any event handlers bind correctly
+    setTimeout(() => { _rfqActivePartId = origPartId; }, 0);
 }
-
-function _renderPartTasks(reqId, requirementId, data, contentEl) {
-    const key = reqId + '-' + requirementId;
-    const tasks = Array.isArray(data) ? data : [];
-    const openTasks = tasks.filter(t => t.status !== 'done');
-    const doneTasks = tasks.filter(t => t.status === 'done');
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length === 1 ? '' : 's'}</span>
-        <button class="btn btn-sm" onclick="event.stopPropagation();_showPartTaskForm(${reqId},${requirementId})">+ Add Task</button>
-    </div>
-    <div id="partTaskForm-${key}"></div>`;
-    if (!tasks.length) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No tasks yet for this part</div>';
-        contentEl.innerHTML = html;
-        return;
-    }
-    html += `<div style="font-size:11px;font-weight:600;margin:8px 0 6px">${openTasks.length} Open</div>`;
-    html += openTasks.length
-        ? openTasks.map(t => _renderPartTaskItem(reqId, requirementId, t)).join('')
-        : '<div class="empty-placeholder" style="font-size:11px">No open tasks</div>';
-    html += `<div style="font-size:11px;font-weight:600;margin:10px 0 6px">${doneTasks.length} Completed</div>`;
-    html += doneTasks.length
-        ? doneTasks.map(t => _renderPartTaskItem(reqId, requirementId, t)).join('')
-        : '<div class="empty-placeholder" style="font-size:11px">No completed tasks</div>';
-    contentEl.innerHTML = html;
-}
-
-function _renderPartTaskItem(reqId, requirementId, task) {
-    const done = task.status === 'done';
-    const assignee = task.assignee_name || task.assigned_to || 'Unassigned';
-    const creator = task.creator_name || task.created_by_name || '';
-    const due = task.due_at || task.due_date;
-    const dueLabel = due ? (done ? `Due ${fmtDate(due)}` : `Due ${fmtDateTime(due)}`) : '';
-    const meta = [`Assigned to ${esc(assignee)}`];
-    if (creator) meta.push(`by ${esc(creator)}`);
-    if (dueLabel) meta.push(dueLabel);
-    return `<div class="activity-item ${done ? 'activity-item-task-done' : 'activity-item-task-open'}">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-            <div style="flex:1">
-                <div style="font-size:11px;font-weight:600">${esc(task.title || 'Untitled task')}</div>
-                ${task.description ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(task.description)}</div>` : ''}
-                <div style="font-size:10px;color:var(--muted);margin-top:2px">${meta.join(' \u00b7 ')}</div>
-                ${task.ai_risk_flag ? `<div class="task-risk-flag" style="margin-top:4px">${esc(task.ai_risk_flag)}</div>` : ''}
-                ${done && task.completion_note ? `<div style="font-size:10px;color:var(--muted);margin-top:4px;font-style:italic">"${esc(task.completion_note)}"</div>` : ''}
-                ${done && task.completed_at ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">Completed ${fmtDateTime(task.completed_at)}</div>` : ''}
-            </div>
-            ${done ? '<span style="font-size:10px;color:var(--green);font-weight:600">Done</span>' : `<button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="event.stopPropagation();_showPartTaskCompleteForm(${reqId},${requirementId},${task.id})">Complete</button>`}
-        </div>
-        ${done ? '' : `<div id="partTaskComplete-${task.id}"></div>`}
-    </div>`;
-}
-
-function _renderPartNotes(reqId, requirementId, data, contentEl) {
-    const key = reqId + '-' + requirementId;
-    const noteItems = _getPartNoteTimeline(data);
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:600">${noteItems.length} Note${noteItems.length === 1 ? '' : 's'}</span>
-        <button class="btn btn-sm" onclick="event.stopPropagation();_showPartNoteForm(${reqId},${requirementId})">+ Add Note</button>
-    </div>
-    <div id="partNoteForm-${key}"></div>`;
-    if (!noteItems.length) {
-        html += '<div class="empty-placeholder" style="font-size:11px">No notes yet for this part</div>';
-        contentEl.innerHTML = html;
-        return;
-    }
-    html += '<div class="activity-timeline">';
-    for (const item of noteItems) {
-        const label = item.type === 'offer'
-            ? `Offer Note${item.vendor ? ' \u2014 ' + esc(item.vendor) : ''}`
-            : 'Requirement Note';
-        html += `<div class="activity-item activity-item-note">
-            <div style="font-size:10px;font-weight:600;color:var(--muted)">${label}</div>
-            <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-            ${item.meta ? `<div style="font-size:10px;color:var(--muted);margin-top:3px">${esc(item.meta)}</div>` : ''}
-            ${item.created_at ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${fmtDateTime(item.created_at)}</div>` : ''}
-        </div>`;
-    }
-    html += '</div>';
-    contentEl.innerHTML = html;
-}
-
-function _getPartNoteTimeline(data) {
-    const notesData = data || {};
-    const items = [];
-    const rawRequirementNotes = notesData.requirement_notes || '';
-    rawRequirementNotes.split('\n').map(line => line.trim()).filter(Boolean).forEach(line => {
-        const match = line.match(/^\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s([^\]]+)\]\s*(.*)$/);
-        const createdAt = match ? match[1].replace(' ', 'T') + ':00Z' : null;
-        items.push({
-            type: 'requirement',
-            text: match ? (match[3] || line) : line,
-            meta: match ? match[2] : '',
-            created_at: createdAt,
-            ts: createdAt ? new Date(createdAt).getTime() : 0,
-        });
-    });
-    (Array.isArray(notesData.notes) ? notesData.notes : []).forEach(note => {
-        const createdAt = note.created_at || null;
-        items.push({
-            type: 'offer',
-            vendor: note.vendor_name || '',
-            text: note.note || '',
-            meta: note.offer_id ? `Offer #${note.offer_id}` : '',
-            created_at: createdAt,
-            ts: createdAt ? new Date(createdAt).getTime() : 0,
-        });
-    });
-    items.sort((a, b) => b.ts - a.ts);
-    return items;
-}
-
-function _showPartTaskForm(reqId, requirementId) {
-    const key = reqId + '-' + requirementId;
-    const slot = document.getElementById('partTaskForm-' + key);
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form">
-        <input type="text" id="partTaskTitle-${key}" placeholder="Task title..." style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-        <textarea id="partTaskDesc-${key}" placeholder="Description (optional)..." rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);margin-top:4px;resize:vertical"></textarea>
-        <div style="display:flex;gap:6px;margin-top:4px">
-            <select id="partTaskAssignee-${key}" style="flex:1;font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-                <option value="">Assign to...</option>
-            </select>
-            <input type="date" id="partTaskDue-${key}" style="font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-        </div>
-        <div style="display:flex;gap:4px;margin-top:6px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partTaskForm-${key}').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_submitPartTask(${reqId},${requirementId})">Create Task</button>
-        </div>
-    </div>`;
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const dueInput = document.getElementById('partTaskDue-' + key);
-    if (dueInput) dueInput.min = tomorrow.toISOString().split('T')[0];
-    apiFetch('/api/users/list').then(users => {
-        const select = document.getElementById('partTaskAssignee-' + key);
-        if (!select || !Array.isArray(users)) return;
-        users.forEach(user => {
-            const opt = document.createElement('option');
-            opt.value = user.id;
-            opt.textContent = user.name || user.email;
-            select.appendChild(opt);
-        });
-    }).catch(() => {});
-    document.getElementById('partTaskTitle-' + key)?.focus();
-}
-window._showPartTaskForm = _showPartTaskForm;
-
-async function _submitPartTask(reqId, requirementId) {
-    const key = reqId + '-' + requirementId;
-    const title = document.getElementById('partTaskTitle-' + key)?.value?.trim();
-    const description = document.getElementById('partTaskDesc-' + key)?.value?.trim() || null;
-    const assignee = document.getElementById('partTaskAssignee-' + key)?.value;
-    const dueStr = document.getElementById('partTaskDue-' + key)?.value;
-    if (!title) { showToast('Task title is required', 'warn'); return; }
-    if (!assignee) { showToast('Please assign this task', 'warn'); return; }
-    if (!dueStr) { showToast('Please set a due date', 'warn'); return; }
-    try {
-        await apiFetch(`/api/requirements/${requirementId}/tasks`, {
-            method: 'POST',
-            body: {
-                title,
-                description,
-                assigned_to_id: parseInt(assignee, 10),
-                due_at: new Date(dueStr + 'T17:00:00Z').toISOString(),
-            },
-        });
-        delete _partDetailCache[key + '-tasks'];
-        delete _partDetailCache[key + '-activity'];
-        await _loadPartTab(reqId, requirementId, 'tasks');
-        showToast('Task created', 'success');
-    } catch (e) {
-        showToast('Failed to create task \u2014 ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-window._submitPartTask = _submitPartTask;
-
-function _showPartTaskCompleteForm(reqId, requirementId, taskId) {
-    const slot = document.getElementById('partTaskComplete-' + taskId);
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form" style="margin-top:6px">
-        <textarea id="partTaskCompleteNote-${taskId}" placeholder="How was this resolved?" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partTaskComplete-${taskId}').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_submitPartTaskComplete(${reqId},${requirementId},${taskId})">Mark Complete</button>
-        </div>
-    </div>`;
-    document.getElementById('partTaskCompleteNote-' + taskId)?.focus();
-}
-window._showPartTaskCompleteForm = _showPartTaskCompleteForm;
-
-async function _submitPartTaskComplete(reqId, requirementId, taskId) {
-    const note = document.getElementById('partTaskCompleteNote-' + taskId)?.value?.trim();
-    if (!note) { showToast('Add a completion note', 'warn'); return; }
-    const key = reqId + '-' + requirementId;
-    try {
-        await apiFetch(`/api/tasks/${taskId}/complete`, {
-            method: 'POST',
-            body: { completion_note: note },
-        });
-        delete _partDetailCache[key + '-tasks'];
-        delete _partDetailCache[key + '-activity'];
-        await _loadPartTab(reqId, requirementId, 'tasks');
-        showToast('Task completed', 'success');
-    } catch (e) {
-        showToast('Failed to complete task \u2014 ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-window._submitPartTaskComplete = _submitPartTaskComplete;
 
 // Keep _addPartNote for backward compat (editDrillCell uses it)
-async function _addPartNote(reqId, requirementId) {
+function _addPartNote(reqId, requirementId) {
     const key = reqId + '-' + requirementId;
-    _partActiveTab[key] = 'notes';
-    const panel = document.getElementById('pdp-' + key);
-    if (!panel) return;
-    await _renderPartDetail(reqId, requirementId, panel);
-    _showPartNoteForm(reqId, requirementId);
+    const contentEl = document.getElementById('pdc-' + key);
+    if (!contentEl) return;
+    const existing = contentEl.querySelector('.activity-add-form');
+    if (existing) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'activity-add-form';
+    wrapper.style.cssText = 'margin-top:6px';
+    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
+        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();this.closest('.activity-add-form').remove()">Cancel</button>
+            <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.closest('.activity-add-form').querySelector('textarea').value)">Save</button>
+        </div>`;
+    contentEl.appendChild(wrapper);
+    wrapper.querySelector('textarea').focus();
 }
 window._addPartNote = _addPartNote;
 
-function _showPartNoteForm(reqId, requirementId) {
-    const key = reqId + '-' + requirementId;
-    const slot = document.getElementById('partNoteForm-' + key);
-    if (!slot || slot.querySelector('.activity-add-form')) return;
-    slot.innerHTML = `<div class="activity-add-form">
-        <textarea id="partNoteText-${key}" placeholder="Add a note\u2026" rows="3" style="width:100%;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <div style="display:flex;gap:4px;margin-top:4px;justify-content:flex-end">
-            <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();document.getElementById('partNoteForm-${key}').innerHTML=''">Cancel</button>
-            <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},document.getElementById('partNoteText-${key}').value)">Save</button>
-        </div>
-    </div>`;
-    document.getElementById('partNoteText-' + key)?.focus();
-}
-window._showPartNoteForm = _showPartNoteForm;
-
 async function _savePartNote(reqId, requirementId, text) {
-    if (!text?.trim()) {
-        showToast('Note text is required', 'warn');
-        return;
-    }
-    const key = reqId + '-' + requirementId;
+    if (!text?.trim()) return;
     try {
         await apiFetch(`/api/requirements/${requirementId}/notes`, { method: 'POST', body: { text: text.trim() } });
-        delete _partDetailCache[key + '-notes'];
-        await _loadPartTab(reqId, requirementId, 'notes');
-        showToast('Note saved', 'success');
-    } catch(e) {
-        showToast('Couldn\'t save note \u2014 ' + friendlyError(e, 'please try again'), 'error');
-        logCatchError('_savePartNote', e);
-    }
+        delete _partDetailCache[reqId + '-' + requirementId + '-activity'];
+        await _loadPartTab(reqId, requirementId, 'activity');
+    } catch(e) { logCatchError('_savePartNote', e); }
 }
 window._savePartNote = _savePartNote;
 
@@ -8820,19 +8476,6 @@ function _ddEvidenceBadge(tier) {
     return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:default" title="${c.tip}">${c.label}</span>`;
 }
 
-function _ddLeadQualityBadge(s) {
-    const q = s.lead_quality;
-    if (!q) return '';
-    const cfg = {
-        strong: { bg: '#dcfce7', color: '#166534', icon: '\u2713' },
-        moderate: { bg: '#fef3c7', color: '#92400e', icon: '\u25cb' },
-        weak: { bg: '#fee2e2', color: '#991b1b', icon: '\u25bd' },
-    };
-    const c = cfg[q] || cfg.weak;
-    const tip = s.lead_explanation || q;
-    return ` <span style="font-size:8px;padding:1px 4px;border-radius:3px;background:${c.bg};color:${c.color};font-weight:700;cursor:help;vertical-align:middle" title="${esc(tip)}">${c.icon} ${q}</span>`;
-}
-
 function _ddScoreTooltip(s) {
     const sc = s.score_components;
     if (!sc) return s.score != null ? 'Score: ' + s.score : '';
@@ -8841,7 +8484,7 @@ function _ddScoreTooltip(s) {
         const color = w >= 66 ? 'var(--green)' : w >= 33 ? 'var(--amber)' : 'var(--red)';
         return label + ': ' + Math.round(val) + '/100';
     };
-    const tip = [
+    return [
         'Score: ' + (s.score || 0) + '/100',
         bar('Trust', sc.trust),
         bar('Price', sc.price),
@@ -8849,8 +8492,6 @@ function _ddScoreTooltip(s) {
         bar('Fresh', sc.freshness),
         bar('Complete', sc.completeness),
     ].join(' | ');
-    if (s.lead_explanation) return tip + '\n' + s.lead_explanation;
-    return tip;
 }
 
 function _ddCopyContact(text, type) {
@@ -8895,7 +8536,6 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
         const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600" title="Click to add an email address for this vendor">+ add email</a>` : '';
         const ring = _ddVendorScoreRing(s);
-        const scoreTip = _ddScoreTooltip(s);
         const linkPill = _ddVendorLinkPill(s);
         const inlineBadges = _ddVendorInlineBadges(s);
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
@@ -8930,12 +8570,12 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         const staleOpacity = s.is_stale && !unavail ? 'opacity:0.55;' : '';
         html += `<tr style="${staleOpacity}${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td title="${escAttr(scoreTip)}">${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
+            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
             ${showContact !== false ? `<td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>` : ''}
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
-            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${_ddLeadQualityBadge(s)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
@@ -9683,7 +9323,7 @@ function renderReqList() {
         if (_currentMainView === 'archive') {
             el.innerHTML = '<div class="empty" style="text-align:center;padding:40px 20px"><p style="font-size:14px;font-weight:600;margin-bottom:8px">No archived requisitions</p><p style="font-size:12px;color:var(--muted)">Completed or closed requisitions will appear here. Use the <b>Archive</b> button on an open req to move it here.</p></div>';
         } else {
-            const viewLabel = v === 'deals' ? 'deals' : 'pipeline';
+            const viewLabel = v === 'sales' ? 'sales' : v === 'purchasing' ? 'purchasing' : '';
             const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted'};
             el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || viewLabel) + ' requisitions</p>';
         }
@@ -9707,45 +9347,37 @@ function renderReqList() {
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             ${_thIcons}
         </tr></thead>`;
+    } else if (v === 'sales') {
+        // Sales view: Customer-focused columns — Coverage, Quote status, Value, Deadline prominent
+        thead = `<thead><tr>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:220px">Customer ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')} style="min-width:55px;text-align:right">Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
+            <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} style="min-width:60px;text-align:right" title="Vendor offers received">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')} style="min-width:50px;text-align:right">Age ${sa('age')}</th>
+            ${_thIcons}
+        </tr></thead>`;
     } else {
-        // Unified pipeline view: same data, role-prioritized column order.
-        const isSalesProfile = _isSalesPipelineProfile();
-        if (isSalesProfile) {
-            thead = `<thead><tr>
-                <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
-                <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
-                <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-                <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
-                <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
-                <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-                <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
-                <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
-                <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
-                <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
-                <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
-                <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-                ${_thIcons}
-            </tr></thead>`;
-        } else {
-            thead = `<thead><tr>
-                <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
-                <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
-                <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
-                <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
-                <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
-                <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
-                <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
-                <th onclick="sortReqList('quote')"${thClass('quote')} style="min-width:70px" title="Quote status and value">Quote ${sa('quote')}</th>
-                <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
-                <th onclick="sortReqList('deadline')"${thClass('deadline')} style="min-width:85px">Bid Due ${sa('deadline')}</th>
-                <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
-                <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-                ${_thIcons}
-            </tr></thead>`;
-        }
+        // Purchasing view: Part coverage, sightings, RFQs, response rate prominent
+        thead = `<thead><tr>
+            <th style="width:50px;font-size:10px"><input type="checkbox" id="batchSelectAll" onclick="_toggleBatchSelectAll(this)" title="Select all" style="vertical-align:middle;margin-right:4px"><span style="cursor:pointer" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</span></th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Customer ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('sourced')"${thClass('sourced')} title="Parts with at least one supplier sighting found">Sourced ${sa('sourced')}</th>
+            <th onclick="sortReqList('coverage')"${thClass('coverage')} style="min-width:70px" title="Total offers vs total parts — can exceed 100% when multiple offers cover the same part">Coverage ${sa('coverage')}</th>
+            <th onclick="sortReqList('sent')"${thClass('sent')} title="RFQs sent to vendors">RFQs ${sa('sent')}</th>
+            <th onclick="sortReqList('resp')"${thClass('resp')} title="Vendor response rate">Response ${sa('resp')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')} title="Confirmed vendor offers">Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+            ${_thIcons}
+        </tr></thead>`;
     }
 
-    // Priority lane grouping for pipeline/archive views (skip if column sort is active)
+    // Priority lane grouping for sales/sourcing views (skip if column sort is active)
     let rowsHtml;
     if (v === 'archive' && !_reqSortCol) {
         // Group by customer when no column sort is active
@@ -9959,7 +9591,6 @@ function _renderReqRow(r) {
     const offers = r.offer_count || 0;
     const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
     const v = _currentMainView;
-    const isSalesProfile = _isSalesPipelineProfile();
 
     // Status badge mapping
     const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',closed:'b-comp',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
@@ -10062,8 +9693,8 @@ function _renderReqRow(r) {
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
-    } else {
-        // Unified pipeline view: Parts, sourcing progress, RFQ funnel, quote status, and deal timing
+    } else if (v === 'sales') {
+        // Sales view: Parts, Quote (with value), Offers, Bid Due, Sales, Age
         let qCell = '<span style="color:var(--muted)" title="No quote created yet">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
         else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
@@ -10071,31 +9702,11 @@ function _renderReqRow(r) {
         else if (r.quote_status === 'revised') qCell = '<span style="color:var(--amber)">Revised</span>';
         else if (r.quote_status === 'draft') qCell = '<span style="color:var(--muted)">Draft</span>';
 
-        const sent = r.rfq_sent_count || 0;
-        const replied = r.reply_count || 0;
-        const respPct = sent > 0 ? Math.round((replied / sent) * 100) : 0;
-        const respCell = sent > 0
-            ? `<span class="mono" style="font-size:11px">${respPct}% <span style="color:var(--muted)">(${replied}/${sent})</span></span>`
-            : '<span style="color:var(--muted)">\u2014</span>';
-
-        const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
-        let srcCell;
-        if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
-        else {
-            const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
-            srcCell = `<div style="display:flex;align-items:center;gap:4px" title="${sourced} of ${total} parts have supplier sightings"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
-        }
-
         let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
         const _rCnt = r.reply_count || 0;
         if (_oCnt > 0) {
-            let qsBadge = '';
-            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
-            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
-            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
-            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
-            offCell = `<b>${_oCnt}</b>${qsBadge}`;
+            offCell = `<b>${_oCnt}</b>`;
         } else if (_rCnt > 0) {
             offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
@@ -10113,79 +9724,101 @@ function _renderReqRow(r) {
             covCell = `<div style="display:flex;align-items:center;gap:4px" title="${_covTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_covBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_covLabel}</span></div>`;
         }
 
-        if (isSalesProfile) {
-            dataCells = `
-                <td class="mono">${total}</td>
-                <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-                <td style="font-size:11px;white-space:nowrap">${offCell}</td>
-                <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-                <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
-                <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
-                <td class="mono" style="font-size:11px">${sent}</td>
-                <td style="font-size:11px;white-space:nowrap">${respCell}</td>
-                <td>${esc(r.created_by_name || '')}</td>
-                <td class="mono" style="font-size:11px">${age}</td>`;
+        dataCells = `
+            <td class="mono" style="text-align:right">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+            <td style="font-size:11px;white-space:nowrap;text-align:right">${offCell}</td>
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+            <td class="mono" style="font-size:11px;text-align:right">${age}</td>`;
+
+        // Sales actions: context-aware primary action
+        let salesBtn;
+        if (r.has_new_offers && (r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${r.offer_count})</button>`;
+        } else if (r.quote_status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
+        } else if (r.quote_status === 'sent') {
+            salesBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
+        } else if ((r.offer_count || 0) > 0) {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
+        } else if (r.status === 'draft') {
+            salesBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Start sourcing">&#x25b6; Source</button>`;
         } else {
-            dataCells = `
-                <td class="mono">${total}</td>
-                <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
-                <td style="font-size:11px;white-space:nowrap;min-width:70px">${covCell}</td>
-                <td class="mono" style="font-size:11px">${sent}</td>
-                <td style="font-size:11px;white-space:nowrap">${respCell}</td>
-                <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-                <td style="font-size:11px;white-space:nowrap">${offCell}</td>
-                <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
-                <td>${esc(r.created_by_name || '')}</td>
-                <td class="mono" style="font-size:11px">${age}</td>`;
+            salesBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+        }
+        actions = `<td style="white-space:nowrap">${salesBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 9;
+    } else {
+        // Sourcing view: Parts, Sourced bar, RFQs sent, Response rate, Offers, Age
+        const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+        let srcCell;
+        if (total === 0) srcCell = '<span style="color:var(--muted)" title="No parts added yet">\u2014</span>';
+        else {
+            const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCell = `<div style="display:flex;align-items:center;gap:4px" title="${sourced} of ${total} parts have supplier sightings"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
         }
 
-        // Unified actions: sourcing + quoting + close workflow
-        let primaryBtn;
-        if (isSalesProfile) {
-            if (r.quote_status === 'sent') {
-                primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-            } else if (r.has_new_offers && _oCnt > 0) {
-                primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Review new offers">Review Offers (${_oCnt})</button>`;
-            } else if (_oCnt > 0 && (r.quote_status === 'draft' || r.quote_status === 'revised')) {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
-            } else if (_oCnt > 0) {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Build a quote from offers">Build Quote</button>`;
-            } else if (sourced > 0 && sent === 0) {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
-            } else if (r.status === 'draft') {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
-            } else if (sent > 0 && _oCnt === 0) {
-                const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
-                const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
-                const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
-                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
-            } else {
-                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
-            }
-        } else {
-            if (r.status === 'draft') {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
-            } else if (_oCnt > 0 && r.has_new_offers) {
-                primaryBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
-            } else if (sourced > 0 && sent === 0) {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
-            } else if (sent > 0 && _oCnt === 0) {
-                const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
-                const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
-                const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
-                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
-            } else if (_oCnt > 0 && (r.quote_status === 'draft' || r.quote_status === 'revised')) {
-                primaryBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="Finish and send quote">Send Quote</button>`;
-            } else if (_oCnt > 0) {
-                primaryBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
-            } else if (r.quote_status === 'sent') {
-                primaryBtn = `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();markReqOutcome(${r.id},'won')" title="Mark as Won">\u2713 Won</button><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="event.stopPropagation();markReqOutcome(${r.id},'lost')" title="Mark as Lost">\u2715 Lost</button>`;
-            } else {
-                primaryBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
-            }
+        const sent = r.rfq_sent_count || 0;
+        const replied = r.reply_count || 0;
+        const respPct = sent > 0 ? Math.round((replied / sent) * 100) : 0;
+        const respCell = sent > 0
+            ? `<span class="mono" style="font-size:11px">${respPct}% <span style="color:var(--muted)">(${replied}/${sent})</span></span>`
+            : '<span style="color:var(--muted)">\u2014</span>';
+
+        let offCell = '<span style="color:var(--muted)">\u2014</span>';
+        const _oCnt = r.offer_count || 0;
+        if (_oCnt > 0) {
+            let qsBadge = '';
+            if (r.quote_status === 'won') qsBadge = ' <span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">Won</span>';
+            else if (r.quote_status === 'sent') qsBadge = ' <span class="badge" style="background:#dbeafe;color:#1e40af;font-size:8px;padding:1px 4px">Quoted</span>';
+            else if (r.quote_status === 'draft') qsBadge = ' <span class="badge" style="background:#f3f4f6;color:#6b7280;font-size:8px;padding:1px 4px">Draft Q</span>';
+            else if (r.quote_status === 'lost') qsBadge = ' <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">Lost</span>';
+            offCell = `<b>${_oCnt}</b>${qsBadge}`;
         }
-        actions = `<td style="white-space:nowrap">${primaryBtn} <button class="btn btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed vendor offer">+ Offer</button> <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
-        colspan = 13;
+
+        // Coverage: offers vs total parts (can exceed 100% with multiple offers per part)
+        const _srcCovPct = total > 0 ? Math.round((_oCnt / total) * 100) : 0;
+        const _srcCovBarPct = Math.min(_srcCovPct, 100);
+        const _srcCovLabel = _srcCovPct > 100 ? _srcCovPct + '% (multi)' : _srcCovPct + '%';
+        const _srcCovTip = _oCnt + ' offer' + (_oCnt !== 1 ? 's' : '') + ' across ' + total + ' part' + (total !== 1 ? 's' : '') + (_srcCovPct > 100 ? ' \u2014 multiple offers per part' : '');
+        let srcCovCell;
+        if (total === 0) srcCovCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const covColor = _srcCovPct >= 80 ? 'var(--green)' : _srcCovPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCovCell = `<div style="display:flex;align-items:center;gap:4px" title="${_srcCovTip}"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:28px"><div style="height:100%;width:${_srcCovBarPct}%;background:${covColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${_srcCovLabel}</span></div>`;
+        }
+
+        dataCells = `
+            <td class="mono">${total}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:70px">${srcCovCell}</td>
+            <td class="mono" style="font-size:11px">${sent}</td>
+            <td style="font-size:11px;white-space:nowrap">${respCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${offCell}</td>
+            <td>${esc(r.created_by_name || '')}</td>
+            <td class="mono" style="font-size:11px">${age}</td>`;
+
+        // Purchasing actions: context-aware primary action
+        let srcBtn;
+        if (r.status === 'draft') {
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Search supplier APIs for parts">&#x25b6; Source All</button>`;
+        } else if (_oCnt > 0 && r.has_new_offers) {
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers to review">Offers (${_oCnt})</button>`;
+        } else if (sourced > 0 && sent === 0) {
+            srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="Sightings found — select vendors and send RFQs">Send RFQs</button>`;
+        } else if (sent > 0 && _oCnt === 0) {
+            const awaitLabel = replied > 0 ? replied + ' Replies' : 'Awaiting';
+            const rfqAge = r.latest_rfq_sent_at ? _timeAgo(r.latest_rfq_sent_at) : '';
+            const awaitTitle = rfqAge ? `RFQs sent ${rfqAge}, waiting for responses` : 'RFQs sent, waiting for responses';
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'activity')" title="${escAttr(awaitTitle)}">${awaitLabel}${rfqAge ? ' <span style="font-size:9px;opacity:.7">(' + rfqAge + ')</span>' : ''}</button>`;
+        } else if (_oCnt > 0) {
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View confirmed offers">Offers (${_oCnt})</button>`;
+        } else {
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'sightings')" title="View sourcing progress">Sourcing</button>`;
+        }
+        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all suppliers">&#x1f50d;</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button></td>`;
+        colspan = 10;
     }
 
     // Build drill-down header: action buttons vary by tab
@@ -10631,14 +10264,7 @@ function _cancelTabInflight() {
     }
 }
 
-function _normalizeMainView(view) {
-    // Legacy aliases now route to the unified requisition pipeline view.
-    if (view === 'purchasing' || view === 'sourcing' || view === 'active' || view === 'rfq') return 'sales';
-    return view;
-}
-
 function setMainView(view, btn) {
-    view = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
@@ -10656,7 +10282,7 @@ function setMainView(view, btn) {
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
     document.querySelectorAll('#mobilePills .fp').forEach(b => b.classList.remove('on'));
-    if (btn && _normalizeMainView(btn.dataset?.view || '') === view) btn.classList.add('on');
+    if (btn) btn.classList.add('on');
     // Sync whichever pill strip the click didn't originate from
     ['mainPills', 'mobilePills'].forEach(id => {
         const cont = document.getElementById(id);
@@ -10670,10 +10296,10 @@ function setMainView(view, btn) {
     // Follow-ups panel: hide on view switch, will be re-shown by loadFollowUpsPanel
     const fuPanel = document.getElementById('followUpsPanel');
     if (fuPanel) fuPanel.style.display = 'none';
-    // Show status filter pills on pipeline view, hide on archive/deals
+    // Show status filter pills on sales/sourcing views, hide on archive/deals
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'sales') ? '' : 'none';
-    if (view === 'sales') {
+    if (stEl) stEl.style.display = (view === 'sales' || view === 'purchasing') ? '' : 'none';
+    if (view === 'sales' || view === 'purchasing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
@@ -10682,6 +10308,13 @@ function setMainView(view, btn) {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
+    } else if (view === 'active' || view === 'rfq') {
+        // Legacy: redirect old view names to sales
+        _currentMainView = 'sales';
+        _reqStatusFilter = 'all';
+        _serverSearchActive = false;
+        loadRequisitions();
+        loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
@@ -11070,7 +10703,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUpsPanel();
+        loadFollowUps();
     });
 }
 
@@ -11249,8 +10882,8 @@ async function requoteFromList(reqId) {
                 await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
             }
             showToast(`Re-quoted as "${reName}" — opening now…`, 'success');
-            const srcBtn = document.querySelector('#mainPills .fp[data-view="sales"]');
-            if (srcBtn) setMainView('sales', srcBtn);
+            const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
+            if (srcBtn) setMainView('purchasing', srcBtn);
             await loadRequisitions();
             const found = _reqListData.find(r => r.id === resp.id);
             if (found) {
@@ -15077,10 +14710,10 @@ async function _retryRfq(contactId) {
         if (r.status === 'sent') {
             showToast('RFQ resent successfully', 'success');
         } else {
-            showToast(r.error || r.detail || 'Retry failed', 'error');
+            showToast(r.error || 'Retry failed', 'error');
         }
     } catch(e) {
-        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Retry failed: ' + e.message, 'error');
     }
 }
 
@@ -15093,7 +14726,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
+        showToast('Failed: ' + e.message, 'error');
     }
 }
 
@@ -15709,17 +15342,17 @@ document.addEventListener('keydown', function(e) {
         if (e.key === 'n' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault(); openNewReqModal(); return;
         }
-        // 1/2/3 — Switch tabs: Pipeline / Deals / Archive (only on list view)
+        // 1/2/3 — Switch tabs: Open / Sourcing / Archive (only when on list view)
         if (e.key === '1' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="sales"]');
-            if (btn) setMainView('sales', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="rfq"]');
+            if (btn) setMainView('rfq', btn);
             return;
         }
         if (e.key === '2' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
             e.preventDefault();
-            const btn = document.querySelector('#mainPills .fp[data-view="deals"]');
-            if (btn) setMainView('deals', btn);
+            const btn = document.querySelector('#mainPills .fp[data-view="purchasing"]');
+            if (btn) setMainView('purchasing', btn);
             return;
         }
         if (e.key === '3' && !e.ctrlKey && !e.metaKey && !e.altKey && _currentViewId === 'view-list') {
@@ -15731,7 +15364,7 @@ document.addEventListener('keydown', function(e) {
         // ? — Show keyboard shortcuts help
         if (e.key === '?' && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
-            showToast('Shortcuts: / Search, n New Req, 1 Pipeline, 2 Deals, 3 Archive, ? Help', 'info', 5000);
+            showToast('Shortcuts: / Search, n New Req, 1 Open, 2 Sourcing, 3 Archive, ? Help', 'info', 5000);
             return;
         }
     }
@@ -16467,29 +16100,13 @@ function ctxAttachFile() {
 // ═══════════════════════════════════════════════════════════════════════
 
 let _intakeParsedRows = [];
+let _intakeParsedContext = {};
 let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
-let _intakeDraftMeta = null;
-let _intakeLoading = false;
-let _intakeParseSeq = 0;
-let _intakeLastParsedText = '';
-
-function _blankIntakeMeta() {
-    return {
-        document_type: 'unclear',
-        confidence: 0,
-        summary: '',
-        requisition_name: '',
-        customer_name: '',
-        vendor_name: '',
-        notes: '',
-        source: 'legacy'
-    };
-}
-
-function _intakeShouldParse(text) {
-    const trimmed = (text || '').trim();
-    return trimmed.length >= 20 && (trimmed.includes('\n') || trimmed.includes('\t') || trimmed.length >= 60);
-}
+let _intakeParsing = false;
+let _intakeParseTimer = null;
+let _intakeExistingReqMpns = new Set();
+let _intakeExistingOfferKeys = new Set();
+let _intakeSubmitInFlight = false;
 
 function showIntakeBar() {
     const bar = document.getElementById('intakeBar');
@@ -16503,14 +16120,16 @@ function hideIntakeBar() {
 }
 
 function _intakeInputChange(value) {
-    if (_intakeShouldParse(value)) {
-        _intakeParseText(value);
+    // Multi-line and longer text triggers AI parse preview.
+    if (value.includes('\n') || value.includes('\t') || value.length > 40) {
+        if (_intakeParseTimer) clearTimeout(_intakeParseTimer);
+        _intakeParseTimer = setTimeout(() => _intakeParseText(value), 220);
     }
 }
 
 function _intakePaste(event) {
     const text = (event.clipboardData || window.clipboardData)?.getData('text') || '';
-    if (_intakeShouldParse(text)) {
+    if (text.includes('\n') || text.includes('\t') || text.length > 40) {
         event.preventDefault();
         const input = document.getElementById('intakeInput');
         if (input) input.value = text;
@@ -16518,151 +16137,130 @@ function _intakePaste(event) {
     }
 }
 
-function _intakeParseText(text) {
-    void _intakeParseTextAsync(text);
+async function _intakeLoadExistingForReq(reqId) {
+    _intakeExistingReqMpns = new Set();
+    _intakeExistingOfferKeys = new Set();
+    if (!reqId) return;
+    try {
+        const reqs = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        for (const r of (reqs || [])) {
+            const mpn = (r?.primary_mpn || '').trim().toUpperCase();
+            if (mpn) _intakeExistingReqMpns.add(mpn);
+        }
+    } catch (e) {
+        console.warn('intake requirements duplicate scan failed', e);
+    }
+    try {
+        const offersRes = await apiFetch(`/api/requisitions/${reqId}/offers`);
+        const groups = offersRes?.groups || [];
+        for (const g of groups) {
+            for (const o of (g?.offers || [])) {
+                const key = offerDuplicateKey({
+                    mpn: o?.mpn || '',
+                    vendor_name: o?.vendor_name || '',
+                });
+                if (key !== '::') _intakeExistingOfferKeys.add(key);
+            }
+        }
+    } catch (e) {
+        console.warn('intake offers duplicate scan failed', e);
+    }
 }
 
-async function _intakeParseTextAsync(text) {
+function _intakeRecomputeDuplicates() {
+    applyDuplicateMarkers(_intakeParsedRows, {
+        existingRequirementMpns: _intakeExistingReqMpns,
+        existingOfferKeys: _intakeExistingOfferKeys,
+    });
+}
+
+async function _intakeParseText(text) {
     const trimmed = (text || '').trim();
-    if (!trimmed) return;
-
-    if (trimmed === _intakeLastParsedText && _intakeParsedRows.length && !_intakeLoading) {
-        _intakeRenderDrawer();
-        return;
-    }
-
-    const parseSeq = ++_intakeParseSeq;
-    _intakeLoading = true;
-    _intakeParsedRows = [];
-    _intakeDraftMeta = { ..._blankIntakeMeta(), summary: 'AI is reviewing the pasted text…', source: 'ai' };
-    _intakeRenderDrawer();
-
+    if (!trimmed || _intakeParsing) return;
+    _intakeParsing = true;
+    const titleEl = document.getElementById('intakeDrawerTitle');
+    if (titleEl) titleEl.textContent = 'AI Review — parsing...';
+    const mode = document.getElementById('intakeModeSelect')?.value || 'auto';
+    _intakeTargetType = mode === 'offer' ? 'offer' : 'requirement';
     try {
-        const data = await apiFetch('/api/ai/intake-draft', {
+        const parsed = await apiFetch('/api/ai/intake-parse', {
             method: 'POST',
-            body: { text: trimmed, requisition_id: currentReqId || null }
+            body: { text: trimmed, mode }
         });
-        if (parseSeq !== _intakeParseSeq) return;
-        const rows = _intakeRowsFromDraft(data || {});
-        if (rows.length) {
-            _intakeParsedRows = rows;
-            _intakeDraftMeta = {
-                ..._blankIntakeMeta(),
-                document_type: data.document_type || 'unclear',
-                confidence: Number(data.confidence) || 0,
-                summary: data.summary || '',
-                requisition_name: data.requisition_name || '',
-                customer_name: data.customer_name || '',
-                vendor_name: data.vendor_name || '',
-                notes: data.notes || '',
-                source: 'ai'
-            };
-            _intakeLoading = false;
-            _intakeLastParsedText = trimmed;
-            _intakeRenderDrawer();
+        _intakeParsedContext = parsed?.context || {};
+        _intakeParsedRows = (parsed?.rows || []).map(r => normalizeIntakeRow(r, mode)).filter(r => r.mpn);
+        if (!_intakeParsedRows.length) {
+            _intakeParsedRows = parseFallbackRows(trimmed, mode, _intakeParsedContext).map(r => normalizeIntakeRow(r, mode));
+        }
+        if (!_intakeParsedRows.length) {
+            showToast('No valid line items found in pasted text', 'warn');
+            _intakeClose();
             return;
         }
-        showToast('AI could not confidently structure that text — showing a quick manual draft.', 'warn');
+        await _intakeLoadExistingForReq(currentReqId || null);
+        _intakeRecomputeDuplicates();
+        _intakeRenderDrawer();
     } catch (e) {
-        if (parseSeq !== _intakeParseSeq) return;
-        showToast('AI review failed — falling back to a quick pasted-row draft.', 'warn');
+        // Safe fallback so intake still works when AI is unavailable.
+        _intakeParsedRows = parseFallbackRows(trimmed, mode, _intakeParsedContext).map(r => normalizeIntakeRow(r, mode));
+        if (_intakeParsedRows.length) {
+            await _intakeLoadExistingForReq(currentReqId || null);
+            _intakeRecomputeDuplicates();
+            _intakeRenderDrawer();
+            showToast('AI parsing unavailable — using fallback parse', 'warn');
+        } else {
+            showToast('Could not parse intake text', 'error');
+        }
+    } finally {
+        _intakeParsing = false;
     }
-
-    if (parseSeq !== _intakeParseSeq) return;
-    _intakeLoading = false;
-    _intakeLastParsedText = trimmed;
-    _intakeLegacyParseText(trimmed);
-}
-
-function _intakeLegacyParseText(text) {
-    const lines = text.trim().split('\n').filter(l => l.trim());
-    if (lines.length === 0) return;
-    _intakeParsedRows = [];
-    _intakeDraftMeta = {
-        ..._blankIntakeMeta(),
-        document_type: 'rfq',
-        confidence: 0.55,
-        summary: 'Structured rows detected from the pasted text. Review the draft before saving.',
-        source: 'legacy'
-    };
-    // Detect header row
-    const firstLine = lines[0].toLowerCase();
-    const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
-    const startIdx = hasHeader ? 1 : 0;
-    for (let i = startIdx; i < lines.length; i++) {
-        const cols = lines[i].split('\t');
-        if (cols.length === 0 || !cols[0].trim()) continue;
-        const row = {
-            mpn: cols[0]?.trim() || '',
-            qty: cols[1]?.trim() || '',
-            price: cols[2]?.trim() || '',
-            manufacturer: cols[3]?.trim() || '',
-            vendor_name: '',
-            currency: 'USD',
-            lead_time: '',
-            date_code: '',
-            condition: '',
-            packaging: '',
-            moq: '',
-            notes: '',
-            confidence: 0.95,
-            type: _intakeTargetType,
-            duplicate: false
-        };
-        // Simple confidence heuristic
-        if (!row.mpn || row.mpn.length < 3) row.confidence = 0.3;
-        else if (!row.qty && !row.price) row.confidence = 0.65;
-        _intakeParsedRows.push(row);
-    }
-    _intakeRenderDrawer();
 }
 
 function _intakeRenderDrawer() {
     const drawer = document.getElementById('intakeDrawer');
     const body = document.getElementById('intakeDrawerBody');
     const titleEl = document.getElementById('intakeDrawerTitle');
-    const btn = document.getElementById('intakeConfirmBtn');
     if (!drawer || !body) return;
     drawer.classList.add('open');
-    if (_intakeLoading) {
-        if (titleEl) titleEl.textContent = 'AI Review — analyzing pasted text';
-        body.innerHTML = `<div class="empty" style="padding:20px">AI is cleaning up the pasted text and building a draft for review…</div>`;
-        if (btn) { btn.textContent = 'Analyzing…'; btn.disabled = true; }
-        return;
-    }
-    const reqCount = _intakeParsedRows.filter(r => r.type === 'requirement').length;
-    const offerCount = _intakeParsedRows.filter(r => r.type === 'offer').length;
-    if (titleEl) titleEl.textContent = `AI Review — ${reqCount} RFQ line${reqCount === 1 ? '' : 's'}${offerCount ? ` · ${offerCount} offer draft${offerCount === 1 ? '' : 's'}` : ''}`;
-    if (btn) {
-        btn.disabled = !_intakeParsedRows.length;
-        btn.textContent = _intakeConfirmLabel(reqCount, offerCount);
-    }
-    if (!_intakeParsedRows.length) {
-        body.innerHTML = `<div class="empty" style="padding:20px">Paste customer or vendor text to build a draft for review.</div>`;
-        return;
-    }
+    const ctxLabel = _intakeParsedContext?.customer_name || _intakeParsedContext?.vendor_name || '';
+    if (titleEl) titleEl.textContent = `AI Review — ${_intakeParsedRows.length} draft line item${_intakeParsedRows.length !== 1 ? 's' : ''}${ctxLabel ? ' · ' + ctxLabel : ''}`;
     let html = '';
-    html += _intakeRenderMetaCard(reqCount, offerCount);
     for (let i = 0; i < _intakeParsedRows.length; i++) {
         const r = _intakeParsedRows[i];
-        const confClass = _intakeConfidenceClass(r.confidence);
-        const confPct = _intakeConfidencePct(r.confidence);
-        const typeTag = r.type === 'requirement' ? 'req' : r.type === 'sighting' ? 'sighting' : 'offer';
-        html += `<div class="intake-row" style="align-items:flex-start">
-            <div class="intake-row-confidence ${confClass}" title="Confidence: ${r.confidence}">${confPct}%</div>
-            <div class="intake-row-data" style="display:flex;flex-direction:column;gap:8px">
-                <div style="display:flex;justify-content:space-between;gap:8px;align-items:center">
-                    <div class="intake-row-mpn">Line ${i + 1}</div>
-                    <span class="intake-row-tag ${typeTag}">${r.type}</span>
+        const conf = Math.max(0, Math.min(100, Math.round((Number(r.confidence) || 0) * 100)));
+        const confClass = conf >= 80 ? 'high' : conf >= 55 ? 'med' : 'low';
+        const dupTag = r.duplicate ? `<span class="intake-row-tag dup" title="${escAttr(r.duplicate_reason || 'Duplicate')}">DUP</span>` : '';
+        const statusTag = r.save_status === 'saved'
+            ? '<span class="intake-row-tag req" style="background:var(--green-light);color:var(--green)">SAVED</span>'
+            : (r.save_status === 'error'
+                ? `<span class="intake-row-tag offer" style="background:var(--red-light);color:var(--red)" title="${escAttr(r.save_error || 'Save failed')}">ERROR</span>`
+                : (r.save_status === 'skipped'
+                    ? `<span class="intake-row-tag dup" title="${escAttr(r.save_error || 'Skipped')}">SKIP</span>`
+                    : ''));
+        html += `<div class="intake-row">
+            <div class="intake-row-confidence ${confClass}" title="AI confidence">${conf}%</div>
+            <div class="intake-row-data">
+                <div style="display:grid;grid-template-columns:1fr 92px 92px;gap:6px;align-items:center;margin-bottom:6px">
+                    <input value="${escAttr(r.mpn || '')}" placeholder="MPN" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'mpn',this.value)">
+                    <input value="${escAttr(r.qty || '')}" placeholder="Qty" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'qty',this.value)">
+                    <input value="${escAttr(r.unit_price || '')}" placeholder="Price" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'unit_price',this.value)">
                 </div>
-                ${r.type === 'offer' ? _intakeRenderOfferRow(r, i) : _intakeRenderRequirementRow(r, i)}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:center">
+                    <input value="${escAttr(r.vendor_name || '')}" placeholder="Vendor (offers)" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'vendor_name',this.value)">
+                    <input value="${escAttr(r.manufacturer || '')}" placeholder="Manufacturer" style="font-size:11px;padding:4px 6px" oninput="_intakeEdit(${i},'manufacturer',this.value)">
+                </div>
+                <div style="margin-top:6px">
+                    <input value="${escAttr(r.notes || '')}" placeholder="Notes (optional)" style="font-size:11px;padding:4px 6px;width:100%" oninput="_intakeEdit(${i},'notes',this.value)">
+                </div>
+                ${r.save_error ? `<div style="margin-top:6px;font-size:10px;color:var(--red)">${esc(r.save_error)}</div>` : ''}
             </div>
-            ${r.duplicate ? '<span class="intake-row-tag dup">DUP</span>' : ''}
+            <span class="intake-row-tag ${r.row_type === 'requirement' ? 'req' : 'offer'}">${r.row_type}</span>
+            ${dupTag}
+            ${statusTag}
             <div class="intake-row-actions">
-                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeChangeType(${i},this.value)">
-                    <option value="requirement" ${r.type === 'requirement' ? 'selected' : ''}>Requirement</option>
-                    <option value="sighting" ${r.type === 'sighting' ? 'selected' : ''}>Sighting</option>
-                    <option value="offer" ${r.type === 'offer' ? 'selected' : ''}>Offer</option>
+                <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeEdit(${i},'row_type',this.value)">
+                    <option value="requirement" ${r.row_type === 'requirement' ? 'selected' : ''}>RFQ line</option>
+                    <option value="offer" ${r.row_type === 'offer' ? 'selected' : ''}>Offer line</option>
                 </select>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 4px;color:var(--red)" onclick="_intakeRemoveRow(${i})" title="Remove">✕</button>
             </div>
@@ -16671,21 +16269,20 @@ function _intakeRenderDrawer() {
     body.innerHTML = html;
 }
 
-function _intakeChangeType(idx, type) {
-    if (_intakeParsedRows[idx]) {
-        _intakeParsedRows[idx].type = type;
-        if (type === 'offer' && !_intakeParsedRows[idx].vendor_name && _intakeDraftMeta?.vendor_name) {
-            _intakeParsedRows[idx].vendor_name = _intakeDraftMeta.vendor_name;
-        }
-        if (type === 'requirement' && !_intakeDraftMeta?.document_type) {
-            _intakeDraftMeta = { ...(_intakeDraftMeta || _blankIntakeMeta()), document_type: 'rfq' };
-        }
-        _intakeRenderDrawer();
-    }
+function _intakeEdit(idx, field, value) {
+    const row = _intakeParsedRows[idx];
+    if (!row) return;
+    row[field] = value;
+    row.save_status = '';
+    row.save_error = '';
+    if (field === 'row_type' && value === 'requirement') row.vendor_name = '';
+    _intakeRecomputeDuplicates();
+    _intakeRenderDrawer();
 }
 
 function _intakeRemoveRow(idx) {
     _intakeParsedRows.splice(idx, 1);
+    _intakeRecomputeDuplicates();
     _intakeRenderDrawer();
 }
 
@@ -16693,75 +16290,144 @@ function _intakeClose() {
     const drawer = document.getElementById('intakeDrawer');
     if (drawer) drawer.classList.remove('open');
     _intakeParsedRows = [];
-    _intakeDraftMeta = null;
-    _intakeLoading = false;
+    _intakeParsedContext = {};
+    _intakeExistingReqMpns = new Set();
+    _intakeExistingOfferKeys = new Set();
+    _intakeSubmitInFlight = false;
     const input = document.getElementById('intakeInput');
     if (input) input.value = '';
 }
 
-const _intakeSubmit = () => _intakeConfirm();
+const _intakeSubmit = () => {
+    const input = document.getElementById('intakeInput');
+    if (_intakeParsedRows.length) return _intakeConfirm();
+    if (input?.value?.trim()) return _intakeParseText(input.value.trim());
+};
 async function _intakeConfirm() {
-    if (!_intakeParsedRows.length) return;
-    const reqRows = _intakeParsedRows.filter(r => r.type === 'requirement' && (r.mpn || '').trim());
-    const offerRows = _intakeParsedRows.filter(r => r.type === 'offer' && (r.mpn || '').trim());
-    if (!reqRows.length && !offerRows.length) {
-        showToast('Add at least one RFQ or offer line before saving', 'warn');
-        return;
-    }
-
-    const btn = document.getElementById('intakeConfirmBtn');
-    await guardBtn(btn, 'Saving…', async () => {
-        let targetReqId = currentReqId || null;
-        const useMaterialsFallback = !targetReqId && reqRows.length && !offerRows.length && _intakeDraftMeta?.source !== 'ai' && _intakeIsMaterialsView();
-        if (useMaterialsFallback) {
-            _intakeSearchMaterials(reqRows);
-            _intakeClose();
+    if (!_intakeParsedRows.length || _intakeSubmitInFlight) return;
+    _intakeSubmitInFlight = true;
+    try {
+        for (const row of _intakeParsedRows) {
+            row.save_status = '';
+            row.save_error = '';
+        }
+        const validRows = _intakeParsedRows.filter(r => (r.mpn || '').trim());
+        if (!validRows.length) {
+            showToast('No valid rows to submit', 'warn');
             return;
         }
 
+        let targetReqId = currentReqId || null;
+        let createdReqId = null;
+        let createdReqName = null;
         if (!targetReqId) {
-            targetReqId = await _intakeCreateDraftRequisition();
-        }
-
-        if (reqRows.length) {
-            for (const row of reqRows) {
-                await apiFetch(`/api/requisitions/${targetReqId}/requirements`, {
+            try {
+                const draftName = _intakeParsedContext.requisition_name || `AI Intake ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+                const created = await apiFetch('/api/requisitions', {
                     method: 'POST',
-                    body: _intakeRequirementPayload(row)
+                    body: {
+                        name: draftName,
+                        customer_name: _intakeParsedContext.customer_name || null
+                    }
                 });
+                targetReqId = created.id;
+                createdReqId = created.id;
+                createdReqName = created.name || draftName;
+                await _intakeLoadExistingForReq(targetReqId);
+            } catch (e) {
+                showToast(`Could not create requisition: ${intakeFriendlyError(e, 'request failed')}`, 'error');
+                return;
             }
         }
 
-        if (offerRows.length) {
-            if (!currentReqId) {
-                await _intakeEnsureOfferRequirements(targetReqId, offerRows);
+        _intakeRecomputeDuplicates();
+        _intakeRenderDrawer();
+
+        let saved = 0;
+        let failed = 0;
+        let skipped = 0;
+
+        for (let i = 0; i < _intakeParsedRows.length; i++) {
+            const row = _intakeParsedRows[i];
+            const mpn = (row.mpn || '').trim();
+            if (!mpn) {
+                row.save_status = 'error';
+                row.save_error = 'MPN is required';
+                failed += 1;
+                continue;
             }
-            const offerPayloads = offerRows
-                .map(row => _intakeOfferPayload(row, _intakeDraftMeta?.vendor_name || ''))
-                .filter(row => row.vendor_name && row.mpn);
-            if (!offerPayloads.length) {
-                throw new Error('Each offer line needs a vendor name and part number');
+            if (row.duplicate) {
+                row.save_status = 'skipped';
+                row.save_error = row.duplicate_reason || 'Duplicate row';
+                skipped += 1;
+                continue;
             }
-            await apiFetch('/api/ai/save-parsed-offers', {
-                method: 'POST',
-                body: { response_id: null, requisition_id: targetReqId, offers: offerPayloads }
-            });
+
+            try {
+                if (row.row_type === 'offer') {
+                    const qtyInt = parseInt(row.qty, 10);
+                    const priceNum = row.unit_price === '' || row.unit_price == null ? null : Number(row.unit_price);
+                    const payload = {
+                        mpn,
+                        vendor_name: (row.vendor_name || _intakeParsedContext.vendor_name || 'Unknown Vendor').trim(),
+                        manufacturer: (row.manufacturer || '').trim() || null,
+                        qty_available: Number.isFinite(qtyInt) && qtyInt > 0 ? qtyInt : null,
+                        unit_price: Number.isFinite(priceNum) ? priceNum : null,
+                        lead_time: (row.lead_time || '').trim() || null,
+                        condition: (row.condition || 'new').trim() || 'new',
+                        packaging: (row.packaging || '').trim() || null,
+                        notes: (row.notes || '').trim() || null,
+                        source: 'ai_intake',
+                        status: 'pending_review'
+                    };
+                    await apiFetch(`/api/requisitions/${targetReqId}/offers?intake_row=${i}`, { method: 'POST', body: payload });
+                    _intakeExistingOfferKeys.add(offerDuplicateKey(payload));
+                } else {
+                    const qtyInt = parseInt(row.qty, 10);
+                    const priceNum = row.unit_price === '' || row.unit_price == null ? null : Number(row.unit_price);
+                    const payload = {
+                        primary_mpn: mpn,
+                        target_qty: Number.isFinite(qtyInt) && qtyInt > 0 ? qtyInt : 1,
+                        target_price: Number.isFinite(priceNum) ? priceNum : null,
+                        notes: (row.notes || '').trim() || null
+                    };
+                    await apiFetch(`/api/requisitions/${targetReqId}/requirements?intake_row=${i}`, { method: 'POST', body: payload });
+                    _intakeExistingReqMpns.add(mpn.toUpperCase());
+                }
+                row.save_status = 'saved';
+                row.save_error = '';
+                saved += 1;
+            } catch (e) {
+                row.save_status = 'error';
+                row.save_error = intakeFriendlyError(e, 'Failed to save row');
+                failed += 1;
+            }
+        }
+
+        _intakeRecomputeDuplicates();
+        _intakeRenderDrawer();
+
+        if (saved > 0) {
+            showToast(`Saved ${saved} row${saved !== 1 ? 's' : ''}${createdReqId ? ` (RFQ-${createdReqId})` : ''}`, failed || skipped ? 'warn' : 'success');
+        }
+        if (failed > 0 || skipped > 0) {
+            showToast(`${failed} failed · ${skipped} skipped (see row-level errors)`, 'warn');
+            return;
         }
 
         _intakeClose();
-        await loadRequisitions();
-        if (targetReqId) {
-            delete _ddReqCache[targetReqId];
-            if (_ddTabCache[targetReqId]) delete _ddTabCache[targetReqId];
-            delete _ddSightingsCache[targetReqId];
-            delete _ddScoreCache[targetReqId];
-            await expandToSubTab(targetReqId, offerRows.length ? 'offers' : 'sightings');
+        if (targetReqId && targetReqId === currentReqId && typeof loadRequirements === 'function') {
+            loadRequirements();
         }
-        const savedBits = [];
-        if (reqRows.length) savedBits.push(`${reqRows.length} RFQ line${reqRows.length === 1 ? '' : 's'}`);
-        if (offerRows.length) savedBits.push(`${offerRows.length} offer draft${offerRows.length === 1 ? '' : 's'}`);
-        showToast(`Saved ${savedBits.join(' and ')}`, 'success');
-    });
+        if (targetReqId && _ddTabCache[targetReqId]) {
+            delete _ddTabCache[targetReqId].offers;
+        }
+        if (createdReqId && typeof showDetail === 'function') {
+            showDetail(createdReqId, createdReqName || `RFQ-${createdReqId}`);
+        }
+    } finally {
+        _intakeSubmitInFlight = false;
+    }
 }
 
 function _intakeUpload() {
@@ -16788,634 +16454,7 @@ function _intakeFileSelected(input) {
 }
 
 function _intakeImportApi() {
-    // Open quick-search modal, pre-fill with intake bar input if present
-    const intake = document.getElementById('intakeInput');
-    const modal = document.getElementById('quickSearchModal');
-    const input = document.getElementById('qsInput');
-    if (!modal || !input) return;
-    modal.style.display = '';
-    const prefill = (intake?.value || '').trim();
-    if (prefill) input.value = prefill;
-    input.focus();
-    input.select();
-}
-
-async function _quickSearchRun() {
-    const input = document.getElementById('qsInput');
-    const btn = document.getElementById('qsRunBtn');
-    const results = document.getElementById('qsResults');
-    const mpn = (input?.value || '').trim();
-    if (!mpn || mpn.length < 2) {
-        showToast('Enter at least 2 characters', 'warn');
-        if (input) input.focus();
-        return;
-    }
-    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
-    if (results) results.innerHTML = '<div style="text-align:center;padding:24px"><span class="dd-search-spinner" style="width:20px;height:20px"></span><div style="margin-top:8px;font-size:12px;color:var(--muted)">Searching supplier APIs\u2026</div></div>';
-    try {
-        const data = await apiFetch('/api/quick-search', { method: 'POST', body: { mpn } });
-        _renderQuickSearchResults(mpn, data, results);
-    } catch (e) {
-        if (results) results.innerHTML = `<p class="empty" style="color:var(--red)">Search failed: ${esc(e.message || 'Unknown error')}</p>`;
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Search APIs'; }
-    }
-}
-
-function _renderQuickSearchResults(mpn, data, container) {
-    if (!container) return;
-    const sightings = data.sightings || [];
-    const stats = data.source_stats || [];
-    const card = data.material_card;
-
-    let html = '';
-
-    // Source stats summary
-    const okSources = stats.filter(s => s.status === 'ok');
-    const errSources = stats.filter(s => s.status === 'error');
-    const totalResults = stats.reduce((n, s) => n + (s.results || 0), 0);
-    html += `<div style="font-size:11px;color:var(--muted);margin-bottom:8px;display:flex;gap:12px;flex-wrap:wrap">`;
-    html += `<span><strong>${totalResults}</strong> result${totalResults !== 1 ? 's' : ''} from <strong>${okSources.length}</strong> source${okSources.length !== 1 ? 's' : ''}</span>`;
-    if (errSources.length) html += `<span style="color:var(--orange)">${errSources.length} source${errSources.length !== 1 ? 's' : ''} failed</span>`;
-    if (card) html += `<span>Material card: <strong>${esc(card.mpn || mpn)}</strong>${card.manufacturer ? ' \u2014 ' + esc(card.manufacturer) : ''}${card.lifecycle_status ? ' <span style="opacity:0.7">(' + esc(card.lifecycle_status) + ')</span>' : ''}</span>`;
-    html += `</div>`;
-
-    if (!sightings.length) {
-        html += `<p class="empty" style="font-size:13px;padding:20px 0">No results found for <strong>${esc(mpn)}</strong>. Try a different part number or check API health in Settings.</p>`;
-        container.innerHTML = html;
-        return;
-    }
-
-    // Results table
-    html += `<table style="width:100%;border-collapse:collapse;font-size:11px">`;
-    html += `<thead><tr style="border-bottom:2px solid var(--border);text-transform:uppercase;font-size:9px;letter-spacing:0.5px;color:var(--text2)">`;
-    html += `<th style="padding:4px 6px;text-align:left">Vendor</th>`;
-    html += `<th style="padding:4px 6px;text-align:left">MPN</th>`;
-    html += `<th style="padding:4px 6px;text-align:right">Qty</th>`;
-    html += `<th style="padding:4px 6px;text-align:right">Price</th>`;
-    html += `<th style="padding:4px 6px;text-align:left">Source</th>`;
-    html += `<th style="padding:4px 6px;text-align:left">Condition</th>`;
-    html += `<th style="padding:4px 6px;text-align:center">Score</th>`;
-    html += `</tr></thead><tbody>`;
-
-    for (const s of sightings) {
-        const isHist = s.is_material_history;
-        const rowStyle = isHist ? 'opacity:0.65;font-style:italic' : '';
-        const authBadge = s.is_authorized ? '<span style="color:var(--green);font-weight:600" title="Authorized distributor">\u2713</span> ' : '';
-        const priceStr = s.unit_price != null ? `${s.currency === 'USD' ? '$' : s.currency + ' '}${Number(s.unit_price).toFixed(4)}` : '\u2014';
-        const qtyStr = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
-        const scoreColor = s.score >= 60 ? 'var(--green)' : s.score >= 40 ? 'var(--orange)' : 'var(--muted)';
-
-        html += `<tr style="border-bottom:1px solid var(--border);${rowStyle}">`;
-        html += `<td style="padding:5px 6px">${authBadge}${esc(s.vendor_name || '\u2014')}</td>`;
-        html += `<td style="padding:5px 6px" class="mono">${esc(s.mpn_matched || '\u2014')}</td>`;
-        html += `<td style="padding:5px 6px;text-align:right" class="mono">${qtyStr}</td>`;
-        html += `<td style="padding:5px 6px;text-align:right" class="mono">${priceStr}</td>`;
-        html += `<td style="padding:5px 6px">${esc(s.source_type || '\u2014')}${isHist ? ' <span style="font-size:9px">(history)</span>' : ''}</td>`;
-        html += `<td style="padding:5px 6px">${esc(s.condition || '\u2014')}</td>`;
-        html += `<td style="padding:5px 6px;text-align:center;font-weight:600;color:${scoreColor}">${Math.round(s.score || 0)}</td>`;
-        html += `</tr>`;
-    }
-
-    html += `</tbody></table>`;
-    container.innerHTML = html;
-}
-
-window._quickSearchRun = _quickSearchRun;
-window._renderQuickSearchResults = _renderQuickSearchResults;
-
-function _intakeRowsFromDraft(data) {
-    const rows = [];
-    const baseConfidence = Number(data.confidence) || 0;
-    for (const item of (data.requirements || [])) {
-        rows.push({
-            type: 'requirement',
-            mpn: item.mpn || '',
-            qty: item.quantity != null ? String(item.quantity) : '1',
-            price: item.target_price != null ? String(item.target_price) : '',
-            manufacturer: item.manufacturer || '',
-            vendor_name: '',
-            currency: 'USD',
-            lead_time: '',
-            date_code: item.date_codes || '',
-            condition: item.condition || '',
-            packaging: item.packaging || '',
-            moq: '',
-            notes: item.notes || '',
-            confidence: baseConfidence || 0.8,
-            duplicate: false
-        });
-    }
-    for (const item of (data.offers || [])) {
-        rows.push({
-            type: 'offer',
-            mpn: item.mpn || '',
-            qty: item.qty_available != null ? String(item.qty_available) : '',
-            price: item.unit_price != null ? String(item.unit_price) : '',
-            manufacturer: item.manufacturer || '',
-            vendor_name: item.vendor_name || data.vendor_name || '',
-            currency: item.currency || 'USD',
-            lead_time: item.lead_time || '',
-            date_code: item.date_code || '',
-            condition: item.condition || '',
-            packaging: item.packaging || '',
-            moq: item.moq != null ? String(item.moq) : '',
-            notes: item.notes || '',
-            confidence: baseConfidence || 0.8,
-            duplicate: false
-        });
-    }
-    return rows;
-}
-
-function _intakeConfidenceClass(score) {
-    const value = Number(score) || 0;
-    if (value >= 0.8) return 'high';
-    if (value >= 0.5) return 'med';
-    return 'low';
-}
-
-function _intakeConfidencePct(score) {
-    const value = Number(score) || 0;
-    return Math.max(1, Math.min(99, Math.round(value * 100)));
-}
-
-function _intakeConfirmLabel(reqCount, offerCount) {
-    if (reqCount && offerCount) return currentReqId ? 'Save Draft Lines' : 'Create Draft Requisition + Save';
-    if (offerCount) return currentReqId ? 'Save Offer Drafts' : 'Create Draft Requisition + Save Offers';
-    if (reqCount) return currentReqId ? 'Add RFQ Draft' : (_intakeIsMaterialsView() && _intakeDraftMeta?.source !== 'ai' ? 'Confirm & Add' : 'Create Draft Requisition');
-    return 'Review & Save';
-}
-
-function _intakeRenderMetaCard(reqCount, offerCount) {
-    const meta = _intakeDraftMeta || _blankIntakeMeta();
-    const confClass = _intakeConfidenceClass(meta.confidence);
-    const confPct = _intakeConfidencePct(meta.confidence);
-    const docLabel = meta.document_type === 'offer' ? 'Vendor offer draft' : meta.document_type === 'rfq' ? 'Customer RFQ draft' : 'Draft review';
-    const createHint = !currentReqId && (offerCount > 0 || (reqCount > 0 && meta.source === 'ai'))
-        ? `<div style="font-size:11px;color:var(--text2)">No requisition is open, so saving will create a draft requisition first.</div>`
-        : '';
-    return `<div class="intake-row" style="background:var(--bg2)">
-        <div class="intake-row-confidence ${confClass}" title="AI confidence">${confPct}%</div>
-        <div class="intake-row-data" style="display:flex;flex-direction:column;gap:8px">
-            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;flex-wrap:wrap">
-                <div>
-                    <div class="intake-row-mpn">${esc(docLabel)}</div>
-                    <div class="intake-row-detail">${esc(meta.summary || 'Review the extracted draft before saving.')}</div>
-                </div>
-                <span class="intake-row-tag ${meta.source === 'ai' ? 'offer' : 'req'}">${meta.source === 'ai' ? 'ai draft' : 'quick parse'}</span>
-            </div>
-            ${reqCount ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Requisition name
-                    <input value="${escAttr(meta.requisition_name || '')}" onchange="_intakeUpdateMeta('requisition_name',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Customer name
-                    <input value="${escAttr(meta.customer_name || '')}" onchange="_intakeUpdateMeta('customer_name',this.value)" placeholder="Optional customer name">
-                </label>
-            </div>` : ''}
-            ${offerCount ? `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Vendor name
-                    <input value="${escAttr(meta.vendor_name || '')}" onchange="_intakeUpdateMeta('vendor_name',this.value)" placeholder="Vendor name">
-                </label>
-            </div>` : ''}
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Draft notes
-                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateMeta('notes',this.value)" placeholder="Optional context to keep with the draft">${esc(meta.notes || '')}</textarea>
-            </label>
-            ${createHint}
-        </div>
-    </div>`;
-}
-
-function _intakeRenderRequirementRow(r, idx) {
-    return `<div style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MPN
-                <input value="${escAttr(r.mpn || '')}" onchange="_intakeUpdateField(${idx},'mpn',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Qty
-                <input type="number" min="1" value="${escAttr(r.qty || '1')}" onchange="_intakeUpdateField(${idx},'qty',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Target price
-                <input type="number" min="0" step="0.0001" value="${escAttr(r.price || '')}" onchange="_intakeUpdateField(${idx},'price',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Manufacturer
-                <input value="${escAttr(r.manufacturer || '')}" onchange="_intakeUpdateField(${idx},'manufacturer',this.value)">
-            </label>
-        </div>
-        <details>
-            <summary style="font-size:11px;color:var(--teal);cursor:pointer">More RFQ fields</summary>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:8px">
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Condition
-                    <input value="${escAttr(r.condition || '')}" onchange="_intakeUpdateField(${idx},'condition',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Date codes
-                    <input value="${escAttr(r.date_code || '')}" onchange="_intakeUpdateField(${idx},'date_code',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Packaging
-                    <input value="${escAttr(r.packaging || '')}" onchange="_intakeUpdateField(${idx},'packaging',this.value)">
-                </label>
-            </div>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2);margin-top:8px">Notes
-                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateField(${idx},'notes',this.value)">${esc(r.notes || '')}</textarea>
-            </label>
-        </details>
-    </div>`;
-}
-
-function _intakeRenderOfferRow(r, idx) {
-    return `<div style="display:flex;flex-direction:column;gap:8px">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Vendor
-                <input value="${escAttr(r.vendor_name || _intakeDraftMeta?.vendor_name || '')}" onchange="_intakeUpdateField(${idx},'vendor_name',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MPN
-                <input value="${escAttr(r.mpn || '')}" onchange="_intakeUpdateField(${idx},'mpn',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Qty available
-                <input type="number" min="0" value="${escAttr(r.qty || '')}" onchange="_intakeUpdateField(${idx},'qty',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Unit price
-                <input type="number" min="0" step="0.0001" value="${escAttr(r.price || '')}" onchange="_intakeUpdateField(${idx},'price',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Currency
-                <input value="${escAttr(r.currency || 'USD')}" maxlength="3" onchange="_intakeUpdateField(${idx},'currency',this.value)">
-            </label>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Manufacturer
-                <input value="${escAttr(r.manufacturer || '')}" onchange="_intakeUpdateField(${idx},'manufacturer',this.value)">
-            </label>
-        </div>
-        <details>
-            <summary style="font-size:11px;color:var(--teal);cursor:pointer">More offer fields</summary>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:8px">
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Lead time
-                    <input value="${escAttr(r.lead_time || '')}" onchange="_intakeUpdateField(${idx},'lead_time',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Date code
-                    <input value="${escAttr(r.date_code || '')}" onchange="_intakeUpdateField(${idx},'date_code',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Condition
-                    <input value="${escAttr(r.condition || '')}" onchange="_intakeUpdateField(${idx},'condition',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">Packaging
-                    <input value="${escAttr(r.packaging || '')}" onchange="_intakeUpdateField(${idx},'packaging',this.value)">
-                </label>
-                <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2)">MOQ
-                    <input type="number" min="0" value="${escAttr(r.moq || '')}" onchange="_intakeUpdateField(${idx},'moq',this.value)">
-                </label>
-            </div>
-            <label style="display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--text2);margin-top:8px">Notes
-                <textarea rows="2" style="resize:vertical" onchange="_intakeUpdateField(${idx},'notes',this.value)">${esc(r.notes || '')}</textarea>
-            </label>
-        </details>
-    </div>`;
-}
-
-function _intakeUpdateField(idx, field, value) {
-    if (_intakeParsedRows[idx]) {
-        _intakeParsedRows[idx][field] = value;
-    }
-}
-
-function _intakeUpdateMeta(field, value) {
-    _intakeDraftMeta = { ...(_intakeDraftMeta || _blankIntakeMeta()), [field]: value };
-}
-
-function _intakeIsMaterialsView() {
-    const matView = document.getElementById('view-materials');
-    return _currentMainView === 'materials' || (matView && !matView.classList.contains('hidden') && !matView.classList.contains('u-hidden'));
-}
-
-function _intakeSearchMaterials(reqRows) {
-    const mpns = reqRows.map(r => (r.mpn || '').trim()).filter(Boolean);
-    if (!mpns.length) return;
-    const searchBox = document.getElementById('materialSearch');
-    if (searchBox) searchBox.value = mpns.join(', ');
-    showToast(`Searching ${mpns.length} part number(s) in materials`, 'info');
-    if (typeof loadMaterialList === 'function') loadMaterialList();
-}
-
-async function _intakeCreateDraftRequisition() {
-    const meta = _intakeDraftMeta || _blankIntakeMeta();
-    const today = new Date().toISOString().slice(0, 10);
-    const name = (meta.requisition_name || '').trim()
-        || (meta.document_type === 'offer'
-            ? `${(meta.vendor_name || 'Vendor').trim() || 'Vendor'} offer intake ${today}`
-            : `${(meta.customer_name || 'Customer').trim() || 'Customer'} RFQ intake ${today}`);
-    const data = await apiFetch('/api/requisitions', {
-        method: 'POST',
-        body: { name, customer_name: (meta.customer_name || '').trim() || null }
-    });
-    return data.id;
-}
-
-function _intakeRequirementPayload(row) {
-    const qty = parseInt(row.qty, 10);
-    const price = row.price === '' || row.price == null ? null : parseFloat(row.price);
-    return {
-        primary_mpn: (row.mpn || '').trim(),
-        target_qty: Number.isInteger(qty) && qty > 0 ? qty : 1,
-        target_price: Number.isFinite(price) ? price : null,
-        condition: (row.condition || '').trim() || null,
-        date_codes: (row.date_code || '').trim() || null,
-        packaging: (row.packaging || '').trim() || null,
-        notes: (row.notes || '').trim() || null
-    };
-}
-
-function _intakeOfferPayload(row, fallbackVendorName) {
-    const qty = row.qty === '' || row.qty == null ? null : parseInt(row.qty, 10);
-    const price = row.price === '' || row.price == null ? null : parseFloat(row.price);
-    const moq = row.moq === '' || row.moq == null ? null : parseInt(row.moq, 10);
-    return {
-        vendor_name: ((row.vendor_name || fallbackVendorName || '') + '').trim(),
-        mpn: (row.mpn || '').trim(),
-        manufacturer: (row.manufacturer || '').trim() || null,
-        qty_available: Number.isInteger(qty) && qty >= 0 ? qty : null,
-        unit_price: Number.isFinite(price) ? price : null,
-        currency: ((row.currency || 'USD') + '').trim().toUpperCase().slice(0, 3) || 'USD',
-        lead_time: (row.lead_time || '').trim() || null,
-        date_code: (row.date_code || '').trim() || null,
-        condition: (row.condition || '').trim() || null,
-        packaging: (row.packaging || '').trim() || null,
-        moq: Number.isInteger(moq) && moq >= 0 ? moq : null,
-        notes: (row.notes || '').trim() || null
-    };
-}
-
-async function _intakeEnsureOfferRequirements(reqId, offerRows) {
-    const existing = await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(() => []);
-    const existingMpns = new Set((existing || []).map(r => String(r.primary_mpn || '').trim().toUpperCase()).filter(Boolean));
-    const added = new Set();
-    for (const row of offerRows) {
-        const mpn = String(row.mpn || '').trim().toUpperCase();
-        if (!mpn || existingMpns.has(mpn) || added.has(mpn)) continue;
-        await apiFetch(`/api/requisitions/${reqId}/requirements`, {
-            method: 'POST',
-            body: {
-                primary_mpn: row.mpn,
-                target_qty: Math.max(1, parseInt(row.qty, 10) || 1),
-                notes: 'Auto-created from pasted vendor offer draft'
-            }
-        });
-        added.add(mpn);
-    }
-}
-
-
-// ═══════════════════════════════════════════════════════════════════════
-// FREE-TEXT AI PARSER — paste free-form text, AI extracts structured data,
-// user reviews/edits, then saves as RFQ or Offers.
-// Called by: index.html freeTextModal buttons
-// Depends on: apiFetch, esc, showToast, openModal, closeModal
-// ═══════════════════════════════════════════════════════════════════════
-
-let _ftParsedData = null;
-let _ftDocType = 'rfq';
-
-function openFreeTextModal() {
-    const modal = document.getElementById('freeTextModal');
-    if (!modal) return;
-    modal.style.display = 'flex';
-    document.getElementById('ftStep1').style.display = '';
-    document.getElementById('ftStep2').style.display = 'none';
-    document.getElementById('ftStep3').style.display = 'none';
-    const ta = document.getElementById('ftRawText');
-    if (ta) { ta.value = ''; ta.focus(); }
-    _ftParsedData = null;
-    _ftDocType = 'rfq';
-}
-
-function closeFreeTextModal() {
-    const modal = document.getElementById('freeTextModal');
-    if (modal) modal.style.display = 'none';
-    _ftParsedData = null;
-}
-
-async function freeTextParse() {
-    const text = (document.getElementById('ftRawText')?.value || '').trim();
-    if (!text) { showToast('Paste some text first', 'warn'); return; }
-
-    const btn = document.getElementById('ftParseBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Parsing...'; }
-
-    try {
-        const res = await apiFetch('/api/ai/parse-free-text', {
-            method: 'POST',
-            body: { text }
-        });
-
-        if (!res.parsed || !res.line_items?.length) {
-            showToast(res.reason || 'Could not extract parts from the text', 'warn');
-            return;
-        }
-
-        _ftParsedData = res;
-        _ftDocType = res.document_type || 'rfq';
-        _ftRenderReview();
-
-        document.getElementById('ftStep1').style.display = 'none';
-        document.getElementById('ftStep2').style.display = '';
-    } catch (e) {
-        showToast('AI parsing failed: ' + (e.message || e), 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Parse with AI'; }
-    }
-}
-
-function _ftRenderReview() {
-    if (!_ftParsedData) return;
-    const items = _ftParsedData.line_items || [];
-
-    const typeEl = document.getElementById('ftDocType');
-    if (typeEl) {
-        typeEl.textContent = _ftDocType === 'rfq' ? 'RFQ (Customer Request)' : 'Offer (Vendor Quote)';
-        typeEl.style.background = _ftDocType === 'rfq' ? 'var(--blue-bg,#e8f0fe)' : 'var(--green-bg,#e6f4ea)';
-        typeEl.style.color = _ftDocType === 'rfq' ? 'var(--blue,#1a73e8)' : 'var(--green,#34a853)';
-    }
-
-    const confEl = document.getElementById('ftConfidence');
-    if (confEl) {
-        const conf = Math.round((_ftParsedData.confidence || 0) * 100);
-        confEl.textContent = `${conf}% confidence`;
-    }
-
-    const toggleLabel = document.getElementById('ftToggleLabel');
-    if (toggleLabel) toggleLabel.textContent = _ftDocType === 'rfq' ? 'Offer' : 'RFQ';
-
-    document.getElementById('ftCompanyName').value = _ftParsedData.company_name || '';
-    document.getElementById('ftContactName').value = _ftParsedData.contact_name || '';
-
-    const rfqFields = document.getElementById('ftRfqFields');
-    const offerFields = document.getElementById('ftOfferFields');
-    if (_ftDocType === 'rfq') {
-        rfqFields.style.display = 'flex';
-        offerFields.style.display = 'none';
-        const nameInput = document.getElementById('ftReqName');
-        if (nameInput && _ftParsedData.company_name) {
-            nameInput.value = _ftParsedData.company_name + ' RFQ';
-        }
-    } else {
-        rfqFields.style.display = 'none';
-        offerFields.style.display = 'flex';
-        document.getElementById('ftVendorName').value = _ftParsedData.company_name || '';
-        _ftLoadRequisitions();
-    }
-
-    const notesEl = document.getElementById('ftNotes');
-    if (notesEl && _ftParsedData.notes) {
-        notesEl.textContent = 'Notes: ' + _ftParsedData.notes;
-    } else if (notesEl) {
-        notesEl.textContent = '';
-    }
-
-    _ftRenderItems(items);
-}
-
-function _ftRenderItems(items) {
-    const tbody = document.getElementById('ftItemsBody');
-    if (!tbody) return;
-    let html = '';
-    for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        html += `<tr style="border-bottom:1px solid var(--border)">
-            <td style="padding:3px 4px;text-align:center">
-                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:0 3px;color:var(--red)" onclick="ftRemoveItem(${i})" title="Remove">&times;</button>
-            </td>
-            <td style="padding:3px 4px"><input data-ft-field="mpn" data-ft-idx="${i}" value="${esc(it.mpn || '')}" style="width:100%;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="manufacturer" data-ft-idx="${i}" value="${esc(it.manufacturer || '')}" style="width:80px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="quantity" data-ft-idx="${i}" value="${it.quantity || 1}" type="number" min="1" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="target_price" data-ft-idx="${i}" value="${it.target_price || ''}" type="number" step="0.01" style="width:70px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="condition" data-ft-idx="${i}" value="${esc(it.condition || '')}" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="date_code" data-ft-idx="${i}" value="${esc(it.date_code || '')}" style="width:60px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="lead_time" data-ft-idx="${i}" value="${esc(it.lead_time || '')}" style="width:70px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-            <td style="padding:3px 4px"><input data-ft-field="notes" data-ft-idx="${i}" value="${esc(it.notes || '')}" style="width:90px;font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:3px"></td>
-        </tr>`;
-    }
-    tbody.innerHTML = html;
-}
-
-function ftRemoveItem(idx) {
-    if (!_ftParsedData?.line_items) return;
-    _ftParsedData.line_items.splice(idx, 1);
-    _ftRenderItems(_ftParsedData.line_items);
-}
-
-function freeTextToggleType() {
-    _ftDocType = _ftDocType === 'rfq' ? 'offer' : 'rfq';
-    _ftRenderReview();
-}
-
-function freeTextBack() {
-    document.getElementById('ftStep1').style.display = '';
-    document.getElementById('ftStep2').style.display = 'none';
-}
-
-function _ftCollectEdits() {
-    if (!_ftParsedData?.line_items) return [];
-    const items = [];
-    const inputs = document.querySelectorAll('[data-ft-field]');
-    const byIdx = {};
-    inputs.forEach(inp => {
-        const idx = parseInt(inp.dataset.ftIdx);
-        const field = inp.dataset.ftField;
-        if (!byIdx[idx]) byIdx[idx] = {};
-        byIdx[idx][field] = inp.value;
-    });
-    for (const idx of Object.keys(byIdx).sort((a, b) => a - b)) {
-        const d = byIdx[idx];
-        if (!d.mpn?.trim()) continue;
-        items.push({
-            mpn: d.mpn.trim(),
-            manufacturer: d.manufacturer?.trim() || null,
-            quantity: parseInt(d.quantity) || 1,
-            target_price: d.target_price ? parseFloat(d.target_price) : null,
-            condition: d.condition?.trim() || null,
-            date_code: d.date_code?.trim() || null,
-            lead_time: d.lead_time?.trim() || null,
-            notes: d.notes?.trim() || null,
-        });
-    }
-    return items;
-}
-
-async function _ftLoadRequisitions() {
-    try {
-        const res = await apiFetch('/api/requisitions?limit=50&status=active,sourcing,draft');
-        const select = document.getElementById('ftReqSelect');
-        if (!select) return;
-        select.innerHTML = '<option value="">-- Select --</option>';
-        const reqs = res.requisitions || res || [];
-        for (const r of reqs) {
-            const opt = document.createElement('option');
-            opt.value = r.id;
-            opt.textContent = `#${r.id} ${r.name || ''}`.substring(0, 60);
-            select.appendChild(opt);
-        }
-        if (currentReqId) select.value = currentReqId;
-    } catch (e) {
-        // Silent fail — user can type req ID manually
-    }
-}
-
-async function freeTextSave() {
-    const items = _ftCollectEdits();
-    if (!items.length) { showToast('No valid items to save', 'warn'); return; }
-
-    const btn = document.getElementById('ftSaveBtn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
-
-    try {
-        if (_ftDocType === 'rfq') {
-            const reqName = document.getElementById('ftReqName')?.value?.trim() || 'Untitled';
-            const customerName = document.getElementById('ftCompanyName')?.value?.trim() || null;
-
-            const res = await apiFetch('/api/ai/save-free-text-rfq', {
-                method: 'POST',
-                body: {
-                    name: reqName,
-                    customer_name: customerName,
-                    line_items: items,
-                }
-            });
-
-            document.getElementById('ftStep2').style.display = 'none';
-            document.getElementById('ftStep3').style.display = '';
-            document.getElementById('ftDoneMsg').textContent =
-                `Requisition "${res.requisition_name}" created with ${res.requirements_created} requirement(s)`;
-            showToast(`RFQ created: ${res.requirements_created} parts`, 'success');
-
-            if (typeof loadReqList === 'function') loadReqList();
-
-        } else {
-            const reqSelect = document.getElementById('ftReqSelect');
-            const reqId = parseInt(reqSelect?.value);
-            const vendorName = document.getElementById('ftVendorName')?.value?.trim();
-
-            if (!reqId) { showToast('Select a requisition for offers', 'warn'); return; }
-            if (!vendorName) { showToast('Enter a vendor name', 'warn'); return; }
-
-            const res = await apiFetch('/api/ai/save-free-text-offers', {
-                method: 'POST',
-                body: {
-                    requisition_id: reqId,
-                    vendor_name: vendorName,
-                    line_items: items,
-                }
-            });
-
-            document.getElementById('ftStep2').style.display = 'none';
-            document.getElementById('ftStep3').style.display = '';
-            document.getElementById('ftDoneMsg').textContent =
-                `${res.offers_created} offer(s) saved to requisition #${reqId}`;
-            showToast(`${res.offers_created} offers saved`, 'success');
-
-            if (currentReqId === reqId && typeof loadOffers === 'function') loadOffers();
-        }
-    } catch (e) {
-        showToast('Save failed: ' + (e.message || e), 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-    }
+    showToast('API import: use Search to pull live availability from supplier APIs', 'info');
 }
 
 
@@ -18281,7 +17320,7 @@ Object.assign(window, {
     _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
     ddInlineEditOffer, ddApproveOffer, ddRejectOffer, ddShowChangelog, ddRefreshTab,
     _clearSightingSelection, _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
-    _ddLeadQualityBadge, _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
+    _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
@@ -18340,8 +17379,7 @@ Object.assign(window, {
     toggleContextPanel, switchCtxTab, bindContextPanel, unbindContextPanel, ctxSendMessage, ctxAttachFile,
     // Universal intake bar
     showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit,
-    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
-    _intakeUpdateField, _intakeUpdateMeta,
+    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeEdit, _intakeRemoveRow, _intakeConfirm,
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
