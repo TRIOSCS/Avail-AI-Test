@@ -276,6 +276,25 @@ def test_list_contacts_missing_req(client):
     assert resp.json() == []
 
 
+# ── POST /api/contacts/{id}/retry ─────────────────────────────────────
+
+
+def test_retry_failed_rfq_rejects_non_failed_contact(client, db_session, test_user, test_requisition):
+    """Retry endpoint returns 400 unless contact is in failed state."""
+    c = _make_contact(
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Arrow Electronics",
+        vendor_contact="sales@arrow.com",
+        status="sent",
+    )
+    resp = client.post(f"/api/contacts/{c.id}/retry")
+    assert resp.status_code == 400
+    msg = resp.json().get("detail") or resp.json().get("error", "")
+    assert "Only failed contacts can be retried" in msg
+
+
 # ── GET /api/requisitions/{id}/responses ─────────────────────────────
 
 
@@ -306,6 +325,31 @@ def test_list_responses_empty(client, test_requisition):
     resp = client.get(f"/api/requisitions/{test_requisition.id}/responses")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ── PATCH /api/vendor-responses/{id}/status ───────────────────────────
+
+
+def test_update_vendor_response_status_rejects_invalid_status(client, db_session, test_requisition):
+    """Status update endpoint returns 400 for unsupported statuses."""
+    vr = VendorResponse(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow Electronics",
+        vendor_email="sales@arrow.com",
+        subject="Re: RFQ",
+        status="new",
+        received_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+
+    resp = client.patch(
+        f"/api/vendor-responses/{vr.id}/status",
+        json={"status": "invalid"},
+    )
+    assert resp.status_code == 400
+    msg = resp.json().get("detail") or resp.json().get("error", "")
+    assert "Status must be one of" in msg
 
 
 # ── POST /api/requisitions/{id}/rfq-prepare ──────────────────────────

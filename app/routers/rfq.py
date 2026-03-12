@@ -74,7 +74,7 @@ async def retry_failed_rfq(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     if contact.status != "failed":
-        return {"error": "Only failed contacts can be retried", "status_code": 400}
+        raise HTTPException(status_code=400, detail="Only failed contacts can be retried")
 
     token = await require_fresh_token(request, db)
     results = await send_batch_rfq(
@@ -209,7 +209,7 @@ async def update_vendor_response_status(
     VALID_STATUSES = {"new", "reviewed", "rejected"}
     new_status = body.get("status")
     if new_status not in VALID_STATUSES:
-        return {"error": f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}", "status_code": 400}
+        raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}")
 
     vr = db.get(VendorResponse, vr_id)
     if not vr:
