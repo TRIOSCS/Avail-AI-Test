@@ -32,6 +32,13 @@ def app_js():
 
 
 @pytest.fixture(scope="module")
+def followups_js():
+    """Read RFQ follow-up module raw content."""
+    with open("app/static/rfq/followups.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
 def styles_css():
     """Read styles.css raw content."""
     with open("app/static/styles.css", "r") as f:
@@ -45,6 +52,13 @@ class TestJSSyntax:
     def test_app_js_parses(self):
         """app.js passes Node.js syntax check."""
         result = subprocess.run(["node", "-c", "app/static/app.js"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"JS syntax error: {result.stderr}"
+
+    def test_followups_js_parses(self):
+        """RFQ follow-up module passes Node.js syntax check."""
+        result = subprocess.run(
+            ["node", "-c", "app/static/rfq/followups.js"], capture_output=True, text=True, timeout=10
+        )
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
     def test_crm_js_parses(self):
@@ -371,6 +385,21 @@ class TestTasksSidebarRight:
         """loadMyTasks uses Promise.allSettled for resilience."""
         assert "Promise.allSettled" in app_js
         assert "Array.isArray(tasksRes.value)" in app_js
+
+
+class TestRfqFollowupsModule:
+    """Verify RFQ follow-up UI has a mount point and dedicated helper module."""
+
+    def test_followups_panel_mount_exists(self, index_html):
+        assert 'id="followUpsPanel"' in index_html
+
+    def test_app_imports_followups_module(self, app_js):
+        assert "from './rfq/followups.js'" in app_js
+        assert "configureRfqFollowups({" in app_js
+
+    def test_bulk_followup_refreshes_panel(self, followups_js):
+        assert "await loadFollowUpsPanel()" in followups_js
+        assert "loadFollowUps()" not in followups_js
 
 
 # ── Scroll-End Detection ────────────────────────────────────────────────
