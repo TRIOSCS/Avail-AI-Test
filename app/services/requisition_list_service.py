@@ -317,14 +317,12 @@ def list_requisitions(
             )
         )
     # ── Status filter ────────────────────────────────────────────────
-    elif filters.status.value == "archive":
-        query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
     elif filters.status.value == "all":
         pass  # no status filter
-    elif filters.status.value:
-        query = query.filter(Requisition.status == filters.status.value)
+    elif filters.status.value == "archived":
+        query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
     else:
-        query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
+        query = query.filter(Requisition.status == filters.status.value)
 
     # ── Owner filter ─────────────────────────────────────────────────
     if filters.owner:

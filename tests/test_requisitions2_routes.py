@@ -276,3 +276,350 @@ def test_sales_role_sees_only_own(client, db_session, test_user, sales_user):
     finally:
         # Restore original override
         app.dependency_overrides[require_user] = lambda: test_user
+
+
+# ── Invalid filter fallback ──────────────────────────────────────────
+
+
+def test_invalid_filter_falls_back_to_defaults(client):
+    """Invalid filter values fall back to defaults instead of crashing."""
+    resp = client.get("/requisitions2", params={"status": "BOGUS_STATUS", "page": "abc"})
+    assert resp.status_code == 200
+    assert "rq2all-page" in resp.text
+
+
+def test_invalid_sort_falls_back(client, test_requisition):
+    """Invalid sort column falls back to default."""
+    resp = client.get("/requisitions2/table", params={"sort": "nonexistent_column"})
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text
+
+
+# ── Row actions — won / lost / assign ────────────────────────────────
+
+
+def test_row_action_won(client, test_requisition, db_session):
+    """POST won action marks requisition as won."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/won")
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "won"
+
+
+def test_row_action_lost(client, test_requisition, db_session):
+    """POST lost action marks requisition as lost (from quoted status)."""
+    test_requisition.status = "quoted"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/lost")
+    assert resp.status_code == 200
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "lost"
+
+
+def test_row_action_assign(client, test_requisition, db_session, sales_user):
+    """POST assign action reassigns the requisition owner."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(
+        f"/requisitions2/{test_requisition.id}/action/assign",
+        data={"owner_id": str(sales_user.id)},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.created_by == sales_user.id
+
+
+def test_row_action_assign_without_owner_id(client, test_requisition, test_user, db_session):
+    """POST assign without owner_id does not change owner."""
+    test_requisition.status = "active"
+    original_owner = test_requisition.created_by
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/assign")
+    assert resp.status_code == 200
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.created_by == original_owner
+
+
+# ── Row actions — invalid state transitions ──────────────────────────
+
+
+def test_row_action_archive_invalid_state(client, test_requisition, db_session):
+    """Archive from 'closed' (no transitions) still returns 200 with error toast."""
+    test_requisition.status = "closed"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
+    assert resp.status_code == 200
+    assert "HX-Trigger" in resp.headers
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Invalid transition" in trigger["showToast"]["message"]
+
+
+def test_row_action_activate_invalid_state(client, test_requisition, db_session):
+    """Activate from 'offers' (not allowed → active) returns 200 with error toast."""
+    test_requisition.status = "offers"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/activate")
+    assert resp.status_code == 200
+    assert "HX-Trigger" in resp.headers
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Invalid transition" in trigger["showToast"]["message"]
+
+
+def test_row_action_won_invalid_state(client, test_requisition, db_session):
+    """Won from 'closed' (no transitions) returns 200 with error toast."""
+    test_requisition.status = "closed"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/won")
+    assert resp.status_code == 200
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Invalid transition" in trigger["showToast"]["message"]
+
+
+def test_row_action_lost_invalid_state(client, test_requisition, db_session):
+    """Lost from 'active' (not in allowed set) returns 200 with error toast."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/lost")
+    assert resp.status_code == 200
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "Invalid transition" in trigger["showToast"]["message"]
+
+
+def test_row_action_claim_already_claimed(client, test_requisition, db_session, sales_user):
+    """Claim on already-claimed requisition returns 200 with error message."""
+    test_requisition.status = "active"
+    test_requisition.claimed_by_id = sales_user.id
+    test_requisition.claimed_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/claim")
+    assert resp.status_code == 200
+    assert "HX-Trigger" in resp.headers
+
+
+# ── Bulk actions — assign ────────────────────────────────────────────
+
+
+def test_bulk_assign(client, test_requisition, db_session, sales_user):
+    """Bulk assign changes owner on selected requisitions."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(
+        "/requisitions2/bulk/assign",
+        data={"ids": str(test_requisition.id), "owner_id": str(sales_user.id)},
+    )
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.created_by == sales_user.id
+
+
+def test_bulk_assign_no_owner_id(client, test_requisition, db_session, test_user):
+    """Bulk assign without owner_id does not change owners."""
+    test_requisition.status = "active"
+    original_owner = test_requisition.created_by
+    db_session.commit()
+
+    resp = client.post(
+        "/requisitions2/bulk/assign",
+        data={"ids": str(test_requisition.id)},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(test_requisition)
+    assert test_requisition.created_by == original_owner
+
+
+def test_bulk_invalid_ids_returns_table(client):
+    """Bulk action with non-numeric IDs returns table without crashing."""
+    resp = client.post(
+        "/requisitions2/bulk/archive",
+        data={"ids": "abc,def"},
+    )
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text
+
+
+def test_bulk_nonexistent_ids(client):
+    """Bulk action with IDs that don't exist does nothing."""
+    resp = client.post(
+        "/requisitions2/bulk/archive",
+        data={"ids": "99998,99999"},
+    )
+    assert resp.status_code == 200
+    assert "rq2-rows" in resp.text
+
+
+def test_bulk_activate_invalid_state(client, test_requisition, db_session):
+    """Bulk activate on 'offers' status (→active not allowed) skips gracefully."""
+    test_requisition.status = "offers"
+    db_session.commit()
+
+    resp = client.post(
+        "/requisitions2/bulk/activate",
+        data={"ids": str(test_requisition.id)},
+    )
+    assert resp.status_code == 200
+    assert "HX-Trigger" in resp.headers
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "0 requisition" in trigger["showToast"]["message"]
+
+
+def test_bulk_archive_invalid_state(client, test_requisition, db_session):
+    """Bulk archive on 'closed' status (no transitions) skips gracefully."""
+    test_requisition.status = "closed"
+    db_session.commit()
+
+    resp = client.post(
+        "/requisitions2/bulk/archive",
+        data={"ids": str(test_requisition.id)},
+    )
+    assert resp.status_code == 200
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "0 requisition" in trigger["showToast"]["message"]
+
+
+# ── HX-Trigger headers ──────────────────────────────────────────────
+
+
+def test_row_action_returns_toast_header(client, test_requisition, db_session):
+    """Row actions include HX-Trigger header with toast message."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
+    assert "HX-Trigger" in resp.headers
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "showToast" in trigger
+    assert "message" in trigger["showToast"]
+
+
+def test_bulk_action_returns_toast_and_clear(client, test_requisition, db_session):
+    """Bulk actions include HX-Trigger with toast and clearSelection."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.post(
+        "/requisitions2/bulk/archive",
+        data={"ids": str(test_requisition.id)},
+    )
+    import json
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "showToast" in trigger
+    assert "clearSelection" in trigger
+
+
+# ── Filter combinations via route ────────────────────────────────────
+
+
+def test_filter_by_urgency(client, test_requisition, db_session):
+    """Urgency filter works through the route."""
+    test_requisition.urgency = "critical"
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active", "urgency": "critical"})
+    assert resp.status_code == 200
+    assert "REQ-TEST-001" in resp.text
+
+    resp2 = client.get("/requisitions2/table", params={"status": "active", "urgency": "hot"})
+    assert "REQ-TEST-001" not in resp2.text
+
+
+def test_filter_by_owner(client, test_requisition, test_user, db_session):
+    """Owner filter restricts to a specific user's requisitions."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active", "owner": str(test_user.id)})
+    assert resp.status_code == 200
+    assert "REQ-TEST-001" in resp.text
+
+    resp2 = client.get("/requisitions2/table", params={"status": "active", "owner": "99999"})
+    assert "REQ-TEST-001" not in resp2.text
+
+
+def test_filter_by_date_range(client, test_requisition, db_session):
+    """Date range filter narrows results."""
+    test_requisition.status = "active"
+    db_session.commit()
+
+    # Future date range should exclude
+    resp = client.get("/requisitions2/table", params={
+        "status": "active", "date_from": "2099-01-01"
+    })
+    assert "REQ-TEST-001" not in resp.text
+
+    # Past date range should include
+    resp2 = client.get("/requisitions2/table", params={
+        "status": "active", "date_from": "2020-01-01", "date_to": "2099-12-31"
+    })
+    assert resp2.status_code == 200
+
+
+def test_status_all(client, test_requisition, db_session):
+    """Status 'all' shows all requisitions regardless of status."""
+    test_requisition.status = "archived"
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "all"})
+    assert resp.status_code == 200
+    assert "REQ-TEST-001" in resp.text
+
+
+# ── Modal with customer site ─────────────────────────────────────────
+
+
+def test_modal_with_customer_site(client, test_requisition, test_customer_site, db_session):
+    """Modal shows customer site display name when linked."""
+    test_requisition.customer_site_id = test_customer_site.id
+    db_session.commit()
+
+    resp = client.get(f"/requisitions2/{test_requisition.id}/modal")
+    assert resp.status_code == 200
+    assert "Acme Electronics" in resp.text
+
+
+# ── Multiple pages pagination ────────────────────────────────────────
+
+
+def test_pagination_shows_controls(client, db_session, test_user):
+    """When there are enough items, pagination controls appear."""
+    from app.models import Requisition
+    for i in range(30):
+        req = Requisition(
+            name=f"PAGINATE-{i:03d}", status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+    db_session.commit()
+
+    resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10"})
+    assert resp.status_code == 200
+    assert "Next" in resp.text
+    assert "Page 1 of" in resp.text
