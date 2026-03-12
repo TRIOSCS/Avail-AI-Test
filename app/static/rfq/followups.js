@@ -1,92 +1,62 @@
-/**
- * rfq/followups.js
- *
- * Purpose:
- * Encapsulates RFQ follow-up panel loading and follow-up send actions so the
- * main frontend bundle does not keep RFQ follow-up behavior inline.
- *
- * Business rules enforced:
- * - Follow-ups are hidden in archive view.
- * - Bulk follow-up sends must refresh the same follow-up panel they came from.
- * - Follow-up UI keeps existing inline handler names and DOM contracts.
- *
- * Called by:
- * - app/static/app.js
- * - inline RFQ follow-up buttons rendered into index.html/app.js templates
- *
- * Depends on:
- * - app/static/app.js to inject shared helpers via configureRfqFollowups()
- * - DOM elements #followUpsPanel and #bulkFollowUpBtn
- * - RFQ follow-up API endpoints under /api/follow-ups
+/*
+ * rfq/followups.js — RFQ follow-up panel actions and rendering helpers.
+ * Called by: app/static/app.js wrapper functions (sendFollowUp/loadFollowUpsPanel/sendBulkFollowUp).
+ * Depends on: callbacks passed from app.js (apiFetch, showToast, esc, escAttr, guardBtn, loadActivity).
  */
 
-let _followUpsAbort = null;
-
-let _deps = {
-    apiFetch: null,
-    confirmAction: null,
-    showToast: null,
-    esc: null,
-    escAttr: null,
-    guardBtn: null,
-    getCurrentMainView: () => 'sales',
-    refreshActivity: null,
-};
-
-export function configureRfqFollowups(deps) {
-    _deps = { ..._deps, ...(deps || {}) };
-}
-
-export function cancelFollowUpsRequests() {
-    if (_followUpsAbort) {
-        try { _followUpsAbort.abort(); } catch (e) {}
-        _followUpsAbort = null;
-    }
-}
-
-export async function sendFollowUp(contactId, vendorName) {
-    _deps.confirmAction('Send Follow-Up', 'Send follow-up email to ' + vendorName + '?', async function() {
-        if (sendFollowUp._busy) return;
-        sendFollowUp._busy = true;
+export function sendFollowUpImpl(ctx, contactId, vendorName, busyRef) {
+    ctx.confirmAction('Send Follow-Up', 'Send follow-up email to ' + vendorName + '?', async function() {
+        if (busyRef._busy) return;
+        busyRef._busy = true;
         try {
-            const data = await _deps.apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
-            _deps.showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
-            if (typeof _deps.refreshActivity === 'function') _deps.refreshActivity();
-            await loadFollowUpsPanel();
-        } catch (e) {
-            _deps.showToast('Failed to send follow-up', 'error');
+            const data = await ctx.apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
+            ctx.showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
+            if (ctx.loadActivityFn) ctx.loadActivityFn();
+            await ctx.loadFollowUpsPanelFn();
+        } catch (_) {
+            ctx.showToast('Failed to send follow-up', 'error');
         } finally {
-            sendFollowUp._busy = false;
+            busyRef._busy = false;
         }
     });
 }
 
-export async function loadFollowUpsPanel() {
+export async function loadFollowUpsPanelImpl(ctx) {
     const panel = document.getElementById('followUpsPanel');
     if (!panel) return;
-    if (_deps.getCurrentMainView() === 'archive') {
+    if (ctx.getCurrentMainView() === 'archive') {
         panel.style.display = 'none';
         return;
     }
 
-    cancelFollowUpsRequests();
-    _followUpsAbort = new AbortController();
+    const prevAbort = ctx.getAbortController();
+    if (prevAbort) {
+        try {
+            prevAbort.abort();
+        } catch (_) {}
+    }
+    const controller = new AbortController();
+    ctx.setAbortController(controller);
 
     try {
-        const data = await _deps.apiFetch('/api/follow-ups', { signal: _followUpsAbort.signal });
-        if (_deps.getCurrentMainView() === 'archive') return;
+        const data = await ctx.apiFetch('/api/follow-ups', { signal: controller.signal });
+        if (ctx.getCurrentMainView() === 'archive') return;
 
         const followUps = data.follow_ups || [];
         if (!followUps.length) {
             panel.style.display = 'none';
-            panel.innerHTML = '';
             return;
         }
 
         const groups = {};
         for (const fu of followUps) {
             const key = fu.requisition_id || 0;
-            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown Requirement', items: [] };
+            if (!groups[key]) {
+                groups[key] = {
+                    name: fu.requisition_name || 'Unknown Requirement',
+                    items: [],
+                };
+            }
             groups[key].items.push(fu);
         }
 
@@ -97,16 +67,16 @@ export async function loadFollowUpsPanel() {
             </div>`;
 
         for (const g of Object.values(groups)) {
-            html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${_deps.esc(g.name)}</span></div>`;
+            html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${ctx.esc(g.name)}</span></div>`;
             for (const fu of g.items) {
                 const dayColor = fu.days_waiting > 5 ? 'var(--red)' : fu.days_waiting > 2 ? 'var(--amber)' : 'var(--green)';
                 html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px">
                     ${fu.contact_id ? `<input type="checkbox" class="fu-cb" data-contact-id="${fu.contact_id}" onchange="_updateBulkFollowUpBtn()">` : ''}
-                    <span style="color:var(--text2)">${_deps.esc(fu.vendor_name)}</span>
-                    <span style="color:var(--muted)">${_deps.esc(fu.vendor_email || '')}</span>
+                    <span style="color:var(--text2)">${ctx.esc(fu.vendor_name)}</span>
+                    <span style="color:var(--muted)">${ctx.esc(fu.vendor_email || '')}</span>
                     <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
-                    ${fu.parts && fu.parts.length ? `<span style="color:var(--muted)">${_deps.esc(Array.isArray(fu.parts) ? fu.parts.join(', ') : String(fu.parts))}</span>` : ''}
-                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${_deps.escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Send Now</button>` : ''}
+                    ${fu.parts && fu.parts.length ? `<span style="color:var(--muted)">${ctx.esc(Array.isArray(fu.parts) ? fu.parts.join(', ') : String(fu.parts))}</span>` : ''}
+                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${ctx.escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Send Now</button>` : ''}
                 </div>`;
             }
         }
@@ -115,33 +85,29 @@ export async function loadFollowUpsPanel() {
         panel.innerHTML = html;
         panel.style.display = '';
     } catch (e) {
-        if (e.name !== 'AbortError') {
-            panel.style.display = 'none';
-        }
+        if (e.name !== 'AbortError') panel.style.display = 'none';
     }
 }
 
-export function _updateBulkFollowUpBtn() {
+export function updateBulkFollowUpBtnImpl() {
     const checked = document.querySelectorAll('.fu-cb:checked').length;
     const btn = document.getElementById('bulkFollowUpBtn');
-    if (btn) {
-        btn.style.display = checked > 0 ? '' : 'none';
-        btn.textContent = `Send ${checked} Follow-up${checked > 1 ? 's' : ''}`;
-    }
+    if (!btn) return;
+    btn.style.display = checked > 0 ? '' : 'none';
+    btn.textContent = `Send ${checked} Follow-up${checked > 1 ? 's' : ''}`;
 }
 
-export async function sendBulkFollowUp() {
+export async function sendBulkFollowUpImpl(ctx) {
     const checked = [...document.querySelectorAll('.fu-cb:checked')];
-    const contactIds = checked.map(cb => parseInt(cb.dataset.contactId)).filter(Boolean);
+    const contactIds = checked.map(cb => parseInt(cb.dataset.contactId, 10)).filter(Boolean);
     if (!contactIds.length) return;
-
     const btn = document.getElementById('bulkFollowUpBtn');
-    await _deps.guardBtn(btn, 'Sending…', async () => {
-        const data = await _deps.apiFetch('/api/follow-ups/send-batch', {
+    await ctx.guardBtn(btn, 'Sending…', async () => {
+        const data = await ctx.apiFetch('/api/follow-ups/send-batch', {
             method: 'POST',
             body: { contact_ids: contactIds },
         });
-        _deps.showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        await loadFollowUpsPanel();
+        ctx.showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
+        await ctx.loadFollowUpsPanelFn();
     });
 }

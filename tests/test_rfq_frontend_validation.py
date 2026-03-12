@@ -45,6 +45,27 @@ def styles_css():
         return f.read()
 
 
+@pytest.fixture(scope="module")
+def rfq_followups_js():
+    """Read followups.js raw content."""
+    with open("app/static/rfq/followups.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def rfq_activity_js():
+    """Read activity.js raw content."""
+    with open("app/static/rfq/activity.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def rfq_workspace_js():
+    """Read workspace.js raw content."""
+    with open("app/static/rfq/workspace.js", "r") as f:
+        return f.read()
+
+
 # ── JS Syntax Validation ─────────────────────────────────────────────────
 
 
@@ -64,6 +85,21 @@ class TestJSSyntax:
     def test_crm_js_parses(self):
         """crm.js passes Node.js syntax check."""
         result = subprocess.run(["node", "-c", "app/static/crm.js"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"JS syntax error: {result.stderr}"
+
+    def test_rfq_followups_js_parses(self):
+        """rfq/followups.js passes Node.js syntax check."""
+        result = subprocess.run(["node", "-c", "app/static/rfq/followups.js"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"JS syntax error: {result.stderr}"
+
+    def test_rfq_activity_js_parses(self):
+        """rfq/activity.js passes Node.js syntax check."""
+        result = subprocess.run(["node", "-c", "app/static/rfq/activity.js"], capture_output=True, text=True, timeout=10)
+        assert result.returncode == 0, f"JS syntax error: {result.stderr}"
+
+    def test_rfq_workspace_js_parses(self):
+        """rfq/workspace.js passes Node.js syntax check."""
+        result = subprocess.run(["node", "-c", "app/static/rfq/workspace.js"], capture_output=True, text=True, timeout=10)
         assert result.returncode == 0, f"JS syntax error: {result.stderr}"
 
 
@@ -200,6 +236,31 @@ class TestRfqErrorToasts:
 
     def test_update_status_uses_friendly_error_toast(self, app_js):
         assert "Couldn\\'t update response status — " in app_js
+
+
+class TestRfqFollowUpModuleWireup:
+    def test_app_imports_followups_module(self, app_js):
+        assert "./rfq/followups.js" in app_js
+
+    def test_followups_module_exports_send_and_panel(self, rfq_followups_js):
+        assert "export function sendFollowUpImpl" in rfq_followups_js
+        assert "export async function loadFollowUpsPanelImpl" in rfq_followups_js
+
+
+class TestRfqActivityModuleWireup:
+    def test_app_imports_activity_module(self, app_js):
+        assert "./rfq/activity.js" in app_js
+
+    def test_activity_module_exports_fetcher(self, rfq_activity_js):
+        assert "export async function fetchActivityData" in rfq_activity_js
+
+
+class TestRfqWorkspaceModuleWireup:
+    def test_app_imports_workspace_module(self, app_js):
+        assert "./rfq/workspace.js" in app_js
+
+    def test_workspace_module_exports_tab_fetcher(self, rfq_workspace_js):
+        assert "export async function fetchRfqWorkspaceTabData" in rfq_workspace_js
 
 
 # ── Notification Bar ─────────────────────────────────────────────────────

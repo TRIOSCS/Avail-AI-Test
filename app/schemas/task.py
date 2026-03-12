@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TaskCreate(BaseModel):
@@ -51,6 +51,8 @@ class TaskComplete(BaseModel):
 
 
 class TaskResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     requisition_id: int
     title: str
@@ -72,10 +74,6 @@ class TaskResponse(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 class TaskSummary(BaseModel):
     assigned_to_me: int = 0
