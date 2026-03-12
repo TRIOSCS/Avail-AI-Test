@@ -1012,7 +1012,7 @@ async def promote_offer(
 
 
 @router.post("/api/offers/{offer_id}/reject")
-async def reject_offer(
+async def reject_offer_t4_review(
     offer_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
