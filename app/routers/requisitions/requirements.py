@@ -52,6 +52,65 @@ from ...vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["requisitions"])
 
 
+def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> None:
+    """Annotate each lead with buyer outcome for quick triage progress.
+
+    Outcomes:
+    - open: not yet qualified
+    - offer_logged: buyer converted lead to an offer
+    - unavailable_confirmed: buyer marked lead unavailable
+    """
+    req_ids = [r.id for r in req.requirements]
+    if not req_ids or not results:
+        return
+
+    offer_rows = (
+        db.query(
+            Offer.requirement_id,
+            Offer.vendor_name_normalized,
+            Offer.normalized_mpn,
+            Offer.mpn,
+        )
+        .filter(
+            Offer.requirement_id.in_(req_ids),
+            Offer.status != "rejected",
+        )
+        .all()
+    )
+    offer_keys: set[tuple[int, str, str]] = set()
+    for row in offer_rows:
+        vendor_norm = normalize_vendor_name(row.vendor_name_normalized or "")
+        mpn_key = row.normalized_mpn or normalize_mpn_key(row.mpn or "")
+        if vendor_norm and mpn_key:
+            offer_keys.add((row.requirement_id, vendor_norm, mpn_key))
+
+    for req_id in req_ids:
+        group = results.get(str(req_id))
+        if not isinstance(group, dict):
+            continue
+        sightings = group.get("sightings") or []
+        outcome_counts = {
+            "open": 0,
+            "offer_logged": 0,
+            "unavailable_confirmed": 0,
+        }
+        for sighting in sightings:
+            if not isinstance(sighting, dict):
+                continue
+            if sighting.get("is_unavailable"):
+                outcome = "unavailable_confirmed"
+            else:
+                vendor_norm = normalize_vendor_name(sighting.get("vendor_name") or "")
+                mpn_key = normalize_mpn_key(sighting.get("mpn_matched") or "")
+                if vendor_norm and mpn_key and (req_id, vendor_norm, mpn_key) in offer_keys:
+                    outcome = "offer_logged"
+                else:
+                    outcome = "open"
+            sighting["buyer_outcome"] = outcome
+            outcome_counts[outcome] += 1
+        group["buyer_outcomes"] = outcome_counts
+
+
 def _enqueue_ics_nc_batch(requirement_ids: list[int]):
     """Queue requirements for ICS and NC browser-based searches (background task)."""
     from ...database import SessionLocal
@@ -644,6 +703,7 @@ async def search_all(
     background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
 
     _enrich_with_vendor_cards(results, db)
+    _annotate_buyer_outcomes(req, results, db)
 
     results["source_stats"] = list(merged_source_stats.values())
     return results
@@ -671,6 +731,7 @@ async def search_one(
     source_stats = search_result["source_stats"]
     results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
     _enrich_with_vendor_cards(results, db)
+    _annotate_buyer_outcomes(req, results, db)
 
     background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
 
@@ -819,6 +880,7 @@ async def get_saved_sightings(
             "historical_offers": hist_offers,
         }
     _enrich_with_vendor_cards(results, db)
+    _annotate_buyer_outcomes(req, results, db)
     return results
 
 

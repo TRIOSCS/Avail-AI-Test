@@ -382,6 +382,63 @@ def test_get_saved_sightings_with_data(client, db_session, test_requisition):
     data = resp.json()
     assert str(req_item.id) in data
     assert len(data[str(req_item.id)]["sightings"]) >= 1
+    first = data[str(req_item.id)]["sightings"][0]
+    assert first["buyer_outcome"] == "open"
+    assert data[str(req_item.id)]["buyer_outcomes"]["open"] >= 1
+
+
+def test_get_saved_sightings_buyer_outcomes_offer_and_unavailable(client, db_session, test_requisition, test_user):
+    """Saved sightings include buyer outcome annotations for triage loop."""
+    from app.models import Offer, Requirement, Sighting
+
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+
+    s_offer = Sighting(
+        requirement_id=req_item.id,
+        vendor_name="Offer Vendor",
+        vendor_name_normalized="offer vendor",
+        mpn_matched="LM317T",
+        source_type="api",
+        score=72.0,
+        created_at=datetime.now(timezone.utc),
+    )
+    s_unavail = Sighting(
+        requirement_id=req_item.id,
+        vendor_name="No Stock Vendor",
+        vendor_name_normalized="no stock vendor",
+        mpn_matched="LM317T",
+        source_type="api",
+        score=40.0,
+        is_unavailable=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add_all([s_offer, s_unavail])
+    db_session.flush()
+
+    offer = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=req_item.id,
+        vendor_name="Offer Vendor",
+        vendor_name_normalized="offer vendor",
+        mpn="LM317T",
+        normalized_mpn="lm317t",
+        qty_available=100,
+        unit_price=0.55,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(offer)
+    db_session.commit()
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/sightings")
+    assert resp.status_code == 200
+    payload = resp.json()[str(req_item.id)]
+    by_vendor = {row["vendor_name"]: row for row in payload["sightings"]}
+    assert by_vendor["Offer Vendor"]["buyer_outcome"] == "offer_logged"
+    assert by_vendor["No Stock Vendor"]["buyer_outcome"] == "unavailable_confirmed"
+    assert payload["buyer_outcomes"]["offer_logged"] >= 1
+    assert payload["buyer_outcomes"]["unavailable_confirmed"] >= 1
 
 
 def test_get_saved_sightings_not_found(client):

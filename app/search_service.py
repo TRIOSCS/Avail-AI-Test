@@ -823,6 +823,12 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         base = 30
     bonus = min(15, (h["times_seen"] - 1) * 3)
     score = max(10, base + bonus - (age_days * 0.1))
+    bucket = _lead_confidence_bucket(score)
+    reason = _historical_lead_reason(
+        age_days=age_days,
+        times_seen=h["times_seen"],
+        is_authorized=bool(h["is_authorized"]),
+    )
 
     return {
         "id": None,
@@ -856,6 +862,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_times_seen": h["times_seen"],
         "material_first_seen": h["first_seen"].strftime("%b %d, %Y") if h["first_seen"] else None,
         "material_card_id": h["material_card_id"],
+        "lead_confidence_bucket": bucket,
+        "lead_confidence_reason": reason,
     }
 
 
@@ -1109,6 +1117,9 @@ def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
 
 def sighting_to_dict(s: Sighting) -> dict:
     raw = s.raw_data or {}
+    score_value = float(s.score or 0)
+    bucket = _lead_confidence_bucket(score_value)
+    reason = _fresh_lead_reason(s)
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1138,6 +1149,8 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_time": s.lead_time,
         "evidence_tier": getattr(s, "evidence_tier", None),
         "score_components": getattr(s, "score_components", None),
+        "lead_confidence_bucket": bucket,
+        "lead_confidence_reason": reason,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "is_stale": (
             datetime.now(timezone.utc)
@@ -1147,3 +1160,61 @@ def sighting_to_dict(s: Sighting) -> dict:
         if s.created_at
         else False,
     }
+
+
+def _lead_confidence_bucket(score: float) -> str:
+    """Map numeric score to buyer-friendly confidence bucket."""
+    if score >= 75:
+        return "high"
+    if score >= 45:
+        return "medium"
+    return "low"
+
+
+def _fresh_lead_reason(s: Sighting) -> str:
+    """Human-readable reason for why this live lead is ranked where it is."""
+    reasons: list[str] = []
+    comps = s.score_components or {}
+    if s.is_authorized:
+        reasons.append("authorized source")
+    if s.evidence_tier in {"T1", "T2"}:
+        reasons.append(f"{s.evidence_tier} evidence")
+
+    freshness = comps.get("freshness")
+    if isinstance(freshness, (int, float)):
+        if freshness >= 80:
+            reasons.append("recent listing")
+        elif freshness < 35:
+            reasons.append("stale listing")
+
+    if s.qty_available is not None and s.qty_available > 0:
+        reasons.append(f"qty {s.qty_available}")
+    elif s.qty_available is None:
+        reasons.append("qty unknown")
+
+    if s.unit_price is not None and s.unit_price > 0:
+        reasons.append("price posted")
+    else:
+        reasons.append("price missing")
+
+    if not reasons:
+        return "limited evidence; buyer review required"
+    return "; ".join(reasons[:3])
+
+
+def _historical_lead_reason(age_days: int, times_seen: int, is_authorized: bool) -> str:
+    """Reason text for historical material-card signals."""
+    reasons: list[str] = []
+    if is_authorized:
+        reasons.append("authorized vendor history")
+    if age_days >= 365:
+        years = age_days // 365
+        reasons.append(f"last seen {years}y ago")
+    elif age_days >= 30:
+        months = age_days // 30
+        reasons.append(f"last seen {months}mo ago")
+    else:
+        reasons.append(f"last seen {age_days}d ago")
+    if times_seen > 1:
+        reasons.append(f"seen {times_seen} times")
+    return "; ".join(reasons[:3])
