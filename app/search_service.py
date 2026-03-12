@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from .connectors.digikey import DigiKeyConnector
 from .connectors.ebay import EbayConnector
 from .connectors.element14 import Element14Connector
+from .connectors.ai_live_web import AIWebSearchConnector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
@@ -56,6 +57,7 @@ _CONNECTOR_SOURCE_MAP = {
     "OEMSecretsConnector": "oemsecrets",
     "SourcengineConnector": "sourcengine",
     "Element14Connector": "element14",
+    "AIWebSearchConnector": "ai_live_web",
 }
 
 
@@ -369,6 +371,11 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
+
+    # AI live web search source (disabled in TESTING to keep tests deterministic)
+    ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
+    has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
+    _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
 
     if not connectors:
         return [], list(source_stats_map.values())
