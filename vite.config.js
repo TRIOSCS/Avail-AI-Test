@@ -127,6 +127,12 @@ export default defineConfig({
 
   plugins: [checkExportsPlugin()],
 
+  test: {
+    root: resolve(__dirname),
+    include: ["tests/frontend/**/*.test.{js,mjs,ts}"],
+    environment: "jsdom",
+  },
+
   resolve: {
     alias: {
       app: resolve(__dirname, "app/static/app.js"),

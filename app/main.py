@@ -1005,8 +1005,7 @@ from .routers.proactive import router as proactive_router
 app.include_router(proactive_router)
 from .routers.performance import router as performance_router
 
-if not settings.mvp_mode:
-    app.include_router(performance_router)
+app.include_router(performance_router)
 from .routers.admin import router as admin_router
 
 app.include_router(admin_router)
@@ -1015,8 +1014,7 @@ from .routers.emails import router as emails_router
 app.include_router(emails_router)
 from .routers.enrichment import router as enrichment_router
 
-if not settings.mvp_mode:
-    app.include_router(enrichment_router)
+app.include_router(enrichment_router)
 from .routers.documents import router as documents_router
 
 app.include_router(documents_router)
@@ -1029,8 +1027,7 @@ from .routers.command_center import router as command_center_router
 app.include_router(command_center_router)
 from .routers.dashboard import router as dashboard_router
 
-if not settings.mvp_mode:
-    app.include_router(dashboard_router)
+app.include_router(dashboard_router)
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
 
@@ -1039,16 +1036,14 @@ app.include_router(prospect_suggested_router)
 
 from .routers.apollo_sync import router as apollo_sync_router
 
-if not settings.mvp_mode:
-    app.include_router(apollo_sync_router)
+app.include_router(apollo_sync_router)
 
-if not settings.mvp_mode:
-    try:
-        from .routers.explorium import router as explorium_router
+try:
+    from .routers.explorium import router as explorium_router
 
-        app.include_router(explorium_router)
-    except ModuleNotFoundError:
-        pass  # explorium router not in this branch / optional
+    app.include_router(explorium_router)
+except ModuleNotFoundError:
+    pass  # explorium router not in this branch / optional
 
 from .routers.nc_admin import router as nc_admin_router
 
@@ -1065,8 +1060,7 @@ app.include_router(notifications_router)
 
 from .routers.teams_actions import router as teams_actions_router
 
-if not settings.mvp_mode:
-    app.include_router(teams_actions_router)
+app.include_router(teams_actions_router)
 
 from .routers.tagging_admin import router as tagging_admin_router
 
@@ -1082,8 +1076,7 @@ app.include_router(activity_router)
 
 from .routers.teams_alerts import router as teams_alerts_router
 
-if not settings.mvp_mode:
-    app.include_router(teams_alerts_router)
+app.include_router(teams_alerts_router)
 
 from .routers.knowledge import insights_router as knowledge_insights_router
 from .routers.knowledge import router as knowledge_router
