@@ -1,4 +1,11 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
+import {
+    applyDuplicateMarkers,
+    intakeFriendlyError,
+    normalizeIntakeRow,
+    offerDuplicateKey,
+    parseFallbackRows,
+} from './intake_helpers.mjs';
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
@@ -16097,6 +16104,9 @@ let _intakeParsedContext = {};
 let _intakeTargetType = 'requirement'; // 'requirement' | 'sighting' | 'offer'
 let _intakeParsing = false;
 let _intakeParseTimer = null;
+let _intakeExistingReqMpns = new Set();
+let _intakeExistingOfferKeys = new Set();
+let _intakeSubmitInFlight = false;
 
 function showIntakeBar() {
     const bar = document.getElementById('intakeBar');
@@ -16127,48 +16137,41 @@ function _intakePaste(event) {
     }
 }
 
-function _intakeNormalizeRow(row, mode) {
-    const rowType = row?.row_type || row?.type || (mode === 'offer' ? 'offer' : 'requirement');
-    const qtyVal = row?.qty == null ? '' : String(row.qty);
-    const unitPrice = row?.unit_price == null ? '' : String(row.unit_price);
-    return {
-        row_type: rowType,
-        mpn: (row?.mpn || '').trim(),
-        qty: qtyVal,
-        unit_price: unitPrice,
-        vendor_name: (row?.vendor_name || '').trim(),
-        manufacturer: (row?.manufacturer || '').trim(),
-        lead_time: (row?.lead_time || '').trim(),
-        condition: (row?.condition || '').trim(),
-        packaging: (row?.packaging || '').trim(),
-        notes: (row?.notes || '').trim(),
-        confidence: Number(row?.confidence ?? 0.5) || 0.5
-    };
+async function _intakeLoadExistingForReq(reqId) {
+    _intakeExistingReqMpns = new Set();
+    _intakeExistingOfferKeys = new Set();
+    if (!reqId) return;
+    try {
+        const reqs = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        for (const r of (reqs || [])) {
+            const mpn = (r?.primary_mpn || '').trim().toUpperCase();
+            if (mpn) _intakeExistingReqMpns.add(mpn);
+        }
+    } catch (e) {
+        console.warn('intake requirements duplicate scan failed', e);
+    }
+    try {
+        const offersRes = await apiFetch(`/api/requisitions/${reqId}/offers`);
+        const groups = offersRes?.groups || [];
+        for (const g of groups) {
+            for (const o of (g?.offers || [])) {
+                const key = offerDuplicateKey({
+                    mpn: o?.mpn || '',
+                    vendor_name: o?.vendor_name || '',
+                });
+                if (key !== '::') _intakeExistingOfferKeys.add(key);
+            }
+        }
+    } catch (e) {
+        console.warn('intake offers duplicate scan failed', e);
+    }
 }
 
-function _intakeParseTextFallback(text, mode) {
-    const lines = (text || '').trim().split('\n').filter(l => l.trim());
-    const parsed = [];
-    if (!lines.length) return parsed;
-    const firstLine = lines[0].toLowerCase();
-    const hasHeader = firstLine.includes('mpn') || firstLine.includes('part') || firstLine.includes('qty') || firstLine.includes('price');
-    const startIdx = hasHeader ? 1 : 0;
-    const fallbackType = mode === 'offer' ? 'offer' : 'requirement';
-    for (let i = startIdx; i < lines.length; i++) {
-        const cols = lines[i].split('\t');
-        const mpn = cols[0]?.trim() || '';
-        if (!mpn) continue;
-        parsed.push({
-            row_type: fallbackType,
-            mpn,
-            qty: cols[1]?.trim() || '',
-            unit_price: cols[2]?.trim() || '',
-            manufacturer: cols[3]?.trim() || '',
-            vendor_name: fallbackType === 'offer' ? (_intakeParsedContext.vendor_name || '') : '',
-            confidence: 0.4
-        });
-    }
-    return parsed;
+function _intakeRecomputeDuplicates() {
+    applyDuplicateMarkers(_intakeParsedRows, {
+        existingRequirementMpns: _intakeExistingReqMpns,
+        existingOfferKeys: _intakeExistingOfferKeys,
+    });
 }
 
 async function _intakeParseText(text) {
@@ -16185,20 +16188,24 @@ async function _intakeParseText(text) {
             body: { text: trimmed, mode }
         });
         _intakeParsedContext = parsed?.context || {};
-        _intakeParsedRows = (parsed?.rows || []).map(r => _intakeNormalizeRow(r, mode)).filter(r => r.mpn);
+        _intakeParsedRows = (parsed?.rows || []).map(r => normalizeIntakeRow(r, mode)).filter(r => r.mpn);
         if (!_intakeParsedRows.length) {
-            _intakeParsedRows = _intakeParseTextFallback(trimmed, mode).map(r => _intakeNormalizeRow(r, mode));
+            _intakeParsedRows = parseFallbackRows(trimmed, mode, _intakeParsedContext).map(r => normalizeIntakeRow(r, mode));
         }
         if (!_intakeParsedRows.length) {
             showToast('No valid line items found in pasted text', 'warn');
             _intakeClose();
             return;
         }
+        await _intakeLoadExistingForReq(currentReqId || null);
+        _intakeRecomputeDuplicates();
         _intakeRenderDrawer();
     } catch (e) {
         // Safe fallback so intake still works when AI is unavailable.
-        _intakeParsedRows = _intakeParseTextFallback(trimmed, mode).map(r => _intakeNormalizeRow(r, mode));
+        _intakeParsedRows = parseFallbackRows(trimmed, mode, _intakeParsedContext).map(r => normalizeIntakeRow(r, mode));
         if (_intakeParsedRows.length) {
+            await _intakeLoadExistingForReq(currentReqId || null);
+            _intakeRecomputeDuplicates();
             _intakeRenderDrawer();
             showToast('AI parsing unavailable — using fallback parse', 'warn');
         } else {
@@ -16222,6 +16229,14 @@ function _intakeRenderDrawer() {
         const r = _intakeParsedRows[i];
         const conf = Math.max(0, Math.min(100, Math.round((Number(r.confidence) || 0) * 100)));
         const confClass = conf >= 80 ? 'high' : conf >= 55 ? 'med' : 'low';
+        const dupTag = r.duplicate ? `<span class="intake-row-tag dup" title="${escAttr(r.duplicate_reason || 'Duplicate')}">DUP</span>` : '';
+        const statusTag = r.save_status === 'saved'
+            ? '<span class="intake-row-tag req" style="background:var(--green-light);color:var(--green)">SAVED</span>'
+            : (r.save_status === 'error'
+                ? `<span class="intake-row-tag offer" style="background:var(--red-light);color:var(--red)" title="${escAttr(r.save_error || 'Save failed')}">ERROR</span>`
+                : (r.save_status === 'skipped'
+                    ? `<span class="intake-row-tag dup" title="${escAttr(r.save_error || 'Skipped')}">SKIP</span>`
+                    : ''));
         html += `<div class="intake-row">
             <div class="intake-row-confidence ${confClass}" title="AI confidence">${conf}%</div>
             <div class="intake-row-data">
@@ -16237,8 +16252,11 @@ function _intakeRenderDrawer() {
                 <div style="margin-top:6px">
                     <input value="${escAttr(r.notes || '')}" placeholder="Notes (optional)" style="font-size:11px;padding:4px 6px;width:100%" oninput="_intakeEdit(${i},'notes',this.value)">
                 </div>
+                ${r.save_error ? `<div style="margin-top:6px;font-size:10px;color:var(--red)">${esc(r.save_error)}</div>` : ''}
             </div>
             <span class="intake-row-tag ${r.row_type === 'requirement' ? 'req' : 'offer'}">${r.row_type}</span>
+            ${dupTag}
+            ${statusTag}
             <div class="intake-row-actions">
                 <select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:3px" onchange="_intakeEdit(${i},'row_type',this.value)">
                     <option value="requirement" ${r.row_type === 'requirement' ? 'selected' : ''}>RFQ line</option>
@@ -16255,14 +16273,16 @@ function _intakeEdit(idx, field, value) {
     const row = _intakeParsedRows[idx];
     if (!row) return;
     row[field] = value;
-    if (field === 'row_type') {
-        if (value === 'requirement') row.vendor_name = '';
-        _intakeRenderDrawer();
-    }
+    row.save_status = '';
+    row.save_error = '';
+    if (field === 'row_type' && value === 'requirement') row.vendor_name = '';
+    _intakeRecomputeDuplicates();
+    _intakeRenderDrawer();
 }
 
 function _intakeRemoveRow(idx) {
     _intakeParsedRows.splice(idx, 1);
+    _intakeRecomputeDuplicates();
     _intakeRenderDrawer();
 }
 
@@ -16271,6 +16291,9 @@ function _intakeClose() {
     if (drawer) drawer.classList.remove('open');
     _intakeParsedRows = [];
     _intakeParsedContext = {};
+    _intakeExistingReqMpns = new Set();
+    _intakeExistingOfferKeys = new Set();
+    _intakeSubmitInFlight = false;
     const input = document.getElementById('intakeInput');
     if (input) input.value = '';
 }
@@ -16281,97 +16304,129 @@ const _intakeSubmit = () => {
     if (input?.value?.trim()) return _intakeParseText(input.value.trim());
 };
 async function _intakeConfirm() {
-    if (!_intakeParsedRows.length) return;
-    const reqRows = _intakeParsedRows
-        .filter(r => r.row_type === 'requirement' && (r.mpn || '').trim())
-        .map(r => ({
-            primary_mpn: (r.mpn || '').trim(),
-            target_qty: parseInt(r.qty, 10) > 0 ? parseInt(r.qty, 10) : 1,
-            target_price: r.unit_price === '' || r.unit_price == null ? null : Number(r.unit_price),
-            notes: (r.notes || '').trim() || null
-        }));
-    const offerRows = _intakeParsedRows
-        .filter(r => r.row_type === 'offer' && (r.mpn || '').trim())
-        .map(r => ({
-            mpn: (r.mpn || '').trim(),
-            vendor_name: (r.vendor_name || _intakeParsedContext.vendor_name || 'Unknown Vendor').trim(),
-            manufacturer: (r.manufacturer || '').trim() || null,
-            qty_available: parseInt(r.qty, 10) > 0 ? parseInt(r.qty, 10) : null,
-            unit_price: r.unit_price === '' || r.unit_price == null ? null : Number(r.unit_price),
-            lead_time: (r.lead_time || '').trim() || null,
-            condition: (r.condition || 'new').trim() || 'new',
-            packaging: (r.packaging || '').trim() || null,
-            notes: (r.notes || '').trim() || null,
-            source: 'ai_intake',
-            status: 'pending_review'
-        }));
-
-    if (!reqRows.length && !offerRows.length) {
-        showToast('No valid rows to submit', 'warn');
-        return;
-    }
-
-    let targetReqId = currentReqId || null;
-    let createdReqId = null;
-    let createdReqName = null;
-    if (!targetReqId && (reqRows.length || offerRows.length)) {
-        try {
-            const draftName = _intakeParsedContext.requisition_name || `AI Intake ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
-            const created = await apiFetch('/api/requisitions', {
-                method: 'POST',
-                body: {
-                    name: draftName,
-                    customer_name: _intakeParsedContext.customer_name || null
-                }
-            });
-            targetReqId = created.id;
-            createdReqId = created.id;
-            createdReqName = created.name || draftName;
-        } catch (e) {
-            showToast('Could not create requisition for intake submit', 'error');
+    if (!_intakeParsedRows.length || _intakeSubmitInFlight) return;
+    _intakeSubmitInFlight = true;
+    try {
+        for (const row of _intakeParsedRows) {
+            row.save_status = '';
+            row.save_error = '';
+        }
+        const validRows = _intakeParsedRows.filter(r => (r.mpn || '').trim());
+        if (!validRows.length) {
+            showToast('No valid rows to submit', 'warn');
             return;
         }
-    }
 
-    let reqCreated = 0;
-    let offerCreated = 0;
-    let offerFailed = 0;
-
-    if (reqRows.length && targetReqId) {
-        try {
-            const reqResp = await apiFetch(`/api/requisitions/${targetReqId}/requirements`, { method: 'POST', body: reqRows });
-            reqCreated = (reqResp?.created || []).length || reqRows.length;
-        } catch (e) {
-            showToast('Failed to save one or more RFQ lines', 'error');
-        }
-    }
-
-    if (offerRows.length && targetReqId) {
-        for (const row of offerRows) {
+        let targetReqId = currentReqId || null;
+        let createdReqId = null;
+        let createdReqName = null;
+        if (!targetReqId) {
             try {
-                await apiFetch(`/api/requisitions/${targetReqId}/offers`, { method: 'POST', body: row });
-                offerCreated += 1;
+                const draftName = _intakeParsedContext.requisition_name || `AI Intake ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+                const created = await apiFetch('/api/requisitions', {
+                    method: 'POST',
+                    body: {
+                        name: draftName,
+                        customer_name: _intakeParsedContext.customer_name || null
+                    }
+                });
+                targetReqId = created.id;
+                createdReqId = created.id;
+                createdReqName = created.name || draftName;
+                await _intakeLoadExistingForReq(targetReqId);
             } catch (e) {
-                offerFailed += 1;
+                showToast(`Could not create requisition: ${intakeFriendlyError(e, 'request failed')}`, 'error');
+                return;
             }
         }
-    }
 
-    const parts = [];
-    if (reqCreated) parts.push(`${reqCreated} RFQ line${reqCreated !== 1 ? 's' : ''}`);
-    if (offerCreated) parts.push(`${offerCreated} offer draft${offerCreated !== 1 ? 's' : ''}`);
-    if (parts.length) showToast(`Saved ${parts.join(' + ')}${createdReqId ? ` (RFQ-${createdReqId})` : ''}`, offerFailed ? 'warn' : 'success');
-    if (offerFailed) showToast(`${offerFailed} offer row${offerFailed !== 1 ? 's' : ''} failed to save`, 'warn');
+        _intakeRecomputeDuplicates();
+        _intakeRenderDrawer();
 
-    _intakeClose();
-    if (targetReqId && targetReqId === currentReqId && typeof loadRequirements === 'function') {
-        loadRequirements();
-    }
-    if (targetReqId && _ddTabCache[targetReqId]) {
-        delete _ddTabCache[targetReqId].offers;
-    }
-    if (createdReqId && typeof showDetail === 'function') {
-        showDetail(createdReqId, createdReqName || `RFQ-${createdReqId}`);
+        let saved = 0;
+        let failed = 0;
+        let skipped = 0;
+
+        for (let i = 0; i < _intakeParsedRows.length; i++) {
+            const row = _intakeParsedRows[i];
+            const mpn = (row.mpn || '').trim();
+            if (!mpn) {
+                row.save_status = 'error';
+                row.save_error = 'MPN is required';
+                failed += 1;
+                continue;
+            }
+            if (row.duplicate) {
+                row.save_status = 'skipped';
+                row.save_error = row.duplicate_reason || 'Duplicate row';
+                skipped += 1;
+                continue;
+            }
+
+            try {
+                if (row.row_type === 'offer') {
+                    const qtyInt = parseInt(row.qty, 10);
+                    const priceNum = row.unit_price === '' || row.unit_price == null ? null : Number(row.unit_price);
+                    const payload = {
+                        mpn,
+                        vendor_name: (row.vendor_name || _intakeParsedContext.vendor_name || 'Unknown Vendor').trim(),
+                        manufacturer: (row.manufacturer || '').trim() || null,
+                        qty_available: Number.isFinite(qtyInt) && qtyInt > 0 ? qtyInt : null,
+                        unit_price: Number.isFinite(priceNum) ? priceNum : null,
+                        lead_time: (row.lead_time || '').trim() || null,
+                        condition: (row.condition || 'new').trim() || 'new',
+                        packaging: (row.packaging || '').trim() || null,
+                        notes: (row.notes || '').trim() || null,
+                        source: 'ai_intake',
+                        status: 'pending_review'
+                    };
+                    await apiFetch(`/api/requisitions/${targetReqId}/offers?intake_row=${i}`, { method: 'POST', body: payload });
+                    _intakeExistingOfferKeys.add(offerDuplicateKey(payload));
+                } else {
+                    const qtyInt = parseInt(row.qty, 10);
+                    const priceNum = row.unit_price === '' || row.unit_price == null ? null : Number(row.unit_price);
+                    const payload = {
+                        primary_mpn: mpn,
+                        target_qty: Number.isFinite(qtyInt) && qtyInt > 0 ? qtyInt : 1,
+                        target_price: Number.isFinite(priceNum) ? priceNum : null,
+                        notes: (row.notes || '').trim() || null
+                    };
+                    await apiFetch(`/api/requisitions/${targetReqId}/requirements?intake_row=${i}`, { method: 'POST', body: payload });
+                    _intakeExistingReqMpns.add(mpn.toUpperCase());
+                }
+                row.save_status = 'saved';
+                row.save_error = '';
+                saved += 1;
+            } catch (e) {
+                row.save_status = 'error';
+                row.save_error = intakeFriendlyError(e, 'Failed to save row');
+                failed += 1;
+            }
+        }
+
+        _intakeRecomputeDuplicates();
+        _intakeRenderDrawer();
+
+        if (saved > 0) {
+            showToast(`Saved ${saved} row${saved !== 1 ? 's' : ''}${createdReqId ? ` (RFQ-${createdReqId})` : ''}`, failed || skipped ? 'warn' : 'success');
+        }
+        if (failed > 0 || skipped > 0) {
+            showToast(`${failed} failed · ${skipped} skipped (see row-level errors)`, 'warn');
+            return;
+        }
+
+        _intakeClose();
+        if (targetReqId && targetReqId === currentReqId && typeof loadRequirements === 'function') {
+            loadRequirements();
+        }
+        if (targetReqId && _ddTabCache[targetReqId]) {
+            delete _ddTabCache[targetReqId].offers;
+        }
+        if (createdReqId && typeof showDetail === 'function') {
+            showDetail(createdReqId, createdReqName || `RFQ-${createdReqId}`);
+        }
+    } finally {
+        _intakeSubmitInFlight = false;
     }
 }
 
@@ -17324,7 +17379,7 @@ Object.assign(window, {
     toggleContextPanel, switchCtxTab, bindContextPanel, unbindContextPanel, ctxSendMessage, ctxAttachFile,
     // Universal intake bar
     showIntakeBar, hideIntakeBar, _intakeInputChange, _intakePaste, _intakeSubmit,
-    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeChangeType, _intakeRemoveRow, _intakeConfirm,
+    _intakeUpload, _intakeFileSelected, _intakeImportApi, _intakeClose, _intakeEdit, _intakeRemoveRow, _intakeConfirm,
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
