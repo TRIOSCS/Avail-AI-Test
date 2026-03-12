@@ -33,6 +33,8 @@ from ..models import (
 )
 from ..schemas.ai import (
     CompareQuotesRequest,
+    IntakeDraftRequest,
+    IntakeDraftResponse,
     NormalizePartsRequest,
     ParseEmailRequest,
     ProspectContactSave,
@@ -566,6 +568,47 @@ async def save_parsed_offers(
 
     db.commit()
     return {"created": len(created), "offer_ids": created}
+
+
+@router.post("/api/ai/intake-draft", response_model=IntakeDraftResponse)
+@limiter.limit("10/minute")
+async def ai_intake_draft(
+    payload: IntakeDraftRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Convert pasted free-form customer/vendor text into an RFQ or offer draft."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    req_context = None
+    if payload.requisition_id:
+        from ..dependencies import get_req_for_user
+
+        req = get_req_for_user(db, user, payload.requisition_id)
+        if not req:
+            raise HTTPException(404, "Requisition not found")
+        req_context = [
+            {
+                "mpn": r.primary_mpn,
+                "qty": r.target_qty,
+                "target_price": float(r.target_price) if r.target_price else None,
+            }
+            for r in req.requirements
+            if r.primary_mpn
+        ]
+
+    from app.services.ai_intake_parser import parse_freeform_intake
+
+    draft = await parse_freeform_intake(payload.text, req_context)
+    if not draft:
+        return IntakeDraftResponse(
+            document_type="unclear",
+            confidence=0.0,
+            summary="AI could not confidently structure that text. Please review or paste a cleaner block.",
+        )
+    return draft
 
 
 # ── Feature 3: Company Intelligence Cards ─────────────────────────────────

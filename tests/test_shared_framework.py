@@ -110,6 +110,9 @@ class TestIntakeBar:
     def test_intake_bar_html_exists(self, index_html):
         assert 'id="intakeBar"' in index_html
 
+    def test_intake_placeholder_mentions_customer_vendor_text(self, index_html):
+        assert "Paste customer RFQ text, vendor offers" in index_html
+
     def test_intake_drawer_html_exists(self, index_html):
         assert 'id="intakeDrawer"' in index_html
 
@@ -124,6 +127,9 @@ class TestIntakeBar:
 
     def test_intake_parse_text(self, app_js):
         assert "function _intakeParseText(" in app_js
+
+    def test_intake_uses_ai_draft_endpoint(self, app_js):
+        assert "/api/ai/intake-draft" in app_js
 
     def test_intake_render_drawer(self, app_js):
         assert "function _intakeRenderDrawer()" in app_js
