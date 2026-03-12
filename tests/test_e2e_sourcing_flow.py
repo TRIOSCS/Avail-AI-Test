@@ -45,27 +45,38 @@ from app.services.requirement_status import (
 )
 from app.services.requisition_state import transition as req_transition
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
 def _full_setup(db: Session):
     """Create complete test data for end-to-end workflow testing."""
     sales = User(
-        email="sales@trioscs.com", name="Sales Rep", role="sales",
-        azure_id="az-sales-e2e", created_at=datetime.now(timezone.utc),
+        email="sales@trioscs.com",
+        name="Sales Rep",
+        role="sales",
+        azure_id="az-sales-e2e",
+        created_at=datetime.now(timezone.utc),
     )
     manager = User(
-        email="manager@trioscs.com", name="Manager", role="manager",
-        azure_id="az-mgr-e2e", created_at=datetime.now(timezone.utc),
+        email="manager@trioscs.com",
+        name="Manager",
+        role="manager",
+        azure_id="az-mgr-e2e",
+        created_at=datetime.now(timezone.utc),
     )
     buyer = User(
-        email="buyer@trioscs.com", name="Buyer", role="buyer",
-        azure_id="az-buyer-e2e", created_at=datetime.now(timezone.utc),
+        email="buyer@trioscs.com",
+        name="Buyer",
+        role="buyer",
+        azure_id="az-buyer-e2e",
+        created_at=datetime.now(timezone.utc),
     )
     ops = User(
-        email="ops@trioscs.com", name="Ops", role="admin",
-        azure_id="az-ops-e2e", created_at=datetime.now(timezone.utc),
+        email="ops@trioscs.com",
+        name="Ops",
+        role="admin",
+        azure_id="az-ops-e2e",
+        created_at=datetime.now(timezone.utc),
     )
     db.add_all([sales, manager, buyer, ops])
     db.flush()
@@ -75,28 +86,33 @@ def _full_setup(db: Session):
     db.add(vg)
 
     company = Company(
-        name="Acme Electronics", is_active=True,
+        name="Acme Electronics",
+        is_active=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add(company)
     db.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="Main",
+        company_id=company.id,
+        site_name="Main",
         created_at=datetime.now(timezone.utc),
     )
     db.add(site)
     db.flush()
 
     vendor = VendorCard(
-        normalized_name="arrow electronics", display_name="Arrow Electronics",
+        normalized_name="arrow electronics",
+        display_name="Arrow Electronics",
         created_at=datetime.now(timezone.utc),
     )
     db.add(vendor)
     db.flush()
 
     req = Requisition(
-        name="REQ-E2E-001", status="draft", created_by=sales.id,
+        name="REQ-E2E-001",
+        status="draft",
+        created_by=sales.id,
         customer_site_id=site.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -104,8 +120,10 @@ def _full_setup(db: Session):
     db.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="LM317T",
-        target_qty=1000, target_price=1.50,
+        requisition_id=req.id,
+        primary_mpn="LM317T",
+        target_qty=1000,
+        target_price=1.50,
         sourcing_status="open",
         created_at=datetime.now(timezone.utc),
     )
@@ -113,9 +131,15 @@ def _full_setup(db: Session):
     db.flush()
 
     return {
-        "sales": sales, "manager": manager, "buyer": buyer, "ops": ops,
-        "company": company, "site": site, "vendor": vendor,
-        "requisition": req, "requirement": requirement,
+        "sales": sales,
+        "manager": manager,
+        "buyer": buyer,
+        "ops": ops,
+        "company": company,
+        "site": site,
+        "vendor": vendor,
+        "requisition": req,
+        "requirement": requirement,
     }
 
 
@@ -188,8 +212,11 @@ class TestBuyPlanV3FullLifecycle:
             requirement_id=data["requirement"].id,
             vendor_card_id=data["vendor"].id,
             vendor_name="Arrow Electronics",
-            mpn="LM317T", qty_available=1000, unit_price=0.50,
-            status="active", entered_by_id=data["buyer"].id,
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            status="active",
+            entered_by_id=data["buyer"].id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(offer)
@@ -198,7 +225,8 @@ class TestBuyPlanV3FullLifecycle:
         quote = Quote(
             requisition_id=data["requisition"].id,
             customer_site_id=data["site"].id,
-            quote_number="Q-E2E-001", status="won",
+            quote_number="Q-E2E-001",
+            status="won",
             created_by_id=data["sales"].id,
             created_at=datetime.now(timezone.utc),
         )
@@ -247,9 +275,9 @@ class TestBuyPlanV3FullLifecycle:
         assert plan.auto_approved is True
 
         # Confirm PO
-        line = confirm_po(plan.id, line.id, "PO-12345",
-                          datetime(2026, 4, 1, tzinfo=timezone.utc),
-                          ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id, line.id, "PO-12345", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
+        )
         assert line.status == BuyPlanLineStatus.pending_verify.value
 
         # Verify PO
@@ -289,8 +317,7 @@ class TestBuyPlanV3FullLifecycle:
         assert plan.status == BuyPlanStatus.pending.value
 
         # Reject
-        plan = approve_buy_plan(plan.id, "reject", ctx["manager"], db_session,
-                                notes="Needs better margin")
+        plan = approve_buy_plan(plan.id, "reject", ctx["manager"], db_session, notes="Needs better margin")
         assert plan.status == BuyPlanStatus.draft.value
 
         # Resubmit
@@ -311,8 +338,7 @@ class TestBuyPlanV3FullLifecycle:
         assert plan.status == BuyPlanStatus.active.value
 
         # Flag issue on line
-        line = flag_line_issue(plan.id, line.id, "price_changed", ctx["buyer"],
-                               db_session, note="Price went up 20%")
+        line = flag_line_issue(plan.id, line.id, "price_changed", ctx["buyer"], db_session, note="Price went up 20%")
         assert line.status == BuyPlanLineStatus.issue.value
 
         # SO approved
@@ -341,21 +367,20 @@ class TestBuyPlanV3FullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-006", ctx["sales"], db_session)
-        line = confirm_po(plan.id, line.id, "PO-BAD",
-                          datetime(2026, 4, 1, tzinfo=timezone.utc),
-                          ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
+        )
         assert line.status == BuyPlanLineStatus.pending_verify.value
 
         # Reject PO
-        line = verify_po(plan.id, line.id, "reject", ctx["ops"], db_session,
-                         rejection_note="Wrong PO number")
+        line = verify_po(plan.id, line.id, "reject", ctx["ops"], db_session, rejection_note="Wrong PO number")
         assert line.status == BuyPlanLineStatus.awaiting_po.value
         assert line.po_number is None
 
         # Re-confirm with correct PO
-        line = confirm_po(plan.id, line.id, "PO-GOOD",
-                          datetime(2026, 4, 5, tzinfo=timezone.utc),
-                          ctx["buyer"], db_session)
+        line = confirm_po(
+            plan.id, line.id, "PO-GOOD", datetime(2026, 4, 5, tzinfo=timezone.utc), ctx["buyer"], db_session
+        )
         assert line.status == BuyPlanLineStatus.pending_verify.value
         assert line.po_number == "PO-GOOD"
 
@@ -374,8 +399,11 @@ class TestBuildBuyPlanIntegration:
             requirement_id=data["requirement"].id,
             vendor_card_id=data["vendor"].id,
             vendor_name="Arrow Electronics",
-            mpn="LM317T", qty_available=1000, unit_price=0.50,
-            status="active", entered_by_id=data["buyer"].id,
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            status="active",
+            entered_by_id=data["buyer"].id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(offer)
@@ -384,7 +412,8 @@ class TestBuildBuyPlanIntegration:
         quote = Quote(
             requisition_id=data["requisition"].id,
             customer_site_id=data["site"].id,
-            quote_number="Q-BUILD-E2E", status="won",
+            quote_number="Q-BUILD-E2E",
+            status="won",
             created_by_id=data["sales"].id,
             created_at=datetime.now(timezone.utc),
         )

@@ -563,10 +563,14 @@ async def bulk_archive(user: User = Depends(require_user), db: Session = Depends
     from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    reqs = db.query(Requisition).filter(
-        Requisition.created_by != user.id,
-        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-    ).all()
+    reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.created_by != user.id,
+            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+        )
+        .all()
+    )
     count = 0
     for req in reqs:
         try:
@@ -589,10 +593,14 @@ async def batch_archive_by_ids(
     from ...services.requisition_state import transition
     from . import invalidate_prefix
 
-    reqs = db.query(Requisition).filter(
-        Requisition.id.in_(payload.ids),
-        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
-    ).all()
+    reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.id.in_(payload.ids),
+            Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+        )
+        .all()
+    )
     count = 0
     for req in reqs:
         try:

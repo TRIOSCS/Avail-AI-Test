@@ -9,8 +9,7 @@ Called by: main.py (router mount)
 Depends on: services/vendor_email_lookup, email_service, dependencies
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 

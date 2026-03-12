@@ -18,8 +18,8 @@ from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import Company, User, VendorCard, VendorReview
-from ..models.vendors import VendorContact
 from ..models.strategic import StrategicVendor
+from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
 from ..schemas.vendors import VendorBlacklistToggle, VendorCardUpdate, VendorReviewCreate
 from ..utils.sql_helpers import escape_like
@@ -137,7 +137,8 @@ async def list_vendors(
                 | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
             )
         if q:
-            from sqlalchemy import String as SAString, or_
+            from sqlalchemy import String as SAString
+            from sqlalchemy import or_
 
             safe_q = escape_like(q)
             # Tag match — vendors whose brand/commodity tags contain the query

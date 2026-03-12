@@ -10,7 +10,6 @@ Depends on: models, enrichment_service, vendor_utils
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -58,18 +57,14 @@ async def find_vendors_for_parts(
 
     # Enrich vendors that have no emails
     if enrich_missing:
-        needs_enrichment = [
-            v for v in all_vendors.values() if not v.get("emails")
-        ]
+        needs_enrichment = [v for v in all_vendors.values() if not v.get("emails")]
         if needs_enrichment:
             logger.info(
                 "Enriching %d vendors missing emails out of %d total",
                 len(needs_enrichment),
                 len(all_vendors),
             )
-            await _enrich_vendors_batch(
-                needs_enrichment, db, timeout=enrich_timeout
-            )
+            await _enrich_vendors_batch(needs_enrichment, db, timeout=enrich_timeout)
             # Re-query to get updated emails
             for mpn in mpns:
                 results[mpn] = _query_db_for_part(mpn.upper().strip(), db)
@@ -87,9 +82,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
         db.query(Sighting)
         .filter(
             sqlfunc.upper(Sighting.normalized_mpn).like(like_pattern)
-            | sqlfunc.upper(sqlfunc.coalesce(Sighting.mpn_matched, "")).like(
-                like_pattern
-            )
+            | sqlfunc.upper(sqlfunc.coalesce(Sighting.mpn_matched, "")).like(like_pattern)
         )
         .order_by(Sighting.created_at.desc())
         .limit(200)
@@ -125,14 +118,9 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
             entry["phones"].append(s.vendor_phone.strip())
         entry["sources"].add(s.source_type or "api")
         # Keep best price/qty
-        if s.qty_available and (
-            not entry["qty_available"]
-            or s.qty_available > entry["qty_available"]
-        ):
+        if s.qty_available and (not entry["qty_available"] or s.qty_available > entry["qty_available"]):
             entry["qty_available"] = s.qty_available
-        if s.unit_price and (
-            not entry["unit_price"] or s.unit_price < entry["unit_price"]
-        ):
+        if s.unit_price and (not entry["unit_price"] or s.unit_price < entry["unit_price"]):
             entry["unit_price"] = s.unit_price
             entry["currency"] = s.currency
         if s.created_at:
@@ -178,7 +166,9 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
         ei_rows = (
             db.query(EmailIntelligence)
             .filter(
-                sqlfunc.cast(EmailIntelligence.parts_detected, db.bind.dialect.name == "postgresql" and "TEXT" or "VARCHAR").ilike(f"%{mpn_upper}%")
+                sqlfunc.cast(
+                    EmailIntelligence.parts_detected, db.bind.dialect.name == "postgresql" and "TEXT" or "VARCHAR"
+                ).ilike(f"%{mpn_upper}%")
             )
             .order_by(EmailIntelligence.received_at.desc())
             .limit(30)
@@ -187,7 +177,8 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
     except Exception:
         # Fallback: simpler query if cast fails
         try:
-            from sqlalchemy import cast, String
+            from sqlalchemy import String, cast
+
             ei_rows = (
                 db.query(EmailIntelligence)
                 .filter(cast(EmailIntelligence.parts_detected, String).ilike(f"%{mpn_upper}%"))
@@ -226,25 +217,15 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
                 "qty_available": None,
                 "unit_price": None,
                 "currency": None,
-                "last_seen": (
-                    ei.received_at.isoformat()
-                    if ei.received_at
-                    else None
-                ),
+                "last_seen": (ei.received_at.isoformat() if ei.received_at else None),
                 "sighting_count": 1,
             }
 
     # 4. Enrich with VendorCard data (emails, phones, domain, contacts)
     if vendors:
         norm_names = list(vendors.keys())
-        cards = (
-            db.query(VendorCard)
-            .filter(VendorCard.normalized_name.in_(norm_names))
-            .all()
-        )
-        card_by_norm: dict[str, VendorCard] = {
-            c.normalized_name: c for c in cards
-        }
+        cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).all()
+        card_by_norm: dict[str, VendorCard] = {c.normalized_name: c for c in cards}
 
         # Get all vendor contacts for these cards
         card_ids = [c.id for c in cards]
@@ -326,10 +307,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
                 emails.append(email)
         # Also pull VendorContact emails for this card
         bcontacts = (
-            db.query(VendorContact)
-            .filter_by(vendor_card_id=card.id)
-            .order_by(VendorContact.confidence.desc())
-            .all()
+            db.query(VendorContact).filter_by(vendor_card_id=card.id).order_by(VendorContact.confidence.desc()).all()
         )
         for vc in bcontacts:
             if vc.email and vc.email not in emails:
@@ -381,21 +359,11 @@ async def _enrich_vendors_batch(
                 return
             try:
                 contacts = await asyncio.wait_for(
-                    find_suggested_contacts(
-                        domain=domain, name=name, title_filter="sales"
-                    ),
+                    find_suggested_contacts(domain=domain, name=name, title_filter="sales"),
                     timeout=5,
                 )
-                emails = list(
-                    dict.fromkeys(
-                        c["email"] for c in contacts if c.get("email")
-                    )
-                )
-                phones = list(
-                    dict.fromkeys(
-                        c["phone"] for c in contacts if c.get("phone")
-                    )
-                )
+                emails = list(dict.fromkeys(c["email"] for c in contacts if c.get("email")))
+                phones = list(dict.fromkeys(c["phone"] for c in contacts if c.get("phone")))
                 if emails and card_id:
                     card = db.query(VendorCard).get(card_id)
                     if card:
@@ -496,12 +464,14 @@ def build_inquiry_groups(
             f"{company_name}"
         )
 
-        groups.append({
-            "vendor_name": info["vendor_name"],
-            "vendor_email": email,
-            "parts": all_mpns,
-            "subject": subject,
-            "body": body,
-        })
+        groups.append(
+            {
+                "vendor_name": info["vendor_name"],
+                "vendor_email": email,
+                "parts": all_mpns,
+                "subject": subject,
+                "body": body,
+            }
+        )
 
     return groups

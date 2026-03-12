@@ -15,53 +15,59 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User
+from app.models import Company, CustomerSite, Quote, Requirement, Requisition, User
 from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
     BuyPlanV3,
     SOVerificationStatus,
-    VerificationGroupMember,
 )
 from app.services.buyplan_workflow import (
     _should_auto_approve,
     approve_buy_plan,
     check_completion,
-    submit_buy_plan,
     resubmit_buy_plan,
+    submit_buy_plan,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _make_plan_with_lines(db: Session, *, status="draft", so_status="pending",
-                          line_statuses=None, total_cost=100.0, ai_flags=None):
+def _make_plan_with_lines(
+    db: Session, *, status="draft", so_status="pending", line_statuses=None, total_cost=100.0, ai_flags=None
+):
     """Create a BuyPlanV3 with associated records for testing."""
     user = User(
-        email="test@trioscs.com", name="Test", role="sales",
-        azure_id="az-test", created_at=datetime.now(timezone.utc),
+        email="test@trioscs.com",
+        name="Test",
+        role="sales",
+        azure_id="az-test",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.flush()
 
     company = Company(
-        name="Test Corp", is_active=True,
+        name="Test Corp",
+        is_active=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add(company)
     db.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="HQ",
+        company_id=company.id,
+        site_name="HQ",
         created_at=datetime.now(timezone.utc),
     )
     db.add(site)
     db.flush()
 
     req = Requisition(
-        name="REQ-WF-TEST", status="won", created_by=user.id,
+        name="REQ-WF-TEST",
+        status="won",
+        created_by=user.id,
         customer_site_id=site.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -69,17 +75,21 @@ def _make_plan_with_lines(db: Session, *, status="draft", so_status="pending",
     db.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="TEST-MPN",
-        target_qty=100, target_price=1.0,
+        requisition_id=req.id,
+        primary_mpn="TEST-MPN",
+        target_qty=100,
+        target_price=1.0,
         created_at=datetime.now(timezone.utc),
     )
     db.add(requirement)
     db.flush()
 
     quote = Quote(
-        requisition_id=req.id, customer_site_id=site.id,
+        requisition_id=req.id,
+        customer_site_id=site.id,
         quote_number="Q-WF-001",
-        status="won", created_by_id=user.id,
+        status="won",
+        created_by_id=user.id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(quote)
@@ -184,7 +194,8 @@ class TestApproveBuyPlanRoleCheck:
     def test_buyer_cannot_approve(self, db_session):
         """Buyer role should be rejected from approving buy plans."""
         plan, user = _make_plan_with_lines(
-            db_session, status=BuyPlanStatus.pending.value,
+            db_session,
+            status=BuyPlanStatus.pending.value,
         )
         # user has role="sales", should fail
         with pytest.raises(PermissionError, match="Only managers/admins"):
@@ -193,7 +204,8 @@ class TestApproveBuyPlanRoleCheck:
     def test_manager_can_approve(self, db_session):
         """Manager should be allowed to approve buy plans."""
         plan, user = _make_plan_with_lines(
-            db_session, status=BuyPlanStatus.pending.value,
+            db_session,
+            status=BuyPlanStatus.pending.value,
         )
         user.role = "manager"
         db_session.flush()
@@ -206,7 +218,8 @@ class TestApproveBuyPlanRoleCheck:
     def test_admin_can_approve(self, db_session):
         """Admin should be allowed to approve buy plans."""
         plan, user = _make_plan_with_lines(
-            db_session, status=BuyPlanStatus.pending.value,
+            db_session,
+            status=BuyPlanStatus.pending.value,
         )
         user.role = "admin"
         db_session.flush()
@@ -218,7 +231,8 @@ class TestApproveBuyPlanRoleCheck:
     def test_manager_can_reject(self, db_session):
         """Manager should be allowed to reject buy plans back to draft."""
         plan, user = _make_plan_with_lines(
-            db_session, status=BuyPlanStatus.pending.value,
+            db_session,
+            status=BuyPlanStatus.pending.value,
         )
         user.role = "manager"
         db_session.flush()
@@ -235,13 +249,17 @@ class TestApproveBuyPlanRoleCheck:
 class TestShouldAutoApprove:
     def test_low_cost_no_flags_auto_approves(self, db_session):
         plan, _ = _make_plan_with_lines(
-            db_session, total_cost=100.0, ai_flags=[],
+            db_session,
+            total_cost=100.0,
+            ai_flags=[],
         )
         assert _should_auto_approve(plan) is True
 
     def test_high_cost_does_not_auto_approve(self, db_session):
         plan, _ = _make_plan_with_lines(
-            db_session, total_cost=10000.0, ai_flags=[],
+            db_session,
+            total_cost=10000.0,
+            ai_flags=[],
         )
         assert _should_auto_approve(plan) is False
 
@@ -264,7 +282,9 @@ class TestShouldAutoApprove:
     def test_submit_and_resubmit_use_same_logic(self, db_session):
         """Verify submit and resubmit produce same auto-approve decision."""
         plan, user = _make_plan_with_lines(
-            db_session, total_cost=100.0, ai_flags=[],
+            db_session,
+            total_cost=100.0,
+            ai_flags=[],
         )
         result1 = submit_buy_plan(plan.id, "SO-001", user, db_session)
         status_after_submit = result1.status

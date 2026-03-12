@@ -31,16 +31,31 @@ from app.models.buy_plan import BuyPlanLine, BuyPlanStatus, BuyPlanV3
 
 def check_invalid_requisition_statuses(db, fix=False):
     """Find requisitions with statuses not in the valid enum."""
-    valid = {"draft", "active", "open", "sourcing", "offers", "quoting",
-             "quoted", "reopened", "won", "lost", "archived"}
+    valid = {
+        "draft",
+        "active",
+        "open",
+        "sourcing",
+        "offers",
+        "quoting",
+        "quoted",
+        "reopened",
+        "won",
+        "lost",
+        "archived",
+    }
     all_reqs = db.query(Requisition).all()
     issues = []
     for r in all_reqs:
         if r.status not in valid:
-            issues.append({
-                "id": r.id, "name": r.name, "status": r.status,
-                "issue": "invalid_status",
-            })
+            issues.append(
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "status": r.status,
+                    "issue": "invalid_status",
+                }
+            )
             if fix:
                 logger.info("Fixing requisition %d: %s → draft", r.id, r.status)
                 r.status = "draft"
@@ -53,23 +68,31 @@ def check_invalid_requisition_statuses(db, fix=False):
 def check_bad_requirements(db, fix=False):
     """Find requirements with missing MPN or invalid target_qty."""
     issues = []
-    bad_reqs = db.query(Requirement).filter(
-        (Requirement.primary_mpn.is_(None))
-        | (Requirement.primary_mpn == "")
-        | (Requirement.target_qty.is_(None))
-        | (Requirement.target_qty < 1)
-    ).all()
+    bad_reqs = (
+        db.query(Requirement)
+        .filter(
+            (Requirement.primary_mpn.is_(None))
+            | (Requirement.primary_mpn == "")
+            | (Requirement.target_qty.is_(None))
+            | (Requirement.target_qty < 1)
+        )
+        .all()
+    )
     for r in bad_reqs:
         issue_type = []
         if not r.primary_mpn:
             issue_type.append("missing_mpn")
         if r.target_qty is None or r.target_qty < 1:
             issue_type.append("invalid_qty")
-        issues.append({
-            "id": r.id, "requisition_id": r.requisition_id,
-            "primary_mpn": r.primary_mpn, "target_qty": r.target_qty,
-            "issue": ", ".join(issue_type),
-        })
+        issues.append(
+            {
+                "id": r.id,
+                "requisition_id": r.requisition_id,
+                "primary_mpn": r.primary_mpn,
+                "target_qty": r.target_qty,
+                "issue": ", ".join(issue_type),
+            }
+        )
         if fix and r.target_qty is not None and r.target_qty < 1:
             logger.info("Fixing requirement %d: qty %d → 1", r.id, r.target_qty)
             r.target_qty = 1
@@ -87,10 +110,13 @@ def check_buyplan_status_mismatches(db, fix=False):
         lines = db.query(BuyPlanLine).filter_by(buy_plan_id=plan.id).all()
         if not lines:
             if plan.status == BuyPlanStatus.active.value:
-                issues.append({
-                    "plan_id": plan.id, "status": plan.status,
-                    "issue": "active_plan_no_lines",
-                })
+                issues.append(
+                    {
+                        "plan_id": plan.id,
+                        "status": plan.status,
+                        "issue": "active_plan_no_lines",
+                    }
+                )
             continue
 
         terminal = {"verified", "cancelled"}
@@ -98,19 +124,25 @@ def check_buyplan_status_mismatches(db, fix=False):
         all_cancelled = all(l.status == "cancelled" for l in lines)
 
         if plan.status == BuyPlanStatus.active.value and all_cancelled:
-            issues.append({
-                "plan_id": plan.id, "status": plan.status,
-                "line_count": len(lines),
-                "issue": "active_plan_all_lines_cancelled",
-            })
+            issues.append(
+                {
+                    "plan_id": plan.id,
+                    "status": plan.status,
+                    "line_count": len(lines),
+                    "issue": "active_plan_all_lines_cancelled",
+                }
+            )
 
         if plan.status == BuyPlanStatus.completed.value and not all_terminal:
             non_terminal = [l for l in lines if l.status not in terminal]
-            issues.append({
-                "plan_id": plan.id, "status": plan.status,
-                "non_terminal_lines": len(non_terminal),
-                "issue": "completed_plan_non_terminal_lines",
-            })
+            issues.append(
+                {
+                    "plan_id": plan.id,
+                    "status": plan.status,
+                    "non_terminal_lines": len(non_terminal),
+                    "issue": "completed_plan_non_terminal_lines",
+                }
+            )
 
     return issues
 
@@ -120,30 +152,34 @@ def check_orphan_buyplan_lines(db, fix=False):
     from sqlalchemy import not_, select
 
     plan_ids = select(BuyPlanV3.id)
-    orphans = db.query(BuyPlanLine).filter(
-        not_(BuyPlanLine.buy_plan_id.in_(plan_ids))
-    ).all()
-    issues = [{"line_id": l.id, "buy_plan_id": l.buy_plan_id, "issue": "orphan_line"}
-              for l in orphans]
+    orphans = db.query(BuyPlanLine).filter(not_(BuyPlanLine.buy_plan_id.in_(plan_ids))).all()
+    issues = [{"line_id": l.id, "buy_plan_id": l.buy_plan_id, "issue": "orphan_line"} for l in orphans]
     return issues
 
 
 def check_stuck_requirements(db, fix=False):
     """Find requirements stuck in 'sourcing' for >48h."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
-    stuck = db.query(Requirement).filter(
-        Requirement.sourcing_status == "sourcing",
-        Requirement.updated_at < cutoff,
-    ).all()
+    stuck = (
+        db.query(Requirement)
+        .filter(
+            Requirement.sourcing_status == "sourcing",
+            Requirement.updated_at < cutoff,
+        )
+        .all()
+    )
     issues = []
     for r in stuck:
-        issues.append({
-            "id": r.id, "requisition_id": r.requisition_id,
-            "primary_mpn": r.primary_mpn,
-            "sourcing_status": r.sourcing_status,
-            "updated_at": str(r.updated_at),
-            "issue": "stuck_sourcing_48h",
-        })
+        issues.append(
+            {
+                "id": r.id,
+                "requisition_id": r.requisition_id,
+                "primary_mpn": r.primary_mpn,
+                "sourcing_status": r.sourcing_status,
+                "updated_at": str(r.updated_at),
+                "issue": "stuck_sourcing_48h",
+            }
+        )
         if fix:
             logger.info("Fixing requirement %d: sourcing → open (stuck)", r.id)
             r.sourcing_status = "open"

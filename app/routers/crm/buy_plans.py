@@ -44,6 +44,7 @@ def _require_v1_enabled():
     if not settings.buy_plan_v1_enabled:
         raise HTTPException(410, "V1 buy plans are disabled. Use /api/v3/buy-plans endpoints.")
 
+
 # ── Buy Plans ────────────────────────────────────────────────────────────
 
 

@@ -321,8 +321,7 @@ def generate_ai_flags(plan: BuyPlanV3, db: Session) -> list[dict]:
                     "severity": "critical",
                     "line_id": line.id,
                     "message": (
-                        f"No buyer assigned for line"
-                        f" (reason: {getattr(line, 'assignment_reason', None) or 'unknown'})"
+                        f"No buyer assigned for line (reason: {getattr(line, 'assignment_reason', None) or 'unknown'})"
                     ),
                 }
             )

@@ -8,8 +8,9 @@ Revises: 071
 Create Date: 2026-03-11
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "072"
 down_revision = "071"
@@ -22,7 +23,9 @@ def upgrade():
         "vendor_cards",
         sa.Column("is_broadcast", sa.Boolean(), server_default=sa.text("false"), nullable=True),
     )
-    op.create_index("ix_vendor_cards_broadcast", "vendor_cards", ["is_broadcast"], postgresql_where=sa.text("is_broadcast = true"))
+    op.create_index(
+        "ix_vendor_cards_broadcast", "vendor_cards", ["is_broadcast"], postgresql_where=sa.text("is_broadcast = true")
+    )
 
 
 def downgrade():

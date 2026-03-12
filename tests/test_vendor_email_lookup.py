@@ -4,12 +4,9 @@ test_vendor_email_lookup.py — Tests for vendor email lookup service and inquir
 Covers: find_vendors_for_parts, build_inquiry_groups, API endpoints.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 
 from app.services.vendor_email_lookup import build_inquiry_groups
-
 
 # ---------------------------------------------------------------------------
 # build_inquiry_groups — pure logic tests
@@ -47,12 +44,40 @@ def test_build_inquiry_groups_multiple_vendors():
     """Multiple vendors across parts are collected."""
     vendor_results = {
         "PART-A": [
-            {"vendor_name": "V1", "emails": ["v1@v1.com"], "phones": [], "domain": "v1.com", "sources": [], "sighting_count": 1},
-            {"vendor_name": "V2", "emails": ["v2@v2.com"], "phones": [], "domain": "v2.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["v1@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
+            {
+                "vendor_name": "V2",
+                "emails": ["v2@v2.com"],
+                "phones": [],
+                "domain": "v2.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ],
         "PART-B": [
-            {"vendor_name": "V2", "emails": ["v2@v2.com"], "phones": [], "domain": "v2.com", "sources": [], "sighting_count": 1},
-            {"vendor_name": "V3", "emails": ["v3@v3.com"], "phones": [], "domain": "v3.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V2",
+                "emails": ["v2@v2.com"],
+                "phones": [],
+                "domain": "v2.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
+            {
+                "vendor_name": "V3",
+                "emails": ["v3@v3.com"],
+                "phones": [],
+                "domain": "v3.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ],
     }
     parts_with_qty = [{"mpn": "PART-A", "qty": 10}, {"mpn": "PART-B", "qty": 20}]
@@ -92,10 +117,24 @@ def test_build_inquiry_groups_dedup_emails():
     """Same email from different parts only produces one group."""
     vendor_results = {
         "PART-A": [
-            {"vendor_name": "V1", "emails": ["sales@v1.com"], "phones": [], "domain": "v1.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["sales@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ],
         "PART-B": [
-            {"vendor_name": "V1", "emails": ["sales@v1.com"], "phones": [], "domain": "v1.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["sales@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ],
     }
     groups = build_inquiry_groups(
@@ -111,7 +150,14 @@ def test_build_inquiry_groups_custom_sender():
     """Custom sender name appears in email body."""
     vendor_results = {
         "PART-A": [
-            {"vendor_name": "V1", "emails": ["v1@v1.com"], "phones": [], "domain": "v1.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["v1@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ],
     }
     groups = build_inquiry_groups(
@@ -128,7 +174,14 @@ def test_build_inquiry_subject_truncation():
     """Subject line handles many parts gracefully."""
     vendor_results = {
         f"PART-{i}": [
-            {"vendor_name": "V1", "emails": ["v1@v1.com"], "phones": [], "domain": "v1.com", "sources": [], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["v1@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": [],
+                "sighting_count": 1,
+            },
         ]
         for i in range(5)
     }
@@ -149,9 +202,23 @@ def test_build_inquiry_groups_broadcast_vendors_included():
     vendor_results = {
         "PART-A": [
             # MPN-matched vendor
-            {"vendor_name": "V1", "emails": ["v1@v1.com"], "phones": [], "domain": "v1.com", "sources": ["brokerbin"], "sighting_count": 1},
+            {
+                "vendor_name": "V1",
+                "emails": ["v1@v1.com"],
+                "phones": [],
+                "domain": "v1.com",
+                "sources": ["brokerbin"],
+                "sighting_count": 1,
+            },
             # Broadcast vendor (no sighting, just flagged)
-            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+            {
+                "vendor_name": "WIN SOURCE",
+                "emails": ["service@win-source.net"],
+                "phones": [],
+                "domain": "win-source.net",
+                "sources": ["broadcast"],
+                "sighting_count": 0,
+            },
         ],
     }
     groups = build_inquiry_groups(vendor_results, [{"mpn": "PART-A", "qty": 10}])
@@ -165,10 +232,24 @@ def test_build_inquiry_groups_broadcast_vendor_gets_all_parts():
     """Broadcast vendors should get inquiries for ALL queried parts."""
     vendor_results = {
         "PART-A": [
-            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+            {
+                "vendor_name": "WIN SOURCE",
+                "emails": ["service@win-source.net"],
+                "phones": [],
+                "domain": "win-source.net",
+                "sources": ["broadcast"],
+                "sighting_count": 0,
+            },
         ],
         "PART-B": [
-            {"vendor_name": "WIN SOURCE", "emails": ["service@win-source.net"], "phones": [], "domain": "win-source.net", "sources": ["broadcast"], "sighting_count": 0},
+            {
+                "vendor_name": "WIN SOURCE",
+                "emails": ["service@win-source.net"],
+                "phones": [],
+                "domain": "win-source.net",
+                "sources": ["broadcast"],
+                "sighting_count": 0,
+            },
         ],
     }
     groups = build_inquiry_groups(

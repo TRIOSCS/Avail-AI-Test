@@ -19,68 +19,87 @@ from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisi
 from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, BuyPlanV3
 from app.services.buyplan_builder import build_buy_plan, generate_ai_flags
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
 def _setup_quote_with_offer(db: Session, *, quote_status="won"):
     """Create a full quote → requisition → requirement → offer chain."""
     user = User(
-        email="builder-test@trioscs.com", name="Builder Test", role="sales",
-        azure_id="az-builder-test", created_at=datetime.now(timezone.utc),
+        email="builder-test@trioscs.com",
+        name="Builder Test",
+        role="sales",
+        azure_id="az-builder-test",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(user)
     db.flush()
 
     company = Company(
-        name="Test Corp", is_active=True, created_at=datetime.now(timezone.utc),
+        name="Test Corp",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(company)
     db.flush()
 
     site = CustomerSite(
-        company_id=company.id, site_name="HQ",
+        company_id=company.id,
+        site_name="HQ",
         created_at=datetime.now(timezone.utc),
     )
     db.add(site)
     db.flush()
 
     req = Requisition(
-        name="REQ-BUILDER-TEST", status="won", created_by=user.id,
-        customer_site_id=site.id, created_at=datetime.now(timezone.utc),
+        name="REQ-BUILDER-TEST",
+        status="won",
+        created_by=user.id,
+        customer_site_id=site.id,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(req)
     db.flush()
 
     requirement = Requirement(
-        requisition_id=req.id, primary_mpn="TEST-MPN",
-        target_qty=100, target_price=1.0,
+        requisition_id=req.id,
+        primary_mpn="TEST-MPN",
+        target_qty=100,
+        target_price=1.0,
         created_at=datetime.now(timezone.utc),
     )
     db.add(requirement)
     db.flush()
 
     vendor = VendorCard(
-        normalized_name="test vendor", display_name="Test Vendor",
+        normalized_name="test vendor",
+        display_name="Test Vendor",
         created_at=datetime.now(timezone.utc),
     )
     db.add(vendor)
     db.flush()
 
     offer = Offer(
-        requisition_id=req.id, requirement_id=requirement.id,
-        vendor_card_id=vendor.id, vendor_name="Test Vendor",
-        mpn="TEST-MPN", qty_available=100, unit_price=0.50,
-        status="active", entered_by_id=user.id,
+        requisition_id=req.id,
+        requirement_id=requirement.id,
+        vendor_card_id=vendor.id,
+        vendor_name="Test Vendor",
+        mpn="TEST-MPN",
+        qty_available=100,
+        unit_price=0.50,
+        status="active",
+        entered_by_id=user.id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(offer)
     db.flush()
 
     quote = Quote(
-        requisition_id=req.id, customer_site_id=site.id,
-        quote_number="Q-BUILD-001", status=quote_status,
-        created_by_id=user.id, created_at=datetime.now(timezone.utc),
+        requisition_id=req.id,
+        customer_site_id=site.id,
+        quote_number="Q-BUILD-001",
+        status=quote_status,
+        created_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(quote)
     db.flush()
@@ -128,7 +147,8 @@ class TestBuildBuyPlanDuplicate:
 
         # Create first plan
         existing = BuyPlanV3(
-            quote_id=quote.id, requisition_id=req.id,
+            quote_id=quote.id,
+            requisition_id=req.id,
             status=BuyPlanStatus.draft.value,
             created_at=datetime.now(timezone.utc),
         )
@@ -143,7 +163,8 @@ class TestBuildBuyPlanDuplicate:
         quote, req, *_ = _setup_quote_with_offer(db_session)
 
         cancelled = BuyPlanV3(
-            quote_id=quote.id, requisition_id=req.id,
+            quote_id=quote.id,
+            requisition_id=req.id,
             status=BuyPlanStatus.cancelled.value,
             created_at=datetime.now(timezone.utc),
         )
@@ -163,7 +184,8 @@ class TestNoBuyerFlag:
         quote, req, requirement, offer, user = _setup_quote_with_offer(db_session)
 
         plan = BuyPlanV3(
-            quote_id=quote.id, requisition_id=req.id,
+            quote_id=quote.id,
+            requisition_id=req.id,
             status=BuyPlanStatus.draft.value,
             created_at=datetime.now(timezone.utc),
         )
@@ -173,10 +195,14 @@ class TestNoBuyerFlag:
         from app.models.buy_plan import BuyPlanLine
 
         line = BuyPlanLine(
-            buy_plan_id=plan.id, requirement_id=requirement.id,
-            offer_id=offer.id, quantity=100,
-            unit_cost=0.50, unit_sell=1.0,
-            buyer_id=None, assignment_reason="no_buyers",
+            buy_plan_id=plan.id,
+            requirement_id=requirement.id,
+            offer_id=offer.id,
+            quantity=100,
+            unit_cost=0.50,
+            unit_sell=1.0,
+            buyer_id=None,
+            assignment_reason="no_buyers",
             status=BuyPlanLineStatus.awaiting_po.value,
         )
         db_session.add(line)

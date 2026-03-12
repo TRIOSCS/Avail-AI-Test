@@ -8,7 +8,6 @@ Depends on: app.jobs.selfheal_jobs
 """
 
 
-
 class TestSelfhealJobsRemoved:
     def test_module_is_stub(self):
         """selfheal_jobs module was removed during simplification."""
