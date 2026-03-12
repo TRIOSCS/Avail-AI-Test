@@ -7718,11 +7718,7 @@ async function _loadPartTab(reqId, requirementId, tabName) {
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
                 break;
             case 'activity': {
-                const [notes, tasks] = await Promise.all([
-                    apiFetch(`/api/requirements/${requirementId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${requirementId}/tasks`).catch(() => []),
-                ]);
-                data = { notes, tasks, history: [] };
+                data = await apiFetch(`/api/requirements/${requirementId}/history`).catch(() => []);
                 break;
             }
         }
@@ -16560,13 +16556,8 @@ async function _rfqLoadTab(tab) {
                 data = await apiFetch(`/api/requirements/${partId}/offers`);
                 break;
             case 'activity': {
-                // Fetch notes, tasks, and history in parallel
-                const [notes, tasks, history] = await Promise.all([
-                    apiFetch(`/api/requirements/${partId}/notes`).catch(() => ({})),
-                    apiFetch(`/api/requirements/${partId}/tasks`).catch(() => []),
-                    apiFetch(`/api/requirements/${partId}/history`).catch(() => []),
-                ]);
-                data = { notes, tasks, history };
+                // Timeline-only activity stream (tasks/notes have dedicated tabs).
+                data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
             }
             case 'sightings':
@@ -16738,174 +16729,67 @@ async function rfqToggleOfferSelection(offerId) {
     }
 }
 
-// ── ACTIVITY TAB (merged tasks + notes + history) ─────────────────────
+// ── ACTIVITY TAB (timeline only) ───────────────────────────────────────
 
 function _rfqRenderActivity(data, body) {
-    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-    const notesData = data.notes || {};
-    const history = Array.isArray(data.history) ? data.history : [];
+    const history = Array.isArray(data) ? data : (Array.isArray(data?.history) ? data.history : []);
+    const timeline = history
+        .map(ev => ({ event: ev, ts: ev.created_at ? new Date(ev.created_at).getTime() : 0 }))
+        .sort((a, b) => b.ts - a.ts);
 
-    const openTasks = tasks.filter(t => t.status !== 'done');
-    const doneTasks = tasks.filter(t => t.status === 'done');
-
-    let html = '';
-
-    // ── Pinned open tasks ──
-    html += '<div class="activity-section">';
+    let html = '<div class="activity-section">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    html += `<span style="font-size:12px;font-weight:600">${openTasks.length ? openTasks.length + ' Open Task' + (openTasks.length > 1 ? 's' : '') : 'No open tasks'}</span>`;
-    html += '<button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>';
+    html += `<span style="font-size:12px;font-weight:600">${timeline.length} Event${timeline.length !== 1 ? 's' : ''}</span>`;
     html += '</div>';
-
-    // Inline task creation form placeholder
-    html += '<div id="rfqTaskFormSlot"></div>';
-
-    openTasks.forEach(t => {
-        const due = t.due_at || t.due_date;
-        let dueHtml = '';
-        if (due) {
-            const d = new Date(due);
-            const overdue = d < new Date() && t.status !== 'done';
-            dueHtml = `<span class="${overdue ? 'task-overdue' : ''}" style="font-size:10px">${overdue ? 'OVERDUE \u2014 ' : 'Due '}${fmtDate(due)}</span>`;
-        }
-        html += `<div class="activity-item activity-item-task-open">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start">
-                <div style="flex:1">
-                    <div style="font-size:11px;font-weight:600">${esc(t.title)}</div>
-                    <div style="font-size:10px;color:var(--muted);margin-top:2px">
-                        Assigned to <b>${esc(t.assignee_name || 'Unassigned')}</b>
-                        ${t.creator_name ? ' by ' + esc(t.creator_name) : ''}
-                        ${dueHtml ? ' \u2014 ' + dueHtml : ''}
-                    </div>
-                    ${t.ai_risk_flag ? '<div class="task-risk-flag" style="margin-top:3px">' + esc(t.ai_risk_flag) + '</div>' : ''}
-                </div>
-                <button class="btn btn-sm btn-ghost" style="font-size:10px;white-space:nowrap" onclick="rfqShowCompleteForm(${t.id})">Complete</button>
-            </div>
-            <div id="rfqCompleteSlot-${t.id}"></div>
-        </div>`;
-    });
-    html += '</div>';
-
-    // ── Inline add-note ──
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0 6px">';
-    html += '<span style="font-size:12px;font-weight:600">Timeline</span>';
-    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button>';
-    html += '</div>';
-    html += '<div id="rfqNoteFormSlot"></div>';
-
-    // ── Timeline: notes + completed tasks + history events ──
     html += '<div class="activity-timeline">';
 
-    // Build a unified timeline array
-    const timeline = [];
-
-    // Requirement notes
-    if (notesData.requirement_notes) {
-        const lines = notesData.requirement_notes.split('\n').filter(l => l.trim());
-        lines.forEach(line => {
-            // Try to parse timestamp from "[YYYY-MM-DD HH:MM user@email] text" format
-            const match = line.match(/^\[(\d{4}-\d{2}-\d{2}\s\d{2}:\d{2})\s/);
-            const ts = match ? new Date(match[1]).getTime() : 0;
-            timeline.push({ type: 'req_note', text: line, ts });
-        });
-    }
-
-    // Offer notes
-    if (notesData.notes && notesData.notes.length > 0) {
-        notesData.notes.forEach(n => {
-            const ts = n.created_at ? new Date(n.created_at).getTime() : 0;
-            timeline.push({ type: 'offer_note', vendor: n.vendor_name, text: n.note, ts, created_at: n.created_at });
-        });
-    }
-
-    // Completed tasks
-    doneTasks.forEach(t => {
-        const ts = t.completed_at ? new Date(t.completed_at).getTime() : (t.updated_at ? new Date(t.updated_at).getTime() : 0);
-        timeline.push({ type: 'task_done', task: t, ts });
-    });
-
-    // History events
-    history.forEach(ev => {
-        const ts = ev.created_at ? new Date(ev.created_at).getTime() : 0;
-        timeline.push({ type: 'history', event: ev, ts });
-    });
-
-    // Sort newest first
-    timeline.sort((a, b) => b.ts - a.ts);
-
-    if (timeline.length === 0) {
+    if (!timeline.length) {
         html += '<div class="empty-placeholder" style="font-size:11px">No activity yet</div>';
     }
 
     timeline.forEach(item => {
-        switch (item.type) {
-            case 'req_note':
-                html += `<div class="activity-item activity-item-note">
-                    <div style="font-size:10px;font-weight:600;color:var(--muted)">Requirement Note</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-                </div>`;
-                break;
-            case 'offer_note':
-                html += `<div class="activity-item activity-item-note">
-                    <div style="font-size:10px;font-weight:600;color:var(--muted)">Offer Note \u2014 ${esc(item.vendor || '')}</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(item.text)}</div>
-                    ${item.created_at ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + fmtDateTime(item.created_at) + '</div>' : ''}
-                </div>`;
-                break;
-            case 'task_done': {
-                const t = item.task;
-                html += `<div class="activity-item activity-item-task-done">
-                    <div style="font-size:10px;font-weight:600;color:var(--green)">Task Completed</div>
-                    <div style="font-size:11px;margin-top:2px">${esc(t.title)}</div>
-                    ${t.completion_note ? '<div style="font-size:11px;margin-top:2px;color:var(--muted);font-style:italic">"' + esc(t.completion_note) + '"</div>' : ''}
-                    <div style="font-size:10px;color:var(--muted);margin-top:2px">${t.assignee_name ? 'by ' + esc(t.assignee_name) : ''} ${t.completed_at ? fmtDateTime(t.completed_at) : ''}</div>
-                </div>`;
-                break;
-            }
-            case 'history': {
-                const ev = item.event;
-                let icon = '', text = '';
-                switch (ev.type) {
-                    case 'change':
-                        icon = '\u270f\ufe0f';
-                        text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity || '')} <b>${esc(ev.field || '')}</b>`;
-                        if (ev.old_value || ev.new_value) {
-                            const fv = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
-                            text += `<div style="font-size:10px;color:var(--muted)">${esc(fv(ev.old_value))} \u2192 ${esc(fv(ev.new_value))}</div>`;
-                        }
-                        break;
-                    case 'offer_created':
-                        icon = '\ud83d\udcb0';
-                        text = `Offer from <b>${esc(ev.vendor_name || '')}</b>`;
-                        if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
-                        break;
-                    case 'rfq_sent':
-                        icon = '\u2709\ufe0f';
-                        text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name || '')}</b>`;
-                        break;
-                    case 'task_done':
-                        icon = '\u2705';
-                        text = `Task completed: <b>${esc(ev.title || '')}</b>`;
-                        break;
-                    default:
-                        icon = '\u2022';
-                        text = esc(ev.summary || ev.type || 'Event');
+        const ev = item.event || {};
+        let icon = '';
+        let text = '';
+        switch (ev.type) {
+            case 'change':
+                icon = '\u270f\ufe0f';
+                text = `<b>${esc(ev.user || 'System')}</b> changed ${esc(ev.entity || '')} <b>${esc(ev.field || '')}</b>`;
+                if (ev.old_value || ev.new_value) {
+                    const fv = v => !v ? '\u2014' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+                    text += `<div style="font-size:10px;color:var(--muted)">${esc(fv(ev.old_value))} \u2192 ${esc(fv(ev.new_value))}</div>`;
                 }
-                html += `<div class="activity-item activity-item-event">
-                    <div style="display:flex;gap:6px;align-items:flex-start">
-                        <span>${icon}</span>
-                        <div>
-                            <div style="font-size:11px">${text}</div>
-                            ${ev.created_at ? '<div style="font-size:10px;color:var(--muted)">' + fmtDateTime(ev.created_at) + '</div>' : ''}
-                        </div>
-                    </div>
-                </div>`;
                 break;
-            }
+            case 'offer_created':
+                icon = '\ud83d\udcb0';
+                text = `Offer from <b>${esc(ev.vendor_name || '')}</b>`;
+                if (ev.unit_price) text += ` at $${Number(ev.unit_price).toFixed(4)}`;
+                break;
+            case 'rfq_sent':
+                icon = '\u2709\ufe0f';
+                text = `RFQ ${ev.contact_type === 'phone' ? 'called' : 'sent'} to <b>${esc(ev.vendor_name || '')}</b>`;
+                break;
+            case 'task_done':
+                icon = '\u2705';
+                text = `Task completed: <b>${esc(ev.title || '')}</b>`;
+                break;
+            default:
+                icon = '\u2022';
+                text = esc(ev.summary || ev.type || 'Event');
         }
+
+        html += `<div class="activity-item activity-item-event">
+            <div style="display:flex;gap:6px;align-items:flex-start">
+                <span>${icon}</span>
+                <div>
+                    <div style="font-size:11px">${text}</div>
+                    ${ev.created_at ? '<div style="font-size:10px;color:var(--muted)">' + fmtDateTime(ev.created_at) + '</div>' : ''}
+                </div>
+            </div>
+        </div>`;
     });
 
-    html += '</div>';
+    html += '</div></div>';
     body.innerHTML = html;
 }
 
