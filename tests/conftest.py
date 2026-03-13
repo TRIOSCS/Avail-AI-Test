@@ -23,6 +23,7 @@ nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contaminat
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
+os.environ["MVP_MODE"] = "false"  # Keep full router surface enabled in tests
 os.environ["DATABASE_URL"] = "sqlite://"  # Prevent any code from connecting to real PostgreSQL
 os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests
 os.environ["CACHE_BACKEND"] = "none"  # Disable cache backend in tests
