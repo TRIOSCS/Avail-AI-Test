@@ -10,6 +10,8 @@ Depends on: app.routers.explorium, app.schemas.explorium,
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.schemas.explorium import (
     DiscoveredCompany,
     DiscoverRequest,
@@ -24,6 +26,16 @@ from app.services.prospect_discovery_explorium import (
 )
 
 # ── Fixtures ────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _skip_if_explorium_router_disabled():
+    """Explorium router is disabled when MVP mode is enabled."""
+    from app.main import app
+
+    has_route = any(getattr(route, "path", "") == "/api/explorium/segments" for route in app.routes)
+    if not has_route:
+        pytest.skip("Explorium router disabled in MVP mode")
 
 
 SAMPLE_DISCOVERY_RESULT = {
