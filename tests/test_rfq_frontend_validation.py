@@ -32,9 +32,44 @@ def app_js():
 
 
 @pytest.fixture(scope="module")
+def crm_js():
+    """Read crm.js raw content."""
+    with open("app/static/crm.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def followups_js():
+    """Read RFQ follow-up module raw content."""
+    with open("app/static/rfq/followups.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
 def styles_css():
     """Read styles.css raw content."""
     with open("app/static/styles.css", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def rfq_followups_js():
+    """Read followups.js raw content."""
+    with open("app/static/rfq/followups.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def rfq_activity_js():
+    """Read activity.js raw content."""
+    with open("app/static/rfq/activity.js", "r") as f:
+        return f.read()
+
+
+@pytest.fixture(scope="module")
+def rfq_workspace_js():
+    """Read workspace.js raw content."""
+    with open("app/static/rfq/workspace.js", "r") as f:
         return f.read()
 
 
@@ -167,6 +202,73 @@ class TestInlineRfqBar:
 
     def test_clearSightingSelection_function(self, app_js):
         assert "_clearSightingSelection" in app_js
+
+
+class TestFollowUpPanelRefresh:
+    def test_bulk_follow_up_refreshes_panel(self, app_js):
+        assert "loadFollowUpsPanel();" in app_js
+
+    def test_no_stale_loadFollowUps_call(self, app_js):
+        assert "loadFollowUps();" not in app_js
+
+
+class TestRfqErrorToasts:
+    def test_retry_rfq_uses_friendly_error_toast(self, app_js):
+        assert "Couldn\\'t retry RFQ — " in app_js
+
+    def test_update_status_uses_friendly_error_toast(self, app_js):
+        assert "Couldn\\'t update response status — " in app_js
+
+
+class TestRfqFollowUpModuleWireup:
+    def test_app_imports_followups_module(self, app_js):
+        assert "./rfq/followups.js" in app_js
+
+    def test_followups_module_exports_send_and_panel(self, rfq_followups_js):
+        assert "export function sendFollowUpImpl" in rfq_followups_js
+        assert "export async function loadFollowUpsPanelImpl" in rfq_followups_js
+
+
+class TestRfqActivityModuleWireup:
+    def test_app_imports_activity_module(self, app_js):
+        assert "./rfq/activity.js" in app_js
+
+    def test_activity_module_exports_fetcher(self, rfq_activity_js):
+        assert "export async function fetchActivityData" in rfq_activity_js
+
+
+class TestRfqWorkspaceModuleWireup:
+    def test_app_imports_workspace_module(self, app_js):
+        assert "./rfq/workspace.js" in app_js
+
+    def test_workspace_module_exports_tab_fetcher(self, rfq_workspace_js):
+        assert "export async function fetchRfqWorkspaceTabData" in rfq_workspace_js
+
+
+class TestFrontendXssGuards:
+    def test_app_uses_sanitizer_for_email_bodies(self, app_js):
+        assert "sanitizeRichHtml(c.body)" in app_js
+        assert "sanitizeRichHtml(r.body)" in app_js
+
+    def test_app_escapes_parts_included_rendering(self, app_js):
+        assert "map(p => esc(typeof p === 'object'" in app_js
+
+    def test_crm_sanitizes_proactive_draft_html(self, crm_js):
+        assert "const safeHtml = sanitizeRichHtml(result.html);" in crm_js
+        assert "emailHtml = sanitizeRichHtml(draftPreview.innerHTML);" in crm_js
+
+    def test_crm_escapes_vendor_scorecard_names(self, crm_js):
+        assert "<strong>${esc(v.vendor_name)}</strong>" in crm_js
+
+
+class TestFrontendRegressionGuards:
+    def test_requesting_contact_field_has_single_combined_class(self, index_html):
+        assert 'class="field u-hidden" id="nrContactField"' in index_html
+        assert 'id="nrContactField" class="u-hidden"' not in index_html
+
+    def test_confirm_modal_removes_escape_listener_on_close(self, app_js):
+        assert "document.removeEventListener('keydown', escHandler);" in app_js
+        assert "var closeConfirm = function()" in app_js
 
 
 # ── Notification Bar ─────────────────────────────────────────────────────

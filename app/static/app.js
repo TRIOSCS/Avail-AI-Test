@@ -451,6 +451,49 @@ export function escAttr(s) {
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+export function sanitizeRichHtml(rawHtml) {
+    if (!rawHtml) return '';
+    const input = String(rawHtml);
+    if (typeof window === 'undefined' || typeof DOMParser === 'undefined') {
+        return esc(input).replace(/\n/g, '<br>');
+    }
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(`<div>${input}</div>`, 'text/html');
+    const root = doc.body.firstElementChild || doc.body;
+    const allowedTags = new Set([
+        'A', 'B', 'BLOCKQUOTE', 'BR', 'CODE', 'DIV', 'EM', 'I', 'LI', 'OL',
+        'P', 'PRE', 'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'UL',
+    ]);
+    const allowedAttrs = new Set(['href', 'title', 'colspan', 'rowspan', 'align']);
+
+    for (const node of Array.from(root.querySelectorAll('*'))) {
+        if (!allowedTags.has(node.tagName)) {
+            node.replaceWith(doc.createTextNode(node.textContent || ''));
+            continue;
+        }
+        for (const attr of Array.from(node.attributes)) {
+            const name = attr.name.toLowerCase();
+            if (name.startsWith('on') || name === 'style') {
+                node.removeAttribute(attr.name);
+                continue;
+            }
+            if (name === 'href') {
+                const href = (attr.value || '').trim();
+                if (!/^(https?:|mailto:|tel:)/i.test(href)) {
+                    node.removeAttribute(attr.name);
+                } else {
+                    node.setAttribute('rel', 'noopener noreferrer');
+                    node.setAttribute('target', '_blank');
+                }
+                continue;
+            }
+            if (!allowedAttrs.has(name)) {
+                node.removeAttribute(attr.name);
+            }
+        }
+    }
+    return root.innerHTML;
+}
 window.skeletonRows = function(n) {
     let h = '';
     for (let i = 0; i < n; i++) h += '<div class="skeleton-row"><div class="skeleton-cell skeleton-cell-lg"></div><div class="skeleton-cell skeleton-cell-md"></div><div class="skeleton-cell skeleton-cell-sm"></div><div class="skeleton-cell skeleton-cell-md"></div></div>';
@@ -14303,7 +14346,7 @@ async function viewThread(vendorName) {
             const searchText = [c.vendor_contact, c.subject, c.user_name, bodyText, ...(c.parts_included||[])].filter(Boolean).join(' ').toLowerCase();
             // Render outbound email body as HTML (it's stored as HTML from the email composer)
             const bodyHtml = c.body
-                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:300px;overflow-y:auto">${c.body}</div>`
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:300px;overflow-y:auto">${sanitizeRichHtml(c.body)}</div>`
                 : '';
             let contactBadge = c.contact_type === 'email' ? '✉ Sent' : '📞 Called';
             let contactStyle = 'background:var(--teal-light);border:1px solid rgba(26,127,155,.15)';
@@ -14322,7 +14365,7 @@ async function viewThread(vendorName) {
                     ${contactBadge} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
                 </div>
                 ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
-                <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).map(p => typeof p === 'object' ? (p.mpn || p.part_number || JSON.stringify(p)) : p).join(', ')}</div>
+                <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).map(p => esc(typeof p === 'object' ? (p.mpn || p.part_number || JSON.stringify(p)) : p)).join(', ')}</div>
                 ${bodyHtml}
             </div>`;
             if (c.status === 'failed') {
@@ -14371,7 +14414,7 @@ async function viewThread(vendorName) {
             const rawBody = (r.body || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
             searchParts.push(rawBody);
             const emailBodyHtml = r.body
-                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:300px;overflow-y:auto">${r.body}</div>`
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:300px;overflow-y:auto">${sanitizeRichHtml(r.body)}</div>`
                 : '';
 
             const searchText = searchParts.filter(Boolean).join(' ').toLowerCase();
@@ -14501,14 +14544,14 @@ function openSentEmailsModal() {
     } else {
         for (const c of allSent) {
             const bodyHtml = c.body
-                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:200px;overflow-y:auto">${c.body}</div>`
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:200px;overflow-y:auto">${sanitizeRichHtml(c.body)}</div>`
                 : '';
             html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
                 <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
                     To: ${esc(c.vendor_contact || '')} (${esc(c.vendor_name || '')}) · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name || '')}
                 </div>
                 ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
-                <div style="font-size:11px;color:var(--text2)">${(c.parts_included || []).map(p => typeof p === 'object' ? (p.mpn || p.part_number || JSON.stringify(p)) : p).join(', ')}</div>
+                <div style="font-size:11px;color:var(--text2)">${(c.parts_included || []).map(p => esc(typeof p === 'object' ? (p.mpn || p.part_number || JSON.stringify(p)) : p)).join(', ')}</div>
                 ${bodyHtml}
             </div>`;
         }
@@ -14550,7 +14593,7 @@ function openRepliedEmailsModal() {
                 parsedHtml += '</table>';
             }
             const emailBodyHtml = r.body
-                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:200px;overflow-y:auto">${r.body}</div>`
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:200px;overflow-y:auto">${sanitizeRichHtml(r.body)}</div>`
                 : '';
             html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
                 <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">

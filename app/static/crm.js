@@ -18,6 +18,7 @@ import {
     toggleDrillDown, guardBtn, openVendorPopup,
     loadVendorContacts, refreshProactiveBadge,
     currentReqId, setCurrentReqId,
+    sanitizeRichHtml,
     _renderAvailScoreTable,
 } from 'app';
 
@@ -50,6 +51,12 @@ function isValidEmail(email) {
 function isValidPhone(phone) {
     const digits = phone.replace(/\D/g, '');
     return digits.length >= 7;
+}
+
+function safeUrl(url) {
+    if (!url) return '';
+    const val = String(url).trim();
+    return /^(https?:\/\/|mailto:|tel:)/i.test(val) ? val : '';
 }
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -5427,8 +5434,9 @@ async function generateProactiveDraft() {
             }
         });
         if (result.html) {
-            preview.innerHTML = result.html;
-            _proactiveDraftHtml = result.html;
+            const safeHtml = sanitizeRichHtml(result.html);
+            preview.innerHTML = safeHtml;
+            _proactiveDraftHtml = safeHtml;
         }
         if (result.subject) {
             const psS = document.getElementById('psSubject'); if (psS) psS.value = result.subject;
@@ -5480,7 +5488,7 @@ async function sendProactiveOffer() {
     let emailHtml = null;
     if (draftPreview && _proactiveDraftHtml) {
         // Use current content of the editable preview (may have been hand-edited)
-        emailHtml = draftPreview.innerHTML;
+        emailHtml = sanitizeRichHtml(draftPreview.innerHTML);
     }
 
     await guardBtn(btn, 'Sending…', async () => {
@@ -5803,7 +5811,7 @@ function renderVendorScorecards(data) {
             : '<td class="metric-cell na">N/A</td>';
         const ringScore = v.composite_score != null ? Math.round(v.composite_score * 100) : 0;
         html += `<tr>
-            <td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(ringScore, 28) : ''}<strong>${v.vendor_name}</strong></td>
+            <td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(ringScore, 28) : ''}<strong>${esc(v.vendor_name)}</strong></td>
             ${metricCell(v.response_rate)}
             ${metricCell(v.quote_conversion)}
             ${metricCell(v.po_conversion)}
@@ -6290,13 +6298,14 @@ function _renderSourceCard(s, canToggle, isPlanned) {
         : '';
 
     const cardCls = isPlanned ? 'card s-card s-card-planned' : 'card s-card';
+    const signupUrl = safeUrl(s.signup_url);
 
     return `<div class="${cardCls}" style="max-width:none">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
             <div style="display:flex;align-items:center;gap:10px">
-                <strong style="font-size:14px">${s.display_name}</strong>
+                <strong style="font-size:14px">${esc(s.display_name)}</strong>
                 ${_statusBadge(s.status, isPlanned)}
-                <span class="s-hint">${s.source_type}</span>
+                <span class="s-hint">${esc(s.source_type)}</span>
             </div>
             <div class="s-row" style="gap:8px">
                 ${activeToggleHtml}
@@ -6304,10 +6313,10 @@ function _renderSourceCard(s, canToggle, isPlanned) {
                 ${testHtml}
             </div>
         </div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
-        ${!isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
-        ${isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:4px">' + s.setup_notes + '</div>' : ''}
-        ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">' + (isPlanned ? 'More info' : 'Get API credentials') + ' ↗</a>' : ''}
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${esc(s.description || '')}</div>
+        ${!isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + esc(s.setup_notes) + '</div>' : ''}
+        ${isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:4px">' + esc(s.setup_notes) + '</div>' : ''}
+        ${signupUrl ? '<a href="' + escAttr(signupUrl) + '" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:var(--teal);text-decoration:none">' + (isPlanned ? 'More info' : 'Get API credentials') + ' ↗</a>' : ''}
         ${credsHtml ? '<div style="margin-top:10px">' + credsHtml + '</div>' : ''}
         <div id="test-result-${s.id}"></div>
         ${statsHtml}${healthHtml}${errorHtml}
@@ -6498,7 +6507,7 @@ async function loadSettingsConfig() {
             if (isBool) {
                 const checked = c.value === 'true' ? 'checked' : '';
                 html += `<div class="s-row">
-                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span class="s-hint">${c.description || ''}</span></label>
+                    <label style="flex:1;font-size:13px">${esc(c.key.replace(/_/g, ' '))}<br><span class="s-hint">${esc(c.description || '')}</span></label>
                     <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
                         <input type="checkbox" ${checked} onchange="saveConfig('${c.key}', this.checked ? 'true' : 'false')">
                         <span style="font-size:12px">${c.value === 'true' ? 'On' : 'Off'}</span>
@@ -6506,8 +6515,8 @@ async function loadSettingsConfig() {
                 </div>`;
             } else {
                 html += `<div class="s-row">
-                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span class="s-hint">${c.description || ''}</span></label>
-                    <input type="text" value="${c.value}" id="cfg_${c.key}" class="s-input-num">
+                    <label style="flex:1;font-size:13px">${esc(c.key.replace(/_/g, ' '))}<br><span class="s-hint">${esc(c.description || '')}</span></label>
+                    <input type="text" value="${escAttr(c.value || '')}" id="cfg_${c.key}" class="s-input-num">
                     <button class="btn btn-ghost btn-sm" onclick="saveConfig('${c.key}', document.getElementById('cfg_${c.key}').value)">Save</button>
                 </div>`;
             }
@@ -6710,7 +6719,7 @@ async function refreshTeamsChannels() {
         }
     } catch (e) {
         const status = document.getElementById('teamsStatus');
-        if (status) status.innerHTML = `<span style="color:var(--red)">Could not load channels: ${e.message || e}</span>`;
+        if (status) status.innerHTML = `<span style="color:var(--red)">Could not load channels: ${esc(e.message || e)}</span>`;
     }
 }
 
@@ -6740,7 +6749,7 @@ async function saveTeamsConfig() {
         });
         if (status) status.innerHTML = '<span style="color:var(--green)">Configuration saved.</span>';
     } catch (e) {
-        if (status) status.innerHTML = `<span style="color:var(--red)">Save failed: ${e.message || e}</span>`;
+        if (status) status.innerHTML = `<span style="color:var(--red)">Save failed: ${esc(e.message || e)}</span>`;
     }
 }
 
