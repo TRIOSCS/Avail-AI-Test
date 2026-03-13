@@ -1,0 +1,29 @@
+{#
+  base.html — App shell for HTMX + Alpine.js frontend.
+  Loaded when USE_HTMX=true. Contains nav, sidebar, content area.
+  Called by: app/routers/views.py
+  Depends on: htmx.org, alpinejs (via htmx_app.js bundle)
+#}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}AvailAI{% endblock %}</title>
+    <link rel="stylesheet" href="/static/styles.css">
+    {% block head %}{% endblock %}
+</head>
+<body hx-boost="true">
+    {% include "partials/shared/toast.html" %}
+    {% include "partials/shared/modal.html" %}
+
+    <div class="app-layout">
+        <main id="main-content" hx-target="this" hx-swap="innerHTML">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <script src="/static/htmx_app.js" type="module"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

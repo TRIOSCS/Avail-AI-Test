@@ -1,0 +1,8 @@
+{# Toast notification — driven by Alpine store. Included in base.html. #}
+<div x-data x-show="$store.toast.show" x-transition
+     @click="$store.toast.show = false"
+     x-init="$watch('$store.toast.show', v => v && setTimeout(() => $store.toast.show = false, 4000))"
+     :class="{ 'toast-success': $store.toast.type === 'success', 'toast-error': $store.toast.type === 'error' }"
+     class="toast">
+    <span x-text="$store.toast.message"></span>
+</div>

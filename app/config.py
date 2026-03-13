@@ -230,6 +230,9 @@ class Settings(BaseSettings):
     # Set MVP_MODE=false in .env to re-enable all features
     mvp_mode: bool = True
 
+    # --- Frontend ---
+    use_htmx: bool = False
+
     # --- Prospecting ---
     prospecting_enabled: bool = True
     prospecting_min_fit_for_contacts: int = 60

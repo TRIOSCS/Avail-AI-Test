@@ -1,0 +1,7 @@
+{# Empty state placeholder — used when a list has no items. #}
+<div class="empty-state">
+    <p>{{ message | default("No items found.") }}</p>
+    {% if action_url %}
+    <button hx-get="{{ action_url }}" hx-target="#main-content">{{ action_label | default("Create one") }}</button>
+    {% endif %}
+</div>
