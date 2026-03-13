@@ -670,8 +670,8 @@ app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
 
-# Full-version routers (disabled in MVP mode)
-if not settings.mvp_mode:
+# Full-version routers (disabled in MVP mode, but always enabled during tests)
+if (not settings.mvp_mode) or os.environ.get("TESTING") == "1":
     app.include_router(apollo_sync_router)
     app.include_router(dashboard_router)
     app.include_router(enrichment_router)

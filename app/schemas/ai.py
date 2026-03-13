@@ -119,6 +119,7 @@ class IntakeDraftRequest(BaseModel):
     """Raw intake text payload sent for AI draft parsing."""
 
     text: str = Field(min_length=1)
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod
@@ -268,7 +269,7 @@ class CompareQuotesRequest(BaseModel):
 class ParseFreeformRfqRequest(BaseModel):
     """Input for AI freeform RFQ parsing (customer text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str = ""
 
 
 class ParseFreeformOfferRequest(BaseModel):
