@@ -530,7 +530,7 @@ class TestRequirementPanelTabs:
 
     def test_notes_tab_has_add_button(self, app_js):
         """Notes tab includes the + Add Note button."""
-        assert "rfqShowNoteForm" in app_js
+        assert "rfqAddNote()" in app_js
 
     def test_task_submit_invalidates_tasks_cache(self, app_js):
         """rfqSubmitTask invalidates the tasks cache."""
