@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -331,6 +332,29 @@ async def csp_middleware(request: Request, call_next):
     return response
 
 
+# ── Clear-Site-Data header gate ──────────────────────────────────────────
+# Temporary: forces browsers to clear cached stale assets during a migration window.
+# Auto-disables after the cutoff to avoid permanent cache clearing.
+_CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Return True while we are still within the cache-clearing migration window."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now < _CLEAR_SITE_DATA_CUTOFF
+
+
+@app.middleware("http")
+async def clear_site_data_middleware(request: Request, call_next):
+    """Inject Clear-Site-Data header during migration window (non-health, non-static)."""
+    response = await call_next(request)
+    path = request.url.path
+    if _should_set_clear_site_data() and not path.startswith(("/static", "/health", "/api")):
+        response.headers["Clear-Site-Data"] = '"cache", "storage"'
+    return response
+
+
 # L1: Request/response middleware — request ID, timing, structured logging
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
@@ -566,7 +590,7 @@ def _seed_api_sources():
             del existing_map["newark"]
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
-        # Backfill known monthly quotas (only sets if currently NULL)
+        # Backfill known monthly quotas — uses existing_map (no extra DB queries)
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
@@ -578,7 +602,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

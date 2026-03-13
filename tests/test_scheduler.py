@@ -57,6 +57,7 @@ def _mock_settings(**overrides):
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
         material_enrichment_enabled=False,
+        mvp_mode=False,  # Enable full-mode jobs by default in tests
     )
     defaults.update(overrides)
     mock = MagicMock()

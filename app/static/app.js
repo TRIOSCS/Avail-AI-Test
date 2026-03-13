@@ -16929,4 +16929,39 @@ Object.assign(window, {
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
     rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    // Lead provenance panel
+    openLeadProvenancePanel,
 });
+
+// ── Lead Provenance Panel ─────────────────────────────────────────────────
+// Opens the lead provenance modal populated with sighting metadata.
+
+var _leadProvenanceListeners = [];
+
+function _registerLeadProvenance(el, sightingId, vendorName) {
+    if (!el) return;
+    var handler = function() { openLeadProvenancePanel(sightingId, vendorName); };
+    el.addEventListener('click', handler);
+    _leadProvenanceListeners.push({ el: el, handler: handler });
+}
+
+function _openLeadProvenanceFromRow(sightingId) {
+    // Called from sighting rows: openLeadProvenancePanel('sighting', sightingId)
+    openLeadProvenancePanel('sighting', sightingId);
+}
+
+async function openLeadProvenancePanel(sightingId, vendorName) {
+    var modal = document.getElementById('leadProvenanceModal');
+    var body = document.getElementById('leadProvenanceBody');
+    if (!modal || !body) return;
+    var title = document.getElementById('leadProvenanceTitle');
+    if (title) title.textContent = 'Lead Provenance: ' + (vendorName || 'Unknown Vendor');
+    body.innerHTML = '<div class="loading-placeholder">Loading…</div>';
+    openModal('leadProvenanceModal');
+    try {
+        var data = await apiFetch('/api/sightings/' + sightingId + '/provenance');
+        body.innerHTML = data.html || '<p class="text-muted">No provenance data available.</p>';
+    } catch(e) {
+        body.innerHTML = '<p class="text-danger">Failed to load provenance data.</p>';
+    }
+}
