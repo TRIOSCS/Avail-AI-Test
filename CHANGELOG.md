@@ -12,6 +12,7 @@ All notable changes to the project are logged here.
 - Forced the test harness and local Playwright web server out of MVP mode so the full router surface is available during test runs.
 - Added the missing `lxml` runtime dependency, restored the temporary Clear-Site-Data gate helper in `main.py`, fixed `BaseConnector._do_search`, and skipped `/var/log/avail` file logging during tests.
 - Restored `_seed_api_sources()` quota backfill to use the preloaded source map instead of issuing extra per-source queries during tests/startup.
+- Added `pytest-playwright` to dev requirements so the checked-in Python browser E2E suite can provide its `page` fixture in fresh environments.
 
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
