@@ -2,9 +2,17 @@
 
 Called by: app/jobs/__init__.py via register_email_jobs()
 Depends on: app.database, app.models, app.connectors.email_mining, app.services.*
+
+Includes:
+  - Contacts sync (Outlook -> VendorCards via delta query)
+  - Inbox scanning (vendor replies, stock lists, outbound RFQs)
+  - Sent folder scanning (track outbound emails, link to requisitions)
+  - Deep email mining, contact scoring, calendar scan
+  - Email health, reverification, ownership sweep
 """
 
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
@@ -60,6 +68,14 @@ def register_email_jobs(scheduler, settings):
 
     scheduler.add_job(
         _job_calendar_scan, CronTrigger(hour=6, minute=0), id="calendar_scan", name="Calendar vendor meeting scan"
+    )
+
+    # Sent folder scan — track outbound emails, link [AVAIL-] tagged messages
+    scheduler.add_job(
+        _job_scan_sent_folders,
+        IntervalTrigger(minutes=30),
+        id="scan_sent_folders",
+        name="Sent folder scan",
     )
 
     if settings.customer_enrichment_enabled:
@@ -761,3 +777,230 @@ async def _sync_user_contacts(user, db):
     except Exception as e:
         logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
+
+
+# ── Sent Folder Scanning ─────────────────────────────────────────────────
+
+# Regex to extract requisition ID from [AVAIL-123] tags in email subjects
+_AVAIL_TAG_RE = re.compile(r"\[AVAIL-(\d+)\]")
+
+
+@_traced_job
+async def _job_scan_sent_folders():
+    """Scan sent folders for all connected users.
+
+    Runs every 30 minutes. For each user with email_scan_enabled (m365_connected),
+    uses delta query on SentItems to incrementally find outbound emails.
+    Stores delta token per user in SyncState for incremental scanning.
+    """
+    from ..database import SessionLocal
+    from ..models import User
+
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        users_to_scan = [u.id for u in users if u.access_token and u.m365_connected]
+    except Exception as e:
+        logger.error(f"Sent folder scan user query error: {e}")
+        return
+    finally:
+        db.close()
+
+    for user_id in users_to_scan:
+        scan_db = SessionLocal()
+        try:
+            user = scan_db.get(User, user_id)
+            if not user:
+                continue
+            await asyncio.wait_for(scan_sent_folder(user, scan_db), timeout=120)
+        except asyncio.TimeoutError:
+            logger.warning(f"Sent folder scan TIMEOUT for user {user_id}")
+            scan_db.rollback()
+        except Exception as e:
+            logger.error(f"Sent folder scan error for user {user_id}: {e}")
+            scan_db.rollback()
+        finally:
+            scan_db.close()
+
+
+async def scan_sent_folder(user, db):
+    """Scan a single user's SentItems folder using delta query.
+
+    For each sent message:
+    - If subject contains [AVAIL-{id}], link to that requisition
+    - Create ActivityLog with activity_type="email_sent", direction="outbound"
+    - Store recipient email for contact matching
+    - Detect and flag file attachments for the attachment_parser pipeline
+
+    Called by: _job_scan_sent_folders (scheduler, every 30 min)
+    Depends on: GraphClient.delta_query, models.ActivityLog, models.SyncState
+    """
+    from app.utils.graph_client import GraphClient, GraphSyncStateExpired
+
+    from ..models import SyncState
+    from ..models.intelligence import ActivityLog
+    from ..utils.token_manager import get_valid_token
+
+    token = await get_valid_token(user, db)
+    if not token:
+        logger.warning(f"Sent folder scan: no token for {user.email}")
+        return []
+
+    gc = GraphClient(token)
+
+    # Load or initialize delta token for SentItems
+    folder_key = "sent_items_scan"
+    sync_state = db.query(SyncState).filter(
+        SyncState.user_id == user.id, SyncState.folder == folder_key
+    ).first()
+    delta_token = sync_state.delta_token if sync_state else None
+
+    try:
+        messages, new_token = await gc.delta_query(
+            "/me/mailFolders/SentItems/messages/delta",
+            delta_token=delta_token,
+            params={
+                "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
+                "$top": "100",
+            },
+            max_items=500,
+        )
+    except GraphSyncStateExpired:
+        logger.warning(f"Sent folder delta expired for {user.email} — full resync")
+        if sync_state:
+            sync_state.delta_token = None
+            db.flush()
+        messages, new_token = await gc.delta_query(
+            "/me/mailFolders/SentItems/messages/delta",
+            delta_token=None,
+            params={
+                "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
+                "$top": "100",
+            },
+            max_items=500,
+        )
+
+    # Persist new delta token
+    if new_token:
+        if sync_state:
+            sync_state.delta_token = new_token
+            sync_state.last_sync_at = datetime.now(timezone.utc)
+        else:
+            db.add(SyncState(
+                user_id=user.id,
+                folder=folder_key,
+                delta_token=new_token,
+                last_sync_at=datetime.now(timezone.utc),
+            ))
+        db.flush()
+
+    # Process each sent message
+    created_logs = []
+    attachment_queue = []
+    for msg in messages:
+        msg_id = msg.get("id", "")
+        subject = msg.get("subject", "")
+        sent_dt = msg.get("sentDateTime")
+
+        # Skip if we already logged this message (dedup by external_id)
+        existing = db.query(ActivityLog).filter(
+            ActivityLog.external_id == msg_id,
+            ActivityLog.user_id == user.id,
+        ).first()
+        if existing:
+            continue
+
+        # Extract first recipient email
+        recipients = msg.get("toRecipients", [])
+        first_recipient = ""
+        if recipients:
+            first_recipient = recipients[0].get("emailAddress", {}).get("address", "")
+
+        # Check for [AVAIL-{id}] tag to link to requisition
+        requisition_id = None
+        tag_match = _AVAIL_TAG_RE.search(subject)
+        if tag_match:
+            requisition_id = int(tag_match.group(1))
+
+        # Parse sentDateTime
+        occurred_at = None
+        if sent_dt:
+            try:
+                occurred_at = datetime.fromisoformat(sent_dt.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                occurred_at = datetime.now(timezone.utc)
+
+        # Create ActivityLog entry
+        log_entry = ActivityLog(
+            user_id=user.id,
+            activity_type="email_sent",
+            channel="email",
+            direction="outbound",
+            event_type="email",
+            subject=subject[:500] if subject else None,
+            contact_email=first_recipient or None,
+            external_id=msg_id,
+            requisition_id=requisition_id,
+            auto_logged=True,
+            occurred_at=occurred_at,
+        )
+        db.add(log_entry)
+        created_logs.append(log_entry)
+
+        # Check for file attachments (exclude inline images)
+        if msg.get("hasAttachments"):
+            attachment_info = await detect_attachments(gc, msg_id)
+            if attachment_info:
+                attachment_queue.append({"message_id": msg_id, "attachments": attachment_info})
+
+    try:
+        db.commit()
+        if created_logs:
+            logger.info(f"Sent folder scan [{user.email}]: {len(created_logs)} outbound emails logged")
+        if attachment_queue:
+            logger.info(f"Sent folder scan [{user.email}]: {len(attachment_queue)} messages queued for attachment parsing")
+    except Exception as e:
+        logger.error(f"Sent folder scan commit failed for {user.email}: {e}")
+        db.rollback()
+
+    return created_logs
+
+
+# ── Attachment Detection ──────────────────────────────────────────────────
+
+
+async def detect_attachments(gc, message_id: str) -> list[dict]:
+    """Fetch attachment metadata for a message and return file attachments.
+
+    Excludes inline images (contentType starting with 'image/' where isInline is True).
+    Returns list of dicts with name, contentType, and size for each file attachment.
+
+    Called by: scan_sent_folder(), _scan_user_inbox()
+    Depends on: GraphClient.get_json
+    """
+    try:
+        data = await gc.get_json(
+            f"/me/messages/{message_id}/attachments",
+            params={"$select": "name,contentType,size,isInline"},
+        )
+    except Exception as e:
+        logger.warning(f"Failed to fetch attachments for message {message_id[:20]}: {e}")
+        return []
+
+    attachments = data.get("value", [])
+    file_attachments = []
+    for att in attachments:
+        content_type = (att.get("contentType") or "").lower()
+        is_inline = att.get("isInline", False)
+
+        # Skip inline images — they're embedded in the email body, not real attachments
+        if is_inline and content_type.startswith("image/"):
+            continue
+
+        file_attachments.append({
+            "name": att.get("name", ""),
+            "content_type": content_type,
+            "size": att.get("size", 0),
+        })
+
+    return file_attachments
