@@ -613,6 +613,60 @@ def test_batch_assign_invalid_user(client, test_user):
     assert resp.status_code == 404
 
 
+def test_batch_status_change(client, db_session, test_user):
+    """PUT /api/requisitions/batch-status changes status of specific reqs."""
+    from app.models import Requisition
+
+    r1 = Requisition(name="ST-1", status="draft", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="ST-2", status="draft", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add_all([r1, r2])
+    db_session.commit()
+
+    resp = client.put("/api/requisitions/batch-status", json={"ids": [r1.id, r2.id], "status": "active"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["updated_count"] == 2
+    assert data["new_status"] == "active"
+    db_session.refresh(r1)
+    db_session.refresh(r2)
+    assert r1.status == "active"
+    assert r2.status == "active"
+
+
+def test_batch_status_change_invalid_status(client, db_session, test_user):
+    """PUT /api/requisitions/batch-status rejects invalid status values."""
+    resp = client.put("/api/requisitions/batch-status", json={"ids": [1], "status": "bogus"})
+    assert resp.status_code == 422
+
+
+def test_batch_delete(client, db_session, test_user):
+    """DELETE /api/requisitions/batch-delete removes specific reqs."""
+    from app.models import Requisition
+
+    r1 = Requisition(name="DEL-1", status="draft", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="DEL-2", status="draft", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r3 = Requisition(name="DEL-3", status="draft", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add_all([r1, r2, r3])
+    db_session.commit()
+    r3_id = r3.id
+
+    resp = client.request("DELETE", "/api/requisitions/batch-delete", json={"ids": [r1.id, r2.id]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["deleted_count"] == 2
+    # r3 should still exist
+    remaining = db_session.query(Requisition).filter(Requisition.id == r3_id).first()
+    assert remaining is not None
+
+
+def test_batch_delete_empty_list(client):
+    """DELETE /api/requisitions/batch-delete rejects empty list."""
+    resp = client.request("DELETE", "/api/requisitions/batch-delete", json={"ids": []})
+    assert resp.status_code == 422
+
+
 def test_dismiss_new_offers(client, db_session, test_requisition):
     """POST /api/requisitions/{id}/dismiss-new-offers clears offers_viewed_at."""
     resp = client.post(f"/api/requisitions/{test_requisition.id}/dismiss-new-offers")

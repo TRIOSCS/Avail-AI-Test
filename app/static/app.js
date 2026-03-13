@@ -8645,6 +8645,8 @@ function renderReqList() {
     } else {
         el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     }
+    // Re-show batch action bar if items are still selected
+    if (_batchSelectedReqs.size > 0) _updateBatchActionBar();
     _populateUserFilter();
     _updateToolbarStats();
     _applyColVisCSS();
@@ -8736,14 +8738,19 @@ function _updateToolbarStats() {
 }
 
 // ── Batch Selection State ──────────────────────────────────────────────
-// Tracks selected requisition IDs for batch archive/assign operations.
+// ── Batch Selection & Actions for Pipeline Requisitions ──────────────
+// Tracks selected requisition IDs for batch operations.
 // Called by: checkbox onclick in _renderReqRow, batch action bar buttons
-// Depends on: apiFetch, showToast, renderReqList
+// Depends on: apiFetch, showToast, renderReqList, loadRequisitions
 const _batchSelectedReqs = new Set();
 
 function _toggleBatchSelect(reqId, checkbox) {
     if (checkbox.checked) _batchSelectedReqs.add(reqId);
     else _batchSelectedReqs.delete(reqId);
+    // Sync the header "select all" checkbox
+    const selectAll = document.getElementById('batchSelectAll');
+    const allCbs = document.querySelectorAll('.batch-req-cb');
+    if (selectAll && allCbs.length) selectAll.checked = [...allCbs].every(cb => cb.checked);
     _updateBatchActionBar();
 }
 
@@ -8765,17 +8772,25 @@ function _updateBatchActionBar() {
         if (bar) bar.remove();
         return;
     }
-    const html = `<div id="batchActionBar" class="rfq-inline-bar" style="position:sticky;bottom:0;z-index:100;background:var(--bg1);border-top:2px solid var(--teal);padding:8px 16px;display:flex;align-items:center;gap:10px;font-size:12px">
-        <strong>${count} selected</strong>
+    const statusOpts = ['draft','active','sourcing','offers','quoting','quoted','archived']
+        .map(s => `<option value="${s}">${s.charAt(0).toUpperCase() + s.slice(1)}</option>`).join('');
+    const html = `<div id="batchActionBar" style="position:sticky;top:0;z-index:200;background:#f0fdfa;border-bottom:2px solid var(--teal);padding:10px 16px;display:flex;align-items:center;gap:12px;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,0.08);flex-wrap:wrap">
+        <strong style="color:var(--teal);white-space:nowrap">${count} selected</strong>
+        <button class="btn btn-sm" style="background:var(--amber-light);color:#92400e" onclick="_batchArchiveSelected()" title="Archive selected">Archive</button>
+        <select id="batchStatusSelect" class="vflt" style="font-size:12px;padding:4px 8px;border:1px solid #d1d5db;border-radius:4px" onchange="_batchChangeStatus(this.value);this.selectedIndex=0">
+            <option value="">Change Status…</option>
+            ${statusOpts}
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="_batchExportSelected()" title="Export selected to CSV">Export CSV</button>
+        <button class="btn btn-sm" style="background:#FEE2E2;color:#991B1B" onclick="_batchDeleteSelected()" title="Delete selected">Delete</button>
         <span style="flex:1"></span>
-        <button class="btn btn-ghost btn-sm" onclick="_clearBatchSelection()">Clear</button>
-        <button class="btn btn-sm" style="background:var(--amber-light);color:#92400e" onclick="_batchArchiveSelected()">Archive (${count})</button>
+        <button class="btn btn-ghost btn-sm" onclick="_clearBatchSelection()" title="Deselect all">&times; Clear</button>
     </div>`;
     if (bar) {
         bar.outerHTML = html;
     } else {
         const reqList = document.getElementById('reqList');
-        if (reqList) reqList.insertAdjacentHTML('afterend', html);
+        if (reqList) reqList.insertAdjacentHTML('afterbegin', html);
     }
 }
 
@@ -8790,6 +8805,7 @@ function _clearBatchSelection() {
 async function _batchArchiveSelected() {
     const ids = [..._batchSelectedReqs];
     if (!ids.length) return;
+    if (!confirm(`Archive ${ids.length} requisition${ids.length !== 1 ? 's' : ''}?`)) return;
     try {
         const data = await apiFetch('/api/requisitions/batch-archive', {
             method: 'PUT', body: { ids }
@@ -8799,7 +8815,6 @@ async function _batchArchiveSelected() {
         loadRequisitions();
         showToast(`Archived ${cnt} requisition${cnt !== 1 ? 's' : ''}`, 'success', { duration: 8000, action: { label: 'Undo', fn: async () => {
             try {
-                // Unarchive each by toggling archive back
                 for (const id of ids) {
                     await apiFetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
                 }
@@ -8810,6 +8825,67 @@ async function _batchArchiveSelected() {
     } catch (e) {
         showToast('Batch archive failed: ' + e.message, 'error');
     }
+}
+
+async function _batchChangeStatus(status) {
+    if (!status) return;
+    const ids = [..._batchSelectedReqs];
+    if (!ids.length) return;
+    try {
+        const data = await apiFetch('/api/requisitions/batch-status', {
+            method: 'PUT', body: { ids, status }
+        });
+        _batchSelectedReqs.clear();
+        loadRequisitions();
+        showToast(`Updated ${data.updated_count} requisition${data.updated_count !== 1 ? 's' : ''} to "${status}"`, 'success');
+    } catch (e) {
+        showToast('Status change failed: ' + e.message, 'error');
+    }
+}
+
+async function _batchDeleteSelected() {
+    const ids = [..._batchSelectedReqs];
+    if (!ids.length) return;
+    if (!confirm(`Permanently delete ${ids.length} requisition${ids.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    try {
+        const data = await apiFetch('/api/requisitions/batch-delete', {
+            method: 'DELETE', body: { ids }
+        });
+        _batchSelectedReqs.clear();
+        loadRequisitions();
+        showToast(`Deleted ${data.deleted_count} requisition${data.deleted_count !== 1 ? 's' : ''}`, 'success');
+    } catch (e) {
+        showToast('Delete failed: ' + e.message, 'error');
+    }
+}
+
+function _batchExportSelected() {
+    const ids = [..._batchSelectedReqs];
+    if (!ids.length) return;
+    const rows = _reqListData.filter(r => ids.includes(r.id));
+    if (!rows.length) { showToast('No matching data to export', 'warn'); return; }
+    const headers = ['ID','Name','Customer','Status','Parts','Sourced','Offers','RFQs Sent','Created'];
+    const csvRows = [headers.join(',')];
+    for (const r of rows) {
+        csvRows.push([
+            r.id,
+            '"' + (r.name || '').replace(/"/g, '""') + '"',
+            '"' + (r.customer_display || '').replace(/"/g, '""') + '"',
+            r.status || '',
+            r.requirement_count || 0,
+            r.sourced_count || 0,
+            r.offer_count || 0,
+            r.rfq_sent_count || 0,
+            r.created_at || ''
+        ].join(','));
+    }
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'requisitions_export.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast(`Exported ${rows.length} requisition${rows.length !== 1 ? 's' : ''}`, 'success');
 }
 
 function _renderReqRow(r) {

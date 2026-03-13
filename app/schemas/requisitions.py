@@ -52,6 +52,27 @@ class BatchAssign(BaseModel):
     owner_id: int
 
 
+class BatchStatusChange(BaseModel):
+    """Change status of specific requisitions by ID list."""
+
+    ids: list[int] = Field(..., min_length=1, max_length=200)
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        allowed = {"draft", "active", "sourcing", "offers", "quoting", "quoted", "archived"}
+        if v not in allowed:
+            raise ValueError(f"Invalid status '{v}'. Allowed: {', '.join(sorted(allowed))}")
+        return v
+
+
+class BatchDelete(BaseModel):
+    """Delete specific requisitions by ID list."""
+
+    ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
 # ── Requisitions ─────────────────────────────────────────────────────
 
 

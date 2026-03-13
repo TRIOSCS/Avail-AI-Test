@@ -35,6 +35,8 @@ from ...models import (
 from ...schemas.requisitions import (
     BatchArchiveByIds,
     BatchAssign,
+    BatchDelete,
+    BatchStatusChange,
     RequisitionCreate,
     RequisitionOut,
     RequisitionUpdate,
@@ -595,6 +597,47 @@ async def batch_assign(
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}
+
+
+@router.put("/api/requisitions/batch-status")
+async def batch_status_change(
+    payload: BatchStatusChange,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Change status of specific requisitions by ID list."""
+    from . import invalidate_prefix
+
+    q = db.query(Requisition).filter(Requisition.id.in_(payload.ids))
+    # Sales users can only change their own requisitions
+    if user.role == "sales":
+        q = q.filter(Requisition.created_by == user.id)
+    count = q.update({"status": payload.status}, synchronize_session="fetch")
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"ok": True, "updated_count": count, "new_status": payload.status}
+
+
+@router.delete("/api/requisitions/batch-delete")
+async def batch_delete(
+    payload: BatchDelete,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete specific requisitions by ID list. Deletes child requirements/sightings too."""
+    from . import invalidate_prefix
+
+    q = db.query(Requisition).filter(Requisition.id.in_(payload.ids))
+    # Sales users can only delete their own requisitions
+    if user.role == "sales":
+        q = q.filter(Requisition.created_by == user.id)
+    reqs = q.all()
+    count = len(reqs)
+    for req in reqs:
+        db.delete(req)
+    db.commit()
+    invalidate_prefix("req_list")
+    return {"ok": True, "deleted_count": count}
 
 
 @router.post("/api/requisitions/{req_id}/dismiss-new-offers")
