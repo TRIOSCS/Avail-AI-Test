@@ -111,7 +111,7 @@ class TestIntakeBar:
         assert 'id="intakeBar"' in index_html
 
     def test_intake_placeholder_mentions_customer_vendor_text(self, index_html):
-        assert "Paste customer RFQ text, vendor offers" in index_html
+        assert "Paste part numbers, vendor offers, or data" in index_html
 
     def test_intake_drawer_html_exists(self, index_html):
         assert 'id="intakeDrawer"' in index_html

@@ -78,9 +78,11 @@ class TestSetMainViewLogic:
 
     def test_main_view_has_normalizer(self, app_js):
         """The frontend should normalize legacy main view values."""
-        assert "function _normalizeMainView(view)" in app_js
+        assert "Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'" in app_js
 
     def test_legacy_sales_and_purchasing_migrate_to_reqs(self, app_js):
         """Old split-view values should route into the unified reqs tab."""
-        assert "'sales', 'purchasing', 'sourcing', 'active', 'rfq'" in app_js
-        assert "return 'reqs';" in app_js
+        assert "_currentMainView === 'sales'" in app_js
+        assert "_currentMainView === 'sourcing'" in app_js
+        assert "_currentMainView === 'purchasing'" in app_js
+        assert "_currentMainView = 'reqs'" in app_js

@@ -1338,7 +1338,7 @@ def test_parse_freeform_rfq_no_result(ai_client):
     ):
         resp = ai_client.post(
             "/api/ai/parse-freeform-rfq",
-            json={"raw_text": ""},
+            json={"raw_text": "Customer text that produces no parsed result"},
         )
     assert resp.status_code == 200
     assert resp.json()["parsed"] is False
