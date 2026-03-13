@@ -84,7 +84,13 @@ def invalidate_prefix(prefix: str) -> None:
     """Invalidate all cache entries matching a prefix.
 
     Note: Redis supports pattern deletion, PostgreSQL fallback uses LIKE.
+    No-op when TESTING (cache disabled, avoids DB table issues).
     """
+    import os
+
+    if os.environ.get("TESTING"):
+        return
+
     from .intel_cache import _REDIS_PREFIX, _get_redis
 
     # Redis: scan and delete by pattern

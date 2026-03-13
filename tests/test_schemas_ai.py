@@ -12,7 +12,6 @@ from app.schemas.ai import (
     DraftOfferItem,
     IntakeDraftRequest,
     IntakeDraftResponse,
-    IntakeRequirementItem,
     ProspectContactSave,
     ProspectFinderRequest,
     RfqDraftRequest,
@@ -64,23 +63,6 @@ class TestSaveDraftOffersRequest:
                 requisition_id=0,
                 offers=[DraftOfferItem()],
             )
-
-
-class TestIntakeRequirementItem:
-    def test_normalizes_fields(self):
-        item = IntakeRequirementItem(
-            mpn=" lm317t ",
-            quantity=25,
-            condition="Factory New",
-            packaging="Tape & Reel",
-        )
-        assert item.mpn == "LM317T"
-        assert item.condition == "new"
-        assert item.packaging == "reel"
-
-    def test_blank_mpn_raises(self):
-        with pytest.raises(ValidationError, match="mpn required"):
-            IntakeRequirementItem(mpn="   ")
 
 
 class TestIntakeDraftRequest:

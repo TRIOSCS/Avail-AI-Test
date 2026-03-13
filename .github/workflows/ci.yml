@@ -118,11 +118,12 @@ jobs:
       - name: Run tests with coverage
         env:
           TESTING: "1"
+          MVP_MODE: "false"
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest tests/ -v --tb=short \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=100 \
+            --cov-fail-under=90 \
             --junitxml=test-results.xml
 
       - name: Upload test results

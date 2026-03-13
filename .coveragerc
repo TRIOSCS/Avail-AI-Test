@@ -1,0 +1,27 @@
+# Coverage configuration for AVAIL AI
+# Run: pytest tests/ --cov=app --cov-report=term-missing
+
+[run]
+source = app
+omit =
+    app/main.py
+    */alembic/*
+    */__pycache__/*
+    */tests/*
+    app/static/*
+    app/templates/*
+    scripts/*
+    # Worker __main__ entry points (run separately)
+    app/services/nc_worker/__main__.py
+    app/services/ics_worker/__main__.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    @abc.abstractmethod

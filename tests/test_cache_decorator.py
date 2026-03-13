@@ -71,10 +71,20 @@ def test_different_params_different_keys():
 
 
 def test_invalidate_prefix():
-    """invalidate_prefix deletes matching PG cache entries."""
+    """invalidate_prefix deletes matching PG cache entries (skipped when TESTING=1)."""
+    import os
+
     from app.cache.decorators import invalidate_prefix
 
+    orig_get = os.environ.get
+
+    def fake_get(key, default=None):
+        if key == "TESTING":
+            return None  # Simulate non-test env so invalidate_prefix runs
+        return orig_get(key, default)
+
     with (
+        patch.object(os.environ, "get", side_effect=fake_get),
         patch("app.cache.intel_cache._get_redis", return_value=None),
         patch("app.database.SessionLocal") as mock_session_cls,
     ):
@@ -188,6 +198,7 @@ def test_cache_prefix_attribute():
 
 def test_invalidate_prefix_with_redis():
     """invalidate_prefix uses Redis SCAN to delete by pattern (lines 89-99)."""
+    import os
     from unittest.mock import MagicMock
 
     from app.cache.decorators import invalidate_prefix
@@ -197,8 +208,13 @@ def test_invalidate_prefix_with_redis():
         (42, ["intel:perf:key1", "intel:perf:key2"]),
         (0, ["intel:perf:key3"]),
     ]
+    orig_get = os.environ.get
+
+    def fake_get(key, default=None):
+        return None if key == "TESTING" else orig_get(key, default)
 
     with (
+        patch.object(os.environ, "get", side_effect=fake_get),
         patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         patch("app.database.SessionLocal") as mock_session_cls,
     ):
@@ -211,14 +227,20 @@ def test_invalidate_prefix_with_redis():
 
 def test_invalidate_prefix_redis_error():
     """Redis error during prefix invalidation is caught (line 99)."""
+    import os
     from unittest.mock import MagicMock
 
     from app.cache.decorators import invalidate_prefix
 
     mock_redis = MagicMock()
     mock_redis.scan.side_effect = Exception("Redis error")
+    orig_get = os.environ.get
+
+    def fake_get(key, default=None):
+        return None if key == "TESTING" else orig_get(key, default)
 
     with (
+        patch.object(os.environ, "get", side_effect=fake_get),
         patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         patch("app.database.SessionLocal") as mock_session_cls,
     ):
@@ -230,9 +252,17 @@ def test_invalidate_prefix_redis_error():
 
 def test_invalidate_prefix_pg_error():
     """PG error during prefix invalidation is caught (lines 113-114)."""
+    import os
+
     from app.cache.decorators import invalidate_prefix
 
+    orig_get = os.environ.get
+
+    def fake_get(key, default=None):
+        return None if key == "TESTING" else orig_get(key, default)
+
     with (
+        patch.object(os.environ, "get", side_effect=fake_get),
         patch("app.cache.intel_cache._get_redis", return_value=None),
         patch("app.database.SessionLocal") as mock_session_cls,
     ):

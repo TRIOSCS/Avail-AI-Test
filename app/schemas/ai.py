@@ -209,6 +209,38 @@ class CompareQuotesRequest(BaseModel):
     required_qty: int | None = None
 
 
+# ── Intake draft (paste → AI parse) ───────────────────────────────────────
+
+
+class IntakeDraftRequest(BaseModel):
+    """Input for AI intake draft (pasted customer/vendor text)."""
+
+    text: str = Field(min_length=1)
+    requisition_id: int | None = None
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("text required")
+        return v
+
+
+class IntakeDraftResponse(BaseModel):
+    """Output from AI intake draft — document_type, requirements, offers."""
+
+    document_type: str = "unclear"
+    requirements: list[dict] = Field(default_factory=list)
+    offers: list[dict] = Field(default_factory=list)
+    confidence: float = 0.0
+    summary: str | None = None
+    requisition_name: str | None = None
+    customer_name: str | None = None
+    vendor_name: str | None = None
+    notes: str | None = None
+
+
 # ── Freeform paste parsing ────────────────────────────────────────────────
 
 
