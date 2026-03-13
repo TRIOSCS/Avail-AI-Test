@@ -35,6 +35,9 @@ from ..models import (
 from ..schemas.ai import (
     ApplyFreeformRfqRequest,
     CompareQuotesRequest,
+    FreeTextParseRequest,
+    FreeTextSaveOffersRequest,
+    FreeTextSaveRfqRequest,
     IntakeDraftRequest,
     IntakeDraftResponse,
     NormalizePartsRequest,
@@ -730,6 +733,107 @@ async def ai_compare_quotes(
 
 
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
+
+
+@router.post("/api/ai/parse-free-text")
+@limiter.limit("10/minute")
+async def ai_parse_free_text(
+    payload: FreeTextParseRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Compatibility endpoint for legacy free-text parsing flow."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.free_text_parser import parse_free_text
+
+    result = await parse_free_text(payload.text)
+    if not result or not result.get("line_items"):
+        return {"parsed": False, "line_items": []}
+    return {"parsed": True, **result}
+
+
+@router.post("/api/ai/save-free-text-rfq")
+@limiter.limit("5/minute")
+async def ai_save_free_text_rfq(
+    payload: FreeTextSaveRfqRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Compatibility endpoint: persist free-text RFQ lines as requisition rows."""
+    from ..utils.normalization import normalize_mpn_key
+
+    req = Requisition(
+        name=payload.name.strip(),
+        customer_name=(payload.customer_name or "").strip() or None,
+        status="draft",
+        created_by=user.id,
+    )
+    db.add(req)
+    db.flush()
+
+    created = 0
+    for item in payload.line_items:
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=item.mpn,
+            normalized_mpn=normalize_mpn_key(item.mpn),
+            target_qty=item.quantity,
+            target_price=item.target_price,
+            condition=item.condition or "",
+            packaging=item.packaging or "",
+            notes=item.notes or "",
+        )
+        db.add(r)
+        created += 1
+
+    db.commit()
+    return {"ok": True, "requisition_id": req.id, "requisition_name": req.name, "requirements_created": created}
+
+
+@router.post("/api/ai/save-free-text-offers")
+@limiter.limit("5/minute")
+async def ai_save_free_text_offers(
+    payload: FreeTextSaveOffersRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Compatibility endpoint: persist parsed free-text offers."""
+    req = db.query(Requisition).filter(Requisition.id == payload.requisition_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    created_ids = []
+    normalized_vendor = normalize_vendor_name(payload.vendor_name)
+    for item in payload.line_items:
+        offer = Offer(
+            requisition_id=payload.requisition_id,
+            vendor_name=payload.vendor_name,
+            vendor_name_normalized=normalized_vendor,
+            mpn=item.mpn,
+            manufacturer=item.manufacturer,
+            qty_available=item.quantity,
+            unit_price=item.target_price,
+            currency=item.currency or "USD",
+            date_code=item.date_code,
+            lead_time=item.lead_time,
+            condition=item.condition or "new",
+            packaging=item.packaging,
+            moq=item.moq,
+            source="free_text",
+            entered_by_id=user.id,
+            notes=item.notes,
+            status="active",
+        )
+        db.add(offer)
+        db.flush()
+        created_ids.append(offer.id)
+
+    db.commit()
+    return {"ok": True, "offers_created": len(created_ids), "offer_ids": created_ids}
 
 
 @router.post("/api/ai/parse-freeform-rfq")

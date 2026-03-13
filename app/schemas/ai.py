@@ -138,6 +138,66 @@ class IntakeDraftResponse(BaseModel):
     offers: list[DraftOfferItem] = Field(default_factory=list)
 
 
+class FreeTextParseRequest(BaseModel):
+    """Backward-compatible request payload for free-text parsing."""
+
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def free_text_required(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("text required")
+        return text
+
+
+class FreeTextLineItem(BaseModel):
+    """Compatibility line item model used by free-text parse/save endpoints."""
+
+    mpn: str
+    manufacturer: str | None = None
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    packaging: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def free_text_mpn_required(cls, v: str) -> str:
+        raw = (v or "").strip()
+        normalized = normalize_mpn(raw) or raw.upper()
+        if not normalized:
+            raise ValueError("mpn required")
+        return normalized
+
+    @field_validator("quantity")
+    @classmethod
+    def free_text_quantity_min_one(cls, v: int) -> int:
+        return max(1, v)
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Compatibility payload for creating a requisition from free-text lines."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Compatibility payload for saving offers from free-text lines."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)
