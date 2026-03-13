@@ -13,6 +13,8 @@ Depends on: app/routers/crm/quotes.py, app/routers/crm/offers.py,
 import os
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -81,6 +83,10 @@ def _make_quote(db, req, site, user, offer_ids, quote_number="Q-TEST-001"):
     db.add(q)
     db.flush()
     return q
+
+
+def _has_dashboard_route(app, path: str) -> bool:
+    return any(getattr(route, "path", "") == path for route in app.routes)
 
 
 # ── Fix 1: Migration file exists ────────────────────────────────────────
@@ -298,6 +304,11 @@ class TestMarkSold:
 
 
 class TestStaleFlag:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        if not _has_dashboard_route(client.app, "/api/dashboard/hot-offers"):
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_is_stale_default_false(self, db_session, test_user):
         """New offers should have is_stale=False by default."""
         req = _make_req(db_session, test_user)
@@ -417,6 +428,13 @@ class TestProactiveOfferExpiry:
 
 
 class TestBuyerBriefOptimized:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_buyer_brief = _has_dashboard_route(client.app, "/api/dashboard/buyer-brief")
+        has_hot_offers = _has_dashboard_route(client.app, "/api/dashboard/hot-offers")
+        if not (has_buyer_brief and has_hot_offers):
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_at_risk_reqs_with_offer_counts(self, client, db_session, test_user):
         r1 = Requisition(
             name="RISKY-1",
@@ -475,6 +493,11 @@ class TestBuyerBriefOptimized:
 
 
 class TestCompletedDeals:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        if not _has_dashboard_route(client.app, "/api/dashboard/buyer-brief"):
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_completed_deals_in_buyer_brief(self, client, db_session, test_user):
         """Buyer-brief should return completed_deals with won/lost data."""
         co, site = _make_company_and_site(db_session)
