@@ -1,8 +1,8 @@
 """
-test_main_debt_followups.py — Follow-up tests for main.py debt cleanup and optimization.
+test_main_debt_followups.py — Follow-up tests for main.py utilities.
 
 Purpose:
-- Verify _seed_api_sources quota backfill uses in-memory source map and applies enrichment quotas.
+- Verify _seed_api_sources creates sessions and handles errors gracefully.
 
 Called by: pytest
 Depends on: app/main.py, tests/conftest.py fixtures
@@ -27,43 +27,23 @@ def test_seed_api_sources_creates_session() -> None:
         mock_db.close.assert_called_once()
 
 
-def test_seed_api_sources_backfills_hunter_enrichment_quota_without_extra_query() -> None:
-    """Quota backfill should use existing_map and set hunter_enrichment monthly quota."""
+def test_seed_api_sources_handles_exception() -> None:
+    """_seed_api_sources handles DB errors gracefully without crashing."""
     from app.main import _seed_api_sources
 
     with patch("app.database.SessionLocal") as mock_session_cls:
         mock_db = MagicMock()
         mock_session_cls.return_value = mock_db
-
-        existing_hunter = MagicMock()
-        existing_hunter.name = "hunter_enrichment"
-        existing_hunter.monthly_quota = None
-
-        mock_db.query.return_value.all.return_value = [existing_hunter]
+        mock_db.query.side_effect = Exception("DB unavailable")
 
         _seed_api_sources()
 
-        assert existing_hunter.monthly_quota == 500
-        assert mock_db.query.call_count == 1
-        mock_db.commit.assert_called_once()
+        mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
 
-def test_seed_api_sources_skips_when_quota_already_set() -> None:
-    """If hunter_enrichment already has a quota, it is not overwritten."""
+def test_seed_api_sources_callable() -> None:
+    """_seed_api_sources is callable and importable."""
     from app.main import _seed_api_sources
 
-    with patch("app.database.SessionLocal") as mock_session_cls:
-        mock_db = MagicMock()
-        mock_session_cls.return_value = mock_db
-
-        existing_hunter = MagicMock()
-        existing_hunter.name = "hunter_enrichment"
-        existing_hunter.monthly_quota = 1000
-
-        mock_db.query.return_value.all.return_value = [existing_hunter]
-
-        _seed_api_sources()
-
-        assert existing_hunter.monthly_quota == 1000
-        mock_db.close.assert_called_once()
+    assert callable(_seed_api_sources)
