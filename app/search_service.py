@@ -525,6 +525,36 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
     return kept
 
 
+# ── Smart AI trigger ─────────────────────────────────────────────────────
+
+
+def should_trigger_ai_search(
+    api_result_count: int,
+    has_price_below_target: bool,
+    is_obsolete: bool,
+    months_since_last_sighting: float | None,
+    manual_trigger: bool = False,
+) -> bool:
+    """Decide whether to fire the AI web search connector.
+
+    Returns True when API results are thin, prices are above target,
+    the part is obsolete, sightings are stale, or the user asked explicitly.
+    This avoids wasting AI credits when conventional connectors already
+    returned rich, actionable data.
+    """
+    if manual_trigger:
+        return True
+    if api_result_count < 5:
+        return True
+    if not has_price_below_target:
+        return True
+    if is_obsolete:
+        return True
+    if months_since_last_sighting is not None and months_since_last_sighting >= 6:
+        return True
+    return False
+
+
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
@@ -597,10 +627,22 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
-    # AI live web search source (disabled in TESTING to keep tests deterministic)
+    # AI live web search — held back for conditional trigger (smart AI trigger)
     ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
-    _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
+    ai_connector = None
+    if "ai_live_web" in disabled_sources:
+        source_stats_map["ai_live_web"] = {
+            "source": "ai_live_web", "results": 0, "ms": 0,
+            "error": None, "status": "disabled",
+        }
+    elif not has_ai_live:
+        source_stats_map["ai_live_web"] = {
+            "source": "ai_live_web", "results": 0, "ms": 0,
+            "error": "No API key configured", "status": "skipped",
+        }
+    else:
+        ai_connector = AIWebSearchConnector(ai_key)
 
     if not connectors:
         return [], list(source_stats_map.values())
@@ -714,6 +756,84 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         "no seller",
     }
     out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+
+    # ── Smart AI trigger: conditionally fire AI connector ────────────
+    if ai_connector is not None:
+        api_result_count = len(out)
+        has_price_below_target = any(
+            r.get("unit_price") is not None and r["unit_price"] > 0
+            for r in out
+        )
+        # Check obsolete status from MaterialCard if available
+        is_obsolete = False
+        for pn in pns:
+            card = db.query(MaterialCard).filter_by(mpn=pn).first()
+            if card and getattr(card, "lifecycle_status", None) == "obsolete":
+                is_obsolete = True
+                break
+
+        # Months since last sighting for primary PN
+        months_since_last_sighting = None
+        latest_sighting = (
+            db.query(Sighting)
+            .filter(Sighting.mpn.in_(pns))
+            .order_by(Sighting.created_at.desc())
+            .first()
+        )
+        if latest_sighting and latest_sighting.created_at:
+            delta = datetime.now(timezone.utc) - latest_sighting.created_at.replace(
+                tzinfo=timezone.utc
+            ) if latest_sighting.created_at.tzinfo is None else datetime.now(timezone.utc) - latest_sighting.created_at
+            months_since_last_sighting = delta.days / 30.0
+
+        trigger = should_trigger_ai_search(
+            api_result_count=api_result_count,
+            has_price_below_target=has_price_below_target,
+            is_obsolete=is_obsolete,
+            months_since_last_sighting=months_since_last_sighting,
+        )
+
+        if trigger:
+            reasons = []
+            if api_result_count < 5:
+                reasons.append(f"few_results({api_result_count})")
+            if not has_price_below_target:
+                reasons.append("no_price_below_target")
+            if is_obsolete:
+                reasons.append("obsolete_part")
+            if months_since_last_sighting is not None and months_since_last_sighting >= 6:
+                reasons.append(f"stale_sightings({months_since_last_sighting:.1f}mo)")
+            logger.info(
+                "AI search TRIGGERED for {}: reasons={}",
+                pns[0] if pns else "?",
+                ", ".join(reasons) or "manual",
+            )
+            ai_tasks = [_throttled(ai_connector, pn) for pn in pns]
+            ai_results_lists = await asyncio.gather(*ai_tasks, return_exceptions=True)
+            for result in ai_results_lists:
+                if isinstance(result, list):
+                    for r in result:
+                        key = (
+                            r.get("vendor_name", "").lower(),
+                            normalize_mpn_key(r.get("mpn_matched", "")),
+                            str(r.get("vendor_sku") or "").lower(),
+                        )
+                        if key not in seen:
+                            seen.add(key)
+                            out.append(r)
+        else:
+            logger.info(
+                "AI search SKIPPED for {} ({} results, prices_ok={}, obsolete={}, stale={})",
+                pns[0] if pns else "?",
+                api_result_count,
+                has_price_below_target,
+                is_obsolete,
+                months_since_last_sighting,
+            )
+            source_stats_map["ai_live_web"] = {
+                "source": "ai_live_web", "results": 0, "ms": 0,
+                "error": None, "status": "skipped",
+            }
 
     # Build source_stats from stats_updates (connectors that actually ran)
     # Aggregate per source (a connector may run for multiple PNs)
