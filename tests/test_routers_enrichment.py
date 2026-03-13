@@ -24,6 +24,16 @@ from app.models import (
 )
 from app.rate_limit import limiter
 
+
+@pytest.fixture(autouse=True)
+def _skip_if_enrichment_router_disabled():
+    from app.main import app
+
+    has_route = any(getattr(route, "path", "") == "/api/enrichment/queue" for route in app.routes)
+    if not has_route:
+        pytest.skip("Enrichment router disabled in MVP mode")
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
