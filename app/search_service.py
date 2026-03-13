@@ -32,7 +32,7 @@ from .models import (
     Requirement,
     Sighting,
 )
-from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2
+from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -220,6 +220,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if vendor_lower in live_vendors:
             continue
         live_vendors.add(vendor_lower)
+        conf_pct = round(match.get("confidence", 0) * 100)
         results.append({
             "vendor_name": match.get("vendor_name", ""),
             "vendor_id": match.get("vendor_id"),
@@ -230,7 +231,8 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             "is_historical": False,
             "is_material_history": False,
             "is_affinity": True,
-            "confidence_pct": round(match.get("confidence", 0) * 100),
+            "confidence_pct": conf_pct,
+            "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
             "reasoning": match.get("reasoning", ""),
             "qty_available": None,
             "unit_price": None,
@@ -287,7 +289,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     if filtered_count > 0:
         logger.info(f"Req {req.id}: filtered {filtered_count} weak leads ({before_count} -> {len(results)})")
 
-    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    results.sort(key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)), reverse=True)
     return {"sightings": results, "source_stats": source_stats}
 
 
@@ -435,7 +437,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
             evidence_tier=r.get("evidence_tier"),
         )
     ]
-    results.sort(key=lambda x: x.get("score", 0), reverse=True)
+    results.sort(key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)), reverse=True)
 
     # 7. Material card summary (if exists)
     card_summary = None
@@ -499,7 +501,7 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
             continue
 
         # Pick the row with highest score as the "best"
-        group.sort(key=lambda x: x.get("score", 0), reverse=True)
+        group.sort(key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)), reverse=True)
         best = dict(group[0])
 
         # Sum quantities across all rows in group; stay None if all unknown
@@ -1197,6 +1199,19 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         age_days=age_days,
     )
 
+    # Unified scoring for historical results
+    age_hours = age_days * 24.0 if age_days is not None else None
+    unified = score_unified(
+        source_type="historical",
+        is_authorized=h["is_authorized"],
+        unit_price=h["unit_price"],
+        qty_available=h["qty_available"],
+        age_hours=age_hours,
+        has_price=has_price,
+        has_qty=has_qty,
+        repeat_sighting_count=h.get("times_seen", 1),
+    )
+
     return {
         "id": None,
         "requirement_id": None,
@@ -1212,6 +1227,10 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "is_authorized": h["is_authorized"],
         "confidence": 0,
         "score": round(score, 1),
+        "source_badge": unified["source_badge"],
+        "confidence_pct": unified["confidence_pct"],
+        "confidence_color": unified["confidence_color"],
+        "reasoning": None,
         "octopart_url": None,
         "click_url": None,
         "vendor_url": None,
@@ -1516,6 +1535,22 @@ def sighting_to_dict(s: Sighting) -> dict:
         source_type=s.source_type,
         age_days=age_days,
     )
+
+    # Unified scoring — adds source_badge, confidence_pct, confidence_color
+    age_hours = (age_days * 24.0) if age_days is not None else None
+    unified = score_unified(
+        source_type=s.source_type or "",
+        is_authorized=s.is_authorized,
+        unit_price=s.unit_price,
+        qty_available=s.qty_available,
+        age_hours=age_hours,
+        has_price=has_price,
+        has_qty=has_qty,
+        has_lead_time=s.lead_time_days is not None or bool(s.lead_time),
+        has_condition=bool(s.condition or (raw.get("condition"))),
+        claude_confidence=s.confidence,
+    )
+
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1531,6 +1566,10 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_authorized": s.is_authorized,
         "confidence": s.confidence,
         "score": score,
+        "source_badge": unified["source_badge"],
+        "confidence_pct": unified["confidence_pct"],
+        "confidence_color": unified["confidence_color"],
+        "reasoning": None,
         "is_unavailable": getattr(s, "is_unavailable", False) or False,
         "octopart_url": raw.get("octopart_url"),
         "click_url": raw.get("click_url"),

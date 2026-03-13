@@ -25,6 +25,26 @@ class OkResponse(BaseModel):
     ok: bool = True
 
 
+# ── Search / Sightings ─────────────────────────────────────────────────
+
+
+class SightingItem(BaseModel, extra="allow"):
+    """Single search-result row returned by search_requirement / quick_search.
+
+    Includes unified scoring fields added in phase-4 task-5.
+    """
+
+    id: int | None = None
+    vendor_name: str = ""
+    mpn_matched: str = ""
+    source_type: str = ""
+    score: float = 0
+    source_badge: str = ""
+    confidence_pct: int = 0
+    confidence_color: str = "red"
+    reasoning: str | None = None
+
+
 # ── Requisitions ────────────────────────────────────────────────────────
 
 
