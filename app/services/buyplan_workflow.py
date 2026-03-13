@@ -7,7 +7,8 @@ Called by: routers/buy_plans_v3.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """
 
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
@@ -72,6 +73,8 @@ def submit_buy_plan(
         logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, float(plan.total_cost or 0))
     else:
         plan.status = BuyPlanStatus.pending.value
+        plan.approval_token = secrets.token_urlsafe(32)
+        plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         logger.info("Buy plan %d pending approval (cost=%.2f)", plan_id, float(plan.total_cost or 0))
 
     db.flush()
@@ -413,6 +416,8 @@ def resubmit_buy_plan(
         plan.approved_at = datetime.now(timezone.utc)
     else:
         plan.status = BuyPlanStatus.pending.value
+        plan.approval_token = secrets.token_urlsafe(32)
+        plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
 
     db.flush()
     return plan
@@ -744,3 +749,64 @@ REJECTIONS ({len(rejections)})
 Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 """
     return report.strip()
+
+
+# ── Workflow: PO Verification Scanning ─────────────────────────────
+
+
+async def verify_po_sent_v3(plan: "BuyPlanV3", db: "Session") -> list[dict]:
+    """Scan buyer's Outlook sent folder for PO emails matching each line.
+
+    For each line with a po_number, searches Graph API for emails containing
+    that PO number. Returns list of verification results per line.
+    """
+    from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
+
+    results = []
+    for line in plan.lines:
+        if not line.po_number:
+            results.append({"line_id": line.id, "po_number": None, "found": False, "skipped": True})
+            continue
+
+        # Get buyer's Graph token
+        if not line.buyer_id:
+            results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "skipped": True, "reason": "no_buyer"})
+            continue
+
+        try:
+            token = await get_valid_token()
+            if not token:
+                results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "skipped": True, "reason": "no_token"})
+                continue
+
+            client = GraphClient(token)
+            # Search sent folder for PO number
+            messages = await client.search_sent_messages(
+                query=line.po_number,
+                user_id=str(line.buyer.azure_id) if line.buyer else None,
+            )
+
+            found = len(messages) > 0
+            if found and line.status == BuyPlanLineStatus.pending_verify.value:
+                line.status = BuyPlanLineStatus.verified.value
+                line.po_verified_at = datetime.now(timezone.utc)
+
+            results.append({
+                "line_id": line.id,
+                "po_number": line.po_number,
+                "found": found,
+                "message_count": len(messages),
+            })
+        except Exception as e:
+            logger.error(f"PO verification failed for line {line.id}: {e}")
+            results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
+
+    # If all lines with POs are now verified, auto-complete the plan
+    po_lines = [l for l in plan.lines if l.po_number]
+    if po_lines and all(l.status == BuyPlanLineStatus.verified.value for l in po_lines):
+        plan.status = BuyPlanStatus.completed.value
+        plan.completed_at = datetime.now(timezone.utc)
+
+    db.commit()
+    return results

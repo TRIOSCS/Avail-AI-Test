@@ -15,7 +15,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.models import (
-    BuyPlan,
     Company,
     CustomerSite,
     Offer,
@@ -599,94 +598,68 @@ class TestQuotes:
 
 
 class TestBuyPlans:
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        """Re-enable V1 buy plans for legacy test coverage."""
-        from app.config import settings
+    def _make_v3_plan(self, db_session, test_requisition, test_quote, test_offer, test_user):
+        """Create a BuyPlanV3 + BuyPlanLine for read endpoint tests."""
+        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanV3
 
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-    def _make_buy_plan(self, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = BuyPlan(
+        plan = BuyPlanV3(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
-            status="pending_approval",
+            status="pending",
             submitted_by_id=test_user.id,
-            line_items=[
-                {
-                    "offer_id": test_offer.id,
-                    "mpn": "LM317T",
-                    "qty": 1000,
-                    "cost_price": 0.50,
-                    "vendor_name": "Arrow Electronics",
-                }
-            ],
+            total_cost=500.00,
+            total_revenue=750.00,
+            submitted_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
-        db_session.add(bp)
+        db_session.add(plan)
+        db_session.flush()
+
+        line = BuyPlanLine(
+            buy_plan_id=plan.id,
+            offer_id=test_offer.id,
+            quantity=1000,
+            unit_cost=0.50,
+            unit_sell=0.75,
+            buyer_id=test_user.id,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
         db_session.commit()
-        db_session.refresh(bp)
-        return bp
+        db_session.refresh(plan)
+        return plan
 
     def test_list_buy_plans(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        self._make_buy_plan(db_session, test_requisition, test_quote, test_offer, test_user)
+        self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.get("/api/buy-plans")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
         assert len(data) >= 1
 
-    def test_submit_buy_plan(self, client, db_session, test_requisition, test_customer_site, test_offer, monkeypatch):
-        # Requisition needs customer_site_id for quoting
-        test_requisition.customer_site_id = test_customer_site.id
-        db_session.commit()
-
-        # Create a quote first
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            quote_number="Q-2026-BP01",
-            status="sent",
-            line_items=[],
-            subtotal=750.0,
-            total_cost=500.0,
-            total_margin_pct=33.3,
-            created_by_id=db_session.query(User).first().id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        # Prevent background notification task from running
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-
+    def test_submit_buy_plan_returns_410(self, client, db_session, test_requisition, test_customer_site, test_offer):
+        """V1 buy plan submission is deprecated and always returns 410."""
         resp = client.post(
-            f"/api/quotes/{q.id}/buy-plan",
+            f"/api/quotes/1/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert "buy_plan_id" in data
+        assert resp.status_code == 410
 
     def test_get_buy_plan(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_buy_plan(db_session, test_requisition, test_quote, test_offer, test_user)
+        bp = self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 200
 
-    def test_cancel_buy_plan(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
+    def test_cancel_buy_plan_returns_410(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
     ):
-        bp = self._make_buy_plan(db_session, test_requisition, test_quote, test_offer, test_user)
-        # Prevent background notification task from running
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
+        """V1 buy plan cancel is deprecated and always returns 410."""
+        bp = self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
+        assert resp.status_code == 410
 
     def test_buy_plans_for_quote(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        self._make_buy_plan(db_session, test_requisition, test_quote, test_offer, test_user)
+        self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.get(f"/api/buy-plans/for-quote/{test_quote.id}")
         assert resp.status_code == 200
         data = resp.json()
@@ -2113,59 +2086,63 @@ def naive_crm_datetime(monkeypatch):
 
 
 class TestBuyPlansAdditional:
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        """Re-enable V1 buy plans for legacy test coverage."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
     def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
-        bp = BuyPlan(
+        """Create a BuyPlanV3 + BuyPlanLine for read endpoint tests."""
+        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanV3
+
+        # Map V1 status names to V3 for backwards compat in tests
+        v1_to_v3 = {
+            "pending_approval": "pending",
+            "approved": "active",
+            "complete": "completed",
+            "po_entered": "active",
+            "po_confirmed": "active",
+        }
+        raw_status = kwargs.get("status", "pending_approval")
+        v3_status = v1_to_v3.get(raw_status, raw_status)
+
+        plan = BuyPlanV3(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
-            status=kwargs.get("status", "pending_approval"),
+            status=v3_status,
             submitted_by_id=test_user.id,
-            line_items=kwargs.get(
-                "line_items",
-                [
-                    {
-                        "offer_id": test_offer.id,
-                        "mpn": "LM317T",
-                        "qty": 1000,
-                        "plan_qty": 1000,
-                        "cost_price": 0.50,
-                        "sell_price": 1.00,
-                        "vendor_name": "Arrow Electronics",
-                        "po_number": None,
-                        "po_entered_at": None,
-                        "po_sent_at": None,
-                        "po_recipient": None,
-                        "po_verified": False,
-                    }
-                ],
-            ),
+            total_cost=500.00,
+            total_revenue=1000.00,
             approval_token=kwargs.get("approval_token", None),
-            # Store token_expires_at without TZ info so SQLite can round-trip it
             token_expires_at=kwargs.get("token_expires_at", None),
             is_stock_sale=kwargs.get("is_stock_sale", False),
+            submitted_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
         )
-        db_session.add(bp)
+        db_session.add(plan)
+        db_session.flush()
+
+        line = BuyPlanLine(
+            buy_plan_id=plan.id,
+            offer_id=test_offer.id,
+            quantity=1000,
+            unit_cost=0.50,
+            unit_sell=1.00,
+            buyer_id=test_user.id,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
         db_session.commit()
-        db_session.refresh(bp)
-        return bp
+        db_session.refresh(plan)
+        return plan
 
     def test_submit_buy_plan_not_found(self, client):
+        """V1 mutation always returns 410."""
         resp = client.post("/api/quotes/99999/buy-plan", json={"offer_ids": [1]})
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
     def test_submit_buy_plan_no_offers(self, client, db_session, test_quote):
+        """V1 mutation always returns 410."""
         resp = client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": []},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     def test_get_buy_plan_not_found(self, client):
         resp = client.get("/api/buy-plans/99999")
@@ -2187,7 +2164,8 @@ class TestBuyPlansAdditional:
         resp = client.get("/api/buy-plans", params={"status": "approved"})
         assert resp.status_code == 200
         data = resp.json()
-        assert all(bp["status"] == "approved" for bp in data)
+        # V3 'active' maps to V1 'approved' (or po_entered/po_confirmed with POs)
+        assert all(bp["status"] in ("approved", "po_entered", "po_confirmed") for bp in data)
 
     def test_list_buy_plans_sales_filter(
         self, sales_client, db_session, test_requisition, test_quote, test_offer, sales_user
@@ -2205,23 +2183,13 @@ class TestBuyPlansAdditional:
         resp = client.get("/api/buy-plans/token/nonexistent-token")
         assert resp.status_code == 404
 
-    def test_get_buyplan_by_token_expired(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="expired-token",
-            token_expires_at=datetime.utcnow() - timedelta(days=1),
-        )
+    def test_get_buyplan_by_token_not_found_bogus(self, client):
+        """Non-existent token returns 404."""
         resp = client.get("/api/buy-plans/token/expired-token")
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_get_buyplan_by_token_success(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
     ):
         bp = self._make_bp(
             db_session,
@@ -2237,602 +2205,192 @@ class TestBuyPlansAdditional:
         data = resp.json()
         assert data["id"] == bp.id
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_by_token(
-        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="approve-token",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-        )
+    def test_approve_by_token_returns_410(self, client):
+        """V1 token-based approve always returns 410."""
         resp = client.put(
             "/api/buy-plans/token/approve-token/approve",
             json={"sales_order_number": "SO-1234"},
         )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_by_token_stock_sale(
-        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="stock-token",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-            is_stock_sale=True,
-        )
+    def test_approve_by_token_stock_sale_returns_410(self, client):
+        """V1 token-based approve always returns 410."""
         resp = client.put(
             "/api/buy-plans/token/stock-token/approve",
             json={"sales_order_number": "SO-STOCK"},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "complete"
+        assert resp.status_code == 410
 
-    def test_approve_by_token_not_found(self, client):
+    def test_approve_by_token_not_found_returns_410(self, client):
+        """V1 token-based approve always returns 410 (before 404 check)."""
         resp = client.put(
             "/api/buy-plans/token/bad-token/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_approve_by_token_expired(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="exp-approve",
-            token_expires_at=datetime.utcnow() - timedelta(days=1),
-        )
+    def test_approve_by_token_expired_returns_410(self, client):
+        """V1 token-based approve always returns 410 (before expiry check)."""
         resp = client.put(
             "/api/buy-plans/token/exp-approve/approve",
             json={"sales_order_number": "SO-X"},
         )
         assert resp.status_code == 410
 
-    def test_approve_by_token_wrong_status(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="wrong-status",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-            status="approved",
-        )
+    def test_approve_by_token_wrong_status_returns_410(self, client):
+        """V1 token-based approve always returns 410 (before status check)."""
         resp = client.put(
             "/api/buy-plans/token/wrong-status/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    def test_approve_by_token_missing_so(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="no-so-token",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-        )
+    def test_approve_by_token_missing_so_returns_410(self, client):
+        """V1 token-based approve always returns 410 (before validation)."""
         resp = client.put(
             "/api/buy-plans/token/no-so-token/approve",
             json={"sales_order_number": "  "},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_reject_by_token(
-        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="reject-token",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-        )
+    def test_reject_by_token_returns_410(self, client):
+        """V1 token-based reject always returns 410."""
         resp = client.put(
             "/api/buy-plans/token/reject-token/reject",
             json={"reason": "Too risky"},
         )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        assert resp.status_code == 410
 
-    def test_reject_by_token_not_found(self, client):
+    def test_reject_by_token_not_found_returns_410(self, client):
+        """V1 token-based reject always returns 410 (before 404 check)."""
         resp = client.put(
             "/api/buy-plans/token/bad-reject/reject",
             json={"reason": "x"},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_reject_by_token_expired(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="exp-reject",
-            token_expires_at=datetime.utcnow() - timedelta(days=1),
-        )
+    def test_reject_by_token_expired_returns_410(self, client):
+        """V1 token-based reject always returns 410 (before expiry check)."""
         resp = client.put(
             "/api/buy-plans/token/exp-reject/reject",
             json={"reason": "x"},
         )
         assert resp.status_code == 410
 
-    def test_reject_by_token_wrong_status(
-        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            approval_token="rej-wrong-status",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-            status="approved",
-        )
+    def test_reject_by_token_wrong_status_returns_410(self, client):
+        """V1 token-based reject always returns 410 (before status check)."""
         resp = client.put(
             "/api/buy-plans/token/rej-wrong-status/reject",
             json={"reason": "x"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    # ── Authenticated approve/reject ──
+    # ── Authenticated approve/reject (all return 410 now) ──
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_buy_plan_admin(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user, admin_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/approve",
-            json={"sales_order_number": "SO-ADMIN"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+    def test_approve_buy_plan_admin_returns_410(self, admin_client):
+        """V1 approve always returns 410."""
+        resp = admin_client.put("/api/buy-plans/1/approve", json={"sales_order_number": "SO-ADMIN"})
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_buy_plan_stock_sale(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            is_stock_sale=True,
-        )
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/approve",
-            json={"sales_order_number": "SO-STOCK2"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "complete"
+    def test_approve_buy_plan_not_admin_returns_410(self, client):
+        """V1 approve always returns 410 (before auth check)."""
+        resp = client.put("/api/buy-plans/1/approve", json={"sales_order_number": "SO-X"})
+        assert resp.status_code == 410
 
-    def test_approve_buy_plan_not_admin(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        """Non-manager/admin cannot approve."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/approve",
-            json={"sales_order_number": "SO-X"},
-        )
-        assert resp.status_code == 403
-
-    def test_approve_buy_plan_not_found(self, admin_client):
+    def test_approve_buy_plan_not_found_returns_410(self, admin_client):
+        """V1 approve always returns 410 (before 404 check)."""
         resp = admin_client.put("/api/buy-plans/99999/approve", json={"sales_order_number": "SO-X"})
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_approve_buy_plan_wrong_status(
-        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/approve",
-            json={"sales_order_number": "SO-X"},
-        )
-        assert resp.status_code == 400
+    def test_reject_buy_plan_returns_410(self, admin_client):
+        """V1 reject always returns 410."""
+        resp = admin_client.put("/api/buy-plans/1/reject", json={"reason": "Bad deal"})
+        assert resp.status_code == 410
 
-    def test_approve_buy_plan_missing_so(
-        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/approve",
-            json={"sales_order_number": "  "},
-        )
-        assert resp.status_code == 400
+    def test_reject_buy_plan_not_admin_returns_410(self, client):
+        """V1 reject always returns 410 (before auth check)."""
+        resp = client.put("/api/buy-plans/1/reject", json={"reason": "x"})
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_reject_buy_plan(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/reject",
-            json={"reason": "Bad deal"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-    def test_reject_buy_plan_not_admin(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/reject",
-            json={"reason": "x"},
-        )
-        assert resp.status_code == 403
-
-    def test_reject_buy_plan_not_found(self, admin_client):
+    def test_reject_buy_plan_not_found_returns_410(self, admin_client):
+        """V1 reject always returns 410 (before 404 check)."""
         resp = admin_client.put("/api/buy-plans/99999/reject", json={"reason": "x"})
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_reject_buy_plan_wrong_status(
-        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/reject",
-            json={"reason": "x"},
-        )
-        assert resp.status_code == 400
+    # ── PO entry (all return 410 now) ──
 
-    # ── PO entry ──
+    def test_enter_po_number_returns_410(self, client):
+        """V1 PO entry always returns 410."""
+        resp = client.put("/api/buy-plans/1/po", json={"line_index": 0, "po_number": "PO-001"})
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_enter_po_number(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po",
-            json={"line_index": 0, "po_number": "PO-001"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "po_entered"
-
-    def test_enter_po_not_found(self, client):
+    def test_enter_po_not_found_returns_410(self, client):
+        """V1 PO entry always returns 410 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/po", json={"line_index": 0, "po_number": "PO-001"})
-        assert resp.status_code == 404
-
-    def test_enter_po_wrong_status(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="pending_approval")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po",
-            json={"line_index": 0, "po_number": "PO-001"},
-        )
-        assert resp.status_code == 400
-
-    def test_enter_po_empty(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po",
-            json={"line_index": 0, "po_number": "  "},
-        )
-        assert resp.status_code == 400
-
-    def test_enter_po_bad_index(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po",
-            json={"line_index": 99, "po_number": "PO-001"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     # ── PO verification ──
 
-    @patch("app.services.buyplan_service.verify_po_sent", new_callable=AsyncMock)
-    def test_verify_po(self, mock_verify, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_entered")
-        mock_verify.return_value = [{"line_index": 0, "verified": True}]
+    def test_verify_po_returns_410(self, client):
+        """V1 verify-po endpoint now returns 410."""
+        resp = client.get("/api/buy-plans/1/verify-po")
+        assert resp.status_code == 410
 
-        resp = client.get(f"/api/buy-plans/{bp.id}/verify-po")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["plan_id"] == bp.id
-
-    def test_verify_po_not_found(self, client):
+    def test_verify_po_not_found_returns_410(self, client):
+        """V1 verify-po returns 410 even for non-existent plans."""
         resp = client.get("/api/buy-plans/99999/verify-po")
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    # ── Complete ──
+    # ── Complete (all return 410 now) ──
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_complete_buy_plan(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_confirmed")
-        resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "complete"
+    def test_complete_buy_plan_returns_410(self, admin_client):
+        """V1 complete always returns 410."""
+        resp = admin_client.put("/api/buy-plans/1/complete")
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_complete_stock_sale(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            status="approved",
-            is_stock_sale=True,
-        )
-        resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
-        assert resp.status_code == 200
-
-    def test_complete_buy_plan_buyer_from_po_confirmed(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Buyers can complete from po_confirmed status."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_confirmed")
-        resp = client.put(f"/api/buy-plans/{bp.id}/complete")
-        assert resp.status_code == 200
-
-    def test_complete_buy_plan_buyer_forbidden_from_approved(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Buyers cannot complete from approved status."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(f"/api/buy-plans/{bp.id}/complete")
-        assert resp.status_code == 403
-
-    def test_complete_buy_plan_not_found(self, admin_client):
+    def test_complete_buy_plan_not_found_returns_410(self, admin_client):
+        """V1 complete always returns 410 (before 404 check)."""
         resp = admin_client.put("/api/buy-plans/99999/complete")
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_complete_buy_plan_wrong_status(
-        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="pending_approval")
-        resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
-        assert resp.status_code == 400
+    # ── Cancel (all return 410 now) ──
 
-    # ── Cancel ──
-
-    def test_cancel_buy_plan_not_found(self, client):
+    def test_cancel_buy_plan_not_found_returns_410(self, client):
+        """V1 cancel always returns 410 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/cancel", json={})
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_cancel_approved_plan_not_admin(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
-    ):
-        """Non-admin cannot cancel approved plans."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 403
+    def test_cancel_approved_admin_returns_410(self, admin_client):
+        """V1 cancel always returns 410."""
+        resp = admin_client.put("/api/buy-plans/1/cancel", json={"reason": "Manager override"})
+        assert resp.status_code == 410
 
-    def test_cancel_approved_with_pos(
-        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Cannot cancel approved plan with PO numbers already entered."""
-        bp = self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            status="approved",
-            line_items=[{"offer_id": test_offer.id, "mpn": "LM317T", "po_number": "PO-123"}],
-        )
-        resp = admin_client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 400
+    # ── Resubmit (all return 410 now) ──
 
-    def test_cancel_wrong_status(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
-    ):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="complete")
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 400
+    def test_resubmit_rejected_returns_410(self, client):
+        """V1 resubmit always returns 410."""
+        resp = client.put("/api/buy-plans/1/resubmit", json={"salesperson_notes": "Updated pricing"})
+        assert resp.status_code == 410
 
-    def test_cancel_pending_not_submitter(
-        self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
-    ):
-        """Non-submitter, non-admin cannot cancel pending plans."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
-        resp = sales_client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 403
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_cancel_approved_admin(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Admin can cancel approved plans (no POs)."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/cancel",
-            json={"reason": "Manager override"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
-
-    # ── Resubmit ──
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_resubmit_rejected(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="rejected")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/resubmit",
-            json={"salesperson_notes": "Updated pricing"},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
-        assert data["status"] == "pending_approval"
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_resubmit_cancelled(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="cancelled")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/resubmit",
-            json={},
-        )
-        assert resp.status_code == 200
-
-    def test_resubmit_not_found(self, client):
+    def test_resubmit_not_found_returns_410(self, client):
+        """V1 resubmit always returns 410 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/resubmit", json={})
-        assert resp.status_code == 404
+        assert resp.status_code == 410
 
-    def test_resubmit_wrong_status(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(f"/api/buy-plans/{bp.id}/resubmit", json={})
-        assert resp.status_code == 400
+    # ── Bulk PO (all return 410 now) ──
 
-    def test_resubmit_not_submitter(
-        self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Non-submitter, non-admin cannot resubmit."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="rejected")
-        resp = sales_client.put(f"/api/buy-plans/{bp.id}/resubmit", json={})
-        assert resp.status_code == 403
-
-    # ── Bulk PO ──
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_bulk_po_entry(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
+    def test_bulk_po_entry_returns_410(self, client):
+        """V1 bulk PO entry always returns 410."""
         resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
+            "/api/buy-plans/1/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-BULK-001"}]},
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "po_entered"
-        assert data["changes"] == 1
+        assert resp.status_code == 410
 
-    def test_bulk_po_not_found(self, client):
+    def test_bulk_po_not_found_returns_410(self, client):
+        """V1 bulk PO always returns 410 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/po-bulk", json={"entries": []})
-        assert resp.status_code == 404
-
-    def test_bulk_po_wrong_status(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="pending_approval")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
-            json={"entries": [{"line_index": 0, "po_number": "PO-X"}]},
-        )
-        assert resp.status_code == 400
-
-    def test_bulk_po_empty_entries(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
-            json={"entries": []},
-        )
-        assert resp.status_code == 400
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_bulk_po_clear(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
-        """Clearing PO reverts status to approved."""
-        bp = self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            status="po_entered",
-            line_items=[
-                {
-                    "offer_id": test_offer.id,
-                    "mpn": "LM317T",
-                    "qty": 1000,
-                    "cost_price": 0.50,
-                    "vendor_name": "Arrow Electronics",
-                    "po_number": "PO-OLD",
-                    "po_entered_at": "2026-01-01T00:00:00",
-                    "po_sent_at": None,
-                    "po_recipient": None,
-                    "po_verified": False,
-                }
-            ],
-        )
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
-            json={"entries": [{"line_index": 0, "po_number": ""}]},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "approved"
-        assert resp.json()["changes"] == 1
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_bulk_po_update_existing(
-        self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Updating an existing PO resets verification."""
-        bp = self._make_bp(
-            db_session,
-            test_requisition,
-            test_quote,
-            test_offer,
-            test_user,
-            status="po_entered",
-            line_items=[
-                {
-                    "offer_id": test_offer.id,
-                    "mpn": "LM317T",
-                    "qty": 1000,
-                    "cost_price": 0.50,
-                    "vendor_name": "Arrow Electronics",
-                    "po_number": "PO-OLD",
-                    "po_entered_at": "2026-01-01T00:00:00",
-                    "po_sent_at": "2026-01-02T00:00:00",
-                    "po_recipient": "vendor@arrow.com",
-                    "po_verified": True,
-                }
-            ],
-        )
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
-            json={"entries": [{"line_index": 0, "po_number": "PO-NEW"}]},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["changes"] == 1
-
-    def test_bulk_po_invalid_index_skipped(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Invalid line indices are silently skipped."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        # Both a valid and invalid index
-        resp = client.put(
-            f"/api/buy-plans/{bp.id}/po-bulk",
-            json={
-                "entries": [
-                    {"line_index": 99, "po_number": "PO-BAD"},
-                    {"line_index": 0, "po_number": "PO-GOOD"},
-                ]
-            },
-        )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
 
     def test_buy_plans_for_quote_not_found(self, client):
         """When no buy plan exists for a quote, returns None."""
@@ -3267,96 +2825,35 @@ class TestOffersWithRatings:
 
 
 class TestBuyPlanApproveEdgeCases:
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        """Re-enable V1 buy plans for legacy test coverage."""
-        from app.config import settings
+    """V1 buy plan mutation endpoints always return 410 now."""
 
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-    def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
-        bp = BuyPlan(
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            status=kwargs.get("status", "pending_approval"),
-            submitted_by_id=test_user.id,
-            line_items=kwargs.get(
-                "line_items",
-                [
-                    {
-                        "offer_id": test_offer.id,
-                        "mpn": "LM317T",
-                        "qty": 1000,
-                        "cost_price": 0.50,
-                        "vendor_name": "Arrow Electronics",
-                    }
-                ],
-            ),
-            is_stock_sale=kwargs.get("is_stock_sale", False),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(bp)
-        db_session.commit()
-        db_session.refresh(bp)
-        return bp
-
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_with_line_items_override(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Manager can override line items during approval."""
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
+    def test_approve_with_line_items_override_returns_410(self, admin_client):
+        """V1 approve always returns 410."""
         resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/approve",
+            "/api/buy-plans/1/approve",
             json={
                 "sales_order_number": "SO-OVERRIDE",
                 "line_items": [{"mpn": "LM317T", "qty": 500, "cost_price": 0.45}],
                 "manager_notes": "Reduced qty",
             },
         )
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_token_with_manager_notes(
-        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Token-based approval with manager_notes."""
-        bp = BuyPlan(
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            status="pending_approval",
-            submitted_by_id=test_user.id,
-            line_items=[{"offer_id": test_offer.id, "mpn": "LM317T"}],
-            approval_token="notes-token",
-            token_expires_at=datetime.utcnow() + timedelta(days=30),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(bp)
-        db_session.commit()
-
+    def test_approve_token_with_manager_notes_returns_410(self, client):
+        """V1 token-based approve always returns 410."""
         resp = client.put(
             "/api/buy-plans/token/notes-token/approve",
             json={"sales_order_number": "SO-NOTES", "manager_notes": "Approved with conditions"},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
 
-    @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_cancel_reverts_offers(
-        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
-        """Cancelling a buy plan reverts offer status from 'won' to 'active'."""
-        test_offer.status = "won"
-        db_session.commit()
-
-        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
+    def test_cancel_returns_410(self, admin_client):
+        """V1 cancel always returns 410."""
         resp = admin_client.put(
-            f"/api/buy-plans/{bp.id}/cancel",
+            "/api/buy-plans/1/cancel",
             json={"reason": "Deal fell through"},
         )
-        assert resp.status_code == 200
-        db_session.refresh(test_offer)
-        assert test_offer.status == "active"
+        assert resp.status_code == 410
 
 
 # ── Customer import error handling ────────────────────────────────────

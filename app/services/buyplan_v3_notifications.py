@@ -149,6 +149,34 @@ async def _teams_dm(user: User, message: str, db: Session):
     await send_teams_dm(user, message, db)
 
 
+# ── Audit Trail ─────────────────────────────────────────────────────
+
+
+def log_buyplan_activity(
+    db: Session,
+    user_id: int,
+    plan: "BuyPlanV3",
+    activity_type: str,
+    detail: str = "",
+):
+    """Create an ActivityLog entry for a V3 buy plan state change.
+
+    Adapted from V1 log_buyplan_activity for BuyPlanV3. Unlike V1 which stores
+    plan linkage in notes (since buy_plan_id FK targets V3), this version can
+    use the plan id directly in subject and notes fields.
+    """
+    db.add(
+        ActivityLog(
+            user_id=user_id,
+            activity_type=activity_type,
+            channel="system",
+            requisition_id=plan.requisition_id,
+            subject=f"Buy plan V3 #{plan.id}: {detail}" if detail else f"Buy plan V3 #{plan.id}",
+            notes=f"v3_plan_id={plan.id} status={plan.status}",
+        )
+    )
+
+
 # ── Notification Functions ───────────────────────────────────────────
 
 
@@ -424,4 +452,92 @@ async def notify_v3_completed(plan: BuyPlanV3, db: Session):
     await _teams_channel(
         f"**Buy Plan V3 #{plan.id} — Completed**\n\n"
         f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'} | ${total:,.2f}"
+    )
+
+
+async def notify_v3_stock_sale_approved(plan: BuyPlanV3, db: Session):
+    """Notify logistics/accounting that a V3 stock sale was approved (no PO required).
+
+    Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete,
+    sends an email to the stock_sale_notify_emails list and creates an in-app
+    notification for the submitter. Also posts to the Teams channel.
+    """
+    from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
+
+    ctx = _plan_context(plan, db)
+    rows, total = _lines_html(plan)
+
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+
+    body = (
+        f"<p>Approved by <strong>{html_mod.escape(str(approver_name))}</strong>.</p>"
+        f"<p>This is an internal stock sale — no purchase orders are needed.</p>"
+        f'<div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">'
+        f'<p style="margin:0"><strong>Submitted by:</strong> {html_mod.escape(ctx["submitter_name"])}</p>'
+        f'<p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html_mod.escape(str(plan.sales_order_number or "N/A"))}</p>'
+        f"</div>"
+        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
+        f'<thead><tr style="background:#f3f4f6">'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
+        f"</tr></thead><tbody>{rows}</tbody>"
+        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
+        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+    )
+    html_body = _wrap_email("Stock Sale Approved — No PO Required", body)
+
+    # Send to stock_sale_notify_emails using an admin user's token
+    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    sender = next((a for a in admin_users if a.access_token), None)
+    if sender:
+        token = await get_valid_token(sender, db)
+        if token:
+            gc = GraphClient(token)
+
+            async def _send_stock_email(email_addr):
+                try:
+                    await gc.post_json(
+                        "/me/sendMail",
+                        {
+                            "message": {
+                                "subject": f"[AVAIL] Stock Sale Approved — V3 Plan #{plan.id}",
+                                "body": {"contentType": "HTML", "content": html_body},
+                                "toRecipients": [{"emailAddress": {"address": email_addr}}],
+                            },
+                            "saveToSentItems": "false",
+                        },
+                    )
+                    logger.info("V3 stock sale email sent to %s", email_addr)
+                except Exception as e:
+                    logger.error("Failed to send V3 stock sale email to %s: %s", email_addr, e)
+
+            await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
+
+    # In-app notification to submitter
+    if ctx["submitter"]:
+        db.add(
+            ActivityLog(
+                user_id=ctx["submitter"].id,
+                activity_type="buyplan_completed",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"Stock sale V3 #{plan.id} approved and completed — no PO required",
+            )
+        )
+    db.commit()
+
+    # Teams channel post
+    await _teams_channel(
+        f"**Buy Plan V3 #{plan.id} — Stock Sale Approved**\n\n"
+        f"Approved by: {approver_name}\n"
+        f"Submitted by: {ctx['submitter_name']}\n"
+        f"Total: ${total:,.2f} | Type: Stock Sale (no PO required)"
     )

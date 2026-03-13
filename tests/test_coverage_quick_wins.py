@@ -142,72 +142,10 @@ class TestAdminVendorMergeFKException:
 
 
 class TestBuyPlanMissingOffer:
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-    def test_submit_buy_plan_skips_missing_offer(self, client, db_session, test_user):
-        """Buy plan submission skips offer IDs not found in DB (line 154)."""
-        # Create a quote
-        co = Company(name="BPlan Corp", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-
-        site = CustomerSite(company_id=co.id, site_name="BPlan HQ", is_active=True)
-        db_session.add(site)
-        db_session.flush()
-
-        req = Requisition(
-            name="BP-REQ-001",
-            customer_site_id=site.id,
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        q = Quote(
-            requisition_id=req.id,
-            customer_site_id=site.id,
-            quote_number="Q-BP-001",
-            status="sent",
-            line_items=[],
-            subtotal=500.00,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.flush()
-
-        # Create one real offer
-        o = Offer(
-            requisition_id=req.id,
-            vendor_name="Test Vendor",
-            mpn="LM317T",
-            qty_available=100,
-            unit_price=0.50,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(o)
-        db_session.commit()
-
-        # Submit buy plan with one valid offer and one non-existent offer ID
-        resp = client.post(
-            f"/api/quotes/{q.id}/buy-plan",
-            json={
-                "offer_ids": [o.id, 99999],  # 99999 doesn't exist — should be skipped
-                "salesperson_notes": "Test notes",
-                "plan_qtys": {},
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "pending_approval"
+    def test_v1_submit_returns_410(self, client, test_quote):
+        """V1 buy plan submit endpoint now returns 410 (use V3 endpoints)."""
+        resp = client.post(f"/api/quotes/{test_quote.id}/buy-plan")
+        assert resp.status_code == 410
 
 
 # ═══════════════════════════════════════════════════════════════════════
