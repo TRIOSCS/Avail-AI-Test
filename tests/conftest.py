@@ -53,6 +53,8 @@ from app.models import (
     VendorContact,
 )
 
+_RUN_PYTHON_BROWSER_E2E = os.getenv("RUN_PYTHON_BROWSER_E2E", "").strip() == "1"
+
 # ── Event loop isolation ─────────────────────────────────────────────
 # Provide a fresh event loop per test to prevent cross-test pollution
 # (e.g. Playwright e2e tests leaving a running loop).
@@ -64,6 +66,29 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip the legacy Python Playwright suites unless explicitly opted in.
+
+    Default browser coverage now runs through the stable TypeScript Playwright
+    suite. The older Python browser suites remain available for manual deep
+    dives via RUN_PYTHON_BROWSER_E2E=1, but are skipped by default to prevent
+    hangs/timeouts in automated test runs.
+    """
+    if _RUN_PYTHON_BROWSER_E2E:
+        return
+
+    skip_browser = pytest.mark.skip(
+        reason=(
+            "Python browser E2E is opt-in; use RUN_PYTHON_BROWSER_E2E=1. "
+            "Default browser coverage runs via `npx playwright test`."
+        )
+    )
+    for item in items:
+        path = str(getattr(item, "path", getattr(item, "fspath", "")))
+        if path.endswith("tests/test_browser_e2e.py") or "/tests/e2e/" in path:
+            item.add_marker(skip_browser)
 
 
 # ── In-memory SQLite engine ──────────────────────────────────────────
