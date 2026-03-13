@@ -593,13 +593,13 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = existing_map.get(name)
-            # Backward-compat path for tests/mocks that patch filter_by().first()
-            # instead of populating query().all() with seeded sources.
+            # Keep a direct lookup for compatibility with tests/mocks that
+            # patch filter_by().first() instead of query().all().
+            src = db.query(ApiSource).filter_by(name=name).first()
             if src is None:
-                src = db.query(ApiSource).filter_by(name=name).first()
-                if src is not None:
-                    existing_map[name] = src
+                src = existing_map.get(name)
+            else:
+                existing_map[name] = src
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 
