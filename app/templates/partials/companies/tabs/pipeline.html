@@ -1,0 +1,58 @@
+{#
+  tabs/pipeline.html — Open requisitions and quotes linked to this company.
+  Receives: requisitions (list), quotes (list), company_id.
+  Called by: views.py company_tab endpoint (tab_name='pipeline').
+  Depends on: HTMX.
+#}
+<div class="tab-panel">
+    <h3>Open Requisitions</h3>
+    {% if requisitions %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in requisitions %}
+            <tr class="clickable-row"
+                hx-get="/views/requisitions/{{ r.id }}" hx-target="#main-content" hx-push-url="true">
+                <td>{{ r.name }}</td>
+                <td><span class="badge badge-{{ r.status }}">{{ r.status }}</span></td>
+                <td>{{ r.created_at.strftime('%b %d') if r.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No open requisitions.</p></div>
+    {% endif %}
+
+    <h3>Quotes</h3>
+    {% if quotes %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Quote #</th>
+                <th>Status</th>
+                <th>Total</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for q in quotes %}
+            <tr>
+                <td>{{ q.quote_number or '-' }}</td>
+                <td><span class="badge">{{ q.status }}</span></td>
+                <td>{{ '${:,.2f}'.format(q.subtotal) if q.subtotal else '-' }}</td>
+                <td>{{ q.created_at.strftime('%b %d') if q.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><p>No quotes.</p></div>
+    {% endif %}
+</div>

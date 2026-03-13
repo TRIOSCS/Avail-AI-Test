@@ -1,0 +1,15 @@
+{#
+  company_row.html — Single table row for a company in the list view.
+  Receives: company dict with id, name, owner_name, site_count, open_req_count.
+  Called by: list.html loop, views.py companies_rows endpoint.
+  Depends on: HTMX (hx-get for detail drawer click).
+#}
+<tr id="company-{{ company.id }}" class="clickable-row"
+    hx-get="/views/companies/{{ company.id }}" hx-target="#detail-drawer" hx-swap="innerHTML">
+    <td><input type="checkbox" name="company_check" :value="'{{ company.id }}'"
+               x-model="selected" @click.stop></td>
+    <td>{{ company.name }}</td>
+    <td>{{ company.owner_name or '-' }}</td>
+    <td>{{ company.site_count or 0 }}</td>
+    <td>{{ company.open_req_count or 0 }}</td>
+</tr>

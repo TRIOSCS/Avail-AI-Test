@@ -19,6 +19,8 @@ from app.dependencies import require_user, wants_html
 from app.models import (
     ActivityLog,
     BuyPlan,
+    Company,
+    CustomerSite,
     MaterialCard,
     Offer,
     Quote,
@@ -26,6 +28,7 @@ from app.models import (
     Requisition,
     RequisitionTask,
     Sighting,
+    SiteContact,
     User,
 )
 from app.utils.sql_helpers import escape_like
@@ -507,4 +510,248 @@ async def sourcing_stream(
     return templates.TemplateResponse(
         "partials/sourcing/search_progress.html",
         {"request": request, "sources": sources},
+    )
+
+
+# ── Companies views ──────────────────────────────────────────────
+
+
+def _query_companies(db: Session, q: str, owner: str, page: int):
+    """Build a filtered, paginated company query.
+
+    Returns (companies_list, page, total_pages, owners) where each item is a
+    lightweight namespace suitable for the list template.
+    """
+    base = db.query(Company, User.name.label("owner_name")).outerjoin(
+        User, Company.account_owner_id == User.id
+    ).filter(Company.is_active.is_(True))
+
+    # Search filter
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                Company.name.ilike(f"%{safe_q}%"),
+                Company.industry.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    # Owner filter (match by owner name)
+    if owner.strip():
+        safe_owner = escape_like(owner.strip())
+        base = base.filter(User.name.ilike(f"%{safe_owner}%"))
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    rows = base.order_by(Company.name.asc()).offset(offset).limit(PER_PAGE).all()
+
+    # Distinct owner names for the filter dropdown
+    owner_rows = (
+        db.query(User.name)
+        .join(Company, Company.account_owner_id == User.id)
+        .filter(Company.is_active.is_(True))
+        .distinct()
+        .order_by(User.name)
+        .all()
+    )
+    owners = [r[0] for r in owner_rows if r[0]]
+
+    companies = [
+        type("Co", (), {
+            "id": c.id,
+            "name": c.name,
+            "owner_name": owner_name or "",
+            "site_count": c.site_count or 0,
+            "open_req_count": c.open_req_count or 0,
+        })
+        for c, owner_name in rows
+    ]
+    return companies, page, total_pages, owners
+
+
+@router.get("/views/companies")
+async def companies_page(
+    request: Request,
+    q: str = "",
+    owner: str = "",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Companies list page."""
+    logger.debug("Companies page view by user={}", user.email if user else "unknown")
+    companies, page, total_pages, owners = _query_companies(db, q, owner, page)
+    return templates.TemplateResponse(
+        "partials/companies/list.html",
+        {
+            "request": request,
+            "user": user,
+            "companies": companies,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "owner": owner,
+            "owners": owners,
+            "sort": "name",
+            "dir": "asc",
+            "message": "No companies found.",
+        },
+    )
+
+
+@router.get("/views/companies/rows")
+async def companies_rows(
+    request: Request,
+    q: str = "",
+    owner: str = "",
+    owner_filter: str = "",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company table rows partial with server-side filtering and pagination."""
+    # Accept owner from either param name (direct or hx-include)
+    effective_owner = owner or owner_filter
+    logger.debug("Companies rows partial q='{}' owner='{}'", q, effective_owner)
+    companies, page, total_pages, _owners = _query_companies(db, q, effective_owner, page)
+
+    from fastapi.responses import HTMLResponse
+
+    row_html_parts = []
+    for company in companies:
+        rendered = templates.get_template("partials/companies/company_row.html").render(company=company)
+        row_html_parts.append(rendered)
+
+    if not row_html_parts:
+        empty = templates.get_template("partials/shared/empty_state.html").render(
+            message="No companies found.",
+        )
+        row_html_parts.append(f'<tr><td colspan="5">{empty}</td></tr>')
+
+    if total_pages > 1:
+        pagination = templates.get_template("partials/shared/pagination.html").render(
+            page=page, total_pages=total_pages, url="/views/companies/rows", target_id="company-table-body",
+        )
+        row_html_parts.append(pagination)
+
+    return HTMLResponse("\n".join(row_html_parts))
+
+
+@router.get("/views/companies/{company_id}")
+async def company_detail(
+    company_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company detail drawer partial."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    logger.debug("Company detail id={} by user={}", company_id, user.email)
+    return templates.TemplateResponse(
+        "partials/companies/detail.html",
+        {"request": request, "user": user, "company": company},
+    )
+
+
+_COMPANY_TABS = {"overview", "sites", "activity", "contacts", "pipeline"}
+
+
+@router.get("/views/companies/{company_id}/tab/{tab_name}")
+async def company_tab(
+    company_id: int,
+    tab_name: str,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company tab content partial."""
+    if tab_name not in _COMPANY_TABS:
+        raise HTTPException(status_code=404, detail=f"Unknown tab: {tab_name}")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    logger.debug("Company tab id={} tab={} by user={}", company_id, tab_name, user.email)
+
+    context: dict = {"request": request, "company": company, "company_id": company_id}
+
+    if tab_name == "overview":
+        pass  # company object has all overview fields
+
+    elif tab_name == "sites":
+        sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id)
+            .order_by(CustomerSite.site_name)
+            .all()
+        )
+        context["sites"] = sites
+
+    elif tab_name == "activity":
+        activities = (
+            db.query(ActivityLog)
+            .filter(ActivityLog.company_id == company_id)
+            .order_by(ActivityLog.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        context["activities"] = activities
+
+    elif tab_name == "contacts":
+        # Gather site contacts across all company sites
+        contacts = (
+            db.query(SiteContact, CustomerSite.site_name)
+            .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+            .filter(CustomerSite.company_id == company_id)
+            .order_by(SiteContact.full_name)
+            .all()
+        )
+        context["contacts"] = [
+            type("C", (), {
+                "full_name": sc.full_name,
+                "title": sc.title,
+                "email": sc.email,
+                "phone": sc.phone,
+                "site_name": site_name,
+                "contact_status": sc.contact_status,
+            })
+            for sc, site_name in contacts
+        ]
+
+    elif tab_name == "pipeline":
+        # Requisitions linked to this company by customer_name match
+        requisitions = (
+            db.query(Requisition)
+            .filter(
+                Requisition.customer_name == company.name,
+                Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+            )
+            .order_by(Requisition.created_at.desc())
+            .all()
+        )
+        context["requisitions"] = requisitions
+
+        # Quotes linked through company's sites
+        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
+        if site_ids:
+            quotes = (
+                db.query(Quote)
+                .filter(Quote.customer_site_id.in_(site_ids))
+                .order_by(Quote.created_at.desc())
+                .all()
+            )
+        else:
+            quotes = []
+        context["quotes"] = quotes
+
+    return templates.TemplateResponse(
+        f"partials/companies/tabs/{tab_name}.html",
+        context,
     )
