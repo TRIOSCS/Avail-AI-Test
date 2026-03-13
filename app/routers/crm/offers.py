@@ -26,6 +26,7 @@ from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
 from ...utils.normalization import normalize_mpn_key
+from ...utils.sanitize import sanitize_text
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
@@ -107,6 +108,26 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
         conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
 
+    # Batch-fetch risk flags for all offers in one query
+    from ...models.risk_flag import RiskFlag as _RiskFlag
+
+    offer_ids_all = [o.id for o in offers]
+    risk_flag_map: dict[int, list] = {oid: [] for oid in offer_ids_all}
+    if offer_ids_all:
+        flags = (
+            db.query(_RiskFlag)
+            .filter(_RiskFlag.source_offer_id.in_(offer_ids_all))
+            .all()
+        )
+        for f in flags:
+            if f.source_offer_id in risk_flag_map:
+                risk_flag_map[f.source_offer_id].append({
+                    "id": f.id,
+                    "type": f.type,
+                    "severity": f.severity,
+                    "message": f.message,
+                })
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -158,6 +179,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_flag_map.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -321,6 +343,9 @@ async def create_offer(
     # 1) If frontend passed a vendor_card_id, use it directly
     if payload.vendor_card_id:
         card = db.get(VendorCard, payload.vendor_card_id)
+
+    # Sanitize user-supplied text fields to prevent stored XSS
+    payload.vendor_name = sanitize_text(payload.vendor_name) or payload.vendor_name
 
     # 2) Exact match on normalized name
     if not card:
@@ -576,6 +601,12 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+    # Validate status transition — terminal states cannot be changed via general update
+    _TERMINAL_OFFER_STATUSES = {"sold", "won", "cancelled"}
+    if "status" in changes and offer.status in _TERMINAL_OFFER_STATUSES:
+        new_status = changes["status"]
+        if new_status != offer.status:
+            raise HTTPException(400, f"Invalid offer status transition: {offer.status} → {new_status}")
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

@@ -1445,10 +1445,10 @@ export function showView(viewId) {
 
 function _normalizeMainView(view) {
     // Migrate legacy split-view values into the unified requisitions view.
-    // Legacy values: 'sales', 'purchasing', 'sourcing', 'active', 'rfq' all route to view-list.
+    // Legacy values: 'sales', 'purchasing', 'sourcing', 'active', 'rfq' all route to 'reqs'.
     const legacyViews = ['sales', 'purchasing', 'sourcing', 'active', 'rfq'];
-    if (legacyViews.includes(view)) return 'view-list';
-    return view || 'view-list';
+    if (legacyViews.includes(view)) return 'reqs';
+    return view || 'reqs';
 }
 
 function showList() {
@@ -16978,4 +16978,33 @@ Object.assign(window, {
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
     rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    // Lead provenance panel
+    openLeadProvenancePanel,
 });
+
+// ── Lead Provenance Panel ──────────────────────────────────────────────
+// Opens a modal showing the chain-of-custody for a sourcing lead.
+// Called as: openLeadProvenancePanel('nexar', sightingId)
+
+const _leadProvenanceMap = {};
+
+function _registerLeadProvenance(source, sightingId, data) {
+    _leadProvenanceMap[`${source}:${sightingId}`] = data;
+}
+
+async function openLeadProvenancePanel(source, sightingId) {
+    const modal = document.getElementById('leadProvenanceModal');
+    const body = document.getElementById('leadProvenanceBody');
+    if (!modal || !body) return;
+    body.innerHTML = '<div class="loading-placeholder">Loading provenance\u2026</div>';
+    openModal('leadProvenanceModal');
+    try {
+        const cached = _leadProvenanceMap[`${source}:${sightingId}`];
+        const data = cached || await apiFetch(`/api/sources/${sightingId}/provenance?source=${encodeURIComponent(source)}`);
+        if (!data) { body.innerHTML = '<div class="empty-placeholder">No provenance data available.</div>'; return; }
+        body.innerHTML = `<div style="font-size:13px"><strong>Source:</strong> ${esc(source)}</div>
+            <pre style="font-size:11px;overflow:auto;max-height:50vh">${esc(JSON.stringify(data, null, 2))}</pre>`;
+    } catch(e) {
+        body.innerHTML = `<div class="error-placeholder">Failed to load: ${esc(e.message)}</div>`;
+    }
+}

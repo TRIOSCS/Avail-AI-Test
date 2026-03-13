@@ -1298,10 +1298,15 @@ async def list_requirement_tasks(
             "status": t.status,
             "priority": t.priority,
             "assigned_to": user_map.get(t.assigned_to_id, ""),
+            "assigned_to_id": t.assigned_to_id,
+            # assignee_name/creator_name are aliases consumed by the RFQ panel
+            "assignee_name": user_map.get(t.assigned_to_id, ""),
+            "creator_name": user_map.get(t.created_by, ""),
             "created_by_name": user_map.get(t.created_by, ""),
             "source_ref": t.source_ref,
             "ai_risk_flag": t.ai_risk_flag,
             "source": t.source,
+            "due_at": t.due_at.isoformat() if t.due_at else None,
             "due_date": t.due_at.isoformat() if t.due_at else None,
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
             "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -1326,22 +1331,49 @@ async def create_requirement_task(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Task title is required")
+
+    # Resolve optional assignment
+    assigned_to_id = body.get("assigned_to_id")
+    description = body.get("description")
+    due_at_raw = body.get("due_at")
+    due_at = None
+    if due_at_raw:
+        from datetime import datetime, timezone as _tz
+        try:
+            due_at = datetime.fromisoformat(due_at_raw.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass
+
     task = RequisitionTask(
         requisition_id=req.requisition_id,
         title=title,
+        description=description,
         task_type="general",
         status="todo",
         source="manual",
         source_ref=f"requirement:{requirement_id}",
         created_by=user.id,
+        assigned_to_id=assigned_to_id,
+        due_at=due_at,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    # Resolve assignee name for response
+    assignee_name = None
+    if task.assigned_to_id:
+        assignee = db.get(User, task.assigned_to_id)
+        assignee_name = assignee.name or assignee.email if assignee else None
+
     return {
         "id": task.id,
         "title": task.title,
+        "description": task.description,
         "status": task.status,
+        "assigned_to_id": task.assigned_to_id,
+        "assignee_name": assignee_name,
+        "due_at": task.due_at.isoformat() if task.due_at else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,
     }
 

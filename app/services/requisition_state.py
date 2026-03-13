@@ -22,7 +22,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "quoting": {"quoted", "reopened", "won", "archived"},
     "quoted": {"won", "lost", "reopened", "archived"},
     "reopened": {"quoting", "won", "archived"},
-    "won": {"active", "archived"},
+    "won": {"active", "archived"},  # Can re-open to active if deal is re-worked
     "lost": {"active", "archived", "reopened"},
     "archived": {"active"},
 }

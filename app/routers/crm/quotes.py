@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
+from ...utils.sanitize import sanitize_text
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
 from ._helpers import (
@@ -276,7 +277,13 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        raw_items = updates.pop("line_items")
+        # Sanitize text fields in line items to prevent stored XSS
+        for item in raw_items:
+            for key in ("mpn", "manufacturer", "description", "notes"):
+                if key in item and item[key]:
+                    item[key] = sanitize_text(item[key])
+        quote.line_items = raw_items
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell

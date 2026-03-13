@@ -224,11 +224,11 @@ class TestSubmitEndpoint:
         """Blank SO# rejected by Pydantic (schema validation tested in test_buy_plan_schemas.py)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        with pytest.raises(Exception):
-            c.post(
-                f"/api/buy-plans-v3/{plan.id}/submit",
-                json={"sales_order_number": ""},
-            )
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/submit",
+            json={"sales_order_number": ""},
+        )
+        assert r.status_code == 422  # Pydantic validation — blank SO# not allowed
 
 
 # ── Approve ──────────────────────────────────────────────────────────
@@ -454,11 +454,11 @@ class TestFlagIssueEndpoint:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        with pytest.raises(Exception):
-            c.post(
-                f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
-                json={"issue_type": "other"},
-            )
+        r = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            json={"issue_type": "other"},
+        )
+        assert r.status_code == 422  # Pydantic validation — 'other' requires a note
 
 
 # ── Resubmit ─────────────────────────────────────────────────────────

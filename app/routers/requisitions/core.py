@@ -696,3 +696,86 @@ async def unclaim_requisition_endpoint(
     changed = unclaim_requisition(req, db, actor=user)
     db.commit()
     return {"ok": True, "unclaimed": changed}
+
+
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def quote_summary(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight projection of quote and buy-plan status for the quote tab."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+
+    from ...models.buy_plan import BuyPlanV3
+
+    buy_plan = db.query(BuyPlanV3).filter(BuyPlanV3.requisition_id == req_id).first()
+
+    if not quote:
+        return {
+            "requisition_id": req_id,
+            "has_quote": False,
+            "has_buy_plan": False,
+            "quote_status": None,
+            "quote_number": None,
+            "line_count": 0,
+        }
+
+    line_items = quote.line_items or []
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": buy_plan is not None,
+        "quote_status": quote.status,
+        "quote_number": quote.quote_number,
+        "line_count": len(line_items),
+        "quote_id": quote.id,
+        "buy_plan_id": buy_plan.id if buy_plan else None,
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_buy_plan_from_requisition(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create or return an existing buy plan for a requisition with a sent/won quote."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "Requisition has no quote — create a quote first")
+
+    from ...models.buy_plan import BuyPlanV3
+
+    existing = db.query(BuyPlanV3).filter(BuyPlanV3.requisition_id == req_id).first()
+    if existing:
+        return {"buy_plan_id": existing.id, "status": existing.status, "created": False}
+
+    plan = BuyPlanV3(
+        requisition_id=req_id,
+        quote_id=quote.id,
+        status="draft",
+        submitted_by_id=user.id,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return {"buy_plan_id": plan.id, "status": plan.status, "created": True}
