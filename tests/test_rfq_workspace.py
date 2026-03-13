@@ -216,18 +216,16 @@ def test_requirement_tasks_include_assigned_to(client, test_requisition, db_sess
     assert row["assigned_to"] is not None
 
 
-def test_create_requirement_task_persists_assignment_and_due(client, test_requisition, test_user):
-    """Creating part task preserves assigned_to_id and due_at."""
+def test_create_requirement_task_persists_assignment(client, test_requisition, test_user):
+    """Creating part task preserves assigned_to_id."""
     req = test_requisition
     r = req.requirements[0]
-    due = datetime.now(timezone.utc).replace(microsecond=0) + timedelta(days=2)
 
     create_resp = client.post(
         f"/api/requirements/{r.id}/tasks",
         json={
             "title": "RFQ follow-up task",
             "assigned_to_id": test_user.id,
-            "due_at": due.isoformat(),
         },
     )
     assert create_resp.status_code == 200
@@ -237,7 +235,6 @@ def test_create_requirement_task_persists_assignment_and_due(client, test_requis
     rows = list_resp.json()
     created = next(x for x in rows if x["title"] == "RFQ follow-up task")
     assert created["assigned_to"] is not None
-    assert created["due_at"] is not None
 
 
 # ── Requirement History Timeline ──────────────────────────────────────

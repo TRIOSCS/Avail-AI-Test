@@ -1248,7 +1248,7 @@ class TestMaterialEnrichmentGaps:
 
         with (
             patch(
-                "app.services.material_enrichment_service.gradient_json",
+                "app.services.gradient_service.gradient_json",
                 new_callable=AsyncMock,
                 side_effect=Exception("AI error"),
             ),
