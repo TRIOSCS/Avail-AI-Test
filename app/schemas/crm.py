@@ -30,6 +30,7 @@ from app.utils.normalization_helpers import (
     normalize_phone_e164,
     normalize_us_state,
 )
+from app.utils.sanitize import sanitize_text
 
 # ── Companies ────────────────────────────────────────────────────────
 
@@ -368,6 +369,7 @@ class OfferCreate(BaseModel):
     @field_validator("vendor_name")
     @classmethod
     def vendor_name_not_blank(cls, v: str) -> str:
+        v = sanitize_text(v) or ""
         v = v.strip()
         if not v:
             raise ValueError("Field must not be blank")
@@ -417,6 +419,16 @@ class OfferUpdate(BaseModel):
         if v is None:
             return v
         return normalize_mpn(v) or v
+
+    @field_validator("vendor_name")
+    @classmethod
+    def sanitize_vendor_name_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        cleaned = (sanitize_text(v) or "").strip()
+        if not cleaned:
+            raise ValueError("Field must not be blank")
+        return cleaned
 
     @field_validator("condition")
     @classmethod
