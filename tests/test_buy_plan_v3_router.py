@@ -11,7 +11,6 @@ Depends on: conftest.py fixtures, app.routers.crm.buy_plans_v3
 
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 

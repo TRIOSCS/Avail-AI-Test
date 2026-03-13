@@ -9,12 +9,21 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.ai import (
-    DraftOfferItem,
     ApplyFreeformRfqRequest,
+    CompareQuotesRequest,
+    DraftOfferItem,
+    NormalizedPart,
+    NormalizePartsRequest,
+    ParsedQuote,
+    ParseEmailRequest,
+    ParseEmailResponse,
     ParseFreeformOfferRequest,
     ParseFreeformRfqRequest,
     ProspectContactSave,
     ProspectFinderRequest,
+    QuoteForAnalysis,
+    RfqDraftEmailRequest,
+    RfqDraftPart,
     RfqDraftRequest,
     SaveDraftOffersRequest,
     SaveFreeformOffersRequest,
@@ -139,18 +148,6 @@ class TestRfqDraftRequest:
 
 
 # ── Additional coverage for missing lines ───────────────────────────
-
-from app.schemas.ai import (
-    CompareQuotesRequest,
-    NormalizedPart,
-    NormalizePartsRequest,
-    ParsedQuote,
-    ParseEmailRequest,
-    ParseEmailResponse,
-    QuoteForAnalysis,
-    RfqDraftEmailRequest,
-    RfqDraftPart,
-)
 
 
 class TestDraftOfferItemValidators:
