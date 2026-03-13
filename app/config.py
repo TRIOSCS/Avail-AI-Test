@@ -233,6 +233,9 @@ class Settings(BaseSettings):
     # --- Frontend ---
     use_htmx: bool = False
 
+    # --- On-demand enrichment orchestrator ---
+    on_demand_enrichment_enabled: bool = True
+
     # --- Prospecting ---
     prospecting_enabled: bool = True
     prospecting_min_fit_for_contacts: int = 60
