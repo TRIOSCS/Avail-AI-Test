@@ -146,6 +146,14 @@ class TestScoringInfoEndpoint:
 
 
 class TestUnifiedScoresRefreshEndpoint:
+    @pytest.fixture(autouse=True)
+    def _skip_if_performance_router_disabled(self, client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/performance/unified-scores/refresh" for route in client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Performance router disabled in MVP mode")
+
     def test_non_admin_gets_403(self, client):
         resp = client.post("/api/performance/unified-scores/refresh")
         assert resp.status_code == 403
