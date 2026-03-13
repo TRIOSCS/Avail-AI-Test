@@ -14315,8 +14315,6 @@ function closeTroubleChat() { /* removed */ }
 function submitTrouble() { /* removed */ }
 function openTicketDetail() { /* removed */ }
 
-}
-
 // [AI DRAFT + COMPARE REMOVED] — backend removed
 function aiDraftRfq() { /* removed */ }
 function ddAiCompare() { /* removed */ }
