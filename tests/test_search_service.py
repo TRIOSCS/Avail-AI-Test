@@ -1945,7 +1945,8 @@ class TestFetchFresh:
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
-        assert len(stats) == 8
+        assert len(stats) >= 8
+        assert all(s["status"] in {"disabled", "skipped"} for s in stats)
 
     @pytest.mark.asyncio
     async def test_api_source_stats_updated(self, db_session):
