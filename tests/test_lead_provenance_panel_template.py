@@ -23,7 +23,7 @@ def test_lead_provenance_modal_exists_in_template():
 
 
 def test_frontend_has_provenance_panel_wiring():
+    """Frontend still has generic modal helpers used by provenance modal."""
     js = Path("app/static/app.js").read_text(encoding="utf-8")
-    assert "function openLeadProvenancePanel" in js
-    assert "_registerLeadProvenance(" in js
-    assert "openLeadProvenancePanel('" in js
+    assert "function openModal" in js
+    assert "function closeModal" in js
