@@ -525,8 +525,8 @@ class TestRequirementPanelTabs:
         assert "['offers', 'notes', 'tasks']" in app_js
 
     def test_tasks_tab_has_create_button(self, app_js):
-        """Tasks tab includes the + Assign Task button."""
-        assert "rfqShowTaskForm" in app_js
+        """Tasks tab includes the + Add Task button."""
+        assert "rfqAddTask()" in app_js
 
     def test_notes_tab_has_add_button(self, app_js):
         """Notes tab includes the + Add Note button."""
