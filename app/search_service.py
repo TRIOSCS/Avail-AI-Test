@@ -1071,6 +1071,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": {"strong": "high", "moderate": "medium", "weak": "low"}.get(quality, "low"),
+        "lead_confidence_reason": explanation,
     }
 
 
@@ -1387,4 +1389,6 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": {"strong": "high", "moderate": "medium", "weak": "low"}.get(quality, "low"),
+        "lead_confidence_reason": explanation,
     }

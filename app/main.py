@@ -331,6 +331,20 @@ async def csp_middleware(request: Request, call_next):
     return response
 
 
+# Temporary cache-bust gate: adds Clear-Site-Data header until 2026-03-18 UTC
+# to clear stale browser caches after the v3 static asset refactor.
+_CLEAR_SITE_DATA_CUTOFF = __import__("datetime").datetime(2026, 3, 18, 0, 0, tzinfo=__import__("datetime").timezone.utc)
+
+
+def _should_set_clear_site_data(now=None) -> bool:
+    """Return True while the cache-bust window is still open."""
+    from datetime import datetime, timezone
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now < _CLEAR_SITE_DATA_CUTOFF
+
+
 # L1: Request/response middleware — request ID, timing, structured logging
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
@@ -365,6 +379,8 @@ async def request_id_middleware(request: Request, call_next):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         path = request.url.path
+        if _should_set_clear_site_data() and path not in ("/health", "/metrics"):
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
@@ -566,7 +582,8 @@ def _seed_api_sources():
             del existing_map["newark"]
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
-        # Backfill known monthly quotas (only sets if currently NULL)
+        # Backfill known monthly quotas (only sets if currently NULL).
+        # Uses existing_map to avoid extra queries — 1 query total for the whole function.
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
@@ -578,7 +595,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

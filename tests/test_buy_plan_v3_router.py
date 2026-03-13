@@ -221,14 +221,14 @@ class TestSubmitEndpoint:
         assert r.json()["status"] == "pending"
 
     def test_submit_blank_so_rejected(self, db_session: Session, test_quote: Quote, test_user: User):
-        """Blank SO# rejected by Pydantic (schema validation tested in test_buy_plan_schemas.py)."""
+        """Blank SO# rejected by FastAPI schema validation (422)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        with pytest.raises(Exception):
-            c.post(
-                f"/api/buy-plans-v3/{plan.id}/submit",
-                json={"sales_order_number": ""},
-            )
+        resp = c.post(
+            f"/api/buy-plans-v3/{plan.id}/submit",
+            json={"sales_order_number": ""},
+        )
+        assert resp.status_code in (400, 422)
 
 
 # ── Approve ──────────────────────────────────────────────────────────
@@ -454,11 +454,11 @@ class TestFlagIssueEndpoint:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        with pytest.raises(Exception):
-            c.post(
-                f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
-                json={"issue_type": "other"},
-            )
+        resp = c.post(
+            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            json={"issue_type": "other"},
+        )
+        assert resp.status_code in (400, 422)
 
 
 # ── Resubmit ─────────────────────────────────────────────────────────

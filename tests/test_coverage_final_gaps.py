@@ -669,11 +669,23 @@ class TestLoggingConfigJsonStdout:
 
     def test_production_json_logging(self):
         """Line 42: production + EXTRA_LOGS=1 -> JSON stdout handler."""
+        import unittest.mock
+
         from loguru import logger
 
         from app.logging_config import setup_logging
 
         logger.remove()
+        # Patch logger.add to prevent actual file creation (no /var/log/avail in CI)
+        _orig_add = logger.add
+        file_add_calls = []
+
+        def _mock_add(sink, **kwargs):
+            if isinstance(sink, str) and sink.startswith("/var/log"):
+                file_add_calls.append(sink)
+                return 99  # fake handler id
+            return _orig_add(sink, **kwargs)
+
         with patch.dict(
             os.environ,
             {
@@ -682,10 +694,11 @@ class TestLoggingConfigJsonStdout:
                 "LOG_LEVEL": "INFO",
             },
         ):
-            setup_logging()
+            with unittest.mock.patch.object(logger, "add", side_effect=_mock_add):
+                setup_logging()
 
-        # Should have at least one handler configured
-        assert len(logger._core.handlers) > 0
+        # The file sink should have been attempted (proving the code path ran)
+        assert len(file_add_calls) >= 1
         logger.remove()  # Clean up
 
 
@@ -698,23 +711,23 @@ class TestSeedApiSourcesQuotaBackfill:
     """Test monthly_quota backfill in _seed_api_sources."""
 
     def test_quota_backfill_sets_value(self):
-        """Line 851: src with no monthly_quota gets backfilled."""
+        """Quota backfill sets monthly_quota from existing_map (no extra queries)."""
         from app.main import _seed_api_sources
 
         with patch("app.database.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
-            mock_db.query.return_value.all.return_value = []
 
-            # Make filter_by return a source without monthly_quota
+            # Provide a hunter_enrichment source with no quota via the initial .all() query
             mock_src = MagicMock()
-            mock_src.monthly_quota = None  # No quota set
-            mock_db.query.return_value.filter_by.return_value.first.return_value = mock_src
+            mock_src.name = "hunter_enrichment"
+            mock_src.monthly_quota = None
+            mock_db.query.return_value.all.return_value = [mock_src]
 
             _seed_api_sources()
 
-            # The quota should have been set
-            assert mock_src.monthly_quota is not None
+            # Quota should have been backfilled from existing_map
+            assert mock_src.monthly_quota == 500
             mock_db.commit.assert_called()
 
 

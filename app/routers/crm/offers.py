@@ -158,8 +158,29 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": [],
             }
         )
+    # Batch-load risk flags for all offers in this requisition
+    from ...models.risk_flag import RiskFlag
+
+    offer_ids_in_req = [o.id for o in offers]
+    if offer_ids_in_req:
+        risk_flag_rows = (
+            db.query(RiskFlag)
+            .filter(RiskFlag.source_offer_id.in_(offer_ids_in_req))
+            .all()
+        )
+        risk_by_offer: dict[int, list] = {}
+        for rf in risk_flag_rows:
+            risk_by_offer.setdefault(rf.source_offer_id, []).append(
+                {"id": rf.id, "type": rf.type, "severity": rf.severity, "message": rf.message}
+            )
+        # Attach risk flags to each offer in the groups
+        for grp in groups.values():
+            for o_dict in grp:
+                o_dict["risk_flags"] = risk_by_offer.get(o_dict["id"], [])
+
     # Preload quoted prices ONCE instead of per-requirement DB call
     quoted_prices = _preload_last_quoted_prices(db)
 
@@ -317,6 +338,11 @@ async def create_offer(
         raise HTTPException(404, "Requisition not found")
 
     card = None
+
+    # Sanitize user-supplied vendor name before any DB operations
+    from ...utils.sanitize import sanitize_text
+
+    payload.vendor_name = sanitize_text(payload.vendor_name) or payload.vendor_name
 
     # 1) If frontend passed a vendor_card_id, use it directly
     if payload.vendor_card_id:
@@ -576,6 +602,14 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+
+    # Validate offer status transitions — terminal states cannot be undone
+    _TERMINAL_OFFER_STATUSES = {"sold", "won", "lost"}
+    if "status" in changes and offer.status in _TERMINAL_OFFER_STATUSES:
+        new_status = changes["status"]
+        if new_status != offer.status and new_status not in _TERMINAL_OFFER_STATUSES:
+            raise HTTPException(400, f"Cannot change offer status from '{offer.status}' to '{new_status}'")
+
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

@@ -22,3 +22,26 @@ export async function fetchRfqWorkspaceTabData(ctx, tab, partId, reqId) {
             return null;
     }
 }
+
+// ── Offer status & retry actions ────────────────────────────────────────────────
+// Error messages displayed via showToast on failure:
+// "Couldn't retry RFQ — " + error detail
+// "Couldn't update response status — " + error detail
+
+export async function updateRfqOfferStatus(ctx, offerId, status) {
+    try {
+        return await ctx.apiFetch(`/api/offers/${offerId}`, { method: 'PUT', body: { status } });
+    } catch (e) {
+        if (ctx.showToast) ctx.showToast("Couldn't update response status — " + (e.message || 'unknown error'), 'error');
+        throw e;
+    }
+}
+
+export async function retryRfqContact(ctx, contactId) {
+    try {
+        return await ctx.apiFetch(`/api/contacts/${contactId}/retry`, { method: 'POST', body: {} });
+    } catch (e) {
+        if (ctx.showToast) ctx.showToast("Couldn't retry RFQ — " + (e.message || 'unknown error'), 'error');
+        throw e;
+    }
+}

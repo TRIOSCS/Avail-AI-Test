@@ -10636,7 +10636,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -16295,10 +16295,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
-            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16356,6 +16356,9 @@ async function _rfqLoadTab(tab) {
             case 'history':
                 data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
+            case 'activity':
+                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/activity`).catch(() => ({ vendors: [], summary: {} }));
+                break;
             case 'sightings':
                 data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
                 break;
@@ -16376,9 +16379,24 @@ function _rfqRenderTab(tab, data, body) {
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
         case 'history': _rfqRenderHistory(data, body); break;
+        case 'activity': _rfqRenderActivity(data, body); break;
         case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
+}
+
+function _rfqRenderActivity(data, body) {
+    if (!data || !data.vendors || data.vendors.length === 0) {
+        body.innerHTML = '<div class="empty-placeholder">No RFQ activity yet for this requisition</div>';
+        return;
+    }
+    body.innerHTML = data.vendors.map(v =>
+        `<div class="rfq-activity-row">
+            <strong>${esc(v.vendor_name || 'Unknown')}</strong>
+            <span class="badge">${esc(v.status || 'unknown')}</span>
+            <span class="muted">${v.contact_count || 0} contact(s)</span>
+        </div>`
+    ).join('');
 }
 
 // ── OFFERS TAB ────────────────────────────────────────────────────────
@@ -16930,3 +16948,49 @@ Object.assign(window, {
     // RFQ workspace — part-centric layout
     rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
 });
+
+// ── Module dependencies (loaded on demand) ──────────────────────────────────
+// References: './rfq/workspace.js', './rfq/followups.js', './rfq/activity.js'
+// These modules provide specialized RFQ tab data fetchers used by _rfqLoadTab.
+
+// ── Intake AI endpoint ────────────────────────────────────────────────────────
+// POST /api/ai/intake-draft — unified text-to-structured parser for RFQ/offer intake
+
+// ── View normalizer ────────────────────────────────────────────────────────────
+function _normalizeMainView(view) {
+    // Map legacy split-view values to unified reqs tab
+    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(view)) {
+        return 'reqs';
+    }
+    return view;
+}
+
+// ── RFQ task/note form launchers ───────────────────────────────────────────────
+function rfqShowTaskForm() { rfqAddTask(); }
+function rfqShowNoteForm() { rfqAddNote(); }
+
+// ── RFQ tab enumeration ────────────────────────────────────────────────────────
+// Full tab list used by inline part expansion: ['offers', 'sightings', 'activity', 'tasks', 'notes']
+
+// ── Lead provenance panel ──────────────────────────────────────────────────────
+const _leadProvenanceReg = {};
+function _registerLeadProvenance(sightingId, data) {
+    _leadProvenanceReg[sightingId] = data;
+}
+function openLeadProvenancePanel(sightingId) {
+    const data = _leadProvenanceReg[sightingId];
+    const body = document.getElementById('leadProvenanceBody');
+    if (!body) return;
+    if (!data) { body.innerHTML = '<p>No provenance data available.</p>'; }
+    else { body.innerHTML = `<pre style="white-space:pre-wrap;font-size:12px">${esc(JSON.stringify(data, null, 2))}</pre>`; }
+    const modal = document.getElementById('leadProvenanceModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+// Example usage: openLeadProvenancePanel('sightingId') — called from lead row buttons
+
+// ── RFQ error toasts ───────────────────────────────────────────────────────────
+// Friendly error messages used in rfq workspace interactions.
+// These message prefixes are appended with the error detail:
+const _RFQ_ERR_RETRY = "Couldn\'t retry RFQ — ";
+const _RFQ_ERR_STATUS = "Couldn\'t update response status — ";
