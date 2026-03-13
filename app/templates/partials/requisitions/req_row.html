@@ -6,9 +6,9 @@
 #}
 <tr id="req-{{ req.id }}" hx-get="/views/requisitions/{{ req.id }}" hx-push-url="true"
     hx-target="#main-content" class="clickable-row">
-    <td>{{ req.name }}</td>
-    <td>{{ req.customer_name or '' }}</td>
-    <td><span class="badge badge-{{ req.status }}">{{ req.status }}</span></td>
-    <td>{{ req.requirement_count or 0 }} parts</td>
-    <td>{{ req.created_at.strftime('%b %d') if req.created_at else '' }}</td>
+    <td data-label="Name">{{ req.name }}</td>
+    <td data-label="Customer">{{ req.customer_name or '' }}</td>
+    <td data-label="Status"><span class="badge badge-{{ req.status }}">{{ req.status }}</span></td>
+    <td data-label="Parts">{{ req.requirement_count or 0 }} parts</td>
+    <td data-label="Created">{{ req.created_at.strftime('%b %d') if req.created_at else '' }}</td>
 </tr>

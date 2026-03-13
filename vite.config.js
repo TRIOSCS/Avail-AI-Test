@@ -156,6 +156,7 @@ export default defineConfig({
         mobile: resolve(__dirname, "app/static/mobile.css"),
         touch: resolve(__dirname, "app/static/touch.js"),
         htmx_app: resolve(__dirname, "app/static/htmx_app.js"),
+        htmx_mobile: resolve(__dirname, "app/static/htmx_mobile.css"),
       },
     },
   },

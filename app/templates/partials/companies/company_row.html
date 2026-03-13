@@ -6,10 +6,10 @@
 #}
 <tr id="company-{{ company.id }}" class="clickable-row"
     hx-get="/views/companies/{{ company.id }}" hx-target="#detail-drawer" hx-swap="innerHTML">
-    <td><input type="checkbox" name="company_check" :value="'{{ company.id }}'"
+    <td class="col-check"><input type="checkbox" name="company_check" :value="'{{ company.id }}'"
                x-model="selected" @click.stop></td>
-    <td>{{ company.name }}</td>
-    <td>{{ company.owner_name or '-' }}</td>
-    <td>{{ company.site_count or 0 }}</td>
-    <td>{{ company.open_req_count or 0 }}</td>
+    <td data-label="Name">{{ company.name }}</td>
+    <td data-label="Owner">{{ company.owner_name or '-' }}</td>
+    <td data-label="Sites">{{ company.site_count or 0 }}</td>
+    <td data-label="Open Reqs">{{ company.open_req_count or 0 }}</td>
 </tr>
