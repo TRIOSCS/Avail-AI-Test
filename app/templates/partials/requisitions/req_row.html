@@ -1,0 +1,14 @@
+{#
+  req_row.html — Single table row for a requisition in the list view.
+  Receives `req` dict with id, name, customer_name, status, requirement_count, created_at.
+  Called by: list.html loop, views.py rows endpoint, POST create (afterbegin swap).
+  Depends on: HTMX (hx-get for drill-down click).
+#}
+<tr id="req-{{ req.id }}" hx-get="/views/requisitions/{{ req.id }}" hx-push-url="true"
+    hx-target="#main-content" class="clickable-row">
+    <td>{{ req.name }}</td>
+    <td>{{ req.customer_name or '' }}</td>
+    <td><span class="badge badge-{{ req.status }}">{{ req.status }}</span></td>
+    <td>{{ req.requirement_count or 0 }} parts</td>
+    <td>{{ req.created_at.strftime('%b %d') if req.created_at else '' }}</td>
+</tr>

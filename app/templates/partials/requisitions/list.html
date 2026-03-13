@@ -1,0 +1,77 @@
+{#
+  list.html — Requisitions list page with HTMX search, quick filters, sortable headers, pagination.
+  Receives: requisitions (list of req dicts), page, total_pages, q, status, sort, dir.
+  Called by: views.py requisitions_page endpoint.
+  Depends on: req_row.html, pagination.html, create_modal.html, HTMX, Alpine.js.
+#}
+{% extends "base.html" %}
+
+{% block title %}Requisitions — AvailAI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Requisitions</h1>
+    <button class="btn btn-primary"
+            @click="$dispatch('open-modal')"
+            hx-get="/views/requisitions/create-form"
+            hx-target="#modal-content">
+        New Requisition
+    </button>
+</div>
+
+{# Search bar #}
+<div class="toolbar">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="Search requisitions..."
+           hx-get="/views/requisitions/rows"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#req-table-body"
+           hx-include="[name='status_filter']">
+
+    {# Quick filters #}
+    <div class="quick-filters" x-data="{ active: '{{ status }}' }">
+        {% for label, value in [('All', ''), ('Open', 'open'), ('Draft', 'draft'), ('Awarded', 'won'), ('Archived', 'archived')] %}
+        <button class="filter-btn"
+                :class="{ 'active': active === '{{ value }}' }"
+                @click="active = '{{ value }}'"
+                hx-get="/views/requisitions/rows?status={{ value }}"
+                hx-target="#req-table-body">
+            {{ label }}
+        </button>
+        {% endfor %}
+        <input type="hidden" name="status_filter" :value="active">
+    </div>
+</div>
+
+{# Sortable table #}
+<table class="data-table">
+    <thead>
+        <tr>
+            {% for col_label, col_key in [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Parts', ''), ('Created', 'created_at')] %}
+            <th {% if col_key %}
+                hx-get="/views/requisitions/rows?sort={{ col_key }}&dir={% if sort == col_key and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                hx-target="#req-table-body"
+                class="sortable{% if sort == col_key %} sorted-{{ dir }}{% endif %}"
+                {% endif %}>
+                {{ col_label }}
+            </th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody id="req-table-body">
+        {% if requisitions %}
+            {% for req in requisitions %}
+                {% include "partials/requisitions/req_row.html" %}
+            {% endfor %}
+        {% else %}
+            <tr><td colspan="5">
+                {% include "partials/shared/empty_state.html" with context %}
+            </td></tr>
+        {% endif %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+    {% include "partials/shared/pagination.html" %}
+{% endif %}
+{% endblock %}
