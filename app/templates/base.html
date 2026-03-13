@@ -13,15 +13,17 @@
     <link rel="stylesheet" href="/static/styles.css">
     {% block head %}{% endblock %}
 </head>
-<body hx-boost="true">
-    {% include "partials/shared/toast.html" %}
-    {% include "partials/shared/modal.html" %}
-
+<body hx-boost="true" x-data>
+    {% include "partials/shared/topbar.html" %}
     <div class="app-layout">
-        <main id="main-content" hx-target="this" hx-swap="innerHTML">
+        {% include "partials/shared/sidebar.html" %}
+        <main id="main-content" class="main-content" hx-target="this" hx-swap="innerHTML">
             {% block content %}{% endblock %}
         </main>
     </div>
+    {% include "partials/shared/mobile_nav.html" %}
+    {% include "partials/shared/toast.html" %}
+    {% include "partials/shared/modal.html" %}
 
     <script src="/static/htmx_app.js" type="module"></script>
     {% block scripts %}{% endblock %}

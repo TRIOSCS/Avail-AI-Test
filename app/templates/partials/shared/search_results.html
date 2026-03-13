@@ -1,0 +1,27 @@
+{#
+  search_results.html — Dropdown partial showing global search results.
+  Returned by GET /search as an HTMX partial, grouped by type.
+  Called by: app/routers/views.py (global_search endpoint)
+  Depends on: query and results context variables
+#}
+{% if query and query|length > 0 %}
+    {% if results|length > 0 %}
+        <ul class="search-results-list">
+            {% for result in results %}
+            <li class="search-result-item">
+                <a href="{{ result.url }}" hx-boost="true" hx-target="#main-content" hx-push-url="true">
+                    <span class="result-type">{{ result.type }}</span>
+                    <span class="result-title">{{ result.title }}</span>
+                    {% if result.subtitle %}
+                    <span class="result-subtitle">{{ result.subtitle }}</span>
+                    {% endif %}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <div class="search-no-results">
+            No results for "<strong>{{ query }}</strong>"
+        </div>
+    {% endif %}
+{% endif %}
