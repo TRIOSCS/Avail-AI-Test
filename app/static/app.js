@@ -4204,7 +4204,7 @@ function _tqRenderFilteredTasks(tab) {
         return;
     }
 
-    // Sort: in_progress first, then todo, then by due date
+    // Sort by due date within each status group
     tasks.sort(function(a, b) {
         if (a.status !== b.status) {
             var order = { in_progress: 0, todo: 1, done: 2 };
@@ -4216,9 +4216,84 @@ function _tqRenderFilteredTasks(tab) {
         return new Date(a.due_at) - new Date(b.due_at);
     });
 
-    for (var i = 0; i < tasks.length; i++) {
-        container.appendChild(_tqRenderTask(tasks[i], tab));
+    if (_tqViewMode === 'kanban') {
+        _tqRenderKanban(container, tasks, tab);
+    } else {
+        for (var i = 0; i < tasks.length; i++) {
+            container.appendChild(_tqRenderTask(tasks[i], tab));
+        }
     }
+}
+
+function _tqRenderKanban(container, tasks, tab) {
+    var board = document.createElement('div');
+    board.className = 'tq-kanban';
+
+    var columns = [
+        { status: 'todo', label: 'To Do', color: 'var(--muted)' },
+        { status: 'in_progress', label: 'In Progress', color: 'var(--blue)' },
+        { status: 'done', label: 'Done', color: 'var(--green)' },
+    ];
+
+    for (var c = 0; c < columns.length; c++) {
+        var col = _tqKanbanColumn(columns[c], tasks, tab);
+        board.appendChild(col);
+    }
+    container.appendChild(board);
+}
+
+function _tqKanbanColumn(colDef, allTasks, tab) {
+    var col = document.createElement('div');
+    col.className = 'tq-kanban-col';
+    col.setAttribute('data-col-status', colDef.status);
+
+    // Column header
+    var header = document.createElement('div');
+    header.className = 'tq-kanban-header';
+    var count = allTasks.filter(function(t) { return t.status === colDef.status; }).length;
+    header.innerHTML = '<span class="tq-kanban-label" style="color:' + colDef.color + '">' + colDef.label + '</span>' +
+        '<span class="tq-kanban-count">' + count + '</span>';
+    col.appendChild(header);
+
+    // Drop zone
+    var dropZone = document.createElement('div');
+    dropZone.className = 'tq-kanban-drop';
+
+    // Drag-and-drop event handlers
+    dropZone.ondragover = function(e) { e.preventDefault(); dropZone.classList.add('tq-kanban-drop-active'); };
+    dropZone.ondragleave = function() { dropZone.classList.remove('tq-kanban-drop-active'); };
+    dropZone.ondrop = function(e) {
+        e.preventDefault();
+        dropZone.classList.remove('tq-kanban-drop-active');
+        try {
+            var data = JSON.parse(e.dataTransfer.getData('text/plain'));
+            if (data.status !== colDef.status) {
+                if (colDef.status === 'done') {
+                    // Find the task to show complete modal
+                    var matchTask = allTasks.find(function(t) { return t.id === data.id; });
+                    if (matchTask) _tqShowCompleteModal(matchTask);
+                } else {
+                    _tqChangeStatus(data.id, colDef.status);
+                }
+            }
+        } catch (err) { /* ignore bad data */ }
+    };
+
+    // Render cards for this column
+    var colTasks = allTasks.filter(function(t) { return t.status === colDef.status; });
+    for (var i = 0; i < colTasks.length; i++) {
+        dropZone.appendChild(_tqRenderTask(colTasks[i], tab));
+    }
+
+    if (!colTasks.length) {
+        var empty = document.createElement('div');
+        empty.className = 'tq-kanban-empty';
+        empty.textContent = 'Drop tasks here';
+        dropZone.appendChild(empty);
+    }
+
+    col.appendChild(dropZone);
+    return col;
 }
 
 // ---------------------------------------------------------------------------
@@ -4400,12 +4475,22 @@ function _tqRenderTask(task, tab) {
     var isInProgress = task.status === 'in_progress';
     var card = document.createElement('div');
     card.className = 'tq-card' + (isDone ? ' tq-done' : '') + (isInProgress ? ' tq-in-progress' : '');
+    card.setAttribute('data-task-id', task.id);
+    card.setAttribute('data-status', task.status);
+    card.setAttribute('draggable', 'true');
+
+    // Drag-and-drop data
+    card.ondragstart = function(e) {
+        e.dataTransfer.setData('text/plain', JSON.stringify({ id: task.id, status: task.status }));
+        card.classList.add('tq-dragging');
+    };
+    card.ondragend = function() { card.classList.remove('tq-dragging'); };
 
     // Priority stripe
     var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
     card.style.borderLeftColor = priColors[task.priority] || priColors[2];
 
-    // Top row: status actions + title
+    // Top row: status actions + title + action buttons
     var topRow = document.createElement('div');
     topRow.className = 'tq-card-top';
 
@@ -4413,7 +4498,7 @@ function _tqRenderTask(task, tab) {
     var statusGroup = document.createElement('div');
     statusGroup.className = 'tq-status-group';
 
-    if (tab !== 'done') {
+    if (tab !== 'done' && tab !== 'feed') {
         if (isDone) {
             var reopenBtn = _tqStatusBtn('Reopen', 'todo', task);
             statusGroup.appendChild(reopenBtn);
@@ -4442,10 +4527,33 @@ function _tqRenderTask(task, tab) {
     reqLabel.textContent = task.requisition_name || 'Req #' + task.requisition_id;
     if (task.requisition_id) {
         reqLabel.style.cursor = 'pointer';
-        reqLabel.onclick = function() { goToReq(task.requisition_id); };
+        reqLabel.onclick = function(e) { e.stopPropagation(); goToReq(task.requisition_id); };
     }
     titleWrap.appendChild(reqLabel);
     topRow.appendChild(titleWrap);
+
+    // Action buttons (edit, delete)
+    if (tab !== 'feed') {
+        var actions = document.createElement('div');
+        actions.className = 'tq-card-actions';
+
+        var editBtn = document.createElement('button');
+        editBtn.className = 'tq-action-btn';
+        editBtn.title = 'Edit';
+        editBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+        editBtn.onclick = function(e) { e.stopPropagation(); _tqShowEditForm(task); };
+        actions.appendChild(editBtn);
+
+        var delBtn = document.createElement('button');
+        delBtn.className = 'tq-action-btn tq-action-del';
+        delBtn.title = 'Delete';
+        delBtn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        delBtn.onclick = function(e) { e.stopPropagation(); _tqDeleteTask(task); };
+        actions.appendChild(delBtn);
+
+        topRow.appendChild(actions);
+    }
+
     card.appendChild(topRow);
 
     // Meta row: assignee, creator, due date, status badge
@@ -4479,10 +4587,12 @@ function _tqRenderTask(task, tab) {
     }
     if (task.due_at) {
         var dueSpan = document.createElement('span');
-        dueSpan.className = 'tq-meta-due';
+        dueSpan.className = 'tq-meta-due tq-due-editable';
         var dueDate = new Date(task.due_at);
         if (dueDate < new Date() && !isDone) dueSpan.classList.add('tq-overdue');
         dueSpan.textContent = 'Due: ' + _shortDate(task.due_at);
+        dueSpan.title = 'Click to change due date';
+        dueSpan.onclick = function(e) { e.stopPropagation(); _tqInlineEditDue(dueSpan, task); };
         meta.appendChild(dueSpan);
     }
     if (task.ai_risk_flag) {
@@ -4511,6 +4621,186 @@ function _tqRenderTask(task, tab) {
 
     return card;
 }
+
+// ---------------------------------------------------------------------------
+// Inline due date editing
+// ---------------------------------------------------------------------------
+
+function _tqInlineEditDue(spanEl, task) {
+    // Replace the span with an inline date input
+    var input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'tq-due-input';
+    var current = task.due_at ? task.due_at.split('T')[0] : '';
+    input.value = current;
+    spanEl.style.display = 'none';
+    spanEl.parentNode.insertBefore(input, spanEl.nextSibling);
+    input.focus();
+
+    function save() {
+        var newVal = input.value;
+        input.remove();
+        spanEl.style.display = '';
+        if (!newVal || newVal === current) return;
+        var newDue = new Date(newVal).toISOString();
+        apiFetch('/api/requisitions/' + task.requisition_id + '/tasks/' + task.id, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ due_at: newDue }),
+        }).then(function() {
+            task.due_at = newDue;
+            spanEl.textContent = 'Due: ' + _shortDate(newDue);
+            spanEl.classList.remove('tq-overdue');
+            if (new Date(newDue) < new Date()) spanEl.classList.add('tq-overdue');
+            if (typeof showToast === 'function') showToast('Due date updated', 'success');
+        }).catch(function() {
+            if (typeof showToast === 'function') showToast('Failed to update due date', 'error');
+        });
+    }
+
+    input.onchange = save;
+    input.onblur = save;
+    input.onkeydown = function(e) {
+        if (e.key === 'Escape') { input.remove(); spanEl.style.display = ''; }
+        if (e.key === 'Enter') { save(); }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Edit task modal (reuses create form pattern, pre-filled)
+// ---------------------------------------------------------------------------
+
+async function _tqShowEditForm(task) {
+    var old = document.getElementById('tqEditModal');
+    if (old) old.remove();
+
+    var users = [];
+    try { users = await apiFetch('/api/users/list'); } catch(e) { users = []; }
+
+    var overlay = document.createElement('div');
+    overlay.id = 'tqEditModal';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+    var userOpts = '<option value="">-- Assign to --</option>';
+    for (var i = 0; i < users.length; i++) {
+        var sel = (task.assigned_to_id && users[i].id === task.assigned_to_id) ? ' selected' : '';
+        userOpts += '<option value="' + users[i].id + '"' + sel + '>' + _escHtml(users[i].name || users[i].email) + '</option>';
+    }
+
+    var dueStr = task.due_at ? task.due_at.split('T')[0] : '';
+    var priVal = task.priority || 2;
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '480px';
+    box.innerHTML =
+        '<h3 style="margin:0 0 16px;font-size:15px">Edit Task</h3>' +
+        '<div class="tq-form-group"><label>Title</label><input id="tqEditTitle" type="text" value="' + _escHtml(task.title || '') + '" class="tq-form-input"></div>' +
+        '<div class="tq-form-group"><label>Description (optional)</label><textarea id="tqEditDesc" rows="2" class="tq-form-input" style="resize:vertical">' + _escHtml(task.description || '') + '</textarea></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<div class="tq-form-group" style="flex:1;min-width:140px"><label>Assign To</label><select id="tqEditAssignee" class="tq-form-input">' + userOpts + '</select></div>' +
+            '<div class="tq-form-group" style="flex:1;min-width:140px"><label>Due Date</label><input id="tqEditDue" type="date" value="' + dueStr + '" class="tq-form-input"></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<div class="tq-form-group" style="flex:1"><label>Priority</label><select id="tqEditPriority" class="tq-form-input">' +
+                '<option value="1"' + (priVal === 1 ? ' selected' : '') + '>Low</option>' +
+                '<option value="2"' + (priVal === 2 ? ' selected' : '') + '>Medium</option>' +
+                '<option value="3"' + (priVal === 3 ? ' selected' : '') + '>High</option>' +
+            '</select></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tqEditModal\').remove()">Cancel</button>' +
+            '<button class="btn btn-sm" id="tqEditSubmit" style="background:var(--blue);color:#fff">Save Changes</button>' +
+        '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.getElementById('tqEditTitle').focus();
+
+    document.getElementById('tqEditSubmit').onclick = async function() {
+        var title = document.getElementById('tqEditTitle').value.trim();
+        if (!title) { document.getElementById('tqEditTitle').style.borderColor = 'var(--red)'; return; }
+
+        var body = { title: title };
+        var desc = document.getElementById('tqEditDesc').value.trim();
+        body.description = desc || null;
+        var assigneeId = document.getElementById('tqEditAssignee').value;
+        if (assigneeId) body.assigned_to_id = parseInt(assigneeId);
+        var dueVal = document.getElementById('tqEditDue').value;
+        if (dueVal) body.due_at = new Date(dueVal).toISOString();
+        body.priority = parseInt(document.getElementById('tqEditPriority').value);
+
+        try {
+            await apiFetch('/api/requisitions/' + task.requisition_id + '/tasks/' + task.id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            overlay.remove();
+            _tqLoadTab(_tqCurrentTab);
+            _tqLoadBadges();
+            if (typeof showToast === 'function') showToast('Task updated', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to update task', 'error');
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Delete task with confirmation
+// ---------------------------------------------------------------------------
+
+function _tqDeleteTask(task) {
+    var old = document.getElementById('tqDeleteModal');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'tqDeleteModal';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '380px';
+    box.innerHTML =
+        '<h3 style="margin:0 0 12px;font-size:15px;color:var(--red)">Delete Task?</h3>' +
+        '<p style="font-size:13px;color:var(--muted);margin:0 0 16px">' + _escHtml(task.title) + '</p>' +
+        '<p style="font-size:12px;color:var(--muted);margin:0 0 16px">This action cannot be undone.</p>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tqDeleteModal\').remove()">Cancel</button>' +
+            '<button class="btn btn-sm" id="tqDeleteConfirm" style="background:var(--red);color:#fff">Delete</button>' +
+        '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    document.getElementById('tqDeleteConfirm').onclick = async function() {
+        try {
+            await apiFetch('/api/requisitions/' + task.requisition_id + '/tasks/' + task.id, {
+                method: 'DELETE',
+            });
+            overlay.remove();
+            _tqLoadTab(_tqCurrentTab);
+            _tqLoadBadges();
+            if (typeof showToast === 'function') showToast('Task deleted', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to delete task', 'error');
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Kanban Board View
+// ---------------------------------------------------------------------------
+
+var _tqViewMode = 'list'; // 'list' or 'kanban'
+
+window._tqToggleView = function(mode) {
+    _tqViewMode = mode;
+    document.querySelectorAll('.tq-view-btn').forEach(function(b) { b.classList.remove('active'); });
+    var activeBtn = document.querySelector('.tq-view-btn[data-view="' + mode + '"]');
+    if (activeBtn) activeBtn.classList.add('active');
+    _tqRenderFilteredTasks(_tqCurrentTab);
+};
 
 function _tqStatusBtn(label, newStatus, task, requireNote) {
     var btn = document.createElement('button');

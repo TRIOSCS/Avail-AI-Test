@@ -3511,3 +3511,37 @@ body { line-height: 1.42; }
 .tq-person-bar-track { flex: 1; height: 6px; background: var(--bg2, #f1f5f9); border-radius: 3px; overflow: hidden; }
 .tq-person-bar-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
 .tq-person-bar-label { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+/* Task Queue — Card action buttons (edit, delete) */
+.tq-card-actions { display: flex; gap: 4px; align-items: center; flex-shrink: 0; opacity: 0; transition: opacity .15s; }
+.tq-card:hover .tq-card-actions { opacity: 1; }
+.tq-action-btn { background: none; border: 1px solid var(--border, #e2e8f0); border-radius: 4px; padding: 4px 6px; cursor: pointer; color: var(--muted, #64748b); transition: all .15s; display: flex; align-items: center; }
+.tq-action-btn:hover { background: var(--bg2, #f1f5f9); color: var(--fg); border-color: var(--fg); }
+.tq-action-del:hover { color: var(--red, #ef4444); border-color: var(--red); background: var(--red-light, #fef2f2); }
+
+/* Task Queue — Inline due date editing */
+.tq-due-editable { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color .15s; }
+.tq-due-editable:hover { border-bottom-color: var(--blue, #3b6ea8); }
+.tq-due-input { font-size: 11px; border: 1px solid var(--blue, #3b6ea8); border-radius: 4px; padding: 2px 6px; background: var(--card); }
+
+/* Task Queue — View toggle (list/kanban) */
+.tq-view-toggle { display: flex; gap: 2px; margin-left: auto; border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 2px; }
+.tq-view-btn { background: none; border: none; padding: 4px 8px; cursor: pointer; border-radius: 4px; color: var(--muted); display: flex; align-items: center; transition: all .15s; }
+.tq-view-btn.active { background: var(--blue, #3b6ea8); color: #fff; }
+.tq-view-btn:hover:not(.active) { background: var(--bg2, #f1f5f9); }
+
+/* Task Queue — Kanban board */
+.tq-kanban { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; min-height: 300px; }
+@media (max-width: 768px) { .tq-kanban { grid-template-columns: 1fr; } }
+.tq-kanban-col { background: var(--bg2, #f8fafc); border-radius: 8px; padding: 8px; min-height: 200px; }
+.tq-kanban-header { display: flex; justify-content: space-between; align-items: center; padding: 6px 8px 10px; }
+.tq-kanban-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px; }
+.tq-kanban-count { font-size: 11px; background: var(--border, #e2e8f0); border-radius: 10px; padding: 1px 8px; color: var(--muted); font-weight: 600; }
+.tq-kanban-drop { min-height: 120px; border: 2px dashed transparent; border-radius: 6px; transition: border-color .2s, background .2s; display: flex; flex-direction: column; gap: 6px; }
+.tq-kanban-drop-active { border-color: var(--blue, #3b6ea8); background: rgba(59,110,168,.05); }
+.tq-kanban-empty { text-align: center; color: var(--muted); font-size: 12px; padding: 30px 10px; }
+
+/* Task Queue — Drag styling */
+.tq-dragging { opacity: 0.4; transform: rotate(2deg); }
+.tq-card[draggable="true"] { cursor: grab; }
+.tq-card[draggable="true"]:active { cursor: grabbing; }
