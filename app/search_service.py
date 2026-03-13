@@ -44,6 +44,7 @@ from .utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from .services.vendor_affinity_service import find_vendor_affinity
 from .utils.normalization_helpers import fix_encoding
 from .vendor_utils import normalize_vendor_name
 
@@ -163,8 +164,20 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
     now = datetime.now(timezone.utc)
 
-    # 1. Fetch + dedupe (parallel across all connectors)
-    fresh, source_stats = await _fetch_fresh(pns, db)
+    # 1. Fetch + dedupe (parallel across all connectors) + vendor affinity
+    async def _fetch_affinity():
+        """Run vendor affinity matching for the primary MPN."""
+        try:
+            return find_vendor_affinity(pns[0], db)
+        except Exception as e:
+            logger.warning("Vendor affinity lookup failed for {}: {}", pns[0], e)
+            return []
+
+    fresh_task = _fetch_fresh(pns, db)
+    affinity_task = _fetch_affinity()
+    (fresh, source_stats), affinity_matches = await asyncio.gather(
+        fresh_task, affinity_task
+    )
 
     # 2. Score + save — only replace sightings from connectors that succeeded
     succeeded_sources = {stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")}
@@ -200,6 +213,35 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     for h in history:
         results.append(_history_to_result(h, now))
 
+    # 5b. Merge vendor affinity suggestions (skip vendors already in live results)
+    live_vendors = {r.get("vendor_name", "").lower() for r in results}
+    for match in affinity_matches:
+        vendor_lower = match.get("vendor_name", "").lower()
+        if vendor_lower in live_vendors:
+            continue
+        live_vendors.add(vendor_lower)
+        results.append({
+            "vendor_name": match.get("vendor_name", ""),
+            "vendor_id": match.get("vendor_id"),
+            "mpn": pns[0],
+            "mpn_matched": pns[0],
+            "source_type": "vendor_affinity",
+            "source_badge": "Vendor Match",
+            "is_historical": False,
+            "is_material_history": False,
+            "is_affinity": True,
+            "confidence_pct": round(match.get("confidence", 0) * 100),
+            "reasoning": match.get("reasoning", ""),
+            "qty_available": None,
+            "unit_price": None,
+            "score": max(5, match.get("confidence", 0) * 20),
+            "cross_references": [],
+        })
+    if affinity_matches:
+        kept = sum(1 for r in results if r.get("is_affinity"))
+        logger.info("Req {} ({}): merged {} affinity suggestions ({} after dedup)",
+                     req.id, pns[0], len(affinity_matches), kept)
+
     # 6. Cross-references: group results by material_card_id to show alternate MPNs
     card_mpns: dict[int, set[str]] = {}
     for r in results:
@@ -233,7 +275,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     results = [
         r
         for r in results
-        if not is_weak_lead(
+        if r.get("is_affinity") or not is_weak_lead(
             score=r.get("score", 0),
             is_authorized=r.get("is_authorized", False),
             has_price=r.get("unit_price") is not None,
