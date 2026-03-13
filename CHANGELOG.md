@@ -2,6 +2,28 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-13 — Test library refinement (HTMX/Alpine rebuild)
+
+### Test Infrastructure
+- **MVP_MODE=false in conftest** — enrichment, performance, teams routers now included in test runs (were 404 when mvp_mode=True)
+- **pytest-timeout** added to requirements-dev.txt — prevents hanging tests (30s default)
+- **scripts/run_tests.sh** — convenience script for full test run with 60s timeout
+
+### Schema & Import Fixes
+- **test_schemas_ai.py** — removed tests for deleted IntakeDraftRequest/IntakeDraftResponse/IntakeRequirementItem; added tests for ParseFreeformRfqRequest, ApplyFreeformRfqRequest, SaveFreeformOffersRequest
+- **app/routers/ai.py** — fixed relative imports (`...utils` → `app.utils`) that caused ImportError in tests
+
+### Test Updates (HTMX/Alpine alignment)
+- **test_routers_ai.py** — removed 4 intake-draft tests (endpoint removed); fixed test_parse_freeform_rfq_no_result (empty raw_text fails validation, use valid text)
+- **test_shared_framework.py** — intake placeholder assertion updated for new copy; intake endpoint check now accepts parse-freeform-rfq/offer
+
+### Skipped (legacy)
+- **test_free_text_parser.py** — skipped; legacy free_text API replaced by freeform (parse-freeform-rfq, etc.)
+
+### Result
+- ~8,787 tests passing (up from ~8,478)
+- 79 known failures remain (RFQ frontend wireup, NC worker, quote workflow, etc.) — pre-existing or require deeper frontend alignment
+
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
 ### Applied
