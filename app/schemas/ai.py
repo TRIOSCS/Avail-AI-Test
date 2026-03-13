@@ -240,3 +240,100 @@ class SaveFreeformOffersRequest(BaseModel):
 
     requisition_id: int = Field(ge=1)
     offers: list[DraftOfferItem] = Field(min_length=1)
+
+
+# ── Intake Draft (AI-assisted RFQ/offer intake bar) ────────────────────────
+
+
+class IntakeRequirementItem(BaseModel):
+    """A single line item extracted from AI-parsed customer RFQ text."""
+
+    mpn: str
+    quantity: int = 1
+    condition: str | None = None
+    packaging: str | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def mpn_required(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("mpn required")
+        return stripped.upper()
+
+    @field_validator("condition", mode="before")
+    @classmethod
+    def normalize_cond(cls, v):
+        return normalize_condition(v) if v else v
+
+    @field_validator("packaging", mode="before")
+    @classmethod
+    def normalize_pkg(cls, v):
+        return normalize_packaging(v) if v else v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Parse pasted text (RFQ or vendor offer) via the intake bar."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def text_required(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("text required")
+        return stripped
+
+
+class IntakeDraftResponse(BaseModel):
+    """AI-parsed result from the intake bar — requirements or offers."""
+
+    document_type: str = "unclear"
+    confidence: float = 0.0
+    company_name: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    notes: str | None = None
+    requirements: list[dict] = []
+    offers: list[dict] = []
+
+
+# ── Free-Text Parser (unified parse/save for RFQ text) ─────────────────────
+
+
+class FreeTextLineItem(BaseModel):
+    """A single extracted line item from free-text parsing."""
+
+    mpn: str = ""
+    quantity: int = 1
+    target_price: float | None = None
+    condition: str | None = None
+    currency: str = "USD"
+    notes: str | None = None
+
+
+class FreeTextParseRequest(BaseModel):
+    """Request to parse pasted free-form text (RFQ or offer)."""
+
+    text: str = Field(min_length=1)
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Save a parsed free-text RFQ as a new requisition."""
+
+    name: str
+    customer_name: str | None = None
+    customer_site_id: int | None = None
+    deadline: str | None = None
+    notes: str | None = None
+    line_items: list[dict] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Save parsed free-text offers onto an existing requisition."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = ""
+    line_items: list[dict] = Field(min_length=1)

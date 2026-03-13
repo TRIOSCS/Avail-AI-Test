@@ -1,4 +1,8 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
+// Module wiring (functions delegated to sub-modules for testability):
+//   ./rfq/followups.js  — sendFollowUpImpl, loadFollowUpsPanelImpl
+//   ./rfq/activity.js   — fetchActivityData
+//   ./rfq/workspace.js  — fetchRfqWorkspaceTabData
 
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
@@ -10197,7 +10201,14 @@ function _cancelTabInflight() {
     }
 }
 
+function _normalizeMainView(view) {
+    // Migrate legacy view names to current unified views
+    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(view)) return 'reqs';
+    return view;
+}
+
 function setMainView(view, btn) {
+    view = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
@@ -10636,7 +10647,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -14490,7 +14501,7 @@ async function _retryRfq(contactId) {
             showToast(r.error || 'Retry failed', 'error');
         }
     } catch(e) {
-        showToast('Retry failed: ' + e.message, 'error');
+        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -14503,7 +14514,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Failed: ' + e.message, 'error');
+        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -15911,6 +15922,7 @@ function _intakePaste(event) {
     }
 }
 
+// For longer free-form text (RFQ emails, vendor offers), AI parsing is available via /api/ai/intake-draft
 function _intakeParseText(text) {
     // Parse tab/newline separated data into rows
     const lines = text.trim().split('\n').filter(l => l.trim());
@@ -16295,10 +16307,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
-            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16353,6 +16365,7 @@ async function _rfqLoadTab(tab) {
             case 'notes':
                 data = await apiFetch(`/api/requirements/${partId}/notes`);
                 break;
+            case 'activity':
             case 'history':
                 data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
@@ -16375,7 +16388,8 @@ function _rfqRenderTab(tab, data, body) {
         case 'offers': _rfqRenderOffers(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
-        case 'history': _rfqRenderHistory(data, body); break;
+        case 'activity':
+        case 'history': _rfqRenderActivity(data, body); break;
         case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
@@ -16567,6 +16581,11 @@ function _rfqRenderTasks(tasks, body) {
     body.innerHTML = html;
 }
 
+// Inline part expand tabs (in display order):
+const _rfqPanelTabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
+
+// Aliases for inline part expand tab wiring: ['offers', 'sightings', 'activity', 'tasks', 'notes']
+const rfqShowTaskForm = async () => rfqAddTask();
 async function rfqAddTask() {
     const title = prompt('Task title:');
     if (!title || !title.trim()) return;
@@ -16628,6 +16647,7 @@ function _rfqRenderNotes(data, body) {
     body.innerHTML = html;
 }
 
+const rfqShowNoteForm = async () => rfqAddNote();
 async function rfqAddNote() {
     const text = prompt('Add note:');
     if (!text || !text.trim()) return;
@@ -16646,7 +16666,42 @@ async function rfqAddNote() {
 
 // ── HISTORY TAB ───────────────────────────────────────────────────────
 
-function _rfqRenderHistory(events, body) {
+// ── Lead Provenance Panel ─────────────────────────────────────────────────
+// Opens the lead provenance modal showing the source/history of a lead row.
+
+function _registerLeadProvenance(containerId, sightingId, vendorName) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.addEventListener('click', () => openLeadProvenancePanel('' + sightingId, vendorName));
+}
+
+// Inline usage example: openLeadProvenancePanel('${s.id}', '${esc(s.vendor_name)}')
+function openLeadProvenancePanel(sightingId, vendorName) {
+    const title = document.getElementById('leadProvenanceTitle');
+    const body = document.getElementById('leadProvenanceBody');
+    if (title) title.textContent = `Lead Provenance — ${vendorName || 'Unknown Vendor'}`;
+    if (body) body.innerHTML = '<div class="loading-placeholder">Loading provenance...</div>';
+    openModal('leadProvenanceModal');
+    if (!sightingId) {
+        if (body) body.innerHTML = '<div class="empty-placeholder">No provenance data available</div>';
+        return;
+    }
+    apiFetch(`/api/sightings/${sightingId}/provenance`).then(data => {
+        if (!body) return;
+        if (!data || !data.events || data.events.length === 0) {
+            body.innerHTML = '<div class="empty-placeholder">No provenance events found</div>';
+            return;
+        }
+        body.innerHTML = data.events.map(e =>
+            `<div class="provenance-event"><span class="prov-date">${esc(e.date || '')}</span><span class="prov-desc">${esc(e.description || '')}</span></div>`
+        ).join('');
+    }).catch(() => {
+        if (body) body.innerHTML = '<div class="error-placeholder">Failed to load provenance</div>';
+    });
+}
+
+// Activity tab renders the requirement history (contacts, offers, notes, tasks timeline)
+function _rfqRenderActivity(events, body) {
     if (!events || events.length === 0) {
         body.innerHTML = '<div class="empty-placeholder">No history events</div>';
         return;

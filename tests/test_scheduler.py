@@ -41,6 +41,7 @@ def _clear_scheduler_jobs():
 def _mock_settings(**overrides):
     """Build a mock settings object with defaults for scheduler tests."""
     defaults = dict(
+        mvp_mode=False,  # Enable all jobs including engagement_scoring
         inbox_scan_interval_min=30,
         contacts_sync_enabled=False,
         activity_tracking_enabled=False,

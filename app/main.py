@@ -373,6 +373,11 @@ async def request_id_middleware(request: Request, call_next):
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
 
+        # Temporary cache-bust header — auto-disables after cutoff date
+        if not path.startswith("/static") and path != "/health":
+            if _should_set_clear_site_data():
+                response.headers["Clear-Site-Data"] = '"cache", "storage"'
+
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
             logger.info(
@@ -399,6 +404,22 @@ async def api_version_middleware(request: Request, call_next):
     response = await call_next(request)
     response.headers["X-API-Version"] = "v1"
     return response
+
+
+# ── Clear-Site-Data Gate ─────────────────────────────────────────────────
+# Temporary header to flush cached stale JS/CSS from users' browsers.
+# Automatically disabled after the cutoff timestamp to avoid performance cost.
+_CLEAR_SITE_DATA_CUTOFF = "2026-03-18T00:00:00+00:00"
+
+
+def _should_set_clear_site_data(now: "datetime | None" = None) -> bool:
+    """Return True if Clear-Site-Data header should be set (before cutoff)."""
+    from datetime import datetime, timezone
+
+    cutoff = datetime.fromisoformat(_CLEAR_SITE_DATA_CUTOFF)
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now < cutoff
 
 
 # ── Health Check ──────────────────────────────────────────────────────
@@ -567,6 +588,7 @@ def _seed_api_sources():
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
         # Backfill known monthly quotas (only sets if currently NULL)
+        # Uses existing_map to avoid extra DB queries (1 query total for the whole seed)
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
@@ -578,7 +600,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

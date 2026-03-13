@@ -27,6 +27,7 @@ os.environ["DATABASE_URL"] = "sqlite://"  # Prevent any code from connecting to 
 os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests
 os.environ["CACHE_BACKEND"] = "none"  # Disable cache backend in tests
 os.environ.setdefault("AGENT_API_KEY", "test-agent-key-secret")  # Agent session tests
+os.environ["MVP_MODE"] = "false"  # Enable all routers (dashboard, enrichment, performance, etc.)
 
 from datetime import datetime, timezone
 

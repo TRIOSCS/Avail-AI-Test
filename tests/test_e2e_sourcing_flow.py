@@ -166,14 +166,14 @@ class TestRequisitionLifecycle:
         with pytest.raises(ValueError, match="Invalid transition"):
             req_transition(req, "completed", data["sales"], db_session)
 
-    def test_won_to_active_allowed(self, db_session):
-        """Regression: toggle archive from won back to active must work."""
+    def test_won_to_archived_allowed(self, db_session):
+        """Won requisitions can be archived (but not reverted to active — won is terminal)."""
         data = _full_setup(db_session)
         req = data["requisition"]
         req_transition(req, "active", data["sales"], db_session)
         req_transition(req, "won", data["sales"], db_session)
-        req_transition(req, "active", data["sales"], db_session)
-        assert req.status == "active"
+        req_transition(req, "archived", data["sales"], db_session)
+        assert req.status == "archived"
 
 
 # ── Requirement sourcing status ───────────────────────────────────────
