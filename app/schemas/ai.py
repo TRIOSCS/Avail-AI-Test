@@ -209,6 +209,110 @@ class CompareQuotesRequest(BaseModel):
     required_qty: int | None = None
 
 
+# ── Universal Intake ──────────────────────────────────────────────────────
+
+
+class IntakeRequirementItem(BaseModel):
+    """Single requirement extracted from pasted text."""
+
+    mpn: str
+    quantity: int | None = None
+    condition: str | None = None
+    packaging: str | None = None
+    manufacturer: str | None = None
+    target_price: float | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def strip_and_validate_mpn(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("mpn required")
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Paste of customer/vendor text for AI classification and parsing."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def strip_and_validate(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text required")
+        return v
+
+
+class IntakeDraftResponse(BaseModel):
+    """AI-parsed result of an intake draft."""
+
+    document_type: str = "unclear"
+    requirements: list[IntakeRequirementItem] = []
+    offers: list[DraftOfferItem] = []
+    customer_name: str | None = None
+    vendor_name: str | None = None
+    notes: str | None = None
+
+
+# ── Free-text paste schemas ──────────────────────────────────────────────
+
+
+class FreeTextLineItem(BaseModel):
+    """Single line item extracted from free-text paste."""
+
+    mpn: str
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    packaging: str | None = None
+    manufacturer: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+
+class FreeTextParseRequest(BaseModel):
+    """Input for /api/ai/parse-free-text."""
+
+    text: str = Field(min_length=1)
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Save parsed free-text as a new requisition with requirements."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    customer_site_id: int | None = None
+    line_items: list[dict] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Save parsed free-text offers to an existing requisition."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = ""
+    line_items: list[dict] = Field(min_length=1)
+
+
 # ── Freeform paste parsing ────────────────────────────────────────────────
 
 

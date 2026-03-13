@@ -667,26 +667,36 @@ class TestCompanyUtilsDuplicatePairSkip:
 class TestLoggingConfigJsonStdout:
     """Test JSON stdout logging in production mode."""
 
-    def test_production_json_logging(self):
+    def test_production_json_logging(self, tmp_path):
         """Line 42: production + EXTRA_LOGS=1 -> JSON stdout handler."""
         from loguru import logger
 
         from app.logging_config import setup_logging
 
         logger.remove()
-        with patch.dict(
-            os.environ,
-            {
-                "APP_URL": "https://app.availai.net",
-                "EXTRA_LOGS": "1",
-                "LOG_LEVEL": "INFO",
-            },
+        log_file = str(tmp_path / "avail.log")
+        real_add = logger.add
+
+        def _redirect_add(sink, **kw):
+            if isinstance(sink, str) and "/var/log" in sink:
+                return real_add(log_file, **kw)
+            return real_add(sink, **kw)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "APP_URL": "https://app.availai.net",
+                    "EXTRA_LOGS": "1",
+                    "LOG_LEVEL": "INFO",
+                },
+            ),
+            patch("app.logging_config.logger.add", side_effect=_redirect_add),
         ):
             setup_logging()
 
-        # Should have at least one handler configured
         assert len(logger._core.handlers) > 0
-        logger.remove()  # Clean up
+        logger.remove()
 
 
 # ══════════════════════════════════════════════════════════════════════

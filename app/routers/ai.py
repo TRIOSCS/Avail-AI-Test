@@ -35,6 +35,9 @@ from ..models import (
 from ..schemas.ai import (
     ApplyFreeformRfqRequest,
     CompareQuotesRequest,
+    FreeTextParseRequest,
+    FreeTextSaveOffersRequest,
+    FreeTextSaveRfqRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ParseFreeformOfferRequest,
@@ -688,6 +691,130 @@ async def ai_compare_quotes(
     if not result:
         return {"available": False, "reason": "Comparison not available"}
     return {"available": True, **result}
+
+
+# ── Feature 5b: Unified free-text parse/save ──────────────────────────────
+
+
+@router.post("/api/ai/parse-free-text")
+@limiter.limit("10/minute")
+async def ai_parse_free_text(
+    payload: FreeTextParseRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse free-form text into structured RFQ or Offer data."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.free_text_parser import parse_free_text
+
+    result = await parse_free_text(payload.text)
+    if not result or not result.get("line_items"):
+        return {"parsed": False, "document_type": "unclear", "line_items": []}
+    return {"parsed": True, **result}
+
+
+@router.post("/api/ai/save-free-text-rfq")
+@limiter.limit("5/minute")
+async def ai_save_free_text_rfq(
+    payload: FreeTextSaveRfqRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a requisition + requirements from parsed free-text RFQ."""
+    from app.search_service import resolve_material_card
+    from app.utils.normalization import normalize_mpn
+
+    req = Requisition(
+        name=payload.name.strip(),
+        customer_name=payload.customer_name,
+        customer_site_id=payload.customer_site_id,
+        created_by=user.id,
+        status="draft",
+    )
+    db.add(req)
+    db.flush()
+
+    count = 0
+    for item in payload.line_items[:50]:
+        mpn = (item.get("mpn") or "").strip()
+        if not mpn:
+            continue
+        norm = normalize_mpn(mpn) or mpn
+        mat_card = resolve_material_card(norm, db)
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=norm,
+            material_card_id=mat_card.id if mat_card else None,
+            target_qty=item.get("quantity") or 1,
+            target_price=item.get("target_price"),
+            condition=item.get("condition") or "",
+            packaging=item.get("packaging") or "",
+            notes=item.get("notes") or "",
+        )
+        db.add(r)
+        count += 1
+
+    db.commit()
+    return {
+        "ok": True,
+        "requisition_id": req.id,
+        "requisition_name": req.name,
+        "requirements_created": count,
+    }
+
+
+@router.post("/api/ai/save-free-text-offers")
+@limiter.limit("5/minute")
+async def ai_save_free_text_offers(
+    payload: FreeTextSaveOffersRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save free-text parsed offers to an existing requisition."""
+    req = db.query(Requisition).filter(Requisition.id == payload.requisition_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    from app.search_service import resolve_material_card
+    from app.utils.normalization import normalize_mpn
+    from app.vendor_utils import normalize_vendor_name as _nvn
+
+    count = 0
+    for item in payload.line_items[:50]:
+        mpn = (item.get("mpn") or "").strip()
+        if not mpn:
+            continue
+        norm = normalize_mpn(mpn) or mpn
+        vendor_name = item.get("vendor_name") or payload.vendor_name or ""
+        norm_name = _nvn(vendor_name)
+        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
+        if not card and norm_name:
+            card = VendorCard(normalized_name=norm_name, name=vendor_name)
+            db.add(card)
+            db.flush()
+        mat_card = resolve_material_card(norm, db)
+        offer = Offer(
+            requisition_id=req.id,
+            mpn=norm,
+            vendor_name=vendor_name,
+            vendor_card_id=card.id if card else None,
+            material_card_id=mat_card.id if mat_card else None,
+            unit_price=item.get("target_price"),
+            qty_available=item.get("quantity") or 1,
+            condition=item.get("condition") or "new",
+            source="free_text",
+            status="active",
+            created_by=user.id,
+        )
+        db.add(offer)
+        count += 1
+
+    db.commit()
+    return {"ok": True, "offers_created": count}
 
 
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────

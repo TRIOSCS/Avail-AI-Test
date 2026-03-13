@@ -57,6 +57,7 @@ def _mock_settings(**overrides):
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
         material_enrichment_enabled=False,
+        mvp_mode=True,
     )
     defaults.update(overrides)
     mock = MagicMock()
@@ -95,7 +96,7 @@ def test_configure_scheduler_registers_core_jobs():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results", "engagement_scoring"):
+    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results"):
         assert core_id in job_ids, f"Missing core job: {core_id}"
 
 
@@ -121,6 +122,7 @@ def test_configure_scheduler_conditional_flags_on():
             proactive_matching_enabled=True,
             deep_email_mining_enabled=True,
             deep_enrichment_enabled=True,
+            mvp_mode=False,
         ),
     ):
         configure_scheduler()

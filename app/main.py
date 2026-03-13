@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -503,6 +504,18 @@ async def health(request: Request, db: Session = Depends(get_db)):
         },
         status_code=200 if status == "ok" else 503,
     )
+
+
+# ── Clear-Site-Data gate ──────────────────────────────────────────────────
+
+_CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Return True while the temporary cache-bust header should be sent."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now < _CLEAR_SITE_DATA_CUTOFF
 
 
 # ── Seed API Sources ─────────────────────────────────────────────────────
