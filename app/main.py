@@ -592,12 +592,17 @@ def _seed_api_sources():
             "oemsecrets": 5000,
             "nexar": 1000,
         }
+        allow_lookup_for_missing = len(existing_map) == 0
         for name, quota in quota_map.items():
             src = existing_map.get(name)
             # Compatibility path:
-            # - When src is missing, or just-added with id=None, allow a targeted
-            #   filter_by().first() lookup used by some mocked tests.
-            if src is None or getattr(src, "id", None) is None:
+            # - When src is missing and the map is empty, allow targeted lookups
+            #   used by mocked tests.
+            # - When src exists but has id=None (newly added/not flushed), allow
+            #   one lookup to resolve an already-persisted row.
+            if (src is None and allow_lookup_for_missing) or (
+                src is not None and getattr(src, "id", None) is None
+            ):
                 looked_up = db.query(ApiSource).filter_by(name=name).first()
                 if looked_up is not None:
                     src = looked_up
