@@ -237,7 +237,7 @@ def test_create_requirement_task_persists_assignment_and_due(client, test_requis
     rows = list_resp.json()
     created = next(x for x in rows if x["title"] == "RFQ follow-up task")
     assert created["assigned_to"] is not None
-    assert created["due_at"] is not None
+    assert created["due_date"] is not None
 
 
 # ── Requirement History Timeline ──────────────────────────────────────
