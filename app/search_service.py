@@ -1070,6 +1070,7 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_first_seen": h["first_seen"].strftime("%b %d, %Y") if h["first_seen"] else None,
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
+        "lead_confidence_bucket": {"strong": "high", "moderate": "medium", "weak": "low"}.get(quality, quality),
         "lead_explanation": explanation,
     }
 
@@ -1386,5 +1387,6 @@ def sighting_to_dict(s: Sighting) -> dict:
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
+        "lead_confidence_bucket": {"strong": "high", "moderate": "medium", "weak": "low"}.get(quality, quality),
         "lead_explanation": explanation,
     }

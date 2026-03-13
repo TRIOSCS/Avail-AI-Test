@@ -145,6 +145,12 @@ class BaseConnector(ABC):
         raise last_err  # propagate so caller can track the error
 
 
+    @abstractmethod
+    async def _do_search(self, part_number: str) -> list[dict]:
+        """Override in subclasses to implement API-specific search logic."""
+        pass
+
+
 def _parse_retry_after(response: httpx.Response) -> float:
     """Extract wait time from Retry-After header, default to exponential backoff."""
     header = response.headers.get("Retry-After", "")
@@ -155,10 +161,6 @@ def _parse_retry_after(response: httpx.Response) -> float:
             pass
     # No header or unparseable — default to 5s + jitter
     return 5.0 + random.uniform(0, 2)
-
-    @abstractmethod
-    async def _do_search(self, part_number: str) -> list[dict]:
-        pass
 
 
 class NexarConnector(BaseConnector):

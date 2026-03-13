@@ -57,6 +57,7 @@ def _mock_settings(**overrides):
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
         material_enrichment_enabled=False,
+        mvp_mode=False,  # Always include enrichment+teams jobs in scheduler tests
     )
     defaults.update(overrides)
     mock = MagicMock()

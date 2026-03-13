@@ -1566,7 +1566,7 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_all_disabled(self, db_session):
         """When all sources are disabled, returns empty results."""
-        for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
+        for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14", "ai_live_web"]:
             _make_api_source(db_session, name, status="disabled")
 
         with patch("app.services.credential_service.get_credential", return_value="fake-key"):
@@ -1574,7 +1574,7 @@ class TestFetchFresh:
 
         assert results == []
         disabled_count = sum(1 for s in stats if s["status"] == "disabled")
-        assert disabled_count == 8
+        assert disabled_count == 9
 
     @pytest.mark.asyncio
     async def test_no_credentials(self, db_session):
@@ -1584,7 +1584,7 @@ class TestFetchFresh:
 
         assert results == []
         skipped_count = sum(1 for s in stats if s["status"] == "skipped")
-        assert skipped_count == 8
+        assert skipped_count == 9
 
     @pytest.mark.asyncio
     async def test_successful_search(self, db_session):
@@ -1944,7 +1944,7 @@ class TestFetchFresh:
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
-        assert len(stats) == 8
+        assert len(stats) == 9
 
     @pytest.mark.asyncio
     async def test_api_source_stats_updated(self, db_session):

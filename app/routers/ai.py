@@ -35,6 +35,7 @@ from ..models import (
 from ..schemas.ai import (
     ApplyFreeformRfqRequest,
     CompareQuotesRequest,
+    IntakeDraftRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ParseFreeformOfferRequest,
@@ -809,8 +810,8 @@ async def ai_save_freeform_offers(
     """Save freeform-parsed offers to a requisition (after user review)."""
     from app.dependencies import get_req_for_user
 
-    from ...utils.normalization import fuzzy_mpn_match, normalize_mpn_key
-    from ...vendor_utils import normalize_vendor_name
+    from app.utils.normalization import fuzzy_mpn_match, normalize_mpn_key
+    from app.vendor_utils import normalize_vendor_name
 
     req = get_req_for_user(db, user, payload.requisition_id)
     if not req:
@@ -867,3 +868,50 @@ async def ai_save_freeform_offers(
         created.append(offer.id)
     db.commit()
     return {"created": len(created), "offer_ids": created}
+
+
+# ── Intake Draft ─────────────────────────────────────────────────────────────
+
+
+class _IntakeDraftBody(IntakeDraftRequest):
+    """Extends IntakeDraftRequest with optional requisition context."""
+
+    requisition_id: int | None = None
+
+
+@router.post("/api/ai/intake-draft")
+async def ai_intake_draft(
+    payload: _IntakeDraftBody,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Classify pasted text as RFQ or offer and extract structured line items.
+
+    Accepts raw text pasted by the user. If requisition_id is provided, the
+    current requirements are passed as context to improve offer matching.
+    Returns a dict with document_type, requirements, offers, confidence.
+    """
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features disabled")
+
+    context: list[dict] | None = None
+    if payload.requisition_id is not None:
+        req = db.get(Requisition, payload.requisition_id)
+        if not req:
+            raise HTTPException(404, "Requisition not found")
+        reqs = db.query(Requirement).filter(Requirement.requisition_id == req.id).all()
+        context = [
+            {
+                "mpn": r.primary_mpn,
+                "qty": r.target_qty,
+                "target_price": float(r.target_price) if r.target_price is not None else None,
+            }
+            for r in reqs
+        ]
+
+    from app.services.ai_intake_parser import parse_freeform_intake
+
+    result = await parse_freeform_intake(payload.text, context)
+    if result is None:
+        return {"document_type": "unclear", "requirements": [], "offers": [], "confidence": 0.0}
+    return result

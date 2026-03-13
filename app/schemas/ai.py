@@ -240,3 +240,95 @@ class SaveFreeformOffersRequest(BaseModel):
 
     requisition_id: int = Field(ge=1)
     offers: list[DraftOfferItem] = Field(min_length=1)
+
+
+# ── Intake Draft ─────────────────────────────────────────────────────────────
+
+
+class IntakeRequirementItem(BaseModel):
+    """A single line item from AI-parsed intake text (customer RFQ or vendor offer)."""
+
+    mpn: str = ""
+    quantity: int = 1
+    condition: str | None = None
+    packaging: str | None = None
+    target_price: float | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def mpn_not_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if v and not stripped:
+            raise ValueError("mpn required")
+        return normalize_mpn(stripped) if stripped else stripped
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        return normalize_condition(v) if v else v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        return normalize_packaging(v) if v else v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Freeform text pasted into the intake bar for AI classification and parsing."""
+
+    text: str = ""
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("text required")
+        return stripped
+
+
+class IntakeDraftResponse(BaseModel):
+    """AI-classified and parsed result from intake text."""
+
+    document_type: str = "unclear"  # "rfq" | "offer" | "unclear"
+    requirements: list[IntakeRequirementItem] = []
+    offers: list[DraftOfferItem] = []
+    confidence: float = 0.5
+    raw_text: str = ""
+
+
+# ── Free-Text Parser ─────────────────────────────────────────────────────────
+
+
+class FreeTextLineItem(BaseModel):
+    """A single part-line extracted from free-text input."""
+
+    mpn: str
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    notes: str | None = None
+
+
+class FreeTextParseRequest(BaseModel):
+    """Parse free-form text (parts list, RFQ, offer) into structured line items."""
+
+    text: str = Field(min_length=1)
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Create a new requisition from free-text parsed line items."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    customer_site_id: int | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Save free-text parsed vendor offers against an existing requisition."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)

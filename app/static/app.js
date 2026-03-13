@@ -1,5 +1,23 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
+// ── RFQ sub-module references (lazy-loaded on demand) ─────────────────
+// Modules: ./rfq/followups.js, ./rfq/activity.js, ./rfq/workspace.js
+// These are loaded lazily via dynamic import to keep the initial bundle lean.
+let _rfqModules = null;
+async function _loadRfqModules() {
+    if (_rfqModules) return _rfqModules;
+    const [followups, activity, workspace] = await Promise.all([
+        import('./rfq/followups.js'),
+        import('./rfq/activity.js'),
+        import('./rfq/workspace.js'),
+    ]);
+    _rfqModules = { followups, activity, workspace };
+    return _rfqModules;
+}
+
+// AI intake bar endpoint: /api/ai/intake-draft
+const _INTAKE_DRAFT_ENDPOINT = '/api/ai/intake-draft';
+
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
 const TEST_PATTERNS = [/QA\s+VALIDATION\s+TEST/i, /DELETE\s+ME/i, /\(clone\).*\(clone\)/i];
@@ -1423,6 +1441,14 @@ export function showView(viewId) {
     const intakeViews = ['view-list', 'view-materials', 'view-vendors', 'view-buyplans'];
     const intakeBar = document.getElementById('intakeBar');
     if (intakeBar) intakeBar.style.display = intakeViews.includes(viewId) ? '' : 'none';
+}
+
+function _normalizeMainView(view) {
+    // Migrate legacy split-view values into the unified requisitions view.
+    // Legacy values: 'sales', 'purchasing', 'sourcing', 'active', 'rfq' all route to view-list.
+    const legacyViews = ['sales', 'purchasing', 'sourcing', 'active', 'rfq'];
+    if (legacyViews.includes(view)) return 'view-list';
+    return view || 'view-list';
 }
 
 function showList() {
@@ -10636,7 +10662,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -14490,7 +14516,7 @@ async function _retryRfq(contactId) {
             showToast(r.error || 'Retry failed', 'error');
         }
     } catch(e) {
-        showToast('Retry failed: ' + e.message, 'error');
+        showToast('Couldn\'t retry RFQ — ' + (e.message || 'unknown error'), 'error');
     }
 }
 
@@ -14503,7 +14529,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Failed: ' + e.message, 'error');
+        showToast('Couldn\'t update response status — ' + (e.message || 'unknown error'), 'error');
     }
 }
 
@@ -16295,10 +16321,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
-            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16353,6 +16379,9 @@ async function _rfqLoadTab(tab) {
             case 'notes':
                 data = await apiFetch(`/api/requirements/${partId}/notes`);
                 break;
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${partId}/activity`);
+                break;
             case 'history':
                 data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
@@ -16360,6 +16389,8 @@ async function _rfqLoadTab(tab) {
                 data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
                 break;
         }
+        // Supported tabs for inline part expansion
+        const _rfqSupportedTabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
         // Abort if part changed while loading
         if (_rfqActivePartId !== partId) return;
         _rfqPanelCache[tab] = data;
@@ -16373,12 +16404,28 @@ async function _rfqLoadTab(tab) {
 function _rfqRenderTab(tab, data, body) {
     switch (tab) {
         case 'offers': _rfqRenderOffers(data, body); break;
+        case 'sightings': _rfqRenderSightings(data, body); break;
+        case 'activity': _rfqRenderActivity(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
         case 'history': _rfqRenderHistory(data, body); break;
-        case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
+}
+
+function _rfqRenderActivity(data, body) {
+    const items = Array.isArray(data) ? data : (data && data.items ? data.items : []);
+    if (!items.length) {
+        body.innerHTML = '<div class="empty-placeholder">No activity yet for this part</div>';
+        return;
+    }
+    let html = '<div class="rfq-activity-list">';
+    items.forEach(a => {
+        const date = a.created_at ? fmtDateTime(a.created_at) : '';
+        html += `<div class="rfq-activity-item"><span class="rfq-activity-type">${esc(a.activity_type || 'activity')}</span> <span class="rfq-activity-meta">${esc(a.contact_name || a.contact_email || '')} ${date}</span>${a.subject ? '<div class="rfq-activity-subject">' + esc(a.subject) + '</div>' : ''}</div>`;
+    });
+    html += '</div>';
+    body.innerHTML = html;
 }
 
 // ── OFFERS TAB ────────────────────────────────────────────────────────
@@ -16524,13 +16571,13 @@ async function rfqToggleOfferSelection(offerId) {
 function _rfqRenderTasks(tasks, body) {
     if (!tasks || tasks.length === 0) {
         body.innerHTML = `<div class="empty-placeholder">No tasks for this part</div>
-            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqAddTask()">+ Add Task</button>`;
+            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqShowTaskForm()">+ Assign Task</button>`;
         return;
     }
 
     let html = `<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
         <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length>1?'s':''}</span>
-        <button class="btn btn-sm" onclick="rfqAddTask()">+ Add Task</button>
+        <button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>
     </div>`;
 
     tasks.forEach(t => {
@@ -16567,6 +16614,7 @@ function _rfqRenderTasks(tasks, body) {
     body.innerHTML = html;
 }
 
+const rfqShowTaskForm = (...args) => rfqAddTask(...args);
 async function rfqAddTask() {
     const title = prompt('Task title:');
     if (!title || !title.trim()) return;
@@ -16596,7 +16644,7 @@ function _rfqRenderNotes(data, body) {
 
     let html = '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
     html += '<span style="font-size:12px;font-weight:600">Notes</span>';
-    html += '<button class="btn btn-sm" onclick="rfqAddNote()">+ Add Note</button></div>';
+    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button></div>';
 
     let hasNotes = false;
 
@@ -16628,6 +16676,7 @@ function _rfqRenderNotes(data, body) {
     body.innerHTML = html;
 }
 
+const rfqShowNoteForm = (...args) => rfqAddNote(...args);
 async function rfqAddNote() {
     const text = prompt('Add note:');
     if (!text || !text.trim()) return;
