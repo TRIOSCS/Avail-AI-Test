@@ -169,7 +169,7 @@ class TestSourcesGaps:
             async def _do_search(self, part_number: str) -> list[dict]:
                 return []
 
-        c = ConcreteConnector(name="test", api_key="k")
+        c = ConcreteConnector()
         result = await c._do_search("PN")
         assert result == []
 

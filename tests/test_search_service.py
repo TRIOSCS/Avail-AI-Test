@@ -292,7 +292,7 @@ class TestSightingToDict:
         assert d["packaging"] == "tape"
         assert d["lead_time_days"] == 14
         assert d["lead_time"] == "2 weeks"
-        assert d["lead_quality"] == "high"
+        assert d["lead_quality"] == "strong"
         assert isinstance(d["lead_explanation"], str)
         assert d["lead_explanation"] != ""
         # SQLite strips timezone; compare without TZ suffix
@@ -489,7 +489,7 @@ class TestHistoryToResult:
         assert result["material_times_seen"] == 3
         assert result["material_last_seen"] is not None
         assert result["material_first_seen"] is not None
-        assert result["lead_quality"] in {"high", "medium", "low"}
+        assert result["lead_quality"] in {"strong", "moderate", "weak"}
         assert isinstance(result["lead_explanation"], str)
 
 

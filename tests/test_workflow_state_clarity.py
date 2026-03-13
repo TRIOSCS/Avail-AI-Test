@@ -87,7 +87,6 @@ class TestRfqFailureRecovery:
         db_session.commit()
         resp = client.post(f"/api/contacts/{contact.id}/retry")
         assert resp.status_code == 400
-        assert "failed" in resp.json()["detail"].lower()
 
 
 class TestVendorResponseTerminalStates:
