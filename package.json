@@ -10,8 +10,8 @@
     "test:frontend:e2e": "node --test tests/frontend/*.e2e.test.mjs"
   },
   "dependencies": {
-    "htmx.org": "^2.0.0",
-    "alpinejs": "^3.0.0"
+    "alpinejs": "^3.15.8",
+    "htmx.org": "^2.0.8"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
