@@ -231,7 +231,7 @@ class Settings(BaseSettings):
     mvp_mode: bool = True
 
     # --- Frontend ---
-    use_htmx: bool = False
+    use_htmx: bool = True
 
     # --- On-demand enrichment orchestrator ---
     on_demand_enrichment_enabled: bool = True

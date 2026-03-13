@@ -47,23 +47,23 @@ class TestIsHtmxBoosted:
 class TestUseHtmxFeatureFlag:
     """Tests for the USE_HTMX feature flag in Settings."""
 
-    def test_default_is_false(self):
+    def test_default_is_true(self):
         import os
         os.environ["TESTING"] = "1"
         os.environ["DATABASE_URL"] = "sqlite:///test.db"
         s = Settings(
             database_url="sqlite:///test.db",
-            _env_file=None,
-        )
-        assert s.use_htmx is False
-
-    def test_can_enable(self):
-        import os
-        os.environ["TESTING"] = "1"
-        os.environ["DATABASE_URL"] = "sqlite:///test.db"
-        s = Settings(
-            database_url="sqlite:///test.db",
-            use_htmx=True,
             _env_file=None,
         )
         assert s.use_htmx is True
+
+    def test_can_disable(self):
+        import os
+        os.environ["TESTING"] = "1"
+        os.environ["DATABASE_URL"] = "sqlite:///test.db"
+        s = Settings(
+            database_url="sqlite:///test.db",
+            use_htmx=False,
+            _env_file=None,
+        )
+        assert s.use_htmx is False
