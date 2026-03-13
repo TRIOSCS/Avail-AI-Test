@@ -581,17 +581,27 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     stats_updates = []  # (source_name, hit_count, elapsed_ms, error_str|None)
 
     async def _run_one(conn, pn):
-        """Run a single connector for a single PN. No DB access here."""
+        """Run a single connector for a single PN. No DB access here.
+        Each connector call is wrapped in a per-task timeout so one slow
+        source can't hold up the entire search."""
         source_name = _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__)
+        # Per-task timeout: connector timeout + 5s grace for retries/network
+        task_timeout = conn.timeout + 5
         start = time.time()
         try:
-            hits = await conn.search(pn)
+            hits = await asyncio.wait_for(conn.search(pn), timeout=task_timeout)
             elapsed_ms = int((time.time() - start) * 1000)
             for r in hits:
                 r["mpn_matched"] = pn
             if source_name:
                 stats_updates.append((source_name, len(hits), elapsed_ms, None))
             return hits
+        except asyncio.TimeoutError:
+            elapsed_ms = int((time.time() - start) * 1000)
+            logger.warning(f"Search {pn} via {conn.__class__.__name__}: timed out after {task_timeout:.0f}s")
+            if source_name:
+                stats_updates.append((source_name, 0, elapsed_ms, f"Timed out after {task_timeout:.0f}s"))
+            return []
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
             logger.warning(f"Search {pn} via {conn.__class__.__name__}: {e}")
@@ -599,16 +609,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
             return []
 
-    # Fire all connector×PN combos in parallel (with concurrency limit)
-    from .config import settings
-
-    sem = asyncio.Semaphore(settings.search_concurrency_limit)
-
-    async def _throttled(conn, pn):
-        async with sem:
-            return await _run_one(conn, pn)
-
-    tasks = [_throttled(conn, pn) for pn in pns for conn in connectors]
+    # Fire all connector×PN combos in parallel.
+    # Per-connector concurrency is enforced by BaseConnector._semaphore,
+    # so no additional global semaphore needed here.
+    tasks = [_run_one(conn, pn) for pn in pns for conn in connectors]
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Apply stats to DB in one pass — safe, sequential, after gather completes

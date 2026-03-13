@@ -114,7 +114,7 @@ class AIWebSearchConnector(BaseConnector):
             model_tier="smart",
             max_tokens=1800,
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
-            timeout=60,
+            timeout=30,
         )
 
         offers = data.get("offers", []) if isinstance(data, dict) else []

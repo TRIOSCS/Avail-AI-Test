@@ -64,6 +64,7 @@ _CONNECTOR_CONCURRENCY = {
     "OEMSecretsConnector": 3,
     "NexarConnector": 3,
     "BrokerBinConnector": 5,
+    "AIWebSearchConnector": 2,  # AI search is slow (~30s), limit parallel calls
 }
 
 
