@@ -119,6 +119,7 @@ class IntakeDraftRequest(BaseModel):
     """Request body for AI intake draft parsing."""
 
     text: str
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod
@@ -264,19 +265,76 @@ class CompareQuotesRequest(BaseModel):
     required_qty: int | None = None
 
 
+# ── Legacy free-text parsing compatibility ───────────────────────────────────
+
+
+class FreeTextParseRequest(BaseModel):
+    """Legacy request model for /api/ai/parse-free-text."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def free_text_required(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("text required")
+        return cleaned
+
+
+class FreeTextLineItem(BaseModel):
+    """Legacy free-text line item model."""
+
+    mpn: str
+    manufacturer: str | None = None
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    packaging: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def free_text_mpn_required(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("mpn required")
+        return normalize_mpn(cleaned) or cleaned.upper()
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Legacy save request for parsed RFQ line items."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Legacy save request for parsed offer line items."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
 # ── Freeform paste parsing ────────────────────────────────────────────────
 
 
 class ParseFreeformRfqRequest(BaseModel):
     """Input for AI freeform RFQ parsing (customer text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str
 
 
 class ParseFreeformOfferRequest(BaseModel):
     """Input for AI freeform offer parsing (vendor text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str
     requisition_id: int | None = None  # Optional: pass for RFQ context to improve matching
 
 
