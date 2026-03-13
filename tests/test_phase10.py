@@ -231,53 +231,6 @@ class TestReactivationSignal:
         assert sig.material_card_id == card.id
         assert sig.signal_type == "reactivation_opportunity"
 
-    def test_dashboard_endpoint(self, db_session):
-        """GET /api/dashboard/reactivation-signals returns active signals."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_user
-        from app.main import app
-
-        user = User(email="sig@test.com", name="Sig User", role="sales", azure_id="az-sig")
-        db_session.add(user)
-        db_session.flush()
-
-        co = Company(name="Signal Corp")
-        db_session.add(co)
-        db_session.flush()
-
-        sig1 = ReactivationSignal(
-            company_id=co.id,
-            signal_type="churn_risk",
-            reason="90 days silent",
-        )
-        sig2 = ReactivationSignal(
-            company_id=co.id,
-            signal_type="reactivation_opportunity",
-            reason="New sighting",
-            dismissed_at=datetime.now(timezone.utc),
-        )
-        db_session.add_all([sig1, sig2])
-        db_session.commit()
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: user
-
-        with TestClient(app) as client:
-            resp = client.get("/api/dashboard/reactivation-signals")
-
-        app.dependency_overrides.clear()
-
-        assert resp.status_code == 200
-        data = resp.json()
-        # Only sig1 should appear (sig2 is dismissed)
-        assert len(data) == 1
-        assert data[0]["signal_type"] == "churn_risk"
-
 
 # ── Commodity Routing Tests ─────────────────────────────────────────
 

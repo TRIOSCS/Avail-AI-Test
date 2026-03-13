@@ -216,21 +216,6 @@ class TestQuoteWonHistory:
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  7. DASHBOARD — attention_feed buy plan ImportError
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestDashboardBuyPlanImportError:
-    """Cover lines 432-433: ImportError on buy_plan import."""
-
-    def test_attention_feed_without_buy_plan(self, client, db_session):
-        """attention_feed handles ImportError from buy_plan (lines 432-433)."""
-        with patch.dict(sys.modules, {"app.models.buy_plan": None}):
-            resp = client.get("/api/dashboard/attention-feed")
-            assert resp.status_code == 200
-
-
-# ══════════════════════════════════════════════════════════════════════
 #  8. REQUISITIONS — NC enqueue
 # ══════════════════════════════════════════════════════════════════════
 

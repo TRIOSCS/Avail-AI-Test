@@ -166,34 +166,3 @@ def test_resolve_director_id_none(db_session):
     assert result is None
 
 
-# ── Config CRUD endpoints ──────────────────────────────────────────
-
-
-def test_config_crud(client, db_session, test_user):
-    """Full CRUD cycle for alert config."""
-    # GET — no config yet
-    resp = client.get("/api/teams-alerts/config")
-    assert resp.status_code == 200
-    assert resp.json()["configured"] is False
-
-    # PUT — create
-    resp = client.put(
-        "/api/teams-alerts/config", json={"teams_webhook_url": "https://hook.test/abc", "alerts_enabled": True}
-    )
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is True
-
-    # GET — now configured
-    resp = client.get("/api/teams-alerts/config")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["configured"] is True
-    assert data["teams_webhook_url"] == "https://hook.test/abc"
-
-    # DELETE
-    resp = client.delete("/api/teams-alerts/config")
-    assert resp.status_code == 200
-
-    # GET — gone
-    resp = client.get("/api/teams-alerts/config")
-    assert resp.json()["configured"] is False

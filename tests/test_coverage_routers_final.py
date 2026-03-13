@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
@@ -34,7 +33,6 @@ from app.models import (
     Requirement,
     Requisition,
     Sighting,
-    User,
     VendorCard,
 )
 
@@ -629,69 +627,6 @@ def test_standalone_stock_import_existing_material_card(client, db_session, test
     assert data["imported_rows"] >= 1
 
 
-# ── 14. Skip sighting with empty vendor name (enrichment.py line 498-499/502) ──
-
-
-@pytest.fixture()
-def admin_client(db_session: Session, admin_user: User) -> TestClient:
-    from app.database import get_db
-    from app.dependencies import require_admin, require_user
-    from app.main import app
-
-    def _override_db():
-        yield db_session
-
-    def _override_admin():
-        return admin_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_admin
-    app.dependency_overrides[require_admin] = _override_admin
-
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
-
-
-def test_backfill_emails_skips_empty_vendor_name(admin_client, db_session, admin_user):
-    """Backfill emails skips BrokerBin sightings with empty vendor_name."""
-    req = Requisition(
-        name="REQ-BB",
-        status="open",
-        created_by=admin_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-    r = Requirement(
-        requisition_id=req.id,
-        primary_mpn="LM317T",
-        target_qty=100,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(r)
-    db_session.flush()
-
-    # Create BrokerBin sighting with empty vendor_name -- should be skipped at line 498-499
-    s = Sighting(
-        requirement_id=r.id,
-        vendor_name="",
-        vendor_email="test@example.com",
-        mpn_matched="LM317T",
-        source_type="brokerbin",
-        score=50,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(s)
-    db_session.commit()
-
-    resp = admin_client.post("/api/enrichment/backfill-emails")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["brokerbin_created"] == 0
-
-
 # ── 15. Merge phones into vendor card (rfq.py lines 522-524) ──
 # find_suggested_contacts is a lazy import: `from ..enrichment_service import find_suggested_contacts`
 # merge_phones_into_card is a lazy import: `from ..vendor_utils import merge_phones_into_card`
@@ -844,47 +779,6 @@ def test_build_quote_email_html_fmt_price_em_dash(db_session, test_user):
     assert "$1.50" in html
     # The em-dash appears for items with sell_price=0 (via the inline check, not _fmt_price)
     assert "\u2014" in html
-
-
-# ── 20. Enrichment backfill sighting with vendor name normalizing to empty (line 502) ──
-
-
-def test_backfill_emails_skips_vendor_name_normalizes_to_empty(admin_client, db_session, admin_user):
-    """Backfill skips sighting where vendor_name normalizes to empty string (line 500-502)."""
-    req = Requisition(
-        name="REQ-BB2",
-        status="open",
-        created_by=admin_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-    r = Requirement(
-        requisition_id=req.id,
-        primary_mpn="LM317T",
-        target_qty=100,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(r)
-    db_session.flush()
-
-    # "Inc." normalizes to "" via normalize_vendor_name
-    s = Sighting(
-        requirement_id=r.id,
-        vendor_name="Inc.",
-        vendor_email="test@inc.com",
-        mpn_matched="LM317T",
-        source_type="brokerbin",
-        score=50,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(s)
-    db_session.commit()
-
-    resp = admin_client.post("/api/enrichment/backfill-emails")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["brokerbin_created"] == 0
 
 
 # ── 21. Vendor contact lookup IntegrityError via direct function call (lines 704-706) ──

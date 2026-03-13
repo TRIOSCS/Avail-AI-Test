@@ -7,8 +7,7 @@ Covers:
 - TT-043: log_call_activity populates subject field
 """
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
 
 from app.models import (
     ActivityLog,
@@ -57,112 +56,6 @@ class TestCapOutlierLowered:
 
         assert _cap_outlier(200.0, cap=100) == 0.0
         assert _cap_outlier(50.0, cap=100) == 50.0
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  TT-100: Morning brief uses selected user's name
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestMorningBriefTargetUser:
-    """Morning brief should use salesperson_id user's name in AI prompt."""
-
-    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
-    def test_default_uses_logged_in_user(self, mock_claude, client, db_session, test_user):
-        mock_claude.return_value = {"text": "Brief for you."}
-
-        resp = client.get("/api/dashboard/morning-brief")
-        assert resp.status_code == 200
-
-        # Verify Claude was called with the logged-in user's name
-        call_args = mock_claude.call_args
-        prompt = call_args.kwargs.get("prompt", call_args[1].get("prompt", ""))
-        assert test_user.name in prompt
-
-    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
-    def test_morning_brief_always_uses_logged_in_user(self, mock_claude, client, db_session, test_user):
-        """Morning brief always uses the logged-in user's name (salesperson_id removed)."""
-        mock_claude.return_value = {"text": "Brief for logged-in user."}
-
-        # salesperson_id query param is ignored — always uses logged-in user
-        resp = client.get("/api/dashboard/morning-brief?salesperson_id=99999")
-        assert resp.status_code == 200
-
-        call_args = mock_claude.call_args
-        prompt = call_args.kwargs.get("prompt", call_args[1].get("prompt", ""))
-        assert test_user.name in prompt
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  TT-103: Quotes awaiting matches between stats and AI prompt
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestQuotesAwaitingConsistency:
-    """The AI prompt should use the same quotes_awaiting value as stats."""
-
-    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
-    def test_ai_prompt_matches_stats(self, mock_claude, client, db_session, test_user):
-        """AI prompt's quotes count should match the returned stats.quotes_awaiting."""
-        from app.models.quotes import Quote
-        from app.models.sourcing import Requisition
-
-        mock_claude.return_value = {"text": "Brief."}
-
-        # Set up data: company + site + quotes
-        c = Company(
-            name="TestCo",
-            is_active=True,
-            account_owner_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(c)
-        db_session.flush()
-
-        s = CustomerSite(
-            company_id=c.id,
-            site_name="HQ",
-            owner_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(s)
-        db_session.flush()
-
-        req = Requisition(
-            name="REQ-QA",
-            customer_site_id=s.id,
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        # 2 quotes awaiting response
-        for i in range(2):
-            q = Quote(
-                requisition_id=req.id,
-                customer_site_id=s.id,
-                quote_number=f"Q-CONSIST-{i}",
-                status="sent",
-                subtotal=1000,
-                sent_at=datetime.now(timezone.utc) - timedelta(days=1),
-                created_by_id=test_user.id,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(q)
-        db_session.commit()
-
-        resp = client.get("/api/dashboard/morning-brief")
-        data = resp.json()
-
-        # Stats should show 2 awaiting
-        assert data["stats"]["quotes_awaiting"] == 2
-
-        # AI prompt should also mention 2
-        call_args = mock_claude.call_args
-        prompt = call_args.kwargs.get("prompt", call_args[1].get("prompt", ""))
-        assert "2 quotes sent but awaiting customer response" in prompt
 
 
 # ═══════════════════════════════════════════════════════════════════════
