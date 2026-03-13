@@ -124,6 +124,7 @@ class IntakeDraftRequest(BaseModel):
     """Compatibility schema for pasted intake text."""
 
     text: str
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod
@@ -273,19 +274,90 @@ class CompareQuotesRequest(BaseModel):
     required_qty: int | None = None
 
 
+# ── Legacy free-text compatibility ─────────────────────────────────────
+
+
+class FreeTextParseRequest(BaseModel):
+    """Compatibility schema for legacy free-text parse endpoint."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def free_text_not_blank(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("text required")
+        return cleaned
+
+
+class FreeTextLineItem(BaseModel):
+    """Compatibility schema for legacy free-text line items."""
+
+    mpn: str
+    manufacturer: str | None = None
+    quantity: int = Field(default=1, ge=1)
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    packaging: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def free_text_mpn_required(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("mpn required")
+        return normalize_mpn(cleaned) or cleaned
+
+    @field_validator("condition")
+    @classmethod
+    def free_text_condition(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_condition(v) or v.strip() or None
+
+    @field_validator("packaging")
+    @classmethod
+    def free_text_packaging(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_packaging(v) or v.strip() or None
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Compatibility schema for saving legacy free-text RFQs."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Compatibility schema for saving legacy free-text offers."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
 # ── Freeform paste parsing ────────────────────────────────────────────────
 
 
 class ParseFreeformRfqRequest(BaseModel):
     """Input for AI freeform RFQ parsing (customer text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str = ""
 
 
 class ParseFreeformOfferRequest(BaseModel):
     """Input for AI freeform offer parsing (vendor text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str = ""
     requisition_id: int | None = None  # Optional: pass for RFQ context to improve matching
 
 

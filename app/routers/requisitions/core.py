@@ -77,6 +77,83 @@ async def requisition_counts(
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
 
 
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def get_quote_summary(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Legacy quote-summary projection for the requisition workflow tab."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc(), Quote.created_at.desc())
+        .first()
+    )
+    if not quote:
+        return {"requisition_id": req_id, "has_quote": False, "has_buy_plan": False}
+
+    from ...models.buy_plan import BuyPlanV3
+    from ...models.quotes import BuyPlan
+
+    has_buy_plan = (
+        db.query(BuyPlan.id).filter(BuyPlan.quote_id == quote.id).first() is not None
+        or db.query(BuyPlanV3.id).filter(BuyPlanV3.quote_id == quote.id).first() is not None
+    )
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": has_buy_plan,
+        "quote_id": quote.id,
+        "quote_number": quote.quote_number,
+        "quote_status": quote.status,
+        "line_count": len(quote.line_items or []),
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_or_get_buy_plan(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Legacy requisition-to-buy-plan bridge for workflow compatibility."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc(), Quote.created_at.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "Quote required before creating a buy plan")
+
+    from ...models.buy_plan import BuyPlanV3
+
+    existing = db.query(BuyPlanV3).filter(BuyPlanV3.quote_id == quote.id).first()
+    if existing:
+        return {"id": existing.id, "status": existing.status, "quote_id": quote.id, "requisition_id": req_id}
+
+    from ...services.buyplan_builder import build_buy_plan
+
+    try:
+        plan = build_buy_plan(quote.id, db)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return {"id": plan.id, "status": plan.status, "quote_id": quote.id, "requisition_id": req_id}
+
+
 @router.get("/api/requisitions", response_model=RequisitionListResponse, response_model_exclude_none=True)
 async def list_requisitions(
     q: str = "",

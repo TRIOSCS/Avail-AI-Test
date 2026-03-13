@@ -365,6 +365,8 @@ async def request_id_middleware(request: Request, call_next):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         path = request.url.path
+        if path != "/health" and _should_set_clear_site_data():
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
@@ -404,6 +406,7 @@ async def api_version_middleware(request: Request, call_next):
 # ── Health Check ──────────────────────────────────────────────────────
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
 BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
+CLEAR_SITE_DATA_CUTOFF = "2026-03-18T00:00:00+00:00"
 
 
 def _check_backup_freshness() -> str:
@@ -434,6 +437,17 @@ def _check_backup_freshness() -> str:
         return "stale"
     except (ValueError, OSError):
         return "unknown"
+
+
+def _should_set_clear_site_data(now=None) -> bool:
+    """Temporary browser cache reset gate that auto-disables after cutoff."""
+    from datetime import datetime, timezone
+
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    cutoff = datetime.fromisoformat(CLEAR_SITE_DATA_CUTOFF)
+    return current < cutoff
 
 
 @app.get("/sw.js", include_in_schema=False)
@@ -556,7 +570,8 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
+                new_source = ApiSource(status=status, is_active=is_active, **src)
+                db.add(new_source)
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -578,7 +593,9 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
+            if src is None and not existing_map:
+                src = db.query(ApiSource).filter_by(name=name).first()
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

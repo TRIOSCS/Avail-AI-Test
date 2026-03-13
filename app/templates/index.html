@@ -305,7 +305,7 @@
     <!-- Universal Intake Bar — paste parts, upload files, import data -->
     <div class="intake-bar" id="intakeBar" style="display:none">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        <input class="intake-bar-input" id="intakeInput" placeholder="Paste part numbers, vendor offers, or data..." oninput="_intakeInputChange(this.value)" onpaste="_intakePaste(event)" onkeydown="if(event.key==='Enter')_intakeSubmit()">
+        <input class="intake-bar-input" id="intakeInput" placeholder="Paste customer RFQ text, vendor offers, or part data..." oninput="_intakeInputChange(this.value)" onpaste="_intakePaste(event)" onkeydown="if(event.key==='Enter')_intakeSubmit()">
         <div class="intake-bar-divider"></div>
         <button class="intake-bar-btn" onclick="_intakeUpload()" title="Upload CSV/Excel">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>

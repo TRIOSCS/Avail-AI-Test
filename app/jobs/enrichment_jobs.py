@@ -16,9 +16,10 @@ from ..scheduler import _traced_job
 
 def register_enrichment_jobs(scheduler, settings):
     """Register enrichment jobs with the scheduler."""
-    scheduler.add_job(
-        _job_engagement_scoring, IntervalTrigger(hours=12), id="engagement_scoring", name="Engagement scoring"
-    )
+    if not scheduler.get_job("engagement_scoring"):
+        scheduler.add_job(
+            _job_engagement_scoring, IntervalTrigger(hours=12), id="engagement_scoring", name="Engagement scoring"
+        )
 
     # Apollo, Hunter, Gradient are OK to use at full capacity
     if settings.deep_enrichment_enabled:

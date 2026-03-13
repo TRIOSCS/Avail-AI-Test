@@ -107,6 +107,29 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
         conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
 
+    offer_ids = [o.id for o in offers]
+    risk_map: dict[int, list[dict]] = {}
+    if offer_ids:
+        from ...models.risk_flag import RiskFlag
+
+        risk_rows = (
+            db.query(RiskFlag)
+            .filter(RiskFlag.source_offer_id.in_(offer_ids))
+            .order_by(RiskFlag.created_at.desc())
+            .all()
+        )
+        for flag in risk_rows:
+            risk_map.setdefault(flag.source_offer_id, []).append(
+                {
+                    "id": flag.id,
+                    "type": flag.type,
+                    "severity": flag.severity,
+                    "message": flag.message,
+                    "source": flag.source,
+                    "created_at": flag.created_at.isoformat() if flag.created_at else None,
+                }
+            )
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -158,6 +181,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_map.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -311,11 +335,13 @@ async def create_offer(
     db: Session = Depends(get_db),
 ):
     from ...dependencies import get_req_for_user
+    from ...utils.sanitize import sanitize_text
 
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
 
+    vendor_name = sanitize_text(payload.vendor_name) or ""
     card = None
 
     # 1) If frontend passed a vendor_card_id, use it directly
@@ -324,7 +350,7 @@ async def create_offer(
 
     # 2) Exact match on normalized name
     if not card:
-        norm_name = normalize_vendor_name(payload.vendor_name)
+        norm_name = normalize_vendor_name(vendor_name)
         card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
 
     # 3) Fuzzy match: ILIKE prefix search + fuzzy scoring
@@ -336,7 +362,7 @@ async def create_offer(
             candidates = db.query(VendorCard).filter(VendorCard.normalized_name.ilike(f"{prefix}%")).limit(20).all()
             if candidates:
                 matches = fuzzy_match_vendor(
-                    payload.vendor_name,
+                    vendor_name,
                     [c.display_name for c in candidates],
                     threshold=88,
                 )
@@ -345,8 +371,8 @@ async def create_offer(
                     card = next(c for c in candidates if c.display_name == best_name)
                     # Append submitted name as alternate for future exact lookups
                     alts = list(card.alternate_names or [])
-                    if payload.vendor_name not in alts and payload.vendor_name != card.display_name:
-                        alts.append(payload.vendor_name)
+                    if vendor_name not in alts and vendor_name != card.display_name:
+                        alts.append(vendor_name)
                         card.alternate_names = alts
 
     # 4) No match — create new card
@@ -363,7 +389,7 @@ async def create_offer(
             )
         card = VendorCard(
             normalized_name=norm_name,
-            display_name=payload.vendor_name,
+            display_name=vendor_name,
             domain=domain or None,
             emails=[],
             phones=[],
@@ -572,10 +598,16 @@ async def update_offer(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
+    from ...utils.sanitize import sanitize_text
+
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+    if offer.status == "sold" and changes.get("status") not in (None, "sold"):
+        raise HTTPException(400, "Sold offers cannot be reactivated via generic update")
+    if "vendor_name" in changes:
+        changes["vendor_name"] = sanitize_text(changes["vendor_name"])
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

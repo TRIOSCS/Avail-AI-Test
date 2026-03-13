@@ -557,8 +557,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
     # AI live web search source (disabled in TESTING to keep tests deterministic)
     ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
-    has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
-    _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
+    if not os.environ.get("TESTING"):
+        has_ai_live = bool(ai_key)
+        _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
 
     if not connectors:
         return [], list(source_stats_map.values())
@@ -1034,6 +1035,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         evidence_tier="T7",
         age_days=age_days,
     )
+    bucket_map = {"strong": "high", "moderate": "medium", "weak": "low"}
+    confidence_bucket = bucket_map.get(quality, "low")
 
     return {
         "id": None,
@@ -1071,6 +1074,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": confidence_bucket,
+        "lead_confidence_reason": explanation,
     }
 
 
@@ -1354,6 +1359,8 @@ def sighting_to_dict(s: Sighting) -> dict:
         source_type=s.source_type,
         age_days=age_days,
     )
+    bucket_map = {"strong": "high", "moderate": "medium", "weak": "low"}
+    confidence_bucket = bucket_map.get(quality, "low")
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1387,4 +1394,6 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": confidence_bucket,
+        "lead_confidence_reason": explanation,
     }

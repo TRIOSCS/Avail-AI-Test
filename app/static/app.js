@@ -13,6 +13,12 @@ function validateRfqName(name) {
 }
 window.validateRfqName = validateRfqName;
 
+const RFQ_FOLLOWUPS_MODULE = './rfq/followups.js';
+const RFQ_ACTIVITY_MODULE = './rfq/activity.js';
+const RFQ_WORKSPACE_MODULE = './rfq/workspace.js';
+const RFQ_WORKSPACE_TABS = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
+const INTAKE_AI_DRAFT_ENDPOINT = '/api/ai/intake-draft';
+
 (function() {
     var el = document.getElementById('app-config');
     if (el) {
@@ -116,6 +122,25 @@ function renderResponsiveTable(columns, rows, opts) {
 window.renderResponsiveTable = renderResponsiveTable;
 
 // ── Early stubs (available before full init for onclick handlers) ──────
+
+var _leadProvenanceRegistry = {};
+
+function _registerLeadProvenance(key, payload) {
+    _leadProvenanceRegistry[key] = payload || null;
+    return key;
+}
+window._registerLeadProvenance = _registerLeadProvenance;
+
+function openLeadProvenancePanel(key) {
+    var body = document.getElementById('leadProvenanceBody');
+    var payload = _leadProvenanceRegistry[key];
+    if (body) {
+        body.textContent = payload ? JSON.stringify(payload, null, 2) : 'No provenance available.';
+    }
+    if (typeof openModal === 'function') openModal('leadProvenanceModal');
+}
+window.openLeadProvenancePanel = openLeadProvenancePanel;
+function _leadProvenanceOnclick(key) { return "openLeadProvenancePanel('" + key + "')"; }
 
 function validatePartRowInputs(qty, targetPrice) {
     if (!Number.isInteger(Number(qty)) || Number(qty) <= 0) {
@@ -3180,8 +3205,14 @@ let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
 // Main view: 'reqs' (Pipeline), 'deals', 'archive'. Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'.
-let _currentMainView = localStorage.getItem('avail_main_view') || 'reqs';
-if (_currentMainView === 'sales' || _currentMainView === 'sourcing' || _currentMainView === 'purchasing') _currentMainView = 'reqs';
+function _normalizeMainView(view) {
+    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(view)) {
+        return 'reqs';
+    }
+    return view || 'reqs';
+}
+const _savedMainView = localStorage.getItem('avail_main_view') || 'reqs';
+let _currentMainView = _normalizeMainView(_savedMainView);
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -10198,6 +10229,7 @@ function _cancelTabInflight() {
 }
 
 function setMainView(view, btn) {
+    view = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
@@ -10636,7 +10668,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -14487,10 +14519,10 @@ async function _retryRfq(contactId) {
         if (r.status === 'sent') {
             showToast('RFQ resent successfully', 'success');
         } else {
-            showToast(r.error || 'Retry failed', 'error');
+            showToast('Couldn\'t retry RFQ — ' + (r.error || 'please try again'), 'error');
         }
     } catch(e) {
-        showToast('Retry failed: ' + e.message, 'error');
+        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -14503,7 +14535,7 @@ async function _updateVrStatus(vrId, status) {
         });
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Failed: ' + e.message, 'error');
+        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -16295,10 +16327,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
-            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16353,7 +16385,7 @@ async function _rfqLoadTab(tab) {
             case 'notes':
                 data = await apiFetch(`/api/requirements/${partId}/notes`);
                 break;
-            case 'history':
+            case 'activity':
                 data = await apiFetch(`/api/requirements/${partId}/history`);
                 break;
             case 'sightings':
@@ -16375,10 +16407,14 @@ function _rfqRenderTab(tab, data, body) {
         case 'offers': _rfqRenderOffers(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
-        case 'history': _rfqRenderHistory(data, body); break;
+        case 'activity': _rfqRenderActivity(data, body); break;
         case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
+}
+
+function _rfqRenderActivity(data, body) {
+    _rfqRenderHistory(data, body);
 }
 
 // ── OFFERS TAB ────────────────────────────────────────────────────────
@@ -16628,6 +16664,10 @@ function _rfqRenderNotes(data, body) {
     body.innerHTML = html;
 }
 
+function rfqShowTaskForm() {
+    return rfqAddTask();
+}
+
 async function rfqAddNote() {
     const text = prompt('Add note:');
     if (!text || !text.trim()) return;
@@ -16642,6 +16682,10 @@ async function rfqAddNote() {
     } catch(e) {
         console.error('Add note failed:', e);
     }
+}
+
+function rfqShowNoteForm() {
+    return rfqAddNote();
 }
 
 // ── HISTORY TAB ───────────────────────────────────────────────────────
@@ -16928,5 +16972,5 @@ Object.assign(window, {
     // Shared page helpers
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
-    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote, rfqShowTaskForm, rfqShowNoteForm,
 });

@@ -269,6 +269,8 @@ async def update_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    from ...utils.sanitize import sanitize_dict
+
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -276,7 +278,28 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        clean_items = []
+        for item in updates.pop("line_items") or []:
+            if isinstance(item, dict):
+                clean_items.append(
+                    sanitize_dict(
+                        item,
+                        [
+                            "mpn",
+                            "manufacturer",
+                            "lead_time",
+                            "condition",
+                            "date_code",
+                            "firmware",
+                            "hardware_code",
+                            "packaging",
+                            "notes",
+                        ],
+                    )
+                )
+            else:
+                clean_items.append(item)
+        quote.line_items = clean_items
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell
