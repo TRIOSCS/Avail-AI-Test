@@ -172,7 +172,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
+    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',scorecard:'navScorecard',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -949,10 +949,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.showSettings(settingsTab);
             },
             'view-suggested': () => window.showSuggested(),
-            'view-contacts': () => showContacts(),
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -1215,12 +1214,11 @@ function applyRoleGating() {
     }
 
     // ── CRM Section — Role-based visibility ──
-    const navContacts = document.getElementById('navContacts');
     const navVendors = document.getElementById('navVendors');
     const navCustomers = document.getElementById('navCustomers');
 
-    // Sales: Customers (own) + Contacts only — no Vendors
-    // Buyers: Vendors + Contacts only — no Customers
+    // Sales: Customers only — no Vendors
+    // Buyers: Vendors only — no Customers
     // Traders/Admin/Manager: all visible
     if (role === 'sales') {
         if (navVendors) navVendors.style.display = 'none';
@@ -1235,13 +1233,6 @@ function applyRoleGating() {
         navProspecting.style.display = canProspect ? '' : 'none';
     }
 
-    // ── Dashboard: hide Command Center from buyers ──
-    const navDashboard = document.getElementById('navDashboard');
-    if (navDashboard) {
-        navDashboard.style.display = role === 'buyer' ? 'none' : '';
-    }
-    const ccGroup = document.querySelector('.sb-cc-group');
-    if (ccGroup) ccGroup.style.display = role === 'buyer' ? 'none' : '';
     const perfNav = document.getElementById('navScorecard');
     if (perfNav) perfNav.style.display = '';
 
@@ -1274,10 +1265,10 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
@@ -1336,12 +1327,11 @@ window.addEventListener('popstate', (e) => {
             var settingsTab = (baseHash === 'apihealth') ? baseHash : undefined;
             window.showSettings(settingsTab);
         },
-        'view-contacts': () => showContacts(),
         'view-suggested': () => window.showSuggested(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -1455,319 +1445,7 @@ function showMaterials() {
     loadMaterialList();
 }
 
-let _contactStatusFilter = 'all';
-const debouncedLoadContacts = debounce(() => {
-    const q = (document.getElementById('contactFilter')?.value || '').trim();
-    if (_contactCache.length) renderContacts(q);
-    else loadContacts();
-}, 300);
 
-function setContactStatusFilter(status, btn) {
-    _contactStatusFilter = status;
-    document.querySelectorAll('#contactStatusPills .chip').forEach(b => b.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    loadContacts();
-}
-
-let _contactCache = [];
-
-async function loadContacts() {
-    const list = document.getElementById('contactList');
-    if (!list) return;
-    const q = (document.getElementById('contactFilter')?.value || '').trim();
-
-    // If we have a cache and user is just filtering/searching, skip refetch
-    if (_contactCache.length && (q || _contactStatusFilter !== 'all')) {
-        return renderContacts(q);
-    }
-
-    list.innerHTML = window.skeletonRows(5);
-
-    try {
-        const people = [];
-
-        // Fetch vendor contacts (bulk) and customer contacts in parallel
-        const [bulkResp, customerContacts] = await Promise.all([
-            apiFetch('/api/vendor-contacts/bulk?limit=5000').catch(e => { showToast('Failed to load vendor contacts','warn'); return {items:[]}; }),
-            apiFetch('/api/customer-contacts').catch(e => { showToast('Failed to load customer contacts','warn'); return []; }),
-        ]);
-
-        // Step 1: Vendor contacts from bulk endpoint
-        const vendorItems = bulkResp.items || [];
-        for (const c of vendorItems) {
-            if (!c.full_name && !c.email) continue;
-            people.push({
-                id: c.id,
-                vendor_id: c.vendor_id,
-                vendor_name: c.vendor_name || 'Unknown',
-                company_name: c.vendor_name || 'Unknown',
-                full_name: c.full_name || '',
-                title: c.title || '',
-                email: c.email || '',
-                phone: c.phone || '',
-                source: c.source || '',
-                is_verified: c.is_verified || false,
-                confidence: c.confidence || 0,
-                interaction_count: c.interaction_count || 0,
-                last_interaction_at: c.last_interaction_at || null,
-                first_seen_at: c.first_seen_at || null,
-                contact_type: 'vendor',
-            });
-        }
-
-        // Step 2: Customer contacts
-        if (Array.isArray(customerContacts)) {
-            for (const c of customerContacts) {
-                if (!c.full_name && !c.email) continue;
-                people.push({
-                    id: c.id,
-                    company_id: c.company_id,
-                    site_id: c.site_id,
-                    vendor_name: c.company_name || 'Unknown',
-                    company_name: c.company_name || 'Unknown',
-                    full_name: c.full_name || '',
-                    title: c.title || '',
-                    email: c.email || '',
-                    phone: c.phone || '',
-                    source: 'customer',
-                    is_verified: true,
-                    confidence: 100,
-                    interaction_count: 0,
-                    last_interaction_at: null,
-                    first_seen_at: c.created_at || null,
-                    contact_type: 'customer',
-                });
-            }
-        }
-
-        _contactCache = people;
-        renderContacts(q);
-    } catch (err) {
-        console.error('loadContacts error:', err);
-        list.textContent = 'Failed to load contacts.';
-    }
-}
-
-let _contactSortCol = null;
-let _contactSortDir = 'asc';
-
-function sortContactList(col) {
-    if (_contactSortCol === col) {
-        if (_contactSortDir === 'asc') _contactSortDir = 'desc';
-        else { _contactSortCol = null; _contactSortDir = 'asc'; }
-    } else {
-        _contactSortCol = col;
-        _contactSortDir = col === 'name' ? 'asc' : 'desc';
-    }
-    renderContacts((document.getElementById('contactFilter')?.value || '').trim());
-}
-
-function _sanitizeContactField(val) {
-    if (!val) return '';
-    return val.replace(/^[!:;\-.\s]+/, '').trim();
-}
-
-function renderContacts(q) {
-    const list = document.getElementById('contactList');
-    if (!list) return;
-    let contacts = [..._contactCache];
-
-    // Search filter
-    if (q) {
-        const lq = q.toLowerCase();
-        contacts = contacts.filter(c =>
-            (c.full_name || '').toLowerCase().includes(lq) ||
-            (c.email || '').toLowerCase().includes(lq) ||
-            (c.company_name || c.vendor_name || '').toLowerCase().includes(lq) ||
-            (c.title || '').toLowerCase().includes(lq)
-        );
-    }
-
-    // Status filter
-    contacts = contacts.filter(c => {
-        if (_contactStatusFilter === 'all') return true;
-        if (_contactStatusFilter === 'vendor') return c.contact_type !== 'customer';
-        // Status-based filters match on contact_status field
-        if (_contactStatusFilter === 'champion') return (c.contact_status || 'new') === 'champion';
-        if (_contactStatusFilter === 'active') return (c.contact_status || 'new') === 'active';
-        if (_contactStatusFilter === 'quiet') return (c.contact_status || 'new') === 'quiet';
-        if (_contactStatusFilter === 'inactive') return (c.contact_status || 'new') === 'inactive';
-        return true;
-    });
-
-    // Sort
-    if (_contactSortCol) {
-        contacts.sort((a, b) => {
-            let va, vb;
-            switch (_contactSortCol) {
-                case 'name': va = (a.full_name || ''); vb = (b.full_name || ''); break;
-                case 'company': va = (a.company_name || a.vendor_name || ''); vb = (b.company_name || b.vendor_name || ''); break;
-                case 'interactions': va = (a.interaction_count || 0); vb = (b.interaction_count || 0); break;
-                default: va = 0; vb = 0;
-            }
-            if (typeof va === 'string') return _contactSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
-            return _contactSortDir === 'asc' ? va - vb : vb - va;
-        });
-    } else {
-        contacts.sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0) || (a.full_name || '').localeCompare(b.full_name || ''));
-    }
-
-    const countEl = document.getElementById('contactFilterCount');
-    if (countEl) countEl.textContent = `${contacts.length} contact${contacts.length !== 1 ? 's' : ''}`;
-
-    if (!contacts.length) {
-        list.innerHTML = '<p class="crm-empty">No contacts found.</p>';
-        return;
-    }
-
-    // Build table
-    const thSort = (col, label, extra = '') => {
-        const active = _contactSortCol === col;
-        const arrow = active ? (_contactSortDir === 'asc' ? ' ▲' : ' ▼') : '';
-        return `<th class="${active ? 'sorted' : ''}" onclick="sortContactList('${col}')" ${extra}>${label}<span class="sort-arrow">${arrow}</span></th>`;
-    };
-
-    let html = `<table class="crm-table">
-        <thead><tr>
-            ${thSort('name', 'Name')}
-            ${thSort('company', 'Company')}
-            <th>Type</th>
-            <th>Status</th>
-            <th>Title</th>
-            <th>Email</th>
-            <th>Phone</th>
-            ${thSort('interactions', 'Activity')}
-            <th>Last Contact</th>
-        </tr></thead><tbody>`;
-
-    for (const c of contacts) {
-        const cleanName = _sanitizeContactField(c.full_name) || 'Unknown';
-        const cleanTitle = _sanitizeContactField(c.title);
-        const days = daysSince(c.last_interaction_at || c.first_seen_at);
-        const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '—';
-        const verifiedBadge = c.is_verified ? ' <span style="color:var(--green);font-size:9px">✓</span>' : '';
-        const healthColor = days <= 7 ? 'green' : days <= 30 ? 'amber' : 'red';
-        const isCustomer = c.contact_type === 'customer';
-        const typeBadge = isCustomer
-            ? '<span style="background:var(--blue-bg,#e8f0fe);color:var(--blue,#1a73e8);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Customer</span>'
-            : '<span style="background:var(--green-bg,#e6f4ea);color:var(--green,#1e8e3e);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Vendor</span>';
-        const rowClick = isCustomer
-            ? `onclick="openCustDrawer(${c.company_id},'contacts')"`
-            : `onclick="openContactDrawer(${c.vendor_id}, ${c.id})"`;
-        const cStatus = c.contact_status || 'new';
-        const cStatusCfg = CONTACT_STATUS[cStatus] || CONTACT_STATUS.new;
-        const statusDropdown = isCustomer && c.site_contact_id
-            ? `<select class="contact-status-select" style="background:${cStatusCfg.bg};color:${cStatusCfg.color};border:none;border-radius:4px;font-size:10px;font-weight:600;padding:2px 6px;cursor:pointer" onchange="event.stopPropagation();updateContactStatus(${c.site_contact_id},this.value)" data-contact-id="${c.site_contact_id}">${CONTACT_STATUS_ORDER.map(s => '<option value="'+s+'"'+(s===cStatus?' selected':'')+' style="background:#fff;color:#333">'+CONTACT_STATUS[s].label+'</option>').join('')}</select>`
-            : `<span style="background:${cStatusCfg.bg};color:${cStatusCfg.color};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${cStatusCfg.label}</span>`;
-
-        html += `<tr ${rowClick} style="cursor:pointer">
-            <td>
-                <div style="display:flex;align-items:center;gap:8px">
-                    <span class="health-dot health-dot-${healthColor}"></span>
-                    <span style="font-weight:600">${esc(cleanName)}${verifiedBadge}</span>
-                </div>
-            </td>
-            <td>${isCustomer && c.company_id
-                ? '<a onclick="event.stopPropagation();goToCompany('+c.company_id+')" style="cursor:pointer;color:var(--blue);text-decoration:none;font-weight:500">'+esc(c.company_name || '')+'</a>'
-                : c.vendor_id
-                    ? '<a onclick="event.stopPropagation();openVendorDrawer('+c.vendor_id+')" style="cursor:pointer;color:var(--blue);text-decoration:none;font-weight:500">'+esc(c.vendor_name || '')+'</a>'
-                    : esc(c.company_name || c.vendor_name || '')}</td>
-            <td>${typeBadge}</td>
-            <td>${statusDropdown}</td>
-            <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(cleanTitle)}">${esc(cleanTitle.length > 50 ? cleanTitle.slice(0, 50) + '…' : cleanTitle) || '—'}</td>
-            <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
-            <td>${c.phone ? phoneLink(c.phone, {vendor_card_id: c.vendor_id, company_id: c.company_id, origin: 'contacts_table'}) : '<span class="muted-cell">—</span>'}</td>
-            <td>${c.interaction_count || 0}</td>
-            <td class="muted-cell">${lastLabel}</td>
-        </tr>`;
-    }
-    html += '</tbody></table>';
-    list.innerHTML = html;
-}
-
-async function updateContactStatus(siteContactId, newStatus) {
-    try {
-        // Find the contact in cache to get site_id
-        const contact = _contactCache.find(c => c.site_contact_id === siteContactId);
-        if (!contact) { showToast('Contact not found', 'error'); return; }
-        await apiFetch(`/api/sites/${contact.customer_site_id}/contacts/${siteContactId}`, {
-            method: 'PUT',
-            body: JSON.stringify({ contact_status: newStatus }),
-        });
-        // Update cache locally
-        contact.contact_status = newStatus;
-        showToast(`Status updated to ${(CONTACT_STATUS[newStatus] || {}).label || newStatus}`, 'success');
-    } catch (e) {
-        showToast('Failed to update status: ' + (e.message || 'unknown error'), 'error');
-    }
-}
-
-function openContactDrawer(vendorId, contactId) {
-    const backdrop = document.getElementById('contactDrawerBackdrop');
-    const drawer = document.getElementById('contactDrawer');
-    if (backdrop) backdrop.classList.add('open');
-    if (drawer) drawer.classList.add('open');
-
-    const contact = _contactCache.find(c => c.id === contactId && c.vendor_id === vendorId);
-    const title = document.getElementById('contactDrawerTitle');
-    const body = document.getElementById('contactDrawerBody');
-    if (!body) return;
-
-    if (!contact) {
-        if (title) title.textContent = 'Contact';
-        body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Contact not found</p></div>';
-        return;
-    }
-
-    if (title) title.textContent = contact.full_name || 'Unknown';
-
-    const initials = (contact.full_name || '?').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-    const days = daysSince(contact.last_interaction_at || contact.first_seen_at);
-    const healthColor = days <= 7 ? 'green' : days <= 30 ? 'amber' : 'red';
-    const healthLabel = days <= 7 ? 'Active' : days <= 30 ? 'Aging' : 'Needs Follow-up';
-
-    let html = `<div class="drawer-section">
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-            <div class="owner-avatar owner-avatar-lg" style="background:${_avatarColor(contact.full_name)}">${initials}</div>
-            <div>
-                <div style="font-size:14px;font-weight:700;color:var(--text)">${esc(contact.full_name || 'Unknown')}</div>
-                ${contact.title ? '<div style="font-size:12px;color:var(--muted)">' + esc(contact.title) + '</div>' : ''}
-                <div style="font-size:12px;color:var(--muted)">${esc(contact.vendor_name)}</div>
-            </div>
-        </div>
-        <div class="health-indicator" style="margin-bottom:12px"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label" style="font-weight:600">${healthLabel}</span></div>
-        ${contact.email ? '<div class="drawer-field"><span class="drawer-field-label">Email</span><span class="drawer-field-value"><a href="mailto:'+escAttr(contact.email)+'">'+esc(contact.email)+'</a></span></div>' : ''}
-        ${contact.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+phoneLink(contact.phone, {vendor_card_id: contact.vendor_id, origin: 'contact_drawer'})+'</span></div>' : ''}
-        <div class="drawer-field"><span class="drawer-field-label">Company</span><span class="drawer-field-value">${esc(contact.vendor_name)}</span></div>
-        <div class="drawer-field"><span class="drawer-field-label">Interactions</span><span class="drawer-field-value">${contact.interaction_count || 0}</span></div>
-        <div class="drawer-field"><span class="drawer-field-label">Last Contact</span><span class="drawer-field-value">${contact.last_interaction_at ? getRelativeTime(contact.last_interaction_at) : 'Never'}</span></div>
-        ${contact.source ? '<div class="drawer-field"><span class="drawer-field-label">Source</span><span class="drawer-field-value">'+esc(contact.source.replace(/_/g, ' '))+'</span></div>' : ''}
-        ${contact.is_verified ? '<div class="drawer-field"><span class="drawer-field-label">Verified</span><span class="drawer-field-value" style="color:var(--green)">✓ Verified</span></div>' : ''}
-    </div>`;
-
-    html += `<div class="drawer-section">
-        <div style="display:flex;gap:6px">
-            <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${vendorId})">View Vendor</button>
-        </div>
-    </div>`;
-
-    body.innerHTML = html;
-}
-
-function closeContactDrawer() {
-    const backdrop = document.getElementById('contactDrawerBackdrop');
-    const drawer = document.getElementById('contactDrawer');
-    if (backdrop) backdrop.classList.remove('open');
-    if (drawer) drawer.classList.remove('open');
-}
-
-function showContacts() {
-    showView('view-contacts');
-    const viewEl = document.getElementById('view-contacts');
-    if (viewEl) { viewEl.classList.remove('u-hidden'); viewEl.style.display = 'flex'; }
-    _contactCache = [];
-    loadContacts();
-}
 
 let _dashPeriod = '30d';
 let _dashScope = 'my';           // always 'my' — team averages shown inline
@@ -9681,7 +9359,7 @@ function toggleSidebarGroup(headerEl) {
 
 export function sidebarNav(page, el) {
     safeSet('_lastActivityTs', String(Date.now()));
-    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
     // Highlight Command Center group for scorecard views
     if (page === 'scorecard' || page === 'performance') {
@@ -9710,7 +9388,6 @@ export function sidebarNav(page, el) {
         performance: () => { sidebarNav('scorecard', document.getElementById('navScorecard')); },
         scorecard: () => showScorecard(),
         settings: () => window.showSettings(),
-        contacts: () => showContacts(),
         prospecting: () => window.showSuggested(),
         suggested: () => window.showSuggested(),
         apihealth: () => window.showSettings('apihealth'),
@@ -9720,7 +9397,7 @@ export function sidebarNav(page, el) {
 }
 
 export function navHighlight(btn) {
-    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
     var section = btn && btn.closest('[data-section]');
     if (section) {
@@ -15687,7 +15364,6 @@ Object.assign(window, {
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
     selectVendor,
     openVendorDrawer, closeVendorDrawer, switchVendorDrawerTab,
-    openContactDrawer, closeContactDrawer, sortContactList,
     sortVendorList, threadSearchFilter, toggleAllDrillRows,
     archiveGoPage, toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
     toggleGroup, toggleOfferHistory, togglePartsSightings,
@@ -15734,9 +15410,7 @@ Object.assign(window, {
     ownerAvatar, factorBar, relationshipHealthBar, contactStatusBar,
     statusPill, activityIcon, getRelativeTime, filterChip,
     CONTACT_STATUS, CONTACT_STATUS_ORDER,
-    // Contact Intelligence view
-    debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
-    // Dashboard / Command Center
+    // Dashboard
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
     goToReq, _toggleColGear, toggleColVisibility,

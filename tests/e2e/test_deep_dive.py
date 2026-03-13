@@ -152,7 +152,6 @@ class TestSidebarNavigation:
     """Full coverage of sidebar navigation groups and buttons."""
 
     ALL_NAV_IDS = [
-        "navDashboard",
         "navScorecard",
         "navReqs",
         "navProactive",
@@ -162,7 +161,6 @@ class TestSidebarNavigation:
         "navVendors",
         "navStrategic",
         "navProspecting",
-        "navContacts",
         "navSettings",
     ]
 
@@ -173,9 +171,7 @@ class TestSidebarNavigation:
         "navCustomers": "view-customers",
         "navProactive": "view-proactive",
         "navBuyPlans": "view-buyplans",
-        "navDashboard": "view-dashboard",
         "navScorecard": "view-scorecard",
-        "navContacts": "view-contacts",
         "navStrategic": "view-strategic",
         "navProspecting": "view-suggested",
         "navSettings": "view-settings",
@@ -197,9 +193,7 @@ class TestSidebarNavigation:
             ("navCustomers", "view-customers"),
             ("navProactive", "view-proactive"),
             ("navBuyPlans", "view-buyplans"),
-            ("navDashboard", "view-dashboard"),
             ("navScorecard", "view-scorecard"),
-            ("navContacts", "view-contacts"),
             ("navStrategic", "view-strategic"),
             ("navProspecting", "view-suggested"),
         ],
@@ -746,27 +740,7 @@ class TestProactiveView:
         expect(authed_page.locator("#proactiveRefreshBtn")).to_be_visible()
 
 
-# ── 11. CONTACTS VIEW ───────────────────────────────────────────────
-
-
-class TestContactsView:
-    """Tests for the contacts view."""
-
-    def test_contacts_view_loads(self, authed_page, base_url):
-        """Contacts view loads without error."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "navContacts")
-        authed_page.wait_for_timeout(1000)
-        expect(authed_page.locator("#view-contacts")).to_be_visible()
-
-    def test_contacts_drawer_exists(self, authed_page, base_url):
-        """Contact drawer exists in DOM."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "navContacts")
-        assert authed_page.locator("#contactDrawer").count() > 0
-
-
-# ── 12. STRATEGIC VENDORS VIEW ──────────────────────────────────────
+# ── 11. STRATEGIC VENDORS VIEW ──────────────────────────────────────
 
 
 class TestStrategicVendorsView:
@@ -842,21 +816,7 @@ class TestProspectingView:
             assert authed_page.locator(f"#{f_id}").count() > 0, f"#{f_id} missing"
 
 
-# ── 14. DASHBOARD VIEW ──────────────────────────────────────────────
-
-
-class TestDashboardView:
-    """Tests for the dashboard view."""
-
-    def test_dashboard_view_loads(self, authed_page, base_url):
-        """Dashboard view loads."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "navDashboard")
-        authed_page.wait_for_timeout(1000)
-        expect(authed_page.locator("#view-dashboard")).to_be_visible()
-
-
-# ── 15. SCORECARD VIEW ──────────────────────────────────────────────
+# ── 14. SCORECARD VIEW ──────────────────────────────────────────────
 
 
 class TestScorecardView:
@@ -1115,7 +1075,6 @@ class TestAPIHealth:
             "navCustomers",
             "navProactive",
             "navBuyPlans",
-            "navContacts",
             "navReqs",
         ]:
             nav_click(authed_page, nav)
@@ -1146,9 +1105,7 @@ class TestConsoleErrors:
             "navCustomers",
             "navProactive",
             "navBuyPlans",
-            "navDashboard",
             "navScorecard",
-            "navContacts",
             "navStrategic",
             "navProspecting",
             "navReqs",
