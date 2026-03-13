@@ -8260,7 +8260,14 @@ async function ddResearchPart(reqId, requirementId) {
     _ddSearchOverlay(reqId, true, 'Searching part\u2026');
     try {
         const body = { requirement_ids: [requirementId] };
-        await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        // 120s timeout to prevent indefinite spinner
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        try {
+            await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         // Invalidate caches and re-render
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
         delete _ddSightingsCache[reqId];
@@ -8278,7 +8285,8 @@ async function ddResearchPart(reqId, requirementId) {
         showToast('Search complete', 'success');
     } catch(e) {
         _ddSearchOverlay(reqId, false);
-        showToast('Search failed — ' + friendlyError(e, 'please try again'), 'error');
+        const msg = e.name === 'AbortError' ? 'Search timed out — try fewer parts or check API health' : friendlyError(e, 'please try again');
+        showToast('Search failed — ' + msg, 'error');
     }
 }
 
@@ -8289,9 +8297,16 @@ async function ddResearchAll(reqId) {
     try {
         const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
         _ddReqCache[reqId] = reqs;
-        if (!reqs.length) { showToast('No parts to search', 'warn'); return; }
+        if (!reqs.length) { showToast('No parts to search', 'warn'); _ddSearchOverlay(reqId, false); return; }
         const body = { requirement_ids: reqs.map(r => r.id) };
-        await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        // Use AbortController with 120s timeout to prevent indefinite spinner
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        try {
+            await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         // Invalidate and re-load
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
         delete _ddSightingsCache[reqId];
@@ -8309,7 +8324,8 @@ async function ddResearchAll(reqId) {
         showToast('All parts re-searched', 'success');
     } catch(e) {
         _ddSearchOverlay(reqId, false);
-        showToast('Search failed — ' + friendlyError(e, 'please try again'), 'error');
+        const msg = e.name === 'AbortError' ? 'Search timed out — try fewer parts or check API health' : friendlyError(e, 'please try again');
+        showToast('Search failed — ' + msg, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.innerHTML = '&#x1f50d; Search All'; }
     }
@@ -10377,9 +10393,15 @@ async function inlineSourceAll(reqId) {
         const reqs = await apiFetch(`/api/requisitions/${reqId}/requirements`);
         _ddReqCache[reqId] = reqs;
         if (!reqs.length) { showToast('No parts to search', 'warn'); return; }
-        // 2. Fire search
+        // 2. Fire search with 120s timeout to prevent indefinite spinner
         const body = { requirement_ids: reqs.map(r => r.id) };
-        const results = await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        try {
+            await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         // 3. Update caches — convert search results to sightings format for drill-down
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
         delete _ddSightingsCache[reqId];
@@ -10393,7 +10415,8 @@ async function inlineSourceAll(reqId) {
         renderReqList();
         showToast('Search complete — parts are being sourced', 'success');
     } catch(e) {
-        showToast('Search error: ' + e.message, 'error');
+        const msg = e.name === 'AbortError' ? 'Search timed out — try fewer parts or check API health' : e.message;
+        showToast('Search error: ' + msg, 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '\u25b6 Sourcing'; }
     }
@@ -10408,7 +10431,15 @@ async function searchAll() {
     await guardBtn(btn, 'Searching…', async () => {
         try {
             const body = { requirement_ids: [...selectedRequirements] };
-            const results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body });
+            // 120s timeout to prevent indefinite spinner
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+            let results;
+            try {
+                results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body, signal: controller.signal });
+            } finally {
+                clearTimeout(timeoutId);
+            }
             if (currentReqId !== reqIdAtStart) return;  // User navigated away
             window._lastSourceStats = results.source_stats || [];
             delete results.source_stats;
@@ -10427,7 +10458,8 @@ async function searchAll() {
                 notifyStatusChange({status_changed: true, req_status: 'active'});
             }
         } catch (e) {
-            showToast('Search error: ' + e.message, 'error');
+            const msg = e.name === 'AbortError' ? 'Search timed out — try fewer parts or check API health' : e.message;
+            showToast('Search error: ' + msg, 'error');
         }
     });
 }
