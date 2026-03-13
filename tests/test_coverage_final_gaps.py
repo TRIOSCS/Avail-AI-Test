@@ -667,13 +667,14 @@ class TestCompanyUtilsDuplicatePairSkip:
 class TestLoggingConfigJsonStdout:
     """Test JSON stdout logging in production mode."""
 
-    def test_production_json_logging(self):
+    def test_production_json_logging(self, tmp_path):
         """Line 42: production + EXTRA_LOGS=1 -> JSON stdout handler."""
         from loguru import logger
 
         from app.logging_config import setup_logging
 
         logger.remove()
+        log_file = str(tmp_path / "avail.log")
         with patch.dict(
             os.environ,
             {
@@ -682,7 +683,15 @@ class TestLoggingConfigJsonStdout:
                 "LOG_LEVEL": "INFO",
             },
         ):
-            setup_logging()
+            original_add = logger.add
+
+            def _safe_add(sink, **kwargs):
+                if isinstance(sink, str) and "/var/log/" in sink:
+                    return original_add(log_file, **kwargs)
+                return original_add(sink, **kwargs)
+
+            with patch.object(logger, "add", side_effect=_safe_add):
+                setup_logging()
 
         # Should have at least one handler configured
         assert len(logger._core.handlers) > 0
@@ -698,23 +707,37 @@ class TestSeedApiSourcesQuotaBackfill:
     """Test monthly_quota backfill in _seed_api_sources."""
 
     def test_quota_backfill_sets_value(self):
-        """Line 851: src with no monthly_quota gets backfilled."""
+        """Quota backfill sets monthly_quota on sources that have None."""
+        import json
+        from pathlib import Path
+
         from app.main import _seed_api_sources
+
+        sources_path = Path(__file__).parent.parent / "app" / "data" / "api_sources.json"
+        SOURCES = json.loads(sources_path.read_text())
+
+        # Create mock sources matching all but one name to avoid early return
+        existing_mocks = {}
+        for s in SOURCES[:-1]:
+            m = MagicMock()
+            m.name = s["name"]
+            m.monthly_quota = 999
+            existing_mocks[s["name"]] = m
+
+        # Set a quota_map target to have no quota so backfill kicks in
+        target_name = "hunter_enrichment"
+        if target_name in existing_mocks:
+            existing_mocks[target_name].monthly_quota = None
 
         with patch("app.database.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
-            mock_db.query.return_value.all.return_value = []
-
-            # Make filter_by return a source without monthly_quota
-            mock_src = MagicMock()
-            mock_src.monthly_quota = None  # No quota set
-            mock_db.query.return_value.filter_by.return_value.first.return_value = mock_src
+            mock_db.query.return_value.all.return_value = list(existing_mocks.values())
 
             _seed_api_sources()
 
-            # The quota should have been set
-            assert mock_src.monthly_quota is not None
+            assert existing_mocks[target_name].monthly_quota is not None
+            assert existing_mocks[target_name].monthly_quota == 500
             mock_db.commit.assert_called()
 
 

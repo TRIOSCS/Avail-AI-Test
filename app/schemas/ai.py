@@ -340,6 +340,7 @@ class IntakeDraftRequest(BaseModel):
     """Input for AI intake draft — paste text from customer/vendor emails."""
 
     text: str
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod

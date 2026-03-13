@@ -1289,25 +1289,30 @@ async def list_requirement_tasks(
         for u in db.query(User).filter(User.id.in_(user_ids)).all():
             user_map[u.id] = u.name or u.email
 
-    return [
-        {
+    result = []
+    for t in tasks:
+        assignee = user_map.get(t.assigned_to_id, "")
+        creator = user_map.get(t.created_by, "")
+        result.append({
             "id": t.id,
             "title": t.title,
             "description": t.description,
             "task_type": t.task_type,
             "status": t.status,
             "priority": t.priority,
-            "assigned_to": user_map.get(t.assigned_to_id, ""),
-            "created_by_name": user_map.get(t.created_by, ""),
+            "assigned_to": assignee,
+            "assignee_name": assignee,
+            "created_by_name": creator,
+            "creator_name": creator,
             "source_ref": t.source_ref,
             "ai_risk_flag": t.ai_risk_flag,
             "source": t.source,
             "due_date": t.due_at.isoformat() if t.due_at else None,
+            "due_at": t.due_at.isoformat() if t.due_at else None,
             "completed_at": t.completed_at.isoformat() if t.completed_at else None,
             "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in tasks
-    ]
+        })
+    return result
 
 
 @router.post("/api/requirements/{requirement_id}/tasks")
@@ -1329,12 +1334,20 @@ async def create_requirement_task(
     task = RequisitionTask(
         requisition_id=req.requisition_id,
         title=title,
+        description=body.get("description"),
         task_type="general",
         status="todo",
         source="manual",
         source_ref=f"requirement:{requirement_id}",
+        assigned_to_id=body.get("assigned_to_id"),
         created_by=user.id,
     )
+    if body.get("due_at"):
+        from datetime import datetime
+        try:
+            task.due_at = datetime.fromisoformat(body["due_at"])
+        except (ValueError, TypeError):
+            pass
     db.add(task)
     db.commit()
     db.refresh(task)

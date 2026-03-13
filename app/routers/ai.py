@@ -710,7 +710,7 @@ async def ai_intake_draft(
         raise HTTPException(403, "AI features not enabled")
 
     context = None
-    req_id = getattr(payload, "requisition_id", None)
+    req_id = payload.requisition_id
     if req_id:
         req = db.query(Requisition).filter(Requisition.id == req_id).first()
         if not req:
