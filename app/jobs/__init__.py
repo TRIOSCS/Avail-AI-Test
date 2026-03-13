@@ -39,11 +39,9 @@ def register_all_jobs(scheduler, settings):
     # Full-version-only jobs (disabled in MVP mode)
     if not settings.mvp_mode:
         from .enrichment_jobs import register_enrichment_jobs
-        from .teams_alert_jobs import register_teams_alert_jobs
 
         register_enrichment_jobs(scheduler, settings)
-        register_teams_alert_jobs(scheduler, settings)
-        logger.info("Full mode: enrichment + Teams alert jobs registered")
+        logger.info("Full mode: enrichment jobs registered")
     else:
         logger.info("MVP mode: skipping enrichment + Teams alert jobs")
 

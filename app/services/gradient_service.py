@@ -15,8 +15,7 @@ Available model tiers:
   - DEFAULT: anthropic-claude-4.6-sonnet (structured extraction, parsing, drafting)
   - STRONG: anthropic-claude-opus-4.6 (complex reasoning, analysis)
 
-Called by: ai_email_parser, ai_part_normalizer, ai_email_drafter, ai_quote_analyzer,
-           ai_pricing_analyzer, ai_sourcing_assistant
+Called by: ai_email_parser, ai_part_normalizer, ai_pricing_analyzer, ai_sourcing_assistant
 Depends on: app.http_client, app.config
 """
 

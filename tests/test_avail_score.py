@@ -12,6 +12,8 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import (
     ActivityLog,
     BuyPlan,
@@ -592,6 +594,10 @@ class TestGetAvailScores:
 # ── API Endpoint Tests ──────────────────────────────────────────────
 
 
+@pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Performance router disabled in MVP mode",
+)
 class TestAvailScoreAPI:
     def test_get_avail_scores_buyer(self, db_session):
         """GET /api/performance/avail-scores?role=buyer returns data."""

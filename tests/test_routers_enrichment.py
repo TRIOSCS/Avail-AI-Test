@@ -9,11 +9,17 @@ Called by: pytest
 Depends on: app/routers/enrichment.py, conftest.py
 """
 
+import os
 import unittest.mock
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 

@@ -36,11 +36,6 @@ def test_index_template_has_archive_view(index_html):
     assert 'data-view="archive"' in index_html
 
 
-def test_index_template_has_notification_bar(index_html):
-    """Index template includes the smart notification bar element."""
-    assert "notifActionBar" in index_html
-
-
 def test_index_template_has_priority_lane_comment(index_html):
     """Index template includes priority lane reference."""
     assert "priority lane" in index_html.lower() or "prioritylane" in index_html.lower()

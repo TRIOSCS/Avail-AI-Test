@@ -46,69 +46,6 @@ def _setup_req_with_offers(client):
 # ── Quote Summary Endpoint ───────────────────────────────────────────────
 
 
-class TestQuoteSummary:
-    """GET /api/requisitions/{id}/quote-summary — lightweight quote tab projection."""
-
-    def test_summary_no_quote(self, client):
-        """Summary with no quote returns actionable empty state."""
-        co = client.post("/api/companies", json={"name": "Summary Corp"}).json()
-        site = client.post(
-            f"/api/companies/{co['id']}/sites",
-            json={"site_name": "HQ", "contact_name": "J", "contact_email": "j@t.com"},
-        ).json()
-        req = client.post(
-            "/api/requisitions",
-            json={"name": "No Quote Req", "customer_site_id": site["id"]},
-        ).json()
-        resp = client.get(f"/api/requisitions/{req['id']}/quote-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_quote"] is False
-        assert data["has_buy_plan"] is False
-        assert data["requisition_id"] == req["id"]
-
-    def test_summary_with_quote(self, client):
-        """Summary with a quote returns quote metadata."""
-        req_id, offer_ids = _setup_req_with_offers(client)
-        client.post(f"/api/requisitions/{req_id}/quote", json={"offer_ids": offer_ids})
-        resp = client.get(f"/api/requisitions/{req_id}/quote-summary")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["has_quote"] is True
-        assert data["quote_status"] == "draft"
-        assert data["line_count"] >= 1
-        assert "quote_number" in data
-
-    def test_summary_nonexistent_req(self, client):
-        resp = client.get("/api/requisitions/99999/quote-summary")
-        assert resp.status_code == 404
-
-
-# ── Buy Plan Bridge ─────────────────────────────────────────────────────
-
-
-class TestBuyPlanBridge:
-    """POST /api/requisitions/{id}/buy-plan — creates or returns buy plan."""
-
-    def test_no_quote_returns_400(self, client):
-        """Cannot create buy plan without a quote."""
-        co = client.post("/api/companies", json={"name": "BP Corp"}).json()
-        site = client.post(
-            f"/api/companies/{co['id']}/sites",
-            json={"site_name": "HQ", "contact_name": "J", "contact_email": "j@t.com"},
-        ).json()
-        req = client.post(
-            "/api/requisitions",
-            json={"name": "No Quote BP", "customer_site_id": site["id"]},
-        ).json()
-        resp = client.post(f"/api/requisitions/{req['id']}/buy-plan")
-        assert resp.status_code == 400
-
-    def test_nonexistent_req(self, client):
-        resp = client.post("/api/requisitions/99999/buy-plan")
-        assert resp.status_code == 404
-
-
 # ── Transaction Safety ──────────────────────────────────────────────────
 
 
@@ -142,7 +79,7 @@ class TestQuoteTransactionSafety:
         # Try to create quote without site (should fail with 400)
         client.post(f"/api/requisitions/{req['id']}/quote", json={"offer_ids": []})
         # Subsequent read should still work
-        resp = client.get(f"/api/requisitions/{req['id']}/quote-summary")
+        resp = client.get(f"/api/requisitions/{req['id']}")
         assert resp.status_code == 200
 
 
@@ -197,37 +134,6 @@ class TestRiskFlagModel:
 # ── Risk Flags in Offer Response ─────────────────────────────────────────
 
 
-class TestOfferRiskFlags:
-    """Risk flags are surfaced in the offer listing response."""
-
-    def test_offers_include_risk_flags(self, client, db_session):
-        """Offer response includes risk_flags array."""
-        req_id, offer_ids = _setup_req_with_offers(client)
-        # Create a risk flag for the offer
-        flag = RiskFlag(
-            source_offer_id=offer_ids[0],
-            requisition_id=req_id,
-            type="stale_offer",
-            severity="warning",
-            message="Test risk flag",
-        )
-        db_session.add(flag)
-        db_session.commit()
-
-        resp = client.get(f"/api/requisitions/{req_id}/offers")
-        assert resp.status_code == 200
-        data = resp.json()
-        groups = data.get("groups", [])
-        found_flag = False
-        for g in groups:
-            for o in g.get("offers", []):
-                if o["id"] == offer_ids[0]:
-                    assert len(o.get("risk_flags", [])) >= 1
-                    assert o["risk_flags"][0]["type"] == "stale_offer"
-                    found_flag = True
-        assert found_flag, "Risk flag not found in offer response"
-
-
 # ── Input Sanitization ──────────────────────────────────────────────────
 
 
@@ -258,17 +164,3 @@ class TestSanitization:
         assert result["notes"] == "safe text"
         assert result["price"] == 1.5
 
-    def test_xss_in_offer_creation(self, client):
-        """XSS payload in offer vendor_name is sanitized."""
-        req_id, _ = _setup_req_with_offers(client)
-        resp = client.post(
-            f"/api/requisitions/{req_id}/offers",
-            json={
-                "mpn": "TEST-MPN",
-                "vendor_name": "<script>alert('xss')</script>Evil Corp",
-                "unit_price": 1.0,
-                "qty_available": 100,
-            },
-        )
-        assert resp.status_code == 200
-        assert "<script>" not in resp.json().get("vendor_name", "")

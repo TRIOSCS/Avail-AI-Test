@@ -1,13 +1,10 @@
-"""Trouble ticket model — unified bug reports + self-heal pipeline.
-
-Tracks the full lifecycle: submitted -> diagnosed -> fix_proposed -> fix_in_progress ->
-fix_applied -> awaiting_verification -> resolved (or escalated/fix_reverted).
+"""Trouble ticket model — bug reports and error tracking.
 
 Supports two sources:
 - report_button: quick bug report via red chat bubble (formerly ErrorReport)
 - ticket_form: structured ticket via sidebar Tickets view
 
-Called by: routers/trouble_tickets.py, routers/error_reports.py, services/trouble_ticket_service.py
+Called by: routers/error_reports.py, startup.py
 Depends on: models/base.py, models/auth.py (User FK)
 """
 

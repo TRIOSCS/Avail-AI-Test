@@ -90,16 +90,9 @@ def _get_connector(source: ApiSource, db: Session):
 
 
 def _notify_admins(db: Session, event_type: str, title: str, body: str | None = None):
-    """Send an in-app notification to all admin users."""
-    from ..models.auth import User
-    from .notification_service import create_notification
-
-    admins = db.query(User).filter(User.role == "admin", User.is_active == True).all()  # noqa: E712
-    for admin in admins:
-        try:
-            create_notification(db, admin.id, event_type, title, body)
-        except Exception as e:
-            logger.warning("Failed to notify admin {}: {}", admin.email, e)
+    """Log an admin-level health alert (notification_service removed)."""
+    message = f"[{event_type}] {title}" + (f" — {body}" if body else "")
+    logger.warning("API source health alert: {}", message)
 
 
 def _check_status_transition(

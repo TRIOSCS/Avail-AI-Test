@@ -172,7 +172,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',dashboard:'navCmdCenter',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
+    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -237,7 +237,7 @@ document.addEventListener('click', function(e) {
     });
 });
 
-// Sync mobile <-> desktop search + mirror notification badge
+// Sync mobile <-> desktop search
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize sourcing search if the sourcing view is active (lazy — only on first visit)
     if (typeof initSourcingSearch === 'function') {
@@ -271,15 +271,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 ms.value = ds.value || ms.value;
             }
         });
-    }
-    var nb = document.getElementById('notifBadge');
-    var mb = document.getElementById('mobileNotifBadge');
-    if (nb && mb) {
-        new MutationObserver(function() {
-            mb.textContent = nb.textContent;
-            if (nb.style.display === 'none') { mb.classList.add('u-hidden'); mb.style.display = ''; }
-            else { mb.classList.remove('u-hidden'); mb.style.display = nb.style.display; }
-        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style','class']});
     }
     // Initialize mobile user avatar
     var mobileAvatar = document.getElementById('mobileUserAvatar');
@@ -941,12 +932,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         initBaseHash = 'rfqs';
     }
     const initView = _hashToView[initBaseHash];
-    // Auto-load Command Center on first visit or after 3+ hours of inactivity
-    const _lastActivity = parseInt(safeGet('_lastActivityTs', '0'));
-    const _inactiveHours = (Date.now() - _lastActivity) / 3600000;
-    const shouldDefaultDashboard = !initHash && (_lastActivity === 0 || _inactiveHours >= 3);
     safeSet('_lastActivityTs', String(Date.now()));
-    const effectiveView = shouldDefaultDashboard ? 'view-dashboard' : initView;
+    const effectiveView = initView;
     if (effectiveView && effectiveView !== 'view-list') {
         _navFromPopstate = true;
         try {
@@ -958,15 +945,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-proactive': () => window.showProactiveOffers(),
             'view-scorecard': () => showScorecard(),
             'view-settings': () => {
-                var settingsTab = (initBaseHash === 'tickets' || initBaseHash === 'apihealth') ? initBaseHash : undefined;
+                var settingsTab = (initBaseHash === 'apihealth') ? initBaseHash : undefined;
                 window.showSettings(settingsTab);
             },
             'view-suggested': () => window.showSuggested(),
-            'view-dashboard': () => showDashboard(),
             'view-contacts': () => showContacts(),
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -1288,13 +1274,12 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-dashboard', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
-_hashToView['tickets'] = 'view-settings'; // tickets moved into settings
 _hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
 _hashToView['prospecting'] = 'view-suggested'; // old prospecting view removed
 let _navFromPopstate = false;
@@ -1348,16 +1333,15 @@ window.addEventListener('popstate', (e) => {
         'view-proactive': () => window.showProactiveOffers(),
         'view-scorecard': () => showScorecard(),
         'view-settings': () => {
-            var settingsTab = (baseHash === 'tickets' || baseHash === 'apihealth') ? baseHash : undefined;
+            var settingsTab = (baseHash === 'apihealth') ? baseHash : undefined;
             window.showSettings(settingsTab);
         },
         'view-contacts': () => showContacts(),
-        'view-dashboard': () => showDashboard(),
         'view-suggested': () => window.showSuggested(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-suggested':'navProspecting'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -1868,7 +1852,7 @@ async function _loadScPersonalSummary() {
         }
         // Also fetch outcome numbers
         const daysParam = _scPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _scPeriod === '90d' ? 90 : 30;
-        fetches.push(apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=my`).catch(() => null));
+        fetches.push(Promise.resolve(null));
 
         const results = await Promise.all(fetches);
         const data = results[0];
@@ -2301,665 +2285,12 @@ function _renderAvailMetrics(entry) {
     return html;
 }
 
-function showDashboard() {
-    showView('view-dashboard');
-
-    // Build perspective toggle for multi-role users (trader/manager/admin)
-    const header = document.querySelector('#view-dashboard > div:first-child');
-    if (_isMultiRole() && header) {
-        let toggle = document.getElementById('ccPerspectivePills');
-        if (!toggle) {
-            toggle = document.createElement('div');
-            toggle.className = 'cc-persp-toggle';
-            toggle.id = 'ccPerspectivePills';
-            const eff = _effectivePerspective();
-            toggle.innerHTML = `<span style="font-size:10px;color:var(--muted);margin-right:4px" title="Switch between purchasing and sales dashboards">View:</span><button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)" title="Buyer/sourcing focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)" title="Sales/quoting focused dashboard"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
-            const h2 = header.querySelector('h2');
-            if (h2) h2.after(toggle);
-        }
-    }
-
-    _populateDashUserSelect();
-    loadDashboard();
-}
-
-let _reqBreadcrumb = null;
-
-function goToReq(reqId, breadcrumb) {
-    if (breadcrumb) _reqBreadcrumb = breadcrumb;
-    else _reqBreadcrumb = null;
-    sidebarNav('reqs');
-    setTimeout(() => { if (typeof toggleDrillDown === 'function') toggleDrillDown(reqId); }, 300);
-}
-
-function _renderBreadcrumb() {
-    const el = document.getElementById('reqBreadcrumb');
-    if (!el) return;
-    if (!_reqBreadcrumb) { el.style.display = 'none'; return; }
-    el.style.display = '';
-    el.textContent = '';
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm';
-    btn.style.cssText = 'font-size:12px;padding:4px 10px;display:flex;align-items:center;gap:4px;color:var(--blue)';
-    btn.onclick = _goBackFromBreadcrumb;
-    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg> Back to ' + esc(_reqBreadcrumb.label);
-    el.appendChild(btn);
-}
-
-function _goBackFromBreadcrumb() {
-    if (!_reqBreadcrumb) return;
-    const bc = _reqBreadcrumb;
-    _reqBreadcrumb = null;
-    const el = document.getElementById('reqBreadcrumb');
-    if (el) el.style.display = 'none';
-    if (bc.view === 'customers' && bc.companyId) {
-        sidebarNav('customers');
-        setTimeout(() => { if (typeof openCustDrawer === 'function') openCustDrawer(bc.companyId); }, 300);
-    } else if (bc.view) {
-        sidebarNav(bc.view);
-    }
-}
-
-function _ccTrend(curr, prev) {
-    if (curr > prev) return '<span style="color:var(--green);font-size:10px;margin-left:4px">&#9650;</span>';
-    if (curr < prev) return '<span style="color:var(--red);font-size:10px;margin-left:4px">&#9660;</span>';
-    return '';
-}
-
-
-function _renderTeamSummaryCard(teamLb) {
-    const entries = (teamLb && teamLb.entries) ? teamLb.entries : [];
-    let html = `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Team Performance <span class="cc-card-count">${entries.length}</span></h3>`;
-    if (entries.length) {
-        html += '<div class="cc-card-scroll">';
-        html += entries.slice(0, 8).map(e => {
-            const uScore = e.unified_score || 0;
-            const scoreColor = uScore >= 60 ? 'var(--green)' : uScore >= 40 ? 'var(--amber)' : 'var(--muted)';
-            const roleBadge = e.user_role === 'trader' ? '<span class="cc-role-badge">[T]</span>' : e.user_role === 'sales' ? '<span class="cc-role-badge">[S]</span>' : '<span class="cc-role-badge">[B]</span>';
-            let blurbs = '';
-            if (e.ai_blurb_strength) blurbs += `<span class="lb-blurb lb-blurb-strength">${esc(e.ai_blurb_strength)}</span>`;
-            if (e.ai_blurb_improvement) blurbs += `<span class="lb-blurb lb-blurb-improve">${esc(e.ai_blurb_improvement)}</span>`;
-            return `<div class="cc-row cc-team-row">
-                <span class="cc-team-rank">${e.rank || '—'}</span>
-                <div class="cc-row-body">
-                    <span class="cc-row-name">${esc(e.user_name)} ${roleBadge}</span>
-                    ${blurbs ? '<div class="lb-blurbs">' + blurbs + '</div>' : ''}
-                </div>
-                <span class="cc-team-score" style="color:${scoreColor}">${uScore.toFixed(0)}</span>
-            </div>`;
-        }).join('');
-        html += '</div>';
-        html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('scorecard',document.getElementById('navScorecard'))">View full scorecard &rarr;</a></div>`;
-    } else {
-        html += '<p class="cc-empty">No team data yet.</p>';
-    }
-    html += '</div>';
-    return html;
-}
-
-/**
- * Render the morning briefing card using safe DOM methods only.
- * Called from loadDashboard() when the /api/dashboard/briefing response is available.
- * Depends on: createElement, textContent, appendChild — NO innerHTML.
- */
-function _renderBriefingCard(briefing, container) {
-    if (!briefing || !container) return;
-
-    var totalItems = briefing.total_items || 0;
-    var sections = briefing.sections || [];
-
-    // Card wrapper
-    var card = document.createElement('div');
-    card.classList.add('card', 'mb-3', 'border-primary');
-
-    // Header
-    var header = document.createElement('div');
-    header.classList.add('card-header', 'bg-primary', 'text-white');
-    var headerText = document.createElement('span');
-    headerText.textContent = 'Morning Briefing';
-    header.appendChild(headerText);
-    var headerBadge = document.createElement('span');
-    headerBadge.classList.add('badge', 'bg-light', 'text-primary', 'ms-2');
-    headerBadge.textContent = String(totalItems);
-    header.appendChild(headerBadge);
-    card.appendChild(header);
-
-    // Body
-    var body = document.createElement('div');
-    body.classList.add('card-body', 'p-0');
-
-    if (totalItems === 0) {
-        var emptyMsg = document.createElement('div');
-        emptyMsg.classList.add('p-3', 'text-muted');
-        emptyMsg.textContent = 'Nothing needs attention right now';
-        body.appendChild(emptyMsg);
-    } else {
-        for (var si = 0; si < sections.length; si++) {
-            var section = sections[si];
-            var sectionCount = section.count || (section.items ? section.items.length : 0);
-            if (sectionCount <= 0) continue;
-
-            var sectionWrap = document.createElement('div');
-            sectionWrap.classList.add('border-bottom', 'p-2');
-
-            // Clickable header row
-            var sectionHeader = document.createElement('div');
-            sectionHeader.classList.add('d-flex', 'justify-content-between', 'cursor-pointer');
-            var sectionLabel = document.createElement('span');
-            sectionLabel.classList.add('fw-bold');
-            sectionLabel.textContent = section.label || section.name || 'Section';
-            sectionHeader.appendChild(sectionLabel);
-            var sectionBadge = document.createElement('span');
-            sectionBadge.classList.add('badge', 'bg-secondary');
-            sectionBadge.textContent = String(sectionCount);
-            sectionHeader.appendChild(sectionBadge);
-
-            // Collapsible body (starts hidden)
-            var sectionBody = document.createElement('div');
-            sectionBody.classList.add('d-none', 'mt-2');
-
-            // Toggle on header click
-            (function(sb) {
-                sectionHeader.addEventListener('click', function() {
-                    sb.classList.toggle('d-none');
-                });
-            })(sectionBody);
-
-            // Render items
-            var items = section.items || [];
-            for (var ii = 0; ii < items.length; ii++) {
-                var item = items[ii];
-                var itemRow = document.createElement('div');
-                itemRow.classList.add('d-flex', 'align-items-start', 'mb-1');
-
-                // Priority badge
-                var pBadge = document.createElement('span');
-                var priority = item.priority || 'low';
-                var badgeClass = priority === 'high' ? 'bg-danger' : priority === 'medium' ? 'bg-warning' : 'bg-info';
-                pBadge.classList.add('badge', badgeClass, 'me-2');
-                pBadge.textContent = priority;
-                itemRow.appendChild(pBadge);
-
-                // Title
-                var titleSpan = document.createElement('span');
-                titleSpan.textContent = item.title || '';
-                itemRow.appendChild(titleSpan);
-
-                sectionBody.appendChild(itemRow);
-
-                // Optional detail
-                if (item.detail) {
-                    var detailDiv = document.createElement('div');
-                    detailDiv.classList.add('text-muted', 'small', 'ms-5');
-                    detailDiv.textContent = item.detail;
-                    sectionBody.appendChild(detailDiv);
-                }
-            }
-
-            sectionWrap.appendChild(sectionHeader);
-            sectionWrap.appendChild(sectionBody);
-            body.appendChild(sectionWrap);
-        }
-    }
-
-    card.appendChild(body);
-
-    // Prepend card to container
-    if (container.firstChild) {
-        container.insertBefore(card, container.firstChild);
-    } else {
-        container.appendChild(card);
-    }
-}
-
-async function loadDashboard() {
-    const el = document.getElementById('dashboardContent');
-    if (!el) return;
-    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading Dashboard\u2026</div>';
-
-    // Route based on perspective (purchasing = buyer CC, sales = sales CC)
-    if (_effectivePerspective() === 'purchasing') {
-        return loadBuyerDashboard(el);
-    }
-
-    try {
-        const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-        const haveReqs = _reqListData && _reqListData.length > 0;
-
-        const [brief, needsAttn, freshReqs, quotes, scorecard, teamLb, briefing] = await Promise.all([
-            apiFetch('/api/dashboard/morning-brief').catch(() => null),
-            apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
-            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
-            apiFetch('/api/quotes').catch(() => []),
-            apiFetch('/api/proactive/scorecard').catch(() => null),
-            apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
-            apiFetch('/api/dashboard/briefing').catch(() => null),
-        ]);
-
-        const reqs = haveReqs ? _reqListData : freshReqs;
-        const reqList = Array.isArray(reqs) ? reqs : (reqs && reqs.requisitions ? reqs.requisitions : []);
-        const quoteList = Array.isArray(quotes) ? quotes : [];
-        const attnList = Array.isArray(needsAttn) ? needsAttn : [];
-        const targetId = _dashUserId || window.userId;
-        const myReqs = targetId ? reqList.filter(r => r.created_by === targetId || r.sales_user_id === targetId) : reqList;
-
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
-        const myOpenReqs = myReqs.filter(r => ['open','active','sourcing'].includes(r.status)).length;
-        const quotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
-        const wonThisMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
-        const wonLastMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
-        const lostThisMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
-        const winRate = (wonThisMonth + lostThisMonth) > 0 ? Math.round(wonThisMonth / (wonThisMonth + lostThisMonth) * 100) : 0;
-        const lostLastMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
-        const lastWinRate = (wonLastMonth + lostLastMonth) > 0 ? Math.round(wonLastMonth / (wonLastMonth + lostLastMonth) * 100) : 0;
-
-        // ── Team averages (from unfiltered lists) ──
-        const teamSize = (window._userFilterList || []).length || 1;
-        const teamOpenReqs = reqList.filter(r => ['open','active','sourcing'].includes(r.status)).length;
-        const teamQuotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
-        const teamWon = reqList.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
-        const teamLost = reqList.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
-        const teamWinRate = (teamWon + teamLost) > 0 ? Math.round(teamWon / (teamWon + teamLost) * 100) : 0;
-        const avgOpenReqs = Math.round(teamOpenReqs / teamSize * 10) / 10;
-        const avgQuotesOut = Math.round(teamQuotesOut / teamSize * 10) / 10;
-        const avgWon = Math.round(teamWon / teamSize * 10) / 10;
-
-        let html = '';
-
-        // ── Nerve Center: Priority Action Feed ──
-        // Unified ranked list of the most urgent items across all categories
-        const _nerveFeed = [];
-        // Overdue/urgent deadlines
-        for (const r of myReqs) {
-            if (!['open','active','sourcing'].includes(r.status)) continue;
-            if (r.deadline) {
-                const dl = r.deadline === 'ASAP' ? null : new Date(r.deadline + 'T12:00:00Z');
-                const daysLeft = dl ? Math.round((dl - now) / 86400000) : -1;
-                if (r.deadline === 'ASAP' || daysLeft <= 0) {
-                    _nerveFeed.push({ priority: 100 - (daysLeft || 0), icon: '\ud83d\udd34', label: r.deadline === 'ASAP' ? 'ASAP' : (daysLeft === 0 ? 'DUE TODAY' : Math.abs(daysLeft) + 'd OVERDUE'), name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
-                } else if (daysLeft <= 2) {
-                    _nerveFeed.push({ priority: 50 + (3 - daysLeft) * 10, icon: '\u26a0\ufe0f', label: daysLeft + 'd left', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'deadline' });
-                }
-            }
-        }
-        // New offers to review
-        for (const r of myReqs) {
-            if (r.has_new_offers && (r.offer_count || 0) > 0) {
-                _nerveFeed.push({ priority: 80, icon: '\ud83d\udce5', label: (r.offer_count || 0) + ' offer' + ((r.offer_count||0) > 1 ? 's' : '') + ' to review', name: r.customer_display || r.name || 'Req #' + r.id, action: `goToReq(${r.id})`, type: 'offers' });
-            }
-        }
-        // Stale quotes
-        for (const q of quoteList.filter(q => q.status === 'sent' && !q.result)) {
-            const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
-            if (daysSent >= 5) {
-                _nerveFeed.push({ priority: 40 + daysSent, icon: '\ud83d\udcb0', label: daysSent + 'd since quote sent', name: q.quote_number || q.customer_name || 'Quote', action: `goToReq(${q.requisition_id || q.id})`, type: 'quote' });
-            }
-        }
-        // Stale accounts
-        for (const a of attnList.slice(0, 5)) {
-            if ((a.days_since_contact || 0) >= 14) {
-                _nerveFeed.push({ priority: 30, icon: '\ud83d\udce2', label: (a.days_since_contact || 0) + 'd no contact', name: a.company_name, action: `goToCompany(${a.company_id})`, type: 'account' });
-            }
-        }
-
-        _nerveFeed.sort((a, b) => b.priority - a.priority);
-        if (_nerveFeed.length > 0) {
-            html += '<div class="nerve-feed"><div class="nerve-feed-title">Priority Actions</div>';
-            html += _nerveFeed.slice(0, 8).map(item =>
-                `<div class="nerve-feed-item" onclick="${item.action}">
-                    <span class="nerve-feed-icon">${item.icon}</span>
-                    <span class="nerve-feed-name">${esc(item.name)}</span>
-                    <span class="nerve-feed-label nerve-feed-${item.type}">${item.label}</span>
-                </div>`
-            ).join('');
-            html += '</div>';
-        }
-
-        // ── Morning Brief ──
-        if (brief) {
-            const briefText = brief.text || null;
-            const stats = brief.stats || {};
-            if (briefText) {
-                html += `<div class="cc-brief"><p>${esc(briefText)}</p></div>`;
-            } else {
-                html += `<div class="cc-brief cc-brief-fallback"><p>You have ${stats.stale_accounts || 0} stale accounts, ${stats.quotes_awaiting || 0} quotes awaiting response, and ${stats.new_proactive_matches || 0} new proactive matches.</p></div>`;
-            }
-        }
-
-        // ── Stat Row — personal + team averages inline ──
-        html += `<div class="cc-stat-row">
-            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div><div class="cc-stat-sub">Team avg: ${avgOpenReqs}</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div><div class="cc-stat-sub">Team avg: ${avgQuotesOut}</div></div>
-            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won (30d)</div><div class="cc-stat-sub">Team avg: ${avgWon}</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">Team avg: ${teamWinRate}%</div></div>
-        </div>`;
-
-        // ── Detail Cards Grid ──
-        html += '<div class="cc-cards-grid">';
-
-        // Card 1: Needs Attention
-        const attnSorted = [...attnList].sort((a, b) => {
-            const aVal = (a.open_quote_value || 0) + (a.days_since_contact || 0) * 100;
-            const bVal = (b.open_quote_value || 0) + (b.days_since_contact || 0) * 100;
-            return bVal - aVal;
-        });
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
-        if (attnSorted.length) {
-            html += '<div class="cc-card-scroll">';
-            html += attnSorted.slice(0, 15).map(a => {
-                const hasQuote = a.open_quote_value > 0;
-                const neverContacted = !a.last_outreach_at;
-                const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
-                let detail = '';
-                if (neverContacted) detail = 'Never contacted';
-                else if (hasQuote) detail = `$${(a.open_quote_value/1000).toFixed(1)}K quote going cold &middot; ${a.days_since_contact}d`;
-                else detail = `${a.days_since_contact}d ago &middot; ${a.last_channel || 'unknown'}`;
-                return `<div class="cc-row" onclick="goToCompany(${a.company_id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(a.company_name)}${a.is_strategic ? ' <span class="cc-star">&#9733;</span>' : ''}</span>
-                        <span class="cc-row-detail">${detail}</span>
-                    </div>
-                    ${a.open_req_count ? '<span class="cc-row-badge">' + a.open_req_count + ' open</span>' : ''}
-                </div>`;
-            }).join('');
-            html += '</div>';
-            if (attnList.length > 15) {
-                html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('customers',document.getElementById('navCustomers'))">View All ${attnList.length} &rarr;</a></div>`;
-            }
-        } else {
-            html += '<p class="cc-empty">All accounts contacted recently.</p>';
-        }
-        html += '</div>';
-
-        // Card 2: Quotes Awaiting Response
-        const awaitingQuotes = quoteList.filter(q => q.status === 'sent' && !q.result).sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0));
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Quotes Awaiting Response <span class="cc-card-count">${awaitingQuotes.length}</span></h3>`;
-        if (awaitingQuotes.length) {
-            html += awaitingQuotes.slice(0, 5).map(q => {
-                const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
-                const dotColor = daysSent >= 7 ? 'var(--red)' : daysSent >= 3 ? 'var(--amber)' : 'var(--green)';
-                return `<div class="cc-row" onclick="goToReq(${q.requisition_id || q.id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(q.quote_number || 'Quote #' + q.id)}${q.customer_name ? ' &mdash; ' + esc(q.customer_name) : ''}</span>
-                        <span class="cc-row-detail">${daysSent}d since sent${q.subtotal ? ' &middot; $' + Number(q.subtotal).toLocaleString() : ''}</span>
-                    </div>
-                </div>`;
-            }).join('');
-        } else {
-            html += '<p class="cc-empty">No quotes waiting for response.</p>';
-        }
-        html += '</div>';
-
-        // Card 3: Ready to Quote
-        const readyToQuote = myReqs.filter(r => ['open','active','sourcing'].includes(r.status) && (r.offer_count || 0) > 0 && (r.quote_count || 0) === 0);
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">${readyToQuote.length}</span></h3>`;
-        if (readyToQuote.length) {
-            html += readyToQuote.slice(0, 5).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
-                <span class="cc-dot" style="background:var(--blue)"></span>
-                <div class="cc-row-body">
-                    <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                    <span class="cc-row-detail">${r.offer_count} offer${r.offer_count > 1 ? 's' : ''} ready</span>
-                </div>
-            </div>`).join('');
-        } else {
-            html += '<p class="cc-empty">No reqs with unquoted offers.</p>';
-        }
-        html += '</div>';
-
-        // Card 4: Upcoming Deadlines
-        const withDeadline = myReqs.filter(r => r.deadline && ['open','active','sourcing'].includes(r.status));
-        withDeadline.sort((a, b) => {
-            if (a.deadline === 'ASAP') return -1;
-            if (b.deadline === 'ASAP') return 1;
-            return new Date(a.deadline) - new Date(b.deadline);
-        });
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">${withDeadline.length}</span></h3>`;
-        if (withDeadline.length) {
-            html += withDeadline.slice(0, 5).map(r => {
-                let dotColor = 'var(--green)';
-                let deadlineLabel = r.deadline;
-                if (r.deadline === 'ASAP') {
-                    dotColor = 'var(--red)';
-                } else {
-                    const dl = new Date(r.deadline + 'T12:00:00Z');
-                    const daysLeft = Math.floor((dl - now) / 86400000);
-                    if (daysLeft <= 0) { dotColor = 'var(--red)'; deadlineLabel = daysLeft === 0 ? 'Today' : Math.abs(daysLeft) + 'd overdue'; }
-                    else if (daysLeft <= 3) { dotColor = 'var(--amber)'; deadlineLabel = daysLeft + 'd left'; }
-                    else { deadlineLabel = r.deadline; }
-                }
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${deadlineLabel}</span>
-                    </div>
-                </div>`;
-            }).join('');
-        } else {
-            html += '<p class="cc-empty">No upcoming deadlines.</p>';
-        }
-        html += '</div>';
-
-        // Card 5: Proactive Intelligence
-        if (scorecard) {
-            const sc = scorecard;
-            const rate = sc.conversion_rate != null ? Math.round(sc.conversion_rate) : 0;
-            html += `<div class="card-v2 cc-card">
-                <h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Proactive Intelligence</h3>
-                <div class="cc-proactive-stats">
-                    <span class="cc-pill">Sent: <b>${sc.total_sent || 0}</b></span>
-                    <span class="cc-pill">Quoted: <b>${sc.total_quoted || 0}</b></span>
-                    <span class="cc-pill">POs: <b>${sc.total_po || 0}</b></span>
-                    <span class="cc-pill">Rate: <b>${rate}%</b></span>
-                </div>
-                <div style="margin-top:6px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
-            </div>`;
-        }
-
-        // Card 6: Team Performance
-        html += _renderTeamSummaryCard(teamLb);
-
-        html += '</div>'; // close cc-cards-grid
-        el.innerHTML = html;
-
-        // Morning Briefing card (safe DOM — prepended)
-        if (briefing) _renderBriefingCard(briefing, el);
-
-        // Pipeline Health AI insights card
-        var pipelineWrap = document.createElement('div');
-        pipelineWrap.className = 'card';
-        pipelineWrap.style.marginTop = '12px';
-        var pipelineTitle = document.createElement('h3');
-        pipelineTitle.style.cssText = 'font-size:14px;margin:0 0 8px';
-        pipelineTitle.textContent = 'Pipeline Health';
-        pipelineWrap.appendChild(pipelineTitle);
-        el.appendChild(pipelineWrap);
-        _renderEntityInsightsCard('dashboard', 'pipeline', pipelineWrap, { title: 'Pipeline Health AI' });
-    } catch (err) {
-        console.error('loadDashboard error:', err);
-        el.innerHTML = '<p class="empty">Failed to load Dashboard data.</p>';
-    }
-}
-
-async function loadBuyerDashboard(el) {
-    try {
-        const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-        const [brief, hotOffers, teamLb] = await Promise.all([
-            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=my`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
-            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
-            apiFetch('/api/dashboard/unified-leaderboard').catch(() => null),
-        ]);
-
-        if (!brief) {
-            el.innerHTML = '<p class="empty">Failed to load buyer data.</p>';
-            return;
-        }
-
-        const kpis = brief.kpis || {};
-        const tk = brief.team_kpis || {};
-        const pipeline = brief.pipeline || {};
-        const reviewOffers = brief.offers_to_review || [];
-        const reqsAtRisk = brief.reqs_at_risk || [];
-        const quotesDue = brief.quotes_due_soon || [];
-        const needsResp = brief.needs_response || [];
-        const bpPending = brief.buyplans_pending || [];
-        const hotList = Array.isArray(hotOffers) ? hotOffers : [];
-        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
-
-        let html = '';
-
-        // ── Stat Row (matches sales layout) — personal + team averages inline ──
-        html += '<div class="cc-stat-row cc-stat-row-buyer">'
-            + '<div class="cc-stat"><div class="cc-stat-num" style="color:var(--sourcing-color)">' + (kpis.sourcing_ratio || 0) + '%</div><div class="cc-stat-label">Sourcing Ratio</div><div class="cc-stat-sub">' + (kpis.sourced_reqs || 0) + '/' + (kpis.total_reqs || 0) + ' reqs &middot; Team ' + (tk.sourcing_ratio || 0) + '%</div></div>'
-            + '<div class="cc-stat" title="Percentage of offers that resulted in a sent quote"><div class="cc-stat-num" style="color:var(--blue)">' + (kpis.offer_quote_rate || 0) + '%</div><div class="cc-stat-label">Offer \u2192 Quote</div><div class="cc-stat-sub">' + (kpis.quoted_offers || 0) + '/' + (kpis.total_offers || 0) + ' offers &middot; Team ' + (tk.offer_quote_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat" title="Percentage of sent quotes that the customer accepted (won)"><div class="cc-stat-num" style="color:var(--green)">' + (kpis.quote_win_rate || 0) + '%</div><div class="cc-stat-label">Win Rate</div><div class="cc-stat-sub">' + (kpis.won || 0) + 'W / ' + (kpis.lost || 0) + 'L &middot; Team ' + (tk.quote_win_rate || 0) + '%</div></div>'
-            + '<div class="cc-stat" title="Percentage of buy plans that resulted in a confirmed purchase order"><div class="cc-stat-num" style="color:var(--purple)">' + (kpis.buyplan_po_rate || 0) + '%</div><div class="cc-stat-label">Buy Plan \u2192 PO</div><div class="cc-stat-sub">' + (kpis.confirmed_pos || 0) + '/' + (kpis.total_buyplans || 0) + ' plans &middot; Team ' + (tk.buyplan_po_rate || 0) + '%</div></div>'
-            + '</div>';
-
-        // ── Pipeline Bar ──
-        html += '<div class="cc-pipeline-bar">'
-            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'open\'})"><span class="cc-pipe-num">' + (pipeline.active_reqs || 0) + '</span> Active</span>'
-            + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item cc-pipe-click" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'quoted\'})"><span class="cc-pipe-num">' + (pipeline.quotes_out || 0) + '</span> Quoted</span>'
-            + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--green)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'won\'})"><span class="cc-pipe-num">' + (pipeline.won_this_month || 0) + '</span> Won</span>'
-            + '<span class="cc-pipe-sep">/</span>'
-            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--red)" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));loadReqList({status:\'lost\'})"><span class="cc-pipe-num">' + (pipeline.lost_this_month || 0) + '</span> Lost</span>'
-            + '<span class="cc-pipe-sep">&rarr;</span>'
-            + '<span class="cc-pipe-item cc-pipe-click" style="color:var(--purple)" onclick="showBuyPlans()"><span class="cc-pipe-num">' + (pipeline.buyplans_approved || 0) + '</span> Buy Plans</span>'
-            + '</div>';
-
-        // ── 6-Tile Cards Grid (mirrors sales layout) ──
-        html += '<div class="cc-cards-grid">';
-
-        // Card 1: Reqs at Risk (red) — like sales "Needs Attention"
-        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Reqs at Risk <span class="cc-card-count">' + reqsAtRisk.length + '</span></h3>';
-        if (reqsAtRisk.length) {
-            html += '<div class="cc-card-scroll">';
-            for (let i = 0; i < Math.min(reqsAtRisk.length, 15); i++) {
-                const r = reqsAtRisk[i];
-                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
-                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
-                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
-                    + '<div class="cc-row-body">'
-                    + '<span class="cc-row-name">' + esc(r.name || 'REQ #' + r.id) + '</span>'
-                    + '<span class="cc-row-detail">' + (r.customer_name ? esc(r.customer_name) + ' &middot; ' : '') + esc(r.risk) + '</span>'
-                    + '</div>'
-                    + '<span class="cc-row-badge">' + r.num_offers + ' offer' + (r.num_offers !== 1 ? 's' : '') + '</span>'
-                    + '</div>';
-            }
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No requisitions at risk.</p>';
-        }
-        html += '</div>';
-
-        // Card 2: Offers to Review (amber) — like sales "Quotes Awaiting Response"
-        const allOffers = [];
-        for (let i = 0; i < reviewOffers.length; i++) allOffers.push(Object.assign({}, reviewOffers[i], {_src: 'review'}));
-        for (let i = 0; i < hotList.length; i++) allOffers.push(Object.assign({}, hotList[i], {_src: 'hot'}));
-        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Offers to Review <span class="cc-card-count">' + allOffers.length + '</span></h3>';
-        if (allOffers.length) {
-            html += '<div class="cc-card-scroll">';
-            for (let i = 0; i < Math.min(allOffers.length, 10); i++) {
-                const o = allOffers[i];
-                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
-                const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
-                html += '<div class="cc-row" onclick="sidebarNav(\'reqs\',document.getElementById(\'navReqs\'));expandToSubTab(' + o.requisition_id + ',\'offers\')">'
-                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
-                    + '<div class="cc-row-body">'
-                    + '<span class="cc-row-name">' + esc(o.vendor_name) + '</span>'
-                    + '<span class="cc-row-detail"><span class="mono">' + esc(o.mpn) + '</span> &middot; ' + price + ' &middot; ' + (o.age_label || o.source || '') + '</span>'
-                    + '</div>'
-                    + '<span class="cc-row-badge" title="' + (o._src === 'review' ? 'Needs your review — click to open offers tab' : 'Active offer with recent activity') + '">' + (o._src === 'review' ? 'review' : 'hot') + '</span>'
-                    + '</div>';
-            }
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No offers pending review.</p>';
-        }
-        html += '</div>';
-
-        // Card 3: Ready to Quote (blue) — like sales "Ready to Quote"
-        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">' + needsResp.length + '</span></h3>';
-        if (needsResp.length) {
-            html += '<div class="cc-card-scroll">';
-            for (let i = 0; i < Math.min(needsResp.length, 10); i++) {
-                const r = needsResp[i];
-                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
-                    + '<span class="cc-dot" style="background:var(--blue)"></span>'
-                    + '<div class="cc-row-body">'
-                    + '<span class="cc-row-name">' + esc(r.customer_name || r.name || 'REQ #' + r.id) + '</span>'
-                    + '<span class="cc-row-detail">' + r.offer_count + ' offer' + (r.offer_count !== 1 ? 's' : '') + ' ready &middot; ' + (r.age_label || '') + '</span>'
-                    + '</div>'
-                    + '</div>';
-            }
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">All offers have been quoted.</p>';
-        }
-        html += '</div>';
-
-        // Card 4: Upcoming Deadlines (purple) — like sales "Upcoming Deadlines"
-        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">' + quotesDue.length + '</span></h3>';
-        if (quotesDue.length) {
-            html += '<div class="cc-card-scroll">';
-            for (let i = 0; i < Math.min(quotesDue.length, 10); i++) {
-                const r = quotesDue[i];
-                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
-                const dlLabel = r.deadline === 'ASAP' ? 'ASAP' : r.days_left <= 0 ? Math.abs(r.days_left) + 'd overdue' : r.days_left + 'd left';
-                html += '<div class="cc-row" onclick="goToReq(' + r.id + ')">'
-                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
-                    + '<div class="cc-row-body">'
-                    + '<span class="cc-row-name">' + esc(r.name || 'REQ #' + r.id) + '</span>'
-                    + '<span class="cc-row-detail">' + dlLabel + '</span>'
-                    + '</div>'
-                    + '</div>';
-            }
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No upcoming deadlines.</p>';
-        }
-        html += '</div>';
-
-        // Card 5: Buy Plans Pending (sourcing-color) — like sales "Proactive Intelligence"
-        html += '<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">' + bpPending.length + '</span></h3>';
-        if (bpPending.length) {
-            html += '<div class="cc-card-scroll">';
-            for (let i = 0; i < Math.min(bpPending.length, 8); i++) {
-                const bp = bpPending[i];
-                const statusLabel = bp.status === 'pending' ? 'awaiting approval' : bp.so_status === 'pending' ? 'SO pending' : bp.status;
-                const dotColor = bp.status === 'pending' ? 'var(--amber)' : 'var(--purple)';
-                html += '<div class="cc-row" onclick="goToReq(' + bp.requisition_id + ')">'
-                    + '<span class="cc-dot" style="background:' + dotColor + '"></span>'
-                    + '<div class="cc-row-body">'
-                    + '<span class="cc-row-name">' + esc(bp.customer_name || 'BP #' + bp.id) + '</span>'
-                    + '<span class="cc-row-detail">' + fmtMoney(bp.revenue) + ' &middot; ' + bp.margin_pct + '% &middot; ' + statusLabel + '</span>'
-                    + '</div>'
-                    + '</div>';
-            }
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No buy plans pending.</p>';
-        }
-        html += '</div>';
-
-        // Card 6: Team Performance (purple) — same as sales
-        html += _renderTeamSummaryCard(teamLb);
-
-        html += '</div>'; // close cc-cards-grid
-        el.innerHTML = html;
-    } catch (err) {
-        console.error('loadBuyerDashboard error:', err);
-        el.innerHTML = '<p class="empty">Failed to load Buyer Dashboard data.</p>';
-    }
-}
+// [DASHBOARD REMOVED] showDashboard, _ccTrend, _renderTeamSummaryCard, _renderBriefingCard, loadDashboard, loadBuyerDashboard removed
+// Dashboard feature has been removed from the backend.
+function showDashboard() { /* removed */ }
+function loadDashboard() { /* removed */ }
+function loadBuyerDashboard() { /* removed */ }
+function _renderBriefingCard() { /* removed */ }
 
 // ── Modals ──────────────────────────────────────────────────────────────
 function openNewReqModal() {
@@ -4162,9 +3493,7 @@ async function _renderEntityInsightsCard(entityType, entityId, container, opts) 
     container.prepend(wrap);
 
     var url;
-    if (entityType === 'dashboard') {
-        url = '/api/dashboard/pipeline-insights';
-    } else if (entityType === 'materials') {
+    if (entityType === 'materials') {
         url = '/api/materials/insights' + queryParam;
     } else {
         url = '/api/' + entityType + '/' + entityId + '/insights';
@@ -4194,9 +3523,7 @@ async function _refreshEntityInsights(entityType, entityId, queryParam) {
     body.appendChild(loading);
 
     var url;
-    if (entityType === 'dashboard') {
-        url = '/api/dashboard/pipeline-insights/refresh';
-    } else if (entityType === 'materials') {
+    if (entityType === 'materials') {
         url = '/api/materials/insights/refresh' + (queryParam || '');
     } else {
         url = '/api/' + entityType + '/' + entityId + '/insights/refresh';
@@ -5057,9 +4384,6 @@ function _renderDdOffers(reqId, data, panel) {
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:6px">
         <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}${pendingCount > 0 ? ` &middot; <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">${pendingCount} pending review</span>` : ''}</span>
         <span style="display:flex;gap:6px;align-items:center">`;
-    if (sel.size >= 2) {
-        html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
-    }
     if (sel.size === 0) {
         html += `<span style="font-size:11px;color:var(--muted);margin-right:4px">Select offers to quote &rarr;</span>`;
     }
@@ -7066,9 +6390,6 @@ function _renderMobilePartsList(parts, reqId, panel) {
         html += '</div>';
     }
     panel.innerHTML = html;
-    // MPN resurfacing hints for mobile parts
-    var mobileMpns = reqs.map(function(r) { return r.primary_mpn; }).filter(Boolean);
-    if (mobileMpns.length) _fetchMpnHints(mobileMpns, reqId).then(function(hints) { _renderMpnHints(panel, hints); });
 }
 
 function _renderMobileOffersList(data, reqId, panel) {
@@ -7416,9 +6737,6 @@ function _renderDdDetails(reqId, targetPanel) {
 
     html += '</div>';
     dd.innerHTML = html;
-    // MPN resurfacing hints for detail view
-    var detMpns = reqs.map(function(r) { return r.primary_mpn; }).filter(Boolean);
-    if (detMpns.length) _fetchMpnHints(detMpns, reqId).then(function(hints) { _renderMpnHints(dd, hints); });
 }
 
 function _reqBadge(r) {
@@ -7430,33 +6748,6 @@ function _reqBadge(r) {
     return '<span class="req-badge req-badge-norfq" title="No RFQ sent yet — search for vendors first"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="8" x2="12" y2="8"/></svg>NO RFQ</span>';
 }
 
-async function _fetchMpnHints(mpns, excludeReqId) {
-    if (!mpns || mpns.length === 0) return {};
-    var params = new URLSearchParams();
-    params.set('mpns', mpns.join(','));
-    if (excludeReqId) params.set('exclude_req', excludeReqId);
-    try {
-        var data = await apiFetch('/api/resurfacing/hints?' + params);
-        return data.hints || {};
-    } catch (e) { return {}; }
-}
-
-function _renderMpnHints(container, hints) {
-    if (!hints || Object.keys(hints).length === 0) return;
-    var mpnCells = container.querySelectorAll('[data-mpn]');
-    mpnCells.forEach(function(cell) {
-        var mpn = cell.dataset.mpn;
-        var hint = hints[mpn];
-        if (!hint) return;
-        var existing = cell.querySelector('.mpn-hint');
-        if (existing) existing.remove();
-        var el = document.createElement('div');
-        el.className = 'mpn-hint';
-        el.style.cssText = 'font-size:0.75em;color:var(--muted);font-weight:400;font-family:inherit;margin-top:1px';
-        el.textContent = hint;
-        cell.appendChild(el);
-    });
-}
 
 function _renderDrillDownTable(rfqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + rfqId) || {}).querySelector?.('.dd-panel');
@@ -7511,9 +6802,6 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     if (_addRowActive[rfqId]) _appendAddRow(rfqId, dd);
     // AI Insights card above parts table
     _renderInsightsCard(rfqId, dd);
-    // MPN resurfacing hints
-    var ddMpns = visible.map(function(r) { return r.primary_mpn; }).filter(Boolean);
-    if (ddMpns.length) _fetchMpnHints(ddMpns, rfqId).then(function(hints) { _renderMpnHints(dd, hints); });
 }
 
 // ── Split-pane: Parts on left, Offers on right ──────────────────────────
@@ -10385,12 +9673,11 @@ function toggleSidebarGroup(headerEl) {
 }
 
 export function sidebarNav(page, el) {
-    // Track activity for auto-dashboard on return
     safeSet('_lastActivityTs', String(Date.now()));
     document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
-    // Highlight Command Center group for dashboard/scorecard views
-    if (page === 'dashboard' || page === 'scorecard' || page === 'performance') {
+    // Highlight Command Center group for scorecard views
+    if (page === 'scorecard' || page === 'performance') {
         const ccBtn = document.getElementById('navCmdCenter');
         if (ccBtn) ccBtn.classList.add('active');
     }
@@ -10405,8 +9692,6 @@ export function sidebarNav(page, el) {
     // Clean up UI state before switching views
     _collapseAllDrillDowns();
     unbindContextPanel();
-    var np = document.getElementById('notifPanel');
-    if (np) np.classList.remove('open');
     const routes = {
         reqs: () => { showList(); setMainPill('active'); },
         customers: () => window.showCustomers(),
@@ -10419,11 +9704,9 @@ export function sidebarNav(page, el) {
         scorecard: () => showScorecard(),
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
-        dashboard: () => showDashboard(),
         prospecting: () => window.showSuggested(),
         suggested: () => window.showSuggested(),
         apihealth: () => window.showSettings('apihealth'),
-        tickets: () => window.showSettings('tickets')
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }
@@ -12164,9 +11447,6 @@ function renderRfqMessage() {
     if (rfqSubj) rfqSubj.oninput = () => _saveRfqDraft();
     if (rfqBod) rfqBod.oninput = () => _saveRfqDraft();
 
-    // Show AI Draft button for admins
-    const aiWrap = document.getElementById('aiDraftWrap');
-    if (aiWrap) aiWrap.classList.remove('u-hidden');
 }
 
 function _saveRfqDraft() {
@@ -14903,184 +14183,13 @@ async function toggleVpThreadMessages(conversationId, itemEl) {
     }
 }
 
-// ── Sales Notifications ──────────────────────────────────────────────────
-let _notifCloseHandler = null;
-function toggleNotifications() {
-    const panel = document.getElementById('notifPanel');
-    if (!panel) return;
-    const opening = !panel.classList.contains('open');
-    // Remove any stale outside-click listener before toggling
-    if (_notifCloseHandler) {
-        document.removeEventListener('click', _notifCloseHandler, true);
-        _notifCloseHandler = null;
-    }
-    panel.classList.toggle('open');
-    if (opening) {
-        // Position below the bell button (desktop or mobile)
-        var anchor = document.querySelector('.mobile-topbar')?.offsetParent !== null
-            ? document.querySelector('.mobile-notif-btn')
-            : document.querySelector('.filter-wrap .tb-action[title="Notifications"]');
-        if (anchor) {
-            var rect = anchor.getBoundingClientRect();
-            panel.style.top = (rect.bottom + 6) + 'px';
-            panel.style.right = Math.max(12, window.innerWidth - rect.right) + 'px';
-        }
-        loadNotifications();
-        // Close on click outside
-        setTimeout(() => {
-            _notifCloseHandler = function(e) {
-                if (!panel.contains(e.target)
-                    && !e.target.closest('.filter-wrap')
-                    && !e.target.closest('.mobile-notif-btn')) {
-                    panel.classList.remove('open');
-                    document.removeEventListener('click', _notifCloseHandler, true);
-                    _notifCloseHandler = null;
-                }
-            };
-            document.addEventListener('click', _notifCloseHandler, true);
-        }, 0);
-    }
-}
+// [NOTIFICATIONS REMOVED] — backend removed
+function toggleNotifications() { /* removed */ }
+function loadNotifications() { /* removed */ }
+function loadNotificationBadge() { /* removed */ }
+function markNotifRead() { /* removed */ }
+function markAllNotifsRead() { /* removed */ }
 
-function _notifBadgeColor(type) {
-    switch (type) {
-        case 'competitive_quote': case 'buyplan_approved': case 'buyplan_completed': case 'quote_won': return '#22c55e';
-        case 'buyplan_rejected': case 'quote_lost': return '#ef4444';
-        case 'ownership_warning': case 'buyplan_pending': case 'buyplan_cancelled': return '#f59e0b';
-        case 'proactive_match': return '#a855f7';
-        case 'offer_pending_review': return '#f59e0b';
-        default: return '#6b7280';
-    }
-}
-function _notifLabel(type) {
-    switch (type) {
-        case 'ownership_warning': return 'Ownership';
-        case 'competitive_quote': return 'Competitive';
-        case 'proactive_match': return 'Proactive';
-        case 'buyplan_pending': return 'Buy Plan';
-        case 'buyplan_approved': return 'Approved';
-        case 'buyplan_rejected': return 'Rejected';
-        case 'buyplan_completed': return 'Completed';
-        case 'buyplan_cancelled': return 'Cancelled';
-        case 'offer_pending_review': return 'Offer Review';
-        case 'quote_won': return 'Won';
-        case 'quote_lost': return 'Lost';
-        default: return type;
-    }
-}
-function _notifClickAction(n) {
-    const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
-    // Offer pending review → navigate to RFQ view then open offers tab
-    if (n.type === 'offer_pending_review' && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'offers')`;
-    // Buy plan notifications → open buy plan detail V3
-    if (n.type && n.type.startsWith('buyplan_') && n.buy_plan_id)
-        return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetailV3(${n.buy_plan_id}),300)`;
-    // Quote won/lost → navigate to RFQ view then open quotes tab
-    if ((n.type === 'quote_won' || n.type === 'quote_lost') && n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'quotes')`;
-    // Vendor-related → open vendor popup
-    if (n.vendor_card_id)
-        return close + `openVendorPopup(${n.vendor_card_id})`;
-    // Requisition-related → navigate to RFQ view then expand drill-down
-    if (n.requisition_id)
-        return close + `sidebarNav('reqs',document.getElementById('navReqs'));expandToSubTab(${n.requisition_id},'sightings')`;
-    // Company-related → go to company
-    if (n.company_id)
-        return close + `goToCompany(${n.company_id})`;
-    return `markNotifRead(${n.id})`;
-}
-
-async function loadNotifications() {
-    const el = document.getElementById('notifList');
-    if (!el) return;
-    try {
-        const data = await apiFetch('/api/sales/notifications');
-        const items = Array.isArray(data) ? data : (data.notifications || []);
-        if (!items.length) { el.innerHTML = '<p class="empty" style="font-size:12px">No notifications</p>'; return; }
-        const header = `<div style="display:flex;justify-content:flex-end;padding:4px 0;border-bottom:1px solid var(--card2)">
-            <button onclick="markAllNotifsRead()" style="font-size:11px;color:var(--teal);background:none;border:none;cursor:pointer;padding:2px 6px">Mark all read</button>
-        </div>`;
-        // Group by type with priority ordering
-        const priority = ['buyplan_pending','buyplan_approved','offer_pending_review','quote_won','quote_lost','competitive_quote','proactive_match','buyplan_rejected','buyplan_completed','buyplan_cancelled','ownership_warning'];
-        const groups = {};
-        items.forEach(n => { (groups[n.type] = groups[n.type] || []).push(n); });
-        const sortedTypes = Object.keys(groups).sort((a,b) => {
-            const ai = priority.indexOf(a), bi = priority.indexOf(b);
-            return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
-        });
-        let html = header;
-        sortedTypes.forEach((type, gi) => {
-            const group = groups[type];
-            const color = _notifBadgeColor(type);
-            const label = _notifLabel(type);
-            const collapsed = gi > 0;
-            const gid = 'notifGrp_' + type;
-            html += `<div class="notif-group">
-                <div class="notif-group-header" onclick="this.classList.toggle('collapsed');document.getElementById('${gid}').classList.toggle('hidden')" style="display:flex;align-items:center;gap:6px;padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--card2);background:var(--card1)">
-                    <span class="notif-item-badge" style="background:${color}">${label}</span>
-                    <span style="font-size:12px;color:var(--fg2)">${group.length} notification${group.length>1?'s':''}</span>
-                    <span class="notif-group-arrow" style="margin-left:auto;font-size:10px;color:var(--fg3)">${collapsed?'\u25b6':'\u25bc'}</span>
-                </div>
-                <div id="${gid}" class="${collapsed ? 'hidden' : ''}">
-            `;
-            group.slice(0, 10).forEach(n => {
-                // Clean up raw API metadata from notes before display
-                let cleanNotes = n.notes || '';
-                cleanNotes = cleanNotes.replace(/\b\w+_id=\d+/g, '').replace(/\bstatus=\w+/g, '').replace(/\{[^}]*\}/g, '').replace(/\b\w+_\w+=\S+/g, '').replace(/\s{2,}/g, ' ').trim();
-                const notesHtml = cleanNotes ? `<div class="notif-item-notes">${esc(cleanNotes)}</div>` : '';
-                const hasLink = n.requisition_id || n.company_id || n.vendor_card_id || n.buy_plan_id;
-                html += `<div class="notif-item" onclick="${_notifClickAction(n)}">
-                    <div class="notif-item-body">
-                        <div class="notif-item-top">
-                            <span class="notif-item-subject">${esc(n.subject || 'Notification')}</span>
-                        </div>
-                        <div class="notif-item-meta">
-                            <span>${esc(n.company_name || '')}</span>
-                            <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
-                        </div>
-                        ${notesHtml}
-                    </div>
-                    ${hasLink ? '<span class="notif-item-arrow">\u203a</span>' : ''}
-                </div>`;
-            });
-            if (group.length > 5) {
-                html += `<div style="padding:4px 8px;font-size:11px;color:var(--fg3)">+ ${group.length - 5} more</div>`;
-            }
-            html += '</div></div>';
-        });
-        el.innerHTML = html;
-    } catch { el.innerHTML = '<p class="empty" style="font-size:12px">Failed to load</p>'; }
-}
-
-async function markNotifRead(id) {
-    try { await apiFetch(`/api/sales/notifications/${id}/read`, {method:'POST'}); } catch {}
-    loadNotificationBadge();
-}
-
-async function markAllNotifsRead() {
-    try { await apiFetch('/api/sales/notifications/read-all', {method:'POST'}); } catch {}
-    loadNotifications();
-    loadNotificationBadge();
-}
-
-async function loadNotificationBadge() {
-    const badge = document.getElementById('notifBadge');
-    if (!badge) return;
-    try {
-        const salesData = await apiFetch('/api/sales/notifications/count').catch(() => ({count: 0}));
-        const count = salesData.count || 0;
-        badge.textContent = count;
-        badge.style.display = count > 0 ? 'flex' : 'none';
-    } catch { badge.style.display = 'none'; }
-}
-
-// Load notification badge on page init
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => setTimeout(loadNotificationBadge, 2000));
-} else {
-    setTimeout(loadNotificationBadge, 2000);
-}
 
 // "/" keyboard shortcut to focus search bar
 document.addEventListener('keydown', function(e) {
@@ -15193,299 +14302,18 @@ window.addEventListener('unhandledrejection', function(event) {
     if (!navigator.onLine) showOffline();
 })();
 
-// ── Trouble Chat — auto-screenshot + simple submission ──────────────
-var _troubleScreenshotB64 = null;
-var _troubleCapturing = false;
-var _troubleSubmitting = false;
+// [TROUBLE CHAT + TICKET DETAIL REMOVED] — backend removed
+function openTroubleChat() { /* removed */ }
+function closeTroubleChat() { /* removed */ }
+function submitTrouble() { /* removed */ }
+function openTicketDetail() { /* removed */ }
 
-function _gatherBugContext() {
-    var activeView = '';
-    try {
-        var onPill = document.querySelector('#mainPills .fp.on');
-        if (onPill) activeView = onPill.dataset.view || onPill.textContent.trim();
-        var activeSidebar = document.querySelector('.sb-nav-btn.active');
-        if (activeSidebar) activeView = activeSidebar.textContent.replace(/[^\w\s]/g, '').trim() + '/' + activeView;
-    } catch(e) {}
-    return {
-        current_url: location.href,
-        current_view: activeView,
-        browser_info: navigator.userAgent,
-        screen_size: screen.width + 'x' + screen.height,
-        console_errors: JSON.stringify(window.__errorBuffer || []),
-        page_state: JSON.stringify({
-            activeView: activeView,
-            timestamp: new Date().toISOString(),
-        }),
-    };
 }
 
-function openTroubleChat() {
-    _troubleScreenshotB64 = null;
-    _troubleCapturing = true;
-    var body = document.getElementById('troubleChatBody');
-    if (body) body.innerHTML = '';
-    var ta = document.getElementById('troubleMessage');
-    if (ta) ta.value = '';
-    openModal('troubleModal');
-    // Auto-capture screenshot in background
-    if (typeof html2canvas === 'function') {
-        var modal = document.getElementById('troubleModal');
-        html2canvas(document.body, {
-            scale: 0.75,
-            useCORS: true,
-            ignoreElements: function(el) { return el.id === 'troubleModal'; },
-        }).then(function(canvas) {
-            _troubleScreenshotB64 = canvas.toDataURL('image/jpeg', 0.6);
-            _troubleCapturing = false;
-        }).catch(function() {
-            _troubleCapturing = false;
-        });
-    } else {
-        _troubleCapturing = false;
-    }
-    setTimeout(function() { if (ta) ta.focus(); }, 100);
-}
+// [AI DRAFT + COMPARE REMOVED] — backend removed
+function aiDraftRfq() { /* removed */ }
+function ddAiCompare() { /* removed */ }
 
-function closeTroubleChat() {
-    closeModal('troubleModal');
-    _troubleScreenshotB64 = null;
-    _troubleCapturing = false;
-    _troubleSubmitting = false;
-}
-
-async function submitTrouble(btn) {
-    if (_troubleSubmitting) return;
-    var ta = document.getElementById('troubleMessage');
-    var message = (ta ? ta.value : '').trim();
-    if (!message) { showToast('Please describe your issue', 'error'); return; }
-
-    _troubleSubmitting = true;
-
-    // Wait for screenshot capture (max 3s)
-    if (_troubleCapturing) {
-        var waited = 0;
-        while (_troubleCapturing && waited < 3000) {
-            await new Promise(function(r) { setTimeout(r, 200); });
-            waited += 200;
-        }
-    }
-
-    try {
-        await guardBtn(btn, 'Sending…', async function() {
-            // Show user message in chat body
-            var body = document.getElementById('troubleChatBody');
-            if (body) {
-                body.innerHTML = '<div style="background:var(--primary-light,#e8f0fe);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px;max-width:90%;margin-left:auto">' + esc(message) + '</div>';
-            }
-
-            var ctx = _gatherBugContext();
-            var payload = Object.assign({
-                message: message,
-                screenshot_b64: _troubleScreenshotB64 || null,
-                source: 'report_button',
-            }, ctx);
-            await apiFetch('/api/trouble-tickets', { method: 'POST', body: payload });
-
-            // Show confirmation
-            if (body) {
-                body.innerHTML += '<div style="background:var(--green-light,#e6f4ea);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px;color:var(--green)">Got it — your report has been submitted. We\'ll look into it!</div>';
-            }
-            if (ta) ta.value = '';
-            _troubleScreenshotB64 = null;
-
-            // Auto-close after 2.5s
-            setTimeout(function() { closeTroubleChat(); }, 2500);
-        });
-    } finally {
-        _troubleSubmitting = false;
-    }
-}
-
-// ── Ticket Detail Modal (from app.js context) ────────────────────────
-function openTicketDetail(id) {
-    apiFetch('/api/trouble-tickets/' + id).then(function(t) {
-        var modal = document.getElementById('ticketDetailModal');
-        if (!modal) {
-            var div = document.createElement('div');
-            div.id = 'ticketDetailModal';
-            div.className = 'modal-bg';
-            div.onclick = function(e) { if (e.target === div) div.style.display = 'none'; };
-            var inner = document.createElement('div');
-            inner.className = 'modal';
-            inner.style.maxWidth = '600px';
-            var bodyDiv = document.createElement('div');
-            bodyDiv.id = 'ticketDetailBody';
-            inner.appendChild(bodyDiv);
-            var actions = document.createElement('div');
-            actions.className = 'mactions';
-            var closeBtn = document.createElement('button');
-            closeBtn.className = 'btn btn-ghost';
-            closeBtn.textContent = 'Close';
-            closeBtn.onclick = function() { div.style.display = 'none'; };
-            actions.appendChild(closeBtn);
-            inner.appendChild(actions);
-            div.appendChild(inner);
-            document.body.appendChild(div);
-            modal = div;
-        }
-        var body = document.getElementById('ticketDetailBody');
-        if (!body) return;
-        body.textContent = '';
-
-        var h = document.createElement('h3');
-        h.textContent = t.title;
-        body.appendChild(h);
-
-        var pStatus = document.createElement('p');
-        pStatus.appendChild(document.createTextNode('Status: '));
-        var bStatus = document.createElement('strong');
-        bStatus.textContent = t.status;
-        pStatus.appendChild(bStatus);
-        body.appendChild(pStatus);
-
-        var pCat = document.createElement('p');
-        pCat.appendChild(document.createTextNode('Category: '));
-        var bCat = document.createElement('strong');
-        bCat.textContent = t.category || '\u2014';
-        pCat.appendChild(bCat);
-        body.appendChild(pCat);
-
-        var pCreated = document.createElement('p');
-        pCreated.appendChild(document.createTextNode('Created: '));
-        var bCreated = document.createElement('strong');
-        bCreated.textContent = t.created_at ? new Date(t.created_at).toLocaleDateString() : '\u2014';
-        pCreated.appendChild(bCreated);
-        body.appendChild(pCreated);
-
-        var pDescLabel = document.createElement('p');
-        var bDesc = document.createElement('strong');
-        bDesc.textContent = 'Description:';
-        pDescLabel.appendChild(bDesc);
-        body.appendChild(pDescLabel);
-        var pre = document.createElement('pre');
-        pre.style.whiteSpace = 'pre-wrap';
-        pre.style.fontSize = '12px';
-        pre.style.maxHeight = '300px';
-        pre.style.overflow = 'auto';
-        pre.textContent = t.description || '\u2014';
-        body.appendChild(pre);
-
-        if (t.resolution_notes) {
-            var pRes = document.createElement('p');
-            var bRes = document.createElement('strong');
-            bRes.textContent = 'Resolution: ';
-            pRes.appendChild(bRes);
-            pRes.appendChild(document.createTextNode(t.resolution_notes));
-            body.appendChild(pRes);
-        }
-        modal.style.display = 'flex';
-    }).catch(function() { showToast('Failed to load ticket', 'error'); });
-}
-
-// ── Gradient AI Feature Integrations ──────────────────────────────────
-
-// 1. Draft RFQ Email — AI-generate subject + body for the RFQ modal
-async function aiDraftRfq(btn) {
-    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
-    if (!sample) { showToast('No vendor with parts to draft for', 'error'); return; }
-    const parts = [...sample.new_listing, ...sample.new_other];
-    if (sample.include_repeats) parts.push(...sample.repeat_listing, ...sample.repeat_other);
-    if (!parts.length) { showToast('No parts to include in draft', 'error'); return; }
-    await guardBtn(btn, 'Drafting…', async () => {
-        const payload = {
-            vendor_name: sample.vendor_name,
-            buyer_name: window.__userName || 'Buyer',
-            parts: parts.map(mpn => ({
-                part_number: mpn,
-                quantity: reqData.find(r => r.primary_mpn === mpn)?.target_qty || 1,
-                target_price: reqData.find(r => r.primary_mpn === mpn)?.target_price || null,
-                condition_requirement: rfqCondition !== 'any' ? rfqCondition : null
-            }))
-        };
-        let data;
-        try {
-            data = await apiFetch('/api/ai/draft-rfq-email', { method: 'POST', body: payload });
-        } catch(e) {
-            showToast('AI draft failed: ' + e.message, 'error');
-            return;
-        }
-        if (data.subject) { const s = document.getElementById('rfqSubject'); if (s) s.value = data.subject; }
-        if (data.body) { const b = document.getElementById('rfqBody'); if (b) b.value = data.body; }
-        showToast('AI draft generated');
-    });
-}
-
-// 2. Compare Quotes — AI analysis of selected offers in the offers tab
-async function ddAiCompare(reqId, btn) {
-    const sel = _ddSelectedOffers[reqId];
-    if (!sel || sel.size < 2) { showToast('Select at least 2 offers to compare', 'error'); return; }
-    const cached = _ddTabCache[reqId]?.offers;
-    if (!cached) { showToast('Offers data not loaded', 'error'); return; }
-    const groups = cached.groups || cached || [];
-    // Gather selected offer objects
-    const selectedOffers = [];
-    let partNumber = '';
-    let requiredQty = null;
-    for (const g of groups) {
-        for (const o of (g.offers || [])) {
-            if (sel.has(o.id)) {
-                selectedOffers.push(o);
-                if (!partNumber) {
-                    partNumber = g.mpn || g.label || o.mpn || '';
-                    // Find target qty from reqData
-                    const req = reqData.find(r => r.primary_mpn === partNumber);
-                    if (req) requiredQty = req.target_qty;
-                }
-            }
-        }
-    }
-    if (selectedOffers.length < 2) { showToast('Need 2+ offers from loaded data', 'error'); return; }
-    await guardBtn(btn, 'Analyzing…', async () => {
-        const payload = {
-            part_number: partNumber,
-            quotes: selectedOffers.map(o => ({
-                vendor_name: o.vendor_name || o.vendor || '',
-                unit_price: o.unit_price,
-                quantity_available: o.qty_available ?? o.quantity_available ?? null,
-                lead_time_days: null,
-                date_code: o.date_code || null,
-                condition: o.condition || null,
-                moq: o.moq ?? null
-            })),
-            required_qty: requiredQty
-        };
-        let data;
-        try {
-            data = await apiFetch('/api/ai/compare-quotes', { method: 'POST', body: payload });
-        } catch(e) {
-            showToast('AI compare failed: ' + e.message, 'error');
-            return;
-        }
-        if (!data.available) { showToast(data.reason || 'AI comparison unavailable', 'error'); return; }
-        const r = data;
-        // Build comparison modal
-        let html = '<div style="max-width:640px">';
-        html += '<h3 style="margin:0 0 12px;font-size:16px">AI Quote Comparison — ' + esc(partNumber) + '</h3>';
-        if (r.summary) html += '<p style="font-size:13px;color:var(--text2);margin-bottom:12px">' + esc(r.summary) + '</p>';
-        if (r.recommendation) html += '<div style="background:var(--teal)15;border:1px solid var(--teal);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px"><b>Recommendation:</b> ' + esc(r.recommendation) + '</div>';
-        if (r.best_price) html += '<div style="font-size:12px;margin-bottom:4px"><b>Best Price:</b> ' + esc(r.best_price.vendor) + (r.best_price.unit_price != null ? ' ($' + Number(r.best_price.unit_price).toFixed(4) + ')' : '') + (r.best_price.reason ? ' — ' + esc(r.best_price.reason) : '') + '</div>';
-        if (r.fastest_delivery) html += '<div style="font-size:12px;margin-bottom:4px"><b>Fastest Delivery:</b> ' + esc(r.fastest_delivery.vendor) + (r.fastest_delivery.lead_time_days != null ? ' (' + r.fastest_delivery.lead_time_days + ' days)' : '') + (r.fastest_delivery.reason ? ' — ' + esc(r.fastest_delivery.reason) : '') + '</div>';
-        if (r.best_overall) html += '<div style="font-size:12px;margin-bottom:8px"><b>Best Overall:</b> ' + esc(r.best_overall.vendor) + (r.best_overall.reason ? ' — ' + esc(r.best_overall.reason) : '') + '</div>';
-        if (r.risk_factors && r.risk_factors.length) {
-            html += '<div style="margin-top:8px"><b style="font-size:12px;color:var(--amber)">Risk Factors:</b><ul style="margin:4px 0 0 16px;font-size:12px">';
-            for (const rf of r.risk_factors) html += '<li>' + esc(rf) + '</li>';
-            html += '</ul></div>';
-        }
-        if (r.anomalies && r.anomalies.length) {
-            html += '<div style="margin-top:8px"><b style="font-size:12px;color:var(--red)">Anomalies:</b><ul style="margin:4px 0 0 16px;font-size:12px">';
-            for (const a of r.anomalies) html += '<li>' + esc(a) + '</li>';
-            html += '</ul></div>';
-        }
-        html += '</div>';
-        // Show in a generic modal overlay
-        _showAiModal('AI Quote Comparison', html);
-    });
-}
 
 // 3. Normalize Parts — canonicalize MPNs for requirements table
 async function aiNormalizeParts(btn) {
@@ -16868,9 +15696,9 @@ Object.assign(window, {
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
-    _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
-    _ddRefreshQuoteTotals, _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
-    _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
+    _ensureEmailListModal, _formatEmailBody,
+    _ddRefreshQuoteTotals, _loadDdSubTab, _matSortArrow,
+    _parseTsvInput, _previewPaste, _pushNav,
     _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderDdQA, _renderDdTasks, _renderParsedSummary,
     _renderQAEntry, _filterQA, _openAskQuestionModal, _submitQuestion,
     _openAnswerModal, _submitAnswer, _renderInsightsCard, _toggleInsightsCard, _refreshInsights,
@@ -16882,19 +15710,19 @@ Object.assign(window, {
     _isDeadlineUrgent,
     _updateBulkFollowUpBtn, _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
-    _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
+    _clearNrValidation, clearFileInput, clearNrSite, closeLogOfferModal,
     createRequisition, debouncedFilterSites, debouncedFilterVendors,
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
-    doStockImport, filterVendorList, openNewReqModal, openTicketDetail, openTroubleChat,
+    doStockImport, filterVendorList, openNewReqModal,
     openRfqDrawer, closeRfqDrawer,
     rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact, sendBulkFollowUp,
     saveVendorLogCall, saveVendorLogNote, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
-    submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
-    toggleMyAccounts, toggleNotifications, toggleSidebar, toggleSidebarGroup, toggleStockImport,
+    submitLogOffer, submitPastedRows, toggleMobileSidebar,
+    toggleMyAccounts, toggleSidebar, toggleSidebarGroup, toggleStockImport,
     triggerMainSearch,
     // AI feature functions
-    aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply, parseFreeformOffer, parseFreeformRfq,
+    aiNormalizeParts, aiParseReply, parseFreeformOffer, parseFreeformRfq,
     _applyNormalized, _showAiModal,
     // v2 visual helpers
     engRing, healthDot, statCard, daysSince, recencyColor,
@@ -16906,7 +15734,7 @@ Object.assign(window, {
     // Dashboard / Command Center
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
-    showDashboard, loadDashboard, loadBuyerDashboard, _renderBriefingCard, goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
+    goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
     // Scorecard
     showScorecard, setScPeriod,
     // Unified state helpers

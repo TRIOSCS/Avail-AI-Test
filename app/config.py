@@ -177,10 +177,6 @@ class Settings(BaseSettings):
     routing_window_hours: int = 48
     collision_lookback_days: int = 7
 
-    # --- Self-heal pipeline ---
-    self_heal_max_iterations_low: int = 5
-    self_heal_max_iterations_medium: int = 10
-
     # --- Proactive offers ---
     proactive_matching_enabled: bool = True
     proactive_archive_age_days: int = 30

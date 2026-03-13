@@ -5,7 +5,15 @@ Called by: pytest
 Depends on: app.routers.apollo_sync, conftest fixtures
 """
 
+import os
 from unittest.mock import AsyncMock, patch
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 
 
 class TestApolloDiscover:

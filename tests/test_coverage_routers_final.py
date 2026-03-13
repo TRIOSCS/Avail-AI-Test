@@ -19,7 +19,14 @@ import io
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import os
+
 import pytest
+
+_mvp_skip = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -654,6 +661,7 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
     app.dependency_overrides.clear()
 
 
+@_mvp_skip
 def test_backfill_emails_skips_empty_vendor_name(admin_client, db_session, admin_user):
     """Backfill emails skips BrokerBin sightings with empty vendor_name."""
     req = Requisition(
@@ -849,6 +857,7 @@ def test_build_quote_email_html_fmt_price_em_dash(db_session, test_user):
 # ── 20. Enrichment backfill sighting with vendor name normalizing to empty (line 502) ──
 
 
+@_mvp_skip
 def test_backfill_emails_skips_vendor_name_normalizes_to_empty(admin_client, db_session, admin_user):
     """Backfill skips sighting where vendor_name normalizes to empty string (line 500-502)."""
     req = Requisition(

@@ -5,7 +5,7 @@ threading, notification triggers, auto-capture from quotes/offers,
 and AI insight generation.
 
 Called by: routers/knowledge.py, jobs/knowledge_jobs.py
-Depends on: models/knowledge.py, utils/claude_client.py, services/notification_service.py
+Depends on: models/knowledge.py, utils/claude_client.py
 """
 
 from datetime import datetime, timedelta, timezone
@@ -15,7 +15,6 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.knowledge import KnowledgeEntry
-from app.services.notification_service import create_notification
 
 # Expiry defaults (days)
 EXPIRY_PRICE_FACT = 90
@@ -164,18 +163,6 @@ def post_question(
         requisition_id=requisition_id,
         requirement_id=requirement_id,
     )
-    # Notify each assigned buyer
-    for buyer_id in assigned_to_ids:
-        try:
-            create_notification(
-                db=db,
-                user_id=buyer_id,
-                event_type="knowledge_question",
-                title="New question on Req #{}".format(requisition_id) if requisition_id else "New question",
-                body=content[:200],
-            )
-        except Exception as e:
-            logger.warning("Failed to notify buyer {}: {}", buyer_id, e)
     return entry
 
 
@@ -212,21 +199,6 @@ def post_answer(
     # Mark question as resolved
     question.is_resolved = True
     db.commit()
-
-    # Notify the original asker
-    if question.created_by:
-        try:
-            create_notification(
-                db=db,
-                user_id=question.created_by,
-                event_type="knowledge_answer",
-                title="Your question was answered on Req #{}".format(question.requisition_id)
-                if question.requisition_id
-                else "Your question was answered",
-                body=content[:200],
-            )
-        except Exception as e:
-            logger.warning("Failed to notify asker {}: {}", question.created_by, e)
 
     return answer
 

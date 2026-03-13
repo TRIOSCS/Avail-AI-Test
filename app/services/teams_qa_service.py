@@ -4,9 +4,9 @@ Builds batched question cards, handles card-submit answers, enforces daily
 question caps, and sends digest summaries. Uses Graph API to deliver
 Adaptive Cards as 1:1 chat messages.
 
-Called by: app/routers/teams_bot.py, app/jobs/knowledge_jobs.py
+Called by: app/routers/knowledge.py, app/jobs/knowledge_jobs.py
 Depends on: app/models/knowledge.py, app/services/knowledge_service.py,
-            app/services/teams_bot_service.py, app/utils/graph_client.py
+            app/utils/graph_client.py
 """
 
 from datetime import datetime, timedelta, timezone
@@ -368,14 +368,14 @@ async def handle_card_answer(db: Session, payload: dict) -> dict:
 
     Returns: {answered: int, total: int}
     """
+    from app.models.auth import User
     from app.services import knowledge_service
-    from app.services.teams_bot_service import _resolve_user
 
     data = payload.get("data", {})
     question_ids = data.get("question_ids", [])
     user_aad_id = payload.get("from", {}).get("aadObjectId", "")
 
-    user = _resolve_user(user_aad_id, db)
+    user = db.query(User).filter(User.azure_id == user_aad_id).first() if user_aad_id else None
     if not user:
         logger.warning("handle_card_answer: could not resolve user %s", user_aad_id)
         return {"answered": 0, "total": len(question_ids)}

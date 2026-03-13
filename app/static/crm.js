@@ -6635,310 +6635,15 @@ async function createUser() {
 
 
 
-async function loadTeamsConfig() {
-    const el = document.getElementById('teamsConfigContent');
-    if (!el) return;
-    el.innerHTML = '<p class="empty">Loading Teams configuration...</p>';
-    try {
-        const config = await apiFetch('/api/admin/teams/config');
-        let html = `
-            <div class="card s-card">
-                <h3>Teams Channel Notifications</h3>
-                <p class="s-desc">
-                    Post critical AVAIL events (hot requirements, competitive quotes, ownership warnings, stock matches) to a Teams channel.
-                </p>
-                <div class="s-form">
-                    <div class="s-row">
-                        <label class="s-label" style="width:100px">Enabled</label>
-                        <input type="checkbox" id="teamsEnabled" ${config.enabled ? 'checked' : ''} style="width:16px;height:16px">
-                    </div>
-                    <div>
-                        <label class="s-label" style="display:block;margin-bottom:4px">Teams Channel</label>
-                        <select id="teamsChannelSelect" class="s-select" style="width:100%">
-                            <option value="">— Select a channel —</option>
-                        </select>
-                        <button class="btn btn-ghost btn-sm" onclick="refreshTeamsChannels()" style="margin-top:6px;font-size:11px">Refresh Channels</button>
-                    </div>
-                    <div>
-                        <label class="s-label" style="display:block;margin-bottom:4px">Hot Requirement Threshold ($)</label>
-                        <input id="teamsHotThreshold" type="number" value="${config.hot_threshold || 10000}" min="0" step="500" class="s-input" style="width:160px">
-                        <span class="s-hint" style="margin-left:6px">Notify when requirement value exceeds this</span>
-                    </div>
-                    <div class="s-row" style="margin-top:8px">
-                        <button class="btn btn-primary" onclick="saveTeamsConfig()">Save Configuration</button>
-                        <button class="btn btn-ghost" onclick="testTeamsPost()">Send Test Card</button>
-                    </div>
-                    <div id="teamsStatus" class="s-status"></div>
-                </div>
-            </div>`;
-        el.innerHTML = html;
+// [TEAMS ALERTS REMOVED] — backend removed
+function loadTeamsConfig() { /* removed */ }
+function saveTeamsConfig() { /* removed */ }
+function testTeamsPost() { /* removed */ }
+function loadTeamsChannelRouting() { /* removed */ }
+function saveTeamsRouting() { /* removed */ }
+function loadTeamsNotificationLog() { /* removed */ }
+function refreshTeamsChannels() { /* removed */ }
 
-        // If we have a saved config, load channels to populate the dropdown
-        if (config.team_id && config.channel_id) {
-            _populateChannelDropdown(config.team_id, config.channel_id, config.channel_name);
-        }
-        refreshTeamsChannels();
-        // Load routing and notification log sections
-        loadTeamsChannelRouting();
-        loadTeamsNotificationLog();
-    } catch (e) {
-        el.innerHTML = `<p class="empty" style="color:var(--red)">Couldn't load Teams config — ${esc(friendlyError(e, 'please try again'))}</p>`;
-    }
-}
-
-function _populateChannelDropdown(teamId, channelId, channelName) {
-    const sel = document.getElementById('teamsChannelSelect');
-    if (!sel) return;
-    // Add current selection as an option so it's visible immediately
-    const opt = document.createElement('option');
-    opt.value = `${teamId}|${channelId}`;
-    opt.textContent = channelName || `${teamId} / ${channelId}`;
-    opt.selected = true;
-    sel.appendChild(opt);
-}
-
-async function refreshTeamsChannels() {
-    const sel = document.getElementById('teamsChannelSelect');
-    if (!sel) return;
-    const currentVal = sel.value;
-
-    try {
-        const data = await apiFetch('/api/admin/teams/channels');
-        const channels = data.channels || [];
-        sel.innerHTML = '<option value="">— Select a channel —</option>';
-        for (const ch of channels) {
-            const val = `${ch.team_id}|${ch.channel_id}`;
-            const opt = document.createElement('option');
-            opt.value = val;
-            opt.textContent = `${ch.team_name} → ${ch.channel_name}`;
-            if (val === currentVal) opt.selected = true;
-            sel.appendChild(opt);
-        }
-        if (!channels.length) {
-            sel.innerHTML = '<option value="">No channels found (connect M365 first)</option>';
-        }
-    } catch (e) {
-        const status = document.getElementById('teamsStatus');
-        if (status) status.innerHTML = `<span style="color:var(--red)">Could not load channels: ${esc(e.message || e)}</span>`;
-    }
-}
-
-async function saveTeamsConfig() {
-    const status = document.getElementById('teamsStatus');
-    const sel = document.getElementById('teamsChannelSelect');
-    const val = sel ? sel.value : '';
-    if (!val) {
-        if (status) status.innerHTML = '<span style="color:var(--red)">Please select a channel.</span>';
-        return;
-    }
-    const [teamId, channelId] = val.split('|');
-    const channelName = sel.options[sel.selectedIndex]?.textContent || '';
-    const enabled = document.getElementById('teamsEnabled')?.checked ?? true;
-    const hotThreshold = parseFloat(document.getElementById('teamsHotThreshold')?.value) || 10000;
-
-    try {
-        await apiFetch('/api/admin/teams/config', {
-            method: 'POST',
-            body: {
-                team_id: teamId,
-                channel_id: channelId,
-                channel_name: channelName,
-                enabled: enabled,
-                hot_threshold: hotThreshold,
-            },
-        });
-        if (status) status.innerHTML = '<span style="color:var(--green)">Configuration saved.</span>';
-    } catch (e) {
-        if (status) status.innerHTML = `<span style="color:var(--red)">Save failed: ${esc(e.message || e)}</span>`;
-    }
-}
-
-async function testTeamsPost() {
-    const status = document.getElementById('teamsStatus');
-    if (status) status.textContent = 'Sending test card...';
-    try {
-        const res = await apiFetch('/api/admin/teams/test', {method: 'POST'});
-        if (status) { status.style.color = 'var(--green)'; status.textContent = res.message || 'Test card sent!'; }
-    } catch (e) {
-        if (status) { status.style.color = 'var(--red)'; status.textContent = 'Test failed: ' + (e.message || e); }
-    }
-}
-
-// ── Channel Routing ─────────────────────────────────────────────────
-
-const _routingEvents = [
-    {key: 'teams_channel_hot', label: 'Hot Requirements'},
-    {key: 'teams_channel_quotes', label: 'Competitive Quotes'},
-    {key: 'teams_channel_inventory', label: 'Stock Matches / Price Drops'},
-    {key: 'teams_channel_ownership', label: 'Ownership Warnings'},
-    {key: 'teams_channel_buyplan', label: 'Buy Plan Lifecycle'},
-    {key: 'teams_channel_ops', label: 'Ops (Tickets / Connectors)'},
-];
-
-async function loadTeamsChannelRouting() {
-    const el = document.getElementById('teamsRoutingContent');
-    if (!el) return;
-    el.textContent = 'Loading channel routing...';
-    try {
-        const [routing, channelsData] = await Promise.all([
-            apiFetch('/api/admin/teams/channel-routing'),
-            apiFetch('/api/admin/teams/channels'),
-        ]);
-        const channels = channelsData.channels || [];
-        const r = routing.routing || {};
-        // Build DOM safely
-        const wrapper = document.createElement('div');
-        wrapper.className = 'card s-card';
-        const h3 = document.createElement('h3');
-        h3.textContent = 'Channel Routing';
-        wrapper.appendChild(h3);
-        const desc = document.createElement('p');
-        desc.className = 's-desc';
-        desc.textContent = 'Route different event types to different Teams channels. Leave blank to use the default channel.';
-        wrapper.appendChild(desc);
-        const form = document.createElement('div');
-        form.className = 's-form';
-        for (const evt of _routingEvents) {
-            const currentVal = r[evt.key] ? `${r[evt.key + '_team'] || ''}|${r[evt.key]}` : '';
-            const row = document.createElement('div');
-            row.className = 's-row';
-            row.style.marginBottom = '6px';
-            const lbl = document.createElement('label');
-            lbl.className = 's-label';
-            lbl.style.width = '220px';
-            lbl.textContent = evt.label;
-            row.appendChild(lbl);
-            const sel = document.createElement('select');
-            sel.className = 's-select routing-select';
-            sel.dataset.key = evt.key;
-            sel.style.flex = '1';
-            const defOpt = document.createElement('option');
-            defOpt.value = '';
-            defOpt.textContent = '— Default channel —';
-            sel.appendChild(defOpt);
-            for (const ch of channels) {
-                const val = `${ch.team_id}|${ch.channel_id}`;
-                const opt = document.createElement('option');
-                opt.value = val;
-                opt.textContent = `${ch.team_name} → ${ch.channel_name}`;
-                if (val === currentVal) opt.selected = true;
-                sel.appendChild(opt);
-            }
-            row.appendChild(sel);
-            form.appendChild(row);
-        }
-        const btnRow = document.createElement('div');
-        btnRow.className = 's-row';
-        btnRow.style.marginTop = '8px';
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'btn btn-primary';
-        saveBtn.textContent = 'Save Routing';
-        saveBtn.onclick = saveTeamsRouting;
-        btnRow.appendChild(saveBtn);
-        form.appendChild(btnRow);
-        const statusDiv = document.createElement('div');
-        statusDiv.id = 'teamsRoutingStatus';
-        statusDiv.className = 's-status';
-        form.appendChild(statusDiv);
-        wrapper.appendChild(form);
-        el.replaceChildren(wrapper);
-    } catch (e) {
-        el.textContent = 'Couldn\'t load routing — ' + (e.message || e);
-        el.style.color = 'var(--red)';
-    }
-}
-
-async function saveTeamsRouting() {
-    const status = document.getElementById('teamsRoutingStatus');
-    const body = {};
-    document.querySelectorAll('.routing-select').forEach(sel => {
-        const key = sel.dataset.key;
-        const val = sel.value;
-        if (val) {
-            const [teamId, channelId] = val.split('|');
-            body[key] = channelId;
-            body[key + '_team'] = teamId;
-        } else {
-            body[key] = '';
-            body[key + '_team'] = '';
-        }
-    });
-    try {
-        await apiFetch('/api/admin/teams/channel-routing', {method: 'POST', body});
-        if (status) { status.style.color = 'var(--green)'; status.textContent = 'Routing saved.'; }
-    } catch (e) {
-        if (status) { status.style.color = 'var(--red)'; status.textContent = 'Save failed: ' + (e.message || e); }
-    }
-}
-
-// ── Notification Log ────────────────────────────────────────────────
-
-async function loadTeamsNotificationLog() {
-    const el = document.getElementById('teamsLogContent');
-    if (!el) return;
-    el.textContent = 'Loading notification log...';
-    try {
-        const data = await apiFetch('/api/admin/teams/notifications?limit=50');
-        const items = data.notifications || [];
-        if (!items.length) {
-            el.textContent = 'No notifications sent yet.';
-            return;
-        }
-        const table = document.createElement('table');
-        table.style.cssText = 'width:100%;border-collapse:collapse';
-        const thead = document.createElement('thead');
-        const hrow = document.createElement('tr');
-        hrow.style.background = 'var(--bg-alt)';
-        for (const h of ['Time', 'Event', 'Entity', 'OK', 'Error']) {
-            const th = document.createElement('th');
-            th.style.cssText = 'padding:4px 8px;text-align:left;font-size:11px';
-            th.textContent = h;
-            hrow.appendChild(th);
-        }
-        thead.appendChild(hrow);
-        table.appendChild(thead);
-        const tbody = document.createElement('tbody');
-        for (const n of items) {
-            const tr = document.createElement('tr');
-            const vals = [
-                n.created_at ? new Date(n.created_at).toLocaleString() : '',
-                n.event_type || '',
-                n.entity_name || n.entity_id || '',
-                n.success ? '✓' : '✗',
-                n.error_msg || '',
-            ];
-            const colors = [null, null, null, n.success ? 'var(--green)' : 'var(--red)', 'var(--red)'];
-            vals.forEach((v, i) => {
-                const td = document.createElement('td');
-                td.style.cssText = 'padding:4px 8px;font-size:11px';
-                if (colors[i]) td.style.color = colors[i];
-                td.textContent = v;
-                tr.appendChild(td);
-            });
-            tbody.appendChild(tr);
-        }
-        table.appendChild(tbody);
-        const wrapper = document.createElement('div');
-        wrapper.className = 'card s-card';
-        const h3 = document.createElement('h3');
-        h3.textContent = 'Recent Notifications';
-        wrapper.appendChild(h3);
-        wrapper.appendChild(table);
-        el.replaceChildren(wrapper);
-    } catch (e) {
-        el.textContent = 'Couldn\'t load log — ' + (e.message || e);
-        el.style.color = 'var(--red)';
-    }
-}
-
-
-
-// ── Trouble Tickets (Settings Tab) — REMOVED ───────────────────────
-// All ticket management is now in the unified tickets.js sidebar view.
-// The Settings > "Trouble Tickets" tab has been removed from index.html.
-// Old error-report functions (loadTroubleTickets, viewTicketDetail,
-// updateTicketStatus, exportTicketsXlsx, copyPromptToClipboard,
-// regeneratePrompt) have been deleted. See tickets.js for the unified UI.
 
 // ── Vendor Dedup ────────────────────────────────────────────────────────
 
@@ -7591,17 +7296,16 @@ function showApiHealth() {
     openSettingsTab('apihealth');
 }
 
-// ── API Health sub-tab switcher (dashboard / teams) ──
+// ── API Health sub-tab switcher ──
 function switchApiHealthTab(tab, btn) {
     document.querySelectorAll('#apiHealthTabs .tab').forEach(t => t.classList.remove('on'));
     if (btn) btn.classList.add('on');
-    const panels = ['dashboard', 'teams'];
+    const panels = ['dashboard'];
     panels.forEach(p => {
         const el = document.getElementById('apih-' + p);
         if (el) el.style.display = (p === tab) ? '' : 'none';
     });
     if (tab === 'dashboard') loadApiHealthDashboard();
-    else if (tab === 'teams') loadTeamsConfig();
 }
 
 async function loadApiHealthDashboard() {
@@ -8700,10 +8404,10 @@ Object.assign(window, {
     refreshVendorScorecards, rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
     reopenQuote, resubmitBuyPlan, reviseQuote,
     saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
-    saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
+    saveParsedOffers, saveQuoteDraft, scToggle,
     selectOneDriveFile, selectSite, sendQuoteEmail, setOfferFilter,
     setOfferSort, setSourcesFilter, showView, sortBpList, sortCustList,
-    sortSalesScorecard, testSourceCred, testTeamsPost,
+    sortSalesScorecard, testSourceCred,
     toggleOfferSelect, togglePlannedSources, toggleSiteDetail,
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     unifiedEnrichCompany, updateQuoteLine, verifyContactEmail,

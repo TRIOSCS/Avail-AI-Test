@@ -705,18 +705,8 @@ def test_api_health_dashboard_usage_log(admin_client, db_session):
 
 
 @pytest.mark.asyncio
-async def test_ping_live_to_error_notifies_admins(db_session):
-    """When a source transitions live → error, admin users get notified."""
-    admin = User(
-        email="notify_admin@test.com",
-        name="Notify Admin",
-        role="admin",
-        azure_id="notify-admin-1",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(admin)
-    db_session.flush()
-
+async def test_ping_live_to_error_logs_warning(db_session):
+    """When a source transitions live → error, a warning is logged."""
     src = ApiSource(
         name="notif_test_src",
         display_name="Notif Test",
@@ -739,27 +729,10 @@ async def test_ping_live_to_error_notifies_admins(db_session):
     assert result["success"] is False
     assert src.status == "error"
 
-    from app.models.notification import Notification
-
-    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_source_down").all()
-    assert len(notifs) == 1
-    assert "Notif Test" in notifs[0].title
-    assert "403" in notifs[0].body
-
 
 @pytest.mark.asyncio
-async def test_ping_error_to_error_no_duplicate_notification(db_session):
-    """When a source stays in error, no duplicate notification fires."""
-    admin = User(
-        email="no_dup_admin@test.com",
-        name="No Dup Admin",
-        role="admin",
-        azure_id="no-dup-admin-1",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(admin)
-    db_session.flush()
-
+async def test_ping_error_to_error_stays_in_error(db_session):
+    """When a source stays in error, status remains error."""
     src = ApiSource(
         name="nodup_src",
         display_name="NoDup Source",
@@ -779,25 +752,12 @@ async def test_ping_error_to_error_no_duplicate_notification(db_session):
 
         await ping_source(src, db_session)
 
-    from app.models.notification import Notification
-
-    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_source_down").all()
-    assert len(notifs) == 0
+    assert src.status == "error"
 
 
 @pytest.mark.asyncio
 async def test_quota_warning_at_80_percent(db_session):
-    """Quota warning fires when usage crosses 80%."""
-    admin = User(
-        email="quota_admin@test.com",
-        name="Quota Admin",
-        role="admin",
-        azure_id="quota-admin-1",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(admin)
-    db_session.flush()
-
+    """Quota warning logs when usage crosses 80%."""
     src = ApiSource(
         name="quota_src",
         display_name="Quota Source",
@@ -820,29 +780,12 @@ async def test_quota_warning_at_80_percent(db_session):
         result = await ping_source(src, db_session)
 
     assert result["success"] is True
-    # calls_this_month is now 80 (79 + 1 from the ping)
     assert src.calls_this_month == 80
-
-    from app.models.notification import Notification
-
-    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_quota_warning").all()
-    assert len(notifs) == 1
-    assert "80%" in notifs[0].title
 
 
 @pytest.mark.asyncio
 async def test_quota_critical_at_95_percent(db_session):
-    """Quota critical fires when usage crosses 95%."""
-    admin = User(
-        email="crit_admin@test.com",
-        name="Critical Admin",
-        role="admin",
-        azure_id="crit-admin-1",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(admin)
-    db_session.flush()
-
+    """Quota critical logs when usage crosses 95%."""
     src = ApiSource(
         name="crit_src",
         display_name="Critical Source",
@@ -865,12 +808,6 @@ async def test_quota_critical_at_95_percent(db_session):
         result = await ping_source(src, db_session)
 
     assert result["success"] is True
-
-    from app.models.notification import Notification
-
-    notifs = db_session.query(Notification).filter_by(user_id=admin.id, event_type="api_quota_critical").all()
-    assert len(notifs) == 1
-    assert "critical" in notifs[0].title.lower()
 
 
 # ── Auth Error Skip Tests ─────────────────────────────────────────

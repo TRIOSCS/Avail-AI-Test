@@ -21,6 +21,11 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 

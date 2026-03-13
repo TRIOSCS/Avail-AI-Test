@@ -13,10 +13,16 @@ Covers:
 """
 
 import asyncio
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 
 from app.enrichment_service import (
     _clean_domain,

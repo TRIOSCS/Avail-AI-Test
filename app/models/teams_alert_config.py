@@ -3,7 +3,7 @@
 Stores optional webhook URL for fallback delivery and an enabled flag.
 Graph API DM is the primary delivery method; webhook is the fallback.
 
-Called by: app/services/teams_alert_service.py
+Called by: app/jobs/knowledge_jobs.py
 Depends on: app/models/base.py, app/models/auth.py (User)
 """
 

@@ -12,6 +12,8 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import (
     BuyPlan,
     Company,
@@ -665,6 +667,10 @@ class TestGetMultiplierScores:
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 class TestMultiplierAPI:
     def test_get_multiplier_scores_buyer(self, db_session):
         """GET /api/performance/multiplier-scores?role=buyer returns data."""

@@ -6,10 +6,16 @@ Depends on: conftest.py fixtures
 """
 
 import io
+import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+_mvp_skip = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -381,6 +387,7 @@ class TestCrmQuoteEmailFmtPrice:
 # ====== enrichment.py lines 440, 461, 465, 496, 499, 502, 505, 512, 525-528, 596-637, 642-645 ======
 
 
+@_mvp_skip
 class TestEnrichmentBackfillEmails:
     def test_backfill_activity_log_contacts(self, admin_client, db_session, test_vendor_card):
         al = ActivityLog(
@@ -589,6 +596,7 @@ class TestEnrichmentBackfillEmails:
         assert resp.status_code == 500
 
 
+@_mvp_skip
 class TestEnrichmentDeepScan:
     def _setup_user(self, admin_user, db_session):
         admin_user.m365_connected = True

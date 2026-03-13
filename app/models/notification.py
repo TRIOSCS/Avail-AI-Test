@@ -1,9 +1,8 @@
-"""Notification model — in-app notifications for the self-heal pipeline.
+"""Notification model — in-app notifications.
 
-Stores admin notifications for diagnosis, prompt generation, escalation,
-and fix completion events.
+Stores admin notifications for system events.
 
-Called by: services/notification_service.py
+Called by: models/__init__.py (re-exported for DB schema)
 Depends on: models/base.py, models/auth.py
 """
 

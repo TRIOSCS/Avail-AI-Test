@@ -34,14 +34,12 @@ from ..models import (
 )
 from ..schemas.ai import (
     ApplyFreeformRfqRequest,
-    CompareQuotesRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ParseFreeformOfferRequest,
     ParseFreeformRfqRequest,
     ProspectContactSave,
     ProspectFinderRequest,
-    RfqDraftEmailRequest,
     RfqDraftRequest,
     SaveDraftOffersRequest,
     SaveFreeformOffersRequest,
@@ -634,62 +632,6 @@ async def ai_draft_rfq(
     return {"available": True, "body": draft}
 
 
-@router.post("/api/ai/draft-rfq-email")
-@limiter.limit("10/minute")
-async def ai_draft_rfq_email(
-    payload: RfqDraftEmailRequest,
-    request: Request,
-    user: User = Depends(require_user),
-):
-    """Generate a detailed RFQ email with subject and body using Gradient AI."""
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    from app.services.ai_email_drafter import draft_rfq_email
-
-    parts = [p.model_dump() for p in payload.parts]
-
-    result = await draft_rfq_email(
-        vendor_name=payload.vendor_name,
-        parts=parts,
-        buyer_name=payload.buyer_name,
-        vendor_contact_name=payload.vendor_contact_name,
-    )
-
-    if not result:
-        return {"available": False, "reason": "Draft generation failed"}
-    return {"available": True, "subject": result["subject"], "body": result["body"]}
-
-
-# ── Feature 5: Quote Comparison ─────────────────────────────────────────
-
-
-@router.post("/api/ai/compare-quotes")
-@limiter.limit("10/minute")
-async def ai_compare_quotes(
-    payload: CompareQuotesRequest,
-    request: Request,
-    user: User = Depends(require_user),
-):
-    """Compare multiple vendor quotes and recommend the best option."""
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    from app.services.ai_quote_analyzer import compare_quotes
-
-    quotes = [q.model_dump() for q in payload.quotes]
-
-    result = await compare_quotes(
-        part_number=payload.part_number,
-        quotes=quotes,
-        required_qty=payload.required_qty,
-    )
-
-    if not result:
-        return {"available": False, "reason": "Comparison not available"}
-    return {"available": True, **result}
-
-
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
 
 
@@ -747,8 +689,7 @@ async def ai_apply_freeform_rfq(
 ):
     """Create requisition + requirements from edited RFQ template."""
     from app.cache.decorators import invalidate_prefix
-
-    from ...utils.normalization import normalize_mpn_key
+    from app.utils.normalization import normalize_mpn_key
 
     if not payload.customer_site_id:
         raise HTTPException(400, "customer_site_id required")
@@ -768,8 +709,8 @@ async def ai_apply_freeform_rfq(
     db.add(req)
     db.flush()
 
-    from ...schemas.requisitions import RequirementCreate
-    from ...search_service import resolve_material_card
+    from app.schemas.requisitions import RequirementCreate
+    from app.search_service import resolve_material_card
 
     for item in payload.requirements[:50]:
         try:
@@ -808,9 +749,8 @@ async def ai_save_freeform_offers(
 ):
     """Save freeform-parsed offers to a requisition (after user review)."""
     from app.dependencies import get_req_for_user
-
-    from ...utils.normalization import fuzzy_mpn_match, normalize_mpn_key
-    from ...vendor_utils import normalize_vendor_name
+    from app.utils.normalization import fuzzy_mpn_match, normalize_mpn_key
+    from app.vendor_utils import normalize_vendor_name
 
     req = get_req_for_user(db, user, payload.requisition_id)
     if not req:
@@ -825,7 +765,7 @@ async def ai_save_freeform_offers(
                 if fuzzy_mpn_match(o.mpn, r.primary_mpn):
                     req_id = r.id
                     break
-        from ...search_service import resolve_material_card
+        from app.search_service import resolve_material_card
 
         mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
         norm_name = normalize_vendor_name(o.vendor_name or "")

@@ -4,9 +4,15 @@ Covers: POST customer/{id}, POST verify-email, GET credits,
         POST customer-backfill, GET customer-gaps.
 """
 
+import os
 from unittest.mock import AsyncMock, patch
 
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 
 from app.models.crm import Company, CustomerSite
 from tests.conftest import engine  # noqa: F401

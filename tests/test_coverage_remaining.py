@@ -10,9 +10,17 @@ Depends on: conftest fixtures
 """
 
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+_mvp_skip = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
 
 # ── Scheduler Job Wrappers ───────────────────────────────────────────
 
@@ -254,6 +262,7 @@ class TestSchedulerMonthlyEnrichment:
 # ── Performance Router ───────────────────────────────────────────────
 
 
+@_mvp_skip
 class TestPerformanceRouter:
     def test_avail_scores_invalid_month(self, client):
         resp = client.get("/api/performance/avail-scores?role=buyer&month=bad")

@@ -57,18 +57,6 @@
         .qa-buyer-chip.selected{background:var(--teal,#0e7490);color:#fff;border-color:var(--teal)}
         /* Priority Lanes — simple table row separators */
         tr[onclick*="togglePriorityLane"]:hover td{filter:brightness(0.95)}
-        /* Notification bar */
-        .notif-action-bar{display:flex;align-items:center;gap:12px;padding:5px 16px;background:linear-gradient(90deg,rgba(59,130,246,.06),rgba(16,185,129,.06));border-bottom:1px solid var(--border);font-size:11px;flex-wrap:wrap}
-        .notif-action-bar:empty{display:none}
-        .notif-action-item{display:flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:background .15s}
-        .notif-action-item:hover{background:rgba(0,0,0,.05)}
-        .notif-action-item .notif-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-        .notif-action-item .notif-dot-red{background:#dc2626}
-        .notif-action-item .notif-dot-amber{background:#f59e0b}
-        .notif-action-item .notif-dot-green{background:#10b981}
-        .notif-action-item .notif-dot-blue{background:#3b82f6}
-        .notif-action-dismiss{margin-left:auto;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
-        .notif-action-dismiss:hover{color:var(--text1)}
         /* Inline RFQ compose panel */
         .rfq-inline-bar{position:sticky;bottom:0;left:0;right:0;padding:10px 16px;background:var(--card,#fff);border-top:2px solid var(--blue,#3b82f6);display:flex;align-items:center;gap:12px;box-shadow:0 -4px 12px rgba(0,0,0,.08);z-index:50;font-size:13px}
         .rfq-inline-bar .rfq-bar-count{font-weight:600}
@@ -122,20 +110,10 @@
         <div class="tb-group">
             <div class="toolbar-stats" id="toolbarStats"></div>
             <button type="button" class="tb-action tb-primary" onclick="openNewReqModal()">+ New Req</button>
-            <button type="button" class="notif-btn-global" onclick="toggleNotifications()" title="Notifications">
-                <svg class="notif-bell" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                <span id="notifBadge" class="notif-badge">0</span>
-            </button>
         </div>
     </div>
 </div>
 
-
-<!-- Notification panel — standalone so it works on both desktop and mobile -->
-<div id="notifPanel" class="notif-panel-standalone">
-    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Notifications</div>
-    <div id="notifList"><p class="empty" style="font-size:12px">No notifications</p></div>
-</div>
 
 <!-- Sidebar rail — blue strip with chevron, click to toggle -->
 <div class="sb-rail" onclick="toggleSidebar()" title="Toggle menu" aria-label="Toggle sidebar" role="button" tabindex="0">
@@ -148,10 +126,6 @@
     <div class="m-topbar-spacer"></div>
     <button type="button" class="m-topbar-btn m-search-toggle" id="mobileSearchToggle" onclick="_toggleMobileSearch()">
         <svg viewBox="0 0 20 20" fill="none" width="20" height="20"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    </button>
-    <button type="button" class="m-topbar-btn notif-btn-global" onclick="toggleNotifications()" title="Notifications">
-        <svg class="notif-bell" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        <span id="mobileNotifBadge" class="notif-badge">0</span>
     </button>
     <button type="button" class="m-topbar-btn" onclick="_showMobileUserMenu()" id="mobileUserBtn">
         <span class="m-avatar" id="mobileUserAvatar"></span>
@@ -187,7 +161,6 @@
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn" id="navDashboard" data-tip="Dashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Dashboard</button>
                 <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span> Scorecard</button>
             </div>
         </div>
@@ -298,9 +271,6 @@
 <!-- Main content -->
 <main class="main">
     <div class="main-scroll">
-
-    <!-- Smart notification bar — surfaces urgent items -->
-    <div id="notifActionBar" class="notif-action-bar"></div>
 
     <!-- Universal Intake Bar — paste parts, upload files, import data -->
     <div class="intake-bar" id="intakeBar" style="display:none">
@@ -803,9 +773,6 @@
             <div class="field">
                 <label>Message <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:6px" onclick="navigator.clipboard.writeText(document.getElementById('rfqBody').value);showToast('Body copied','success')" title="Copy body to clipboard">Copy</button></label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
-            </div>
-            <div id="aiDraftWrap" class="u-hidden" style="margin-bottom:8px;text-align:right">
-                <button type="button" class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="aiDraftRfq(this)">AI Draft</button>
             </div>
             <div class="mactions">
                 <button type="button" class="btn btn-ghost" onclick="closeRfqDrawer()">Cancel</button>
@@ -1324,24 +1291,6 @@
         </div>
     </div>
 
-    <!-- VIEW: Dashboard -->
-    <div id="view-dashboard" class="hidden">
-        <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <div style="display:flex;align-items:center;gap:12px">
-                <h2 style="margin:0;font-size:18px">Command Center</h2>
-                <select id="dashUserSelect" class="vflt" onchange="setDashUserFilter(this.value)" style="font-size:11px;min-width:120px"></select>
-            </div>
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-<div class="chip-row" style="margin:0" id="dashPeriodPills">
-                    <span class="chip on" onclick="setDashPeriod('30d',this)">30 Days</span>
-                    <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
-                    <span class="chip" onclick="setDashPeriod('ytd',this)">YTD</span>
-                </div>
-            </div>
-        </div>
-        <div id="dashboardContent" aria-live="polite"><p class="empty">Loading…</p></div>
-    </div>
-
     <!-- VIEW: Scorecard -->
     <div id="view-scorecard" class="hidden">
         <div class="sc-header">
@@ -1368,7 +1317,6 @@
             <button type="button" class="tab on" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('tickets',this)">Tickets</button>
             <button type="button" class="tab" onclick="switchSettingsTab('apihealth',this)">API Health</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
@@ -1400,14 +1348,7 @@
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-tickets" class="settings-panel hidden"></div>
-
         <div id="settings-apihealth" class="settings-panel hidden">
-            <div class="tabs" id="apiHealthTabs">
-                <button type="button" class="tab on" onclick="switchApiHealthTab('dashboard',this)">API Health</button>
-                <button type="button" class="tab" onclick="switchApiHealthTab('teams',this)">Teams</button>
-            </div>
-
             <!-- API Health Dashboard -->
             <div id="apih-dashboard">
                 <div class="vendor-header" style="margin-bottom:12px">
@@ -1415,13 +1356,6 @@
                     <button class="btn btn-sm" onclick="refreshApiHealthDashboard()" style="margin-left:auto">Refresh</button>
                 </div>
                 <div id="apiHealthDashboard"><p class="empty">Loading...</p></div>
-            </div>
-
-            <!-- Teams Integration (consolidated from separate tab) -->
-            <div id="apih-teams" style="display:none">
-                <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
-                <div id="teamsRoutingContent" style="margin-top:12px"></div>
-                <div id="teamsLogContent" style="margin-top:12px"></div>
             </div>
         </div>
 
@@ -1506,23 +1440,9 @@
     <button type="button" class="m-more-item" onclick="mobileMoreNav('vendors')"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg> Vendors</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('materials')"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Materials</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('buyplans')"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg> Buy Plans</button>
-    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Dashboard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('scorecard')"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg> Scorecard</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('contacts')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Contacts</button>
     <button type="button" class="m-more-item" onclick="mobileMoreNav('settings')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
-</div>
-
-<!-- Trouble Chat Modal -->
-<div id="troubleModal" class="modal-bg" onclick="if(event.target===this)closeTroubleChat()">
-    <div class="modal" style="max-width:440px;display:flex;flex-direction:column">
-        <h2 style="margin-bottom:8px">What's the trouble?</h2>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Describe your issue — a screenshot and context are captured automatically.</p>
-        <div id="troubleChatBody" style="flex:1;min-height:80px;max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px;align-items:flex-end">
-            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}"></textarea>
-            <button type="button" class="btn btn-primary" id="troubleSendBtn" onclick="submitTrouble(this)" style="white-space:nowrap">Send</button>
-        </div>
-    </div>
 </div>
 
 <!-- Bulk Paste Modal -->
@@ -1549,18 +1469,7 @@
     </div>
 </div>
 
-<!-- Floating trouble ticket pill — always visible -->
-<button type="button" id="troublePill" onclick="openTroubleChat()" style="position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;align-items:center;gap:6px;padding:10px 18px;background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;border:none;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15);transition:all .2s;letter-spacing:.3px" onmouseover="this.style.transform='scale(1.06)';this.style.boxShadow='0 6px 20px rgba(239,68,68,.5),0 2px 6px rgba(0,0,0,.2)'" onmouseout="this.style.transform='scale(1)';this.style.boxShadow='0 4px 14px rgba(239,68,68,.4),0 1px 3px rgba(0,0,0,.15)'">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5v2"/><path d="M15 11v2"/><path d="M15 17v2"/><path d="M5 5h14a2 2 0 0 1 2 2v3a2 2 0 0 0 0 4v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-3a2 2 0 0 0 0-4V7a2 2 0 0 1 2-2z"/></svg>
-    <span class="tp-label">Report Issue</span>
-</button>
-
-{% if is_admin %}
-<!-- System notification bell — placeholder, wired up when notification service is registered -->
-{% endif %}
-
 <script type="application/json" id="app-config">{"userName":{{ user_name | tojson }},"userEmail":{{ user_email | tojson }},"isAdmin":{{ "true" if is_admin else "false" }},"isManager":{{ "true" if is_manager else "false" }},"userRole":{{ user_role | tojson }}}</script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 {{ vite_js_tags }}
 {% endif %}
 <script>

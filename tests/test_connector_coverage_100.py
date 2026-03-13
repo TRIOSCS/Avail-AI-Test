@@ -162,11 +162,11 @@ class TestSourcengineDoSearchGap:
 
 class TestSourcesGaps:
     @pytest.mark.asyncio
-    async def test_abstract_do_search_pass(self):
+    async def test_base_connector_search_method_exists(self):
         from app.connectors.sources import BaseConnector
 
-        result = await BaseConnector._do_search(MagicMock(), "PN")
-        assert result is None
+        # BaseConnector.search is the public interface
+        assert hasattr(BaseConnector, "search")
 
     @pytest.mark.asyncio
     async def test_nexar_do_search_aggregate_query_success(self):

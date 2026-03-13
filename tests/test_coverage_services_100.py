@@ -1246,10 +1246,12 @@ class TestMaterialEnrichmentGaps:
 
         stats = {"enriched": 0, "errors": 0}
 
-        with patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            side_effect=Exception("AI error"),
+        with (
+            patch(
+                "app.services.material_enrichment_service.gradient_json",
+                new_callable=AsyncMock,
+                side_effect=Exception("AI error"),
+            ),
         ):
             await _enrich_batch([card], db_session, stats)
 

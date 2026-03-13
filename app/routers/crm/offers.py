@@ -251,58 +251,6 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     }
 
 
-async def _fire_deal_condition_alerts(db, offer, req, send_alert_fn):
-    """Check and fire Teams DM alerts for deal condition changes.
-
-    Trigger A: New offer has better price than existing best.
-    Trigger B: Total sourced qty now meets/exceeds target.
-    Both route to req.created_by (the AM/salesperson).
-    """
-    from sqlalchemy import func
-
-    alerts = []
-
-    # Trigger A: Better price (skip first offer — nothing to compare)
-    if offer.unit_price and offer.unit_price > 0:
-        best_price = (
-            db.query(func.min(Offer.unit_price))
-            .filter(Offer.requirement_id == offer.requirement_id, Offer.id != offer.id, Offer.unit_price > 0)
-            .scalar()
-        )
-        if best_price and float(offer.unit_price) < float(best_price):
-            alerts.append(
-                f"Better price: {offer.vendor_name} on {offer.mpn} "
-                f"${offer.unit_price} (was ${best_price})"
-                f"{' — ' + req.customer_name if req.customer_name else ''}"
-            )
-
-    # Trigger B: Qty filled threshold transition
-    requirement = db.get(Requirement, offer.requirement_id) if offer.requirement_id else None
-    if requirement and requirement.target_qty and requirement.target_qty > 0:
-        total_sourced = (
-            db.query(func.sum(Offer.qty_available))
-            .filter(Offer.requirement_id == offer.requirement_id, Offer.status == "active")
-            .scalar()
-        ) or 0
-        # Check if we just crossed the threshold (was below before this offer)
-        prev_total = total_sourced - (offer.qty_available or 0)
-        if total_sourced >= requirement.target_qty and prev_total < requirement.target_qty:
-            vendor_count = (
-                db.query(func.count(func.distinct(Offer.vendor_name)))
-                .filter(Offer.requirement_id == offer.requirement_id, Offer.status == "active")
-                .scalar()
-            )
-            alerts.append(
-                f"Qty filled: {offer.mpn} — {total_sourced}/{requirement.target_qty} "
-                f"across {vendor_count} vendor{'s' if vendor_count != 1 else ''}"
-                f"{' — ' + req.customer_name if req.customer_name else ''}"
-            )
-
-    if alerts:
-        msg = "\n".join(alerts)
-        await send_alert_fn(db, req.created_by, msg, "deal_condition", str(offer.id))
-
-
 @router.post("/api/requisitions/{req_id}/offers")
 async def create_offer(
     req_id: int,
@@ -545,15 +493,6 @@ async def create_offer(
                     db.commit()
     except Exception:
         logger.debug("Activity event creation failed", exc_info=True)
-
-    # Teams DM alerts: better price + qty filled (to requisition owner)
-    try:
-        if req.created_by and offer.requirement_id:
-            from ...services.teams_alert_service import send_alert
-
-            await _fire_deal_condition_alerts(db, offer, req, send_alert)
-    except Exception:
-        logger.debug("Deal condition alert failed", exc_info=True)
 
     return {
         "id": offer.id,

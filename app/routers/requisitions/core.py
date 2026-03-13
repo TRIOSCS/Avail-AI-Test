@@ -10,7 +10,6 @@ Called by: requisitions.__init__ (sub-router)
 Depends on: models, schemas, cache, dependencies, sourcing_score service
 """
 
-import asyncio
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -501,17 +500,6 @@ async def create_requisition(
     db.add(req)
     db.commit()
     invalidate_prefix("req_list")
-
-    # Teams DM alert: notify all active buyers about new requisition
-    try:
-        from ...services.teams_alert_service import send_alert_to_role
-
-        msg = f"New RFQ: {body.customer_name or 'Unknown customer'} — {body.name}"
-        asyncio.create_task(
-            send_alert_to_role(db, "buyer", msg, "new_requisition", str(req.id), exclude_user_id=user.id)
-        )
-    except Exception:
-        pass  # Non-critical — don't fail req creation
 
     return {"id": req.id, "name": req.name}
 

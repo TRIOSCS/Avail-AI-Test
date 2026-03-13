@@ -145,13 +145,6 @@ class TestDealBoard:
 
 
 class TestNerveCenter:
-    def test_nerve_feed_generation(self, app_js):
-        assert "_nerveFeed" in app_js
-        assert "nerve-feed-item" in app_js
-
-    def test_nerve_feed_priority_sorting(self, app_js):
-        assert "_nerveFeed.sort(" in app_js
-
     def test_nerve_feed_css(self, styles_css):
         assert ".nerve-feed" in styles_css
         assert ".nerve-feed-item" in styles_css

@@ -7,6 +7,15 @@ Called by: pytest
 Depends on: app/routers/performance.py, app/routers/proactive.py, conftest.py
 """
 
+import os
+
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("MVP_MODE", "true").lower() == "true",
+    reason="Disabled in MVP mode",
+)
+
 
 # ── Performance endpoints ───────────────────────────────────────────
 

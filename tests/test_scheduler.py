@@ -95,7 +95,7 @@ def test_configure_scheduler_registers_core_jobs():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results", "engagement_scoring"):
+    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results"):
         assert core_id in job_ids, f"Missing core job: {core_id}"
 
 
@@ -129,7 +129,6 @@ def test_configure_scheduler_conditional_flags_on():
     assert "contacts_sync" in job_ids
     assert "proactive_matching" in job_ids
     assert "deep_email_mining" in job_ids
-    assert "deep_enrichment" in job_ids
 
 
 def test_configure_scheduler_activity_tracking_jobs():

@@ -65,7 +65,7 @@ from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
 
-# Notifications (self-heal pipeline)
+# Notifications
 from .notification import Notification  # noqa: F401
 
 # Offers, Contacts, Vendor Responses

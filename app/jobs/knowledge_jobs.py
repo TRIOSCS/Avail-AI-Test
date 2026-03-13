@@ -40,12 +40,6 @@ def register_knowledge_jobs(scheduler, settings):
         id="knowledge_send_digests",
         name="Send daily knowledge digests",
     )
-    scheduler.add_job(
-        _job_precompute_briefings,
-        CronTrigger(hour=6, minute=0),
-        id="knowledge_precompute_briefings",
-        name="Pre-compute morning briefings at 6 AM UTC",
-    )
 
 
 async def _job_refresh_insights():
@@ -226,56 +220,8 @@ async def _job_send_knowledge_digests():
         if sent_count:
             logger.info("Sent {} knowledge digests", sent_count)
 
-        # Also deliver morning briefing to Teams via webhook
-        from app.models.auth import User
-        from app.services.dashboard_briefing import generate_briefing
-
-        briefing_count = 0
-        for config in configs:
-            if current_hour != (config.knowledge_digest_hour or 14) % 24:
-                continue
-            if not config.teams_webhook_url:
-                continue
-            try:
-                user = db.get(User, config.user_id)
-                if not user or not user.is_active:
-                    continue
-                role = getattr(user, "role", "buyer") or "buyer"
-                briefing = generate_briefing(db=db, user_id=config.user_id, role=role)
-                if briefing["total_items"] > 0:
-                    await _send_briefing_to_teams(config.teams_webhook_url, briefing, user.display_name or user.email)
-                    briefing_count += 1
-            except Exception as e:
-                logger.warning("Briefing Teams delivery failed for user {}: {}", config.user_id, e)
-
-        if briefing_count:
-            logger.info("Sent {} morning briefings to Teams", briefing_count)
     except Exception as e:
         logger.error("send_knowledge_digests job failed: {}", e)
-    finally:
-        db.close()
-
-
-async def _job_precompute_briefings():
-    """Pre-compute briefings for all users at 6 AM UTC, warming the cache."""
-    from app.database import SessionLocal
-    from app.models.auth import User
-    from app.services.dashboard_briefing import generate_briefing
-
-    db = SessionLocal()
-    try:
-        users = db.query(User).filter(User.is_active.is_(True)).all()
-        ok = 0
-        for user in users:
-            try:
-                role = getattr(user, "role", "buyer") or "buyer"
-                generate_briefing(db=db, user_id=user.id, role=role)
-                ok += 1
-            except Exception as e:
-                logger.warning("Briefing pre-compute failed for user {}: {}", user.id, e)
-        logger.info("Pre-computed briefings for {}/{} users", ok, len(users))
-    except Exception as e:
-        logger.error("precompute_briefings job failed: {}", e)
     finally:
         db.close()
 
@@ -301,57 +247,3 @@ async def _job_expire_stale():
         db.close()
 
 
-async def _send_briefing_to_teams(webhook_url: str, briefing: dict, user_name: str):
-    """Send morning briefing as a Teams message via incoming webhook.
-
-    Called by: _job_send_knowledge_digests()
-    Depends on: httpx
-    """
-    import httpx
-
-    sections_text = []
-    for s in briefing["sections"]:
-        if s["count"] > 0:
-            items_preview = []
-            for item in s["items"][:3]:
-                items_preview.append("  - {}".format(item.get("title", "")))
-            sections_text.append("**{}** ({})".format(s["label"], s["count"]))
-            sections_text.extend(items_preview)
-            if s["count"] > 3:
-                sections_text.append("  - +{} more".format(s["count"] - 3))
-
-    body = {
-        "type": "message",
-        "attachments": [
-            {
-                "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": {
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "type": "AdaptiveCard",
-                    "version": "1.4",
-                    "body": [
-                        {
-                            "type": "TextBlock",
-                            "text": "Morning Briefing for {}".format(user_name),
-                            "weight": "bolder",
-                            "size": "medium",
-                        },
-                        {
-                            "type": "TextBlock",
-                            "text": "{} items need attention".format(briefing["total_items"]),
-                            "isSubtle": True,
-                        },
-                        {
-                            "type": "TextBlock",
-                            "text": "\n".join(sections_text),
-                            "wrap": True,
-                        },
-                    ],
-                },
-            }
-        ],
-    }
-
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(webhook_url, json=body)
-        resp.raise_for_status()

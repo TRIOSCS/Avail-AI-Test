@@ -463,9 +463,11 @@ class TestExtractSignature:
     async def test_low_regex_falls_back_to_ai(self):
         low_regex = {"full_name": "John", "confidence": 0.4}
         high_ai = {"full_name": "John Doe", "title": "CEO", "confidence": 0.85}
+        mock_settings = type("S", (), {"do_gradient_api_key": ""})()
         with (
             patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
             patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock, return_value=high_ai),
+            patch("app.config.settings", mock_settings),
         ):
             result = await extract_signature("body")
         assert result["extraction_method"] == "claude_ai"
@@ -485,6 +487,7 @@ class TestExtractSignature:
     @pytest.mark.asyncio
     async def test_ai_exception_falls_back_to_regex(self):
         low_regex = {"full_name": "John", "confidence": 0.4}
+        mock_settings = type("S", (), {"do_gradient_api_key": ""})()
         with (
             patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex),
             patch(
@@ -492,6 +495,7 @@ class TestExtractSignature:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("fail"),
             ),
+            patch("app.config.settings", mock_settings),
         ):
             result = await extract_signature("body")
         assert result["extraction_method"] == "regex"

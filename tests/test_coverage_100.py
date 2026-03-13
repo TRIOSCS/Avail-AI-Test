@@ -1,18 +1,14 @@
 """Tests to close remaining coverage gaps to reach 100%.
 
 Covers:
-1. trouble_tickets.py — admin list, access denied, PATCH, verify access
-2. trouble_ticket schemas — blank title/description validators
-3. vendors.py — thefuzz ImportError fallback in get_or_create_card + check_duplicate
-4. search_service.py — bulk sighting retry + resolve_material_card PostgreSQL branch
-5. offers.py — _record_offer_won_history site guard
-6. quotes.py — _record_quote_won_history site guard
-7. dashboard.py — attention_feed buy plan ImportError
-8. requisitions.py — NC enqueue inner function
-9. avail_score_service.py — pipeline hygiene + quote followup branches
-10. company_utils.py — _rank tie-break
-11. file_mapper.py — missing dir, OSError, singularize, prefix match
-12. diagnosis_service.py — diagnose_ticket file_context branch
+1. vendors.py — thefuzz ImportError fallback in get_or_create_card + check_duplicate
+2. search_service.py — bulk sighting retry + resolve_material_card PostgreSQL branch
+3. offers.py — _record_offer_won_history site guard
+4. quotes.py — _record_quote_won_history site guard
+5. requisitions.py — NC enqueue inner function
+6. avail_score_service.py — pipeline hygiene + quote followup branches
+7. company_utils.py — _rank tie-break
+8. tagging.py — race condition exception handler
 
 Called by: pytest
 Depends on: conftest fixtures, app modules
@@ -213,21 +209,6 @@ class TestQuoteWonHistory:
 
         with patch.object(db_session, "get", return_value=SimpleNamespace(company_id=None)):
             _record_quote_won_history(db_session, req, quote)
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  7. DASHBOARD — attention_feed buy plan ImportError
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestDashboardBuyPlanImportError:
-    """Cover lines 432-433: ImportError on buy_plan import."""
-
-    def test_attention_feed_without_buy_plan(self, client, db_session):
-        """attention_feed handles ImportError from buy_plan (lines 432-433)."""
-        with patch.dict(sys.modules, {"app.models.buy_plan": None}):
-            resp = client.get("/api/dashboard/attention-feed")
-            assert resp.status_code == 200
 
 
 # ══════════════════════════════════════════════════════════════════════
