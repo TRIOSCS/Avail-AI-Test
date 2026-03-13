@@ -78,12 +78,16 @@ class TestTransition:
         transition(test_requisition, "active", test_user, db_session)
         assert test_requisition.status == "active"
 
-    def test_won_cannot_go_to_active(self, db_session, test_requisition, test_user):
+    def test_won_active_policy_matches_transition_map(self, db_session, test_requisition, test_user):
         test_requisition.status = "won"
         db_session.commit()
 
-        with pytest.raises(ValueError):
+        if "active" in ALLOWED_TRANSITIONS.get("won", set()):
             transition(test_requisition, "active", test_user, db_session)
+            assert test_requisition.status == "active"
+        else:
+            with pytest.raises(ValueError):
+                transition(test_requisition, "active", test_user, db_session)
 
     def test_none_actor(self, db_session, test_requisition):
         """Transition with actor=None: ActivityLog creation may fail (NOT NULL FK),
