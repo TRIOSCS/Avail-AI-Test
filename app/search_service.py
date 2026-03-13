@@ -1354,6 +1354,12 @@ def sighting_to_dict(s: Sighting) -> dict:
         source_type=s.source_type,
         age_days=age_days,
     )
+    legacy_bucket_map = {
+        "strong": "high",
+        "moderate": "medium",
+        "weak": "low",
+    }
+    lead_confidence_bucket = legacy_bucket_map.get(quality, "low")
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1387,4 +1393,7 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
         "lead_explanation": explanation,
+        # Backward-compatibility aliases used by older clients/tests.
+        "lead_confidence_bucket": lead_confidence_bucket,
+        "lead_confidence_reason": explanation,
     }
