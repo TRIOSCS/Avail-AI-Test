@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -307,6 +308,14 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 
 # Secret key validation moved to lifespan (fail-fast)
 
+CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Temporary cache/storage reset gate for browsers after frontend rewrites."""
+    current = now or datetime.now(timezone.utc)
+    return current < CLEAR_SITE_DATA_CUTOFF
+
 
 # L0: CSP middleware — restrict script/style sources
 @app.middleware("http")
@@ -328,6 +337,15 @@ async def csp_middleware(request: Request, call_next):
         "connect-src 'self'"
     )
     response.headers["Content-Security-Policy"] = csp
+    return response
+
+
+# L0.5: Temporary Clear-Site-Data header gate for stale client caches
+@app.middleware("http")
+async def clear_site_data_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path != "/health" and _should_set_clear_site_data():
+        response.headers["Clear-Site-Data"] = '"cache", "storage"'
     return response
 
 
@@ -556,7 +574,9 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
+                new_source = ApiSource(status=status, is_active=is_active, **src)
+                db.add(new_source)
+                existing_map[src["name"]] = new_source
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -578,7 +598,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

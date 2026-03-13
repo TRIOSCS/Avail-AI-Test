@@ -12,6 +12,7 @@ import os
 
 import requests
 from bs4 import BeautifulSoup
+from bs4.exceptions import FeatureNotFound
 from loguru import logger
 
 from .config import NcConfig
@@ -122,7 +123,11 @@ class NcSessionManager:
             )
             login_page.raise_for_status()
 
-            soup = BeautifulSoup(login_page.text, "lxml")
+            try:
+                soup = BeautifulSoup(login_page.text, "lxml")
+            except FeatureNotFound:
+                logger.debug("NC login: lxml not available, falling back to html.parser")
+                soup = BeautifulSoup(login_page.text, "html.parser")
             token_input = soup.find("input", {"name": "__RequestVerificationToken"})
             if not token_input:
                 logger.error("NC login: could not find __RequestVerificationToken")

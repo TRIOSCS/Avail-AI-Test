@@ -704,12 +704,10 @@ class TestSeedApiSourcesQuotaBackfill:
         with patch("app.database.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
-            mock_db.query.return_value.all.return_value = []
-
-            # Make filter_by return a source without monthly_quota
             mock_src = MagicMock()
+            mock_src.name = "hunter_enrichment"
             mock_src.monthly_quota = None  # No quota set
-            mock_db.query.return_value.filter_by.return_value.first.return_value = mock_src
+            mock_db.query.return_value.all.return_value = [mock_src]
 
             _seed_api_sources()
 
