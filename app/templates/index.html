@@ -162,6 +162,7 @@
             </div>
             <div class="sb-group-items">
                 <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span> Scorecard</button>
+                <button type="button" class="sb-nav-btn" id="navTaskQueue" data-tip="Task Queue" onclick="sidebarNav('taskqueue',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg></span> Task Queue<span id="taskQueueBadge" class="sb-badge" style="display:none">0</span></button>
             </div>
         </div>
         <!-- Opportunity -->
@@ -1389,6 +1390,21 @@
         </div>
 
     </div><!-- end view-settings -->
+
+    <!-- Task Queue — cross-requisition task management -->
+    <div id="view-taskqueue" class="hidden">
+        <div class="tq-header">
+            <h2 class="tq-title">Task Queue</h2>
+            <button class="btn btn-sm" id="tqCreateBtn" onclick="window._tqShowCreateForm()">+ New Task</button>
+        </div>
+        <div class="tq-tabs" id="tqTabs">
+            <button class="tq-tab active" data-tab="mine" onclick="window._tqSwitchTab('mine',this)">My Tasks <span id="tqMineBadge" class="tq-tab-badge">0</span></button>
+            <button class="tq-tab" data-tab="waiting" onclick="window._tqSwitchTab('waiting',this)">Waiting On <span id="tqWaitingBadge" class="tq-tab-badge">0</span></button>
+            <button class="tq-tab" data-tab="done" onclick="window._tqSwitchTab('done',this)">Completed</button>
+        </div>
+        <div id="tqContent" class="tq-content"></div>
+    </div>
+
     </div><!-- end main-scroll -->
 
     <!-- Mobile Offers Feed -->

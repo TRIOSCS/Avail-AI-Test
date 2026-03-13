@@ -952,7 +952,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-contacts': () => showContacts(),
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts','view-taskqueue':'navTaskQueue'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -1274,10 +1274,10 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts', 'view-taskqueue'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts','view-taskqueue':'taskqueue'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 _hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
@@ -1338,10 +1338,11 @@ window.addEventListener('popstate', (e) => {
         },
         'view-contacts': () => showContacts(),
         'view-suggested': () => window.showSuggested(),
+        'view-taskqueue': () => window.showTaskQueue(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting','view-taskqueue':'navTaskQueue'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -3914,6 +3915,391 @@ function _renderMyTaskItem(task) {
             } catch(e) { /* silently fail */ }
         })();
     }, 500);
+})();
+
+// ---------------------------------------------------------------------------
+// Task Queue — full-page cross-requisition task management
+// Shows "My Tasks", "Waiting On", and "Completed" tabs.
+// Called by: sidebarNav('taskqueue'), popstate handler
+// Depends on: /api/tasks/mine, /api/tasks/waiting, /api/tasks/mine/summary
+// ---------------------------------------------------------------------------
+
+var _tqCurrentTab = 'mine';
+
+window.showTaskQueue = function showTaskQueue() {
+    showView('view-taskqueue');
+    _tqLoadTab(_tqCurrentTab);
+    _tqLoadBadges();
+};
+
+window._tqSwitchTab = function(tab, btn) {
+    _tqCurrentTab = tab;
+    document.querySelectorAll('#tqTabs .tq-tab').forEach(function(t) { t.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    _tqLoadTab(tab);
+};
+
+async function _tqLoadBadges() {
+    try {
+        var summary = await apiFetch('/api/tasks/mine/summary');
+        var mineCount = (summary.assigned_to_me || 0);
+        var waitCount = (summary.waiting_on || 0);
+        var mineBadge = document.getElementById('tqMineBadge');
+        var waitBadge = document.getElementById('tqWaitingBadge');
+        var navBadge = document.getElementById('taskQueueBadge');
+        if (mineBadge) mineBadge.textContent = mineCount;
+        if (waitBadge) waitBadge.textContent = waitCount;
+        if (navBadge) {
+            navBadge.textContent = mineCount;
+            navBadge.style.display = mineCount > 0 ? '' : 'none';
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function _tqLoadTab(tab) {
+    var container = document.getElementById('tqContent');
+    if (!container) return;
+    container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Loading...</div>';
+    try {
+        var tasks;
+        if (tab === 'mine') {
+            tasks = await apiFetch('/api/tasks/mine');
+        } else if (tab === 'waiting') {
+            tasks = await apiFetch('/api/tasks/waiting');
+        } else if (tab === 'done') {
+            tasks = await apiFetch('/api/tasks/mine?status=done');
+        }
+        if (!Array.isArray(tasks)) tasks = [];
+        container.innerHTML = '';
+        if (!tasks.length) {
+            var emptyMsg = tab === 'mine' ? 'No tasks assigned to you' : tab === 'waiting' ? 'No tasks waiting on others' : 'No completed tasks';
+            container.innerHTML = '<div class="tq-empty">' + emptyMsg + '</div>';
+            return;
+        }
+        // Sort: overdue first, then by due date, then created
+        tasks.sort(function(a, b) {
+            if (a.status !== b.status) {
+                var order = { in_progress: 0, todo: 1, done: 2 };
+                return (order[a.status] || 1) - (order[b.status] || 1);
+            }
+            if (!a.due_at && !b.due_at) return 0;
+            if (!a.due_at) return 1;
+            if (!b.due_at) return -1;
+            return new Date(a.due_at) - new Date(b.due_at);
+        });
+        for (var i = 0; i < tasks.length; i++) {
+            container.appendChild(_tqRenderTask(tasks[i], tab));
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="tq-empty" style="color:var(--red)">Failed to load tasks</div>';
+    }
+}
+
+function _tqRenderTask(task, tab) {
+    var isDone = task.status === 'done';
+    var isInProgress = task.status === 'in_progress';
+    var card = document.createElement('div');
+    card.className = 'tq-card' + (isDone ? ' tq-done' : '') + (isInProgress ? ' tq-in-progress' : '');
+
+    // Priority stripe
+    var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
+    card.style.borderLeftColor = priColors[task.priority] || priColors[2];
+
+    // Top row: status actions + title
+    var topRow = document.createElement('div');
+    topRow.className = 'tq-card-top';
+
+    // Status button group
+    var statusGroup = document.createElement('div');
+    statusGroup.className = 'tq-status-group';
+
+    if (tab !== 'done') {
+        if (isDone) {
+            var reopenBtn = _tqStatusBtn('Reopen', 'todo', task);
+            statusGroup.appendChild(reopenBtn);
+        } else if (isInProgress) {
+            var doneBtn = _tqStatusBtn('Done', 'done', task, true);
+            statusGroup.appendChild(doneBtn);
+        } else {
+            // todo state
+            var startBtn = _tqStatusBtn('Start', 'in_progress', task);
+            statusGroup.appendChild(startBtn);
+            var quickDoneBtn = _tqStatusBtn('Done', 'done', task, true);
+            statusGroup.appendChild(quickDoneBtn);
+        }
+    }
+    topRow.appendChild(statusGroup);
+
+    // Title and req name
+    var titleWrap = document.createElement('div');
+    titleWrap.className = 'tq-card-title-wrap';
+    var titleEl = document.createElement('div');
+    titleEl.className = 'tq-card-title';
+    titleEl.textContent = task.title;
+    titleWrap.appendChild(titleEl);
+    var reqLabel = document.createElement('div');
+    reqLabel.className = 'tq-card-req';
+    reqLabel.textContent = task.requisition_name || 'Req #' + task.requisition_id;
+    if (task.requisition_id) {
+        reqLabel.style.cursor = 'pointer';
+        reqLabel.onclick = function() { goToReq(task.requisition_id); };
+    }
+    titleWrap.appendChild(reqLabel);
+    topRow.appendChild(titleWrap);
+    card.appendChild(topRow);
+
+    // Meta row: assignee, creator, due date, status badge
+    var meta = document.createElement('div');
+    meta.className = 'tq-card-meta';
+
+    // Status badge
+    var statusBadge = document.createElement('span');
+    statusBadge.className = 'tq-badge tq-badge-' + task.status;
+    statusBadge.textContent = task.status === 'in_progress' ? 'In Progress' : task.status === 'todo' ? 'To Do' : 'Done';
+    meta.appendChild(statusBadge);
+
+    // Priority badge
+    var priLabels = { 1: 'Low', 2: 'Med', 3: 'High' };
+    var priBadge = document.createElement('span');
+    priBadge.className = 'tq-badge tq-badge-pri-' + task.priority;
+    priBadge.textContent = priLabels[task.priority] || 'Med';
+    meta.appendChild(priBadge);
+
+    if (tab === 'waiting' && task.assignee_name) {
+        var assignee = document.createElement('span');
+        assignee.className = 'tq-meta-text';
+        assignee.textContent = 'Assigned to: ' + task.assignee_name;
+        meta.appendChild(assignee);
+    }
+    if (tab === 'mine' && task.creator_name) {
+        var creator = document.createElement('span');
+        creator.className = 'tq-meta-text';
+        creator.textContent = 'From: ' + task.creator_name;
+        meta.appendChild(creator);
+    }
+    if (task.due_at) {
+        var dueSpan = document.createElement('span');
+        dueSpan.className = 'tq-meta-due';
+        var dueDate = new Date(task.due_at);
+        if (dueDate < new Date() && !isDone) dueSpan.classList.add('tq-overdue');
+        dueSpan.textContent = 'Due: ' + _shortDate(task.due_at);
+        meta.appendChild(dueSpan);
+    }
+    if (task.ai_risk_flag) {
+        var risk = document.createElement('span');
+        risk.className = 'tq-risk';
+        risk.textContent = task.ai_risk_flag;
+        meta.appendChild(risk);
+    }
+    card.appendChild(meta);
+
+    // Description (if any)
+    if (task.description) {
+        var desc = document.createElement('div');
+        desc.className = 'tq-card-desc';
+        desc.textContent = task.description;
+        card.appendChild(desc);
+    }
+
+    // Completion note (if done and has note)
+    if (isDone && task.completion_note) {
+        var note = document.createElement('div');
+        note.className = 'tq-card-note';
+        note.innerHTML = '<strong>Resolution:</strong> ' + _escHtml(task.completion_note);
+        card.appendChild(note);
+    }
+
+    return card;
+}
+
+function _tqStatusBtn(label, newStatus, task, requireNote) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-sm tq-status-btn tq-status-' + newStatus;
+    btn.textContent = label;
+    btn.onclick = function(e) {
+        e.stopPropagation();
+        if (requireNote && newStatus === 'done') {
+            _tqShowCompleteModal(task);
+        } else {
+            _tqChangeStatus(task.id, newStatus);
+        }
+    };
+    return btn;
+}
+
+function _tqShowCompleteModal(task) {
+    // Remove existing modal
+    var old = document.getElementById('tqCompleteModal');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'tqCompleteModal';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '440px';
+    box.innerHTML =
+        '<h3 style="margin:0 0 12px;font-size:15px">Complete Task</h3>' +
+        '<p style="font-size:12px;color:var(--muted);margin:0 0 12px">' + _escHtml(task.title) + '</p>' +
+        '<textarea id="tqCompleteNote" placeholder="How was this resolved? (required)" rows="4" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical"></textarea>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tqCompleteModal\').remove()">Cancel</button>' +
+            '<button class="btn btn-sm" id="tqCompleteSubmit" style="background:var(--green,#22c55e);color:#fff">Mark Done</button>' +
+        '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.getElementById('tqCompleteNote').focus();
+
+    document.getElementById('tqCompleteSubmit').onclick = async function() {
+        var note = document.getElementById('tqCompleteNote').value.trim();
+        if (!note) {
+            document.getElementById('tqCompleteNote').style.borderColor = 'var(--red)';
+            return;
+        }
+        try {
+            await apiFetch('/api/tasks/' + task.id + '/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completion_note: note }),
+            });
+            overlay.remove();
+            _tqLoadTab(_tqCurrentTab);
+            _tqLoadBadges();
+            if (typeof showToast === 'function') showToast('Task completed', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to complete task', 'error');
+        }
+    };
+}
+
+async function _tqChangeStatus(taskId, newStatus) {
+    try {
+        await apiFetch('/api/tasks/' + taskId + '/status', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus }),
+        });
+        _tqLoadTab(_tqCurrentTab);
+        _tqLoadBadges();
+        var msgs = { todo: 'Task reopened', in_progress: 'Task started', done: 'Task completed' };
+        if (typeof showToast === 'function') showToast(msgs[newStatus] || 'Status updated', 'success');
+    } catch (e) {
+        if (typeof showToast === 'function') showToast('Failed to update task', 'error');
+    }
+}
+
+// Task creation form (modal)
+window._tqShowCreateForm = async function() {
+    var old = document.getElementById('tqCreateModal');
+    if (old) old.remove();
+
+    // Load users for assignment dropdown
+    var users = [];
+    try { users = await apiFetch('/api/users/list'); } catch(e) { users = []; }
+
+    // Load requisitions for the dropdown
+    var reqs = [];
+    try {
+        var allReqs = await apiFetch('/api/requisitions?limit=200');
+        reqs = Array.isArray(allReqs) ? allReqs : (allReqs.items || []);
+    } catch(e) { reqs = []; }
+
+    var overlay = document.createElement('div');
+    overlay.id = 'tqCreateModal';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+    var userOpts = '<option value="">-- Assign to --</option>';
+    for (var i = 0; i < users.length; i++) {
+        userOpts += '<option value="' + users[i].id + '">' + _escHtml(users[i].name || users[i].email) + '</option>';
+    }
+
+    var reqOpts = '<option value="">-- Select Requisition --</option>';
+    for (var j = 0; j < reqs.length; j++) {
+        var rName = reqs[j].name || ('Req #' + reqs[j].id);
+        reqOpts += '<option value="' + reqs[j].id + '">' + _escHtml(rName) + '</option>';
+    }
+
+    // Default due date = 2 days from now
+    var defaultDue = new Date();
+    defaultDue.setDate(defaultDue.getDate() + 2);
+    var dueStr = defaultDue.toISOString().split('T')[0];
+
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '480px';
+    box.innerHTML =
+        '<h3 style="margin:0 0 16px;font-size:15px">New Task</h3>' +
+        '<div class="tq-form-group"><label>Requisition</label><select id="tqNewReq" class="tq-form-input">' + reqOpts + '</select></div>' +
+        '<div class="tq-form-group"><label>Title</label><input id="tqNewTitle" type="text" placeholder="What needs to be done?" class="tq-form-input"></div>' +
+        '<div class="tq-form-group"><label>Description (optional)</label><textarea id="tqNewDesc" rows="2" placeholder="Additional details..." class="tq-form-input" style="resize:vertical"></textarea></div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<div class="tq-form-group" style="flex:1;min-width:140px"><label>Assign To</label><select id="tqNewAssignee" class="tq-form-input">' + userOpts + '</select></div>' +
+            '<div class="tq-form-group" style="flex:1;min-width:140px"><label>Due Date</label><input id="tqNewDue" type="date" value="' + dueStr + '" class="tq-form-input"></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+            '<div class="tq-form-group" style="flex:1"><label>Priority</label><select id="tqNewPriority" class="tq-form-input"><option value="1">Low</option><option value="2" selected>Medium</option><option value="3">High</option></select></div>' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tqCreateModal\').remove()">Cancel</button>' +
+            '<button class="btn btn-sm" id="tqCreateSubmit" style="background:var(--blue);color:#fff">Create Task</button>' +
+        '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.getElementById('tqNewTitle').focus();
+
+    document.getElementById('tqCreateSubmit').onclick = async function() {
+        var reqId = document.getElementById('tqNewReq').value;
+        var title = document.getElementById('tqNewTitle').value.trim();
+        var desc = document.getElementById('tqNewDesc').value.trim();
+        var assigneeId = document.getElementById('tqNewAssignee').value;
+        var dueVal = document.getElementById('tqNewDue').value;
+        var priority = parseInt(document.getElementById('tqNewPriority').value);
+
+        if (!reqId) { document.getElementById('tqNewReq').style.borderColor = 'var(--red)'; return; }
+        if (!title) { document.getElementById('tqNewTitle').style.borderColor = 'var(--red)'; return; }
+        if (!assigneeId) { document.getElementById('tqNewAssignee').style.borderColor = 'var(--red)'; return; }
+        if (!dueVal) { document.getElementById('tqNewDue').style.borderColor = 'var(--red)'; return; }
+
+        var body = {
+            title: title,
+            assigned_to_id: parseInt(assigneeId),
+            due_at: new Date(dueVal).toISOString(),
+            priority: priority,
+        };
+        if (desc) body.description = desc;
+
+        try {
+            await apiFetch('/api/requisitions/' + reqId + '/tasks', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            overlay.remove();
+            _tqLoadTab(_tqCurrentTab);
+            _tqLoadBadges();
+            if (typeof showToast === 'function') showToast('Task created', 'success');
+        } catch (e) {
+            var msg = 'Failed to create task';
+            try { var err = await e.json(); msg = err.detail || msg; } catch(x) {}
+            if (typeof showToast === 'function') showToast(msg, 'error');
+        }
+    };
+};
+
+function _escHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str || '';
+    return div.innerHTML;
+}
+
+// Load task queue badge on page load
+(function() {
+    setTimeout(function() {
+        _tqLoadBadges();
+    }, 800);
 })();
 
 // ---------------------------------------------------------------------------
@@ -9714,6 +10100,7 @@ export function sidebarNav(page, el) {
         prospecting: () => window.showSuggested(),
         suggested: () => window.showSuggested(),
         apihealth: () => window.showSettings('apihealth'),
+        taskqueue: () => window.showTaskQueue(),
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }

@@ -92,6 +92,25 @@ def update_task(
     return task_service.task_to_response(updated)
 
 
+@router.patch("/{req_id}/tasks/{task_id}/status")
+def patch_task_status(
+    req_id: int,
+    task_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Quick status change (todo/in_progress/done) for drag-drop or checkbox."""
+    task = task_service.get_task(db, task_id)
+    if not task or task.requisition_id != req_id:
+        raise HTTPException(404, "Task not found")
+    new_status = body.get("status")
+    if new_status not in ("todo", "in_progress", "done"):
+        raise HTTPException(400, "Invalid status")
+    updated = task_service.update_task_status(db, task_id, new_status)
+    return task_service.task_to_response(updated)
+
+
 @router.delete("/{req_id}/tasks/{task_id}", status_code=204)
 def delete_task(
     req_id: int,
@@ -136,6 +155,24 @@ def get_waiting_on_tasks(
     """Get tasks created by the current user but assigned to someone else."""
     tasks = task_service.get_waiting_on_tasks(db, user.id)
     return [task_service.task_to_response(t) for t in tasks]
+
+
+@my_tasks_router.patch("/{task_id}/status")
+def patch_my_task_status(
+    task_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Quick status change from the cross-req Task Queue view."""
+    task = task_service.get_task(db, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    new_status = body.get("status")
+    if new_status not in ("todo", "in_progress", "done"):
+        raise HTTPException(400, "Invalid status")
+    updated = task_service.update_task_status(db, task_id, new_status)
+    return task_service.task_to_response(updated)
 
 
 @my_tasks_router.post("/{task_id}/complete")

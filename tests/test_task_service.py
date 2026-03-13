@@ -457,6 +457,73 @@ class TestCompleteAPI:
         assert resp.status_code == 404
 
 
+class TestPatchStatusAPI:
+    """Tests for the PATCH status endpoints used by the Task Queue UI."""
+
+    def test_patch_req_task_status(self, client, test_requisition: Requisition, db_session: Session):
+        task = task_service.create_task(db_session, requisition_id=test_requisition.id, title="Patch me")
+        resp = client.patch(
+            f"/api/requisitions/{test_requisition.id}/tasks/{task.id}/status",
+            json={"status": "in_progress"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    def test_patch_req_task_status_to_done(self, client, test_requisition: Requisition, db_session: Session):
+        task = task_service.create_task(db_session, requisition_id=test_requisition.id, title="Done via patch")
+        resp = client.patch(
+            f"/api/requisitions/{test_requisition.id}/tasks/{task.id}/status",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "done"
+        assert resp.json()["completed_at"] is not None
+
+    def test_patch_req_task_invalid_status(self, client, test_requisition: Requisition, db_session: Session):
+        task = task_service.create_task(db_session, requisition_id=test_requisition.id, title="Bad status")
+        resp = client.patch(
+            f"/api/requisitions/{test_requisition.id}/tasks/{task.id}/status",
+            json={"status": "invalid"},
+        )
+        assert resp.status_code == 400
+
+    def test_patch_req_task_not_found(self, client, test_requisition: Requisition):
+        resp = client.patch(
+            f"/api/requisitions/{test_requisition.id}/tasks/99999/status",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 404
+
+    def test_patch_my_task_status(self, client, test_requisition: Requisition, test_user: User, db_session: Session):
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Cross-req patch",
+            assigned_to_id=test_user.id,
+        )
+        resp = client.patch(
+            f"/api/tasks/{task.id}/status",
+            json={"status": "in_progress"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    def test_patch_my_task_status_invalid(self, client, test_requisition: Requisition, db_session: Session):
+        task = task_service.create_task(db_session, requisition_id=test_requisition.id, title="Bad")
+        resp = client.patch(
+            f"/api/tasks/{task.id}/status",
+            json={"status": "nope"},
+        )
+        assert resp.status_code == 400
+
+    def test_patch_my_task_not_found(self, client):
+        resp = client.patch(
+            "/api/tasks/99999/status",
+            json={"status": "done"},
+        )
+        assert resp.status_code == 404
+
+
 class TestWaitingAPI:
     def test_waiting_endpoint(self, client, test_requisition: Requisition, test_user: User, db_session: Session):
         other_user = User(email="delegate@test.com", name="Delegate")

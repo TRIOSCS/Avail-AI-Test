@@ -3417,3 +3417,53 @@ body { line-height: 1.42; }
   line-height: 1.5;
   color: #64748b;
 }
+
+/* ---------------------------------------------------------------------------
+   Task Queue — full-page cross-req task management
+   --------------------------------------------------------------------------- */
+.tq-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 0 8px; }
+.tq-title { font-size: 18px; font-weight: 700; margin: 0; color: var(--fg, #1e293b); }
+.tq-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border, #e2e8f0); padding-bottom: 0; margin-bottom: 12px; }
+.tq-tab { background: none; border: none; padding: 8px 14px; font-size: 13px; font-weight: 500; color: var(--muted, #64748b); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s; }
+.tq-tab:hover { color: var(--fg, #1e293b); }
+.tq-tab.active { color: var(--blue, #3b6ea8); border-bottom-color: var(--blue, #3b6ea8); }
+.tq-tab-badge { font-size: 10px; background: var(--bg2, #f1f5f9); color: var(--muted); padding: 1px 6px; border-radius: 10px; margin-left: 4px; }
+.tq-tab.active .tq-tab-badge { background: var(--blue-lt, #edf3fa); color: var(--blue, #3b6ea8); }
+.tq-content { display: flex; flex-direction: column; gap: 8px; }
+.tq-empty { text-align: center; padding: 48px 20px; color: var(--muted, #64748b); font-size: 13px; }
+
+/* Task cards */
+.tq-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 12px 14px; border-left: 4px solid var(--muted); transition: box-shadow .15s, border-color .15s; }
+.tq-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.tq-card.tq-done { opacity: 0.6; }
+.tq-card.tq-in-progress { border-left-color: var(--blue, #3b6ea8) !important; background: var(--blue-lt, #edf3fa); }
+.tq-card-top { display: flex; align-items: flex-start; gap: 10px; }
+.tq-status-group { display: flex; gap: 4px; flex-shrink: 0; padding-top: 2px; }
+.tq-status-btn { font-size: 11px; padding: 3px 10px; border-radius: 4px; white-space: nowrap; }
+.tq-status-in_progress { background: var(--blue-lt, #edf3fa); color: var(--blue, #3b6ea8); border: 1px solid var(--blue, #3b6ea8); }
+.tq-status-done { background: var(--green-light, #f0fdfa); color: var(--green, #0f766e); border: 1px solid var(--green, #0f766e); }
+.tq-status-todo { background: var(--bg2, #f1f5f9); color: var(--muted, #64748b); border: 1px solid var(--border); }
+.tq-card-title-wrap { flex: 1; min-width: 0; }
+.tq-card-title { font-size: 14px; font-weight: 600; color: var(--fg, #1e293b); line-height: 1.4; }
+.tq-card-req { font-size: 11px; color: var(--muted, #64748b); margin-top: 2px; }
+.tq-card-req:hover { color: var(--blue); text-decoration: underline; }
+.tq-card-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; font-size: 11px; }
+.tq-badge { padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 10px; }
+.tq-badge-todo { background: var(--bg2, #f1f5f9); color: var(--muted, #64748b); }
+.tq-badge-in_progress { background: var(--blue-lt, #edf3fa); color: var(--blue, #3b6ea8); }
+.tq-badge-done { background: var(--green-light, #f0fdfa); color: var(--green, #0f766e); }
+.tq-badge-pri-1 { background: var(--green-light, #f0fdfa); color: var(--green); }
+.tq-badge-pri-2 { background: var(--amber-light, #fefce8); color: var(--amber); }
+.tq-badge-pri-3 { background: var(--red-light, #fef2f2); color: var(--red); }
+.tq-meta-text { color: var(--muted, #64748b); }
+.tq-meta-due { color: var(--muted, #64748b); }
+.tq-meta-due.tq-overdue { color: var(--red, #ef4444); font-weight: 600; }
+.tq-risk { color: var(--amber, #a16207); font-weight: 500; }
+.tq-card-desc { font-size: 12px; color: var(--muted, #64748b); margin-top: 6px; line-height: 1.5; }
+.tq-card-note { font-size: 12px; color: var(--green, #0f766e); background: var(--green-light, #f0fdfa); padding: 6px 10px; border-radius: 6px; margin-top: 8px; line-height: 1.5; }
+
+/* Task create/complete form elements */
+.tq-form-group { margin-bottom: 10px; }
+.tq-form-group label { display: block; font-size: 11px; font-weight: 600; color: var(--muted, #64748b); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px; }
+.tq-form-input { width: 100%; border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 7px 10px; font-size: 13px; background: var(--card, #fff); color: var(--fg, #1e293b); transition: border-color .15s; }
+.tq-form-input:focus { border-color: var(--blue, #3b6ea8); outline: none; box-shadow: 0 0 0 2px rgba(59,110,168,.15); }
