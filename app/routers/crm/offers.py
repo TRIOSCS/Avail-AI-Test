@@ -158,8 +158,32 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": [],  # populated below after batch-loading
             }
         )
+    # Batch-load risk flags for all offers in this requisition
+    try:
+        from ...models.risk_flag import RiskFlag as _RiskFlag
+
+        all_offer_ids = {o.id for o in offers}
+        if all_offer_ids:
+            risk_flag_rows = (
+                db.query(_RiskFlag)
+                .filter(_RiskFlag.source_offer_id.in_(all_offer_ids))
+                .all()
+            )
+            risk_flag_map: dict[int, list[dict]] = {}
+            for rf in risk_flag_rows:
+                risk_flag_map.setdefault(rf.source_offer_id, []).append(
+                    {"id": rf.id, "type": rf.type, "severity": rf.severity, "message": rf.message}
+                )
+            # Apply risk_flags to each offer dict in groups
+            for offer_list in groups.values():
+                for offer_dict in offer_list:
+                    offer_dict["risk_flags"] = risk_flag_map.get(offer_dict["id"], [])
+    except Exception:
+        pass  # Risk flags are optional — don't break offer list if unavailable
+
     # Preload quoted prices ONCE instead of per-requirement DB call
     quoted_prices = _preload_last_quoted_prices(db)
 
@@ -315,6 +339,11 @@ async def create_offer(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
+
+    # Sanitize text inputs to prevent stored XSS
+    from ...utils.sanitize import sanitize_text
+    if payload.vendor_name:
+        payload.vendor_name = sanitize_text(payload.vendor_name) or payload.vendor_name
 
     card = None
 
@@ -576,6 +605,11 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+
+    # Terminal status guard: once sold/won, status cannot be changed via PUT
+    _TERMINAL_OFFER_STATUSES = {"sold", "won"}
+    if "status" in changes and offer.status in _TERMINAL_OFFER_STATUSES and changes["status"] != offer.status:
+        raise HTTPException(400, f"Cannot change status from '{offer.status}' — use dedicated endpoints")
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

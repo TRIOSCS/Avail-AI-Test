@@ -707,22 +707,22 @@ class TestSeedApiSourcesQuotaBackfill:
     """Test monthly_quota backfill in _seed_api_sources."""
 
     def test_quota_backfill_sets_value(self):
-        """Line 851: src with no monthly_quota gets backfilled."""
+        """Line 851: src with no monthly_quota gets backfilled via existing_map."""
         from app.main import _seed_api_sources
 
         with patch("app.database.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
-            mock_db.query.return_value.all.return_value = []
 
-            # Make filter_by return a source without monthly_quota
+            # Return a source with no quota — existing_map is built from all()
             mock_src = MagicMock()
+            mock_src.name = "nexar"  # One of the known quota keys
             mock_src.monthly_quota = None  # No quota set
-            mock_db.query.return_value.filter_by.return_value.first.return_value = mock_src
+            mock_db.query.return_value.all.return_value = [mock_src]
 
             _seed_api_sources()
 
-            # The quota should have been set
+            # The quota should have been set from quota_map via existing_map
             assert mock_src.monthly_quota is not None
             mock_db.commit.assert_called()
 

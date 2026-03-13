@@ -276,7 +276,12 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        from app.utils.sanitize import sanitize_text
+        raw_items = updates.pop("line_items") or []
+        quote.line_items = [
+            {**item, "mpn": sanitize_text(item.get("mpn")) or item.get("mpn"), "manufacturer": sanitize_text(item.get("manufacturer")) or item.get("manufacturer")}
+            for item in raw_items
+        ]
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell

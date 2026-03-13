@@ -465,6 +465,79 @@ async def get_requisition(
     }
 
 
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def get_quote_summary(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight quote tab projection — tells the UI whether a quote and buy plan exist."""
+    from ...models import BuyPlanV3, Quote
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+
+    buy_plan = None
+    if quote:
+        buy_plan = db.query(BuyPlanV3).filter(BuyPlanV3.quote_id == quote.id).first()
+
+    return {
+        "requisition_id": req_id,
+        "has_quote": quote is not None,
+        "has_buy_plan": buy_plan is not None,
+        "quote_status": quote.status if quote else None,
+        "quote_number": quote.quote_number if quote else None,
+        "line_count": len(quote.line_items) if quote and quote.line_items else 0,
+        "buy_plan_status": buy_plan.status if buy_plan else None,
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def get_or_create_buy_plan(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Bridge endpoint: get or create a buy plan for a requisition (requires a quote first)."""
+    from ...models import BuyPlanV3, Quote
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "Cannot create buy plan: no quote exists for this requisition")
+
+    existing = db.query(BuyPlanV3).filter(BuyPlanV3.quote_id == quote.id).first()
+    if existing:
+        return {"id": existing.id, "status": existing.status, "quote_id": quote.id}
+
+    plan = BuyPlanV3(
+        quote_id=quote.id,
+        requisition_id=req_id,
+        status="draft",
+        submitted_by_id=user.id,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return {"id": plan.id, "status": plan.status, "quote_id": quote.id}
+
+
 @router.get("/api/requisitions/{req_id}/sourcing-score")
 async def requisition_sourcing_score(
     req_id: int,
