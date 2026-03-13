@@ -556,7 +556,9 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
+                new_source = ApiSource(status=status, is_active=is_active, **src)
+                db.add(new_source)
+                existing_map[src["name"]] = new_source
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -578,7 +580,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

@@ -11,35 +11,21 @@ Depends on: app/main.py, tests/conftest.py fixtures
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 
-def test_should_set_clear_site_data_before_cutoff() -> None:
-    """Header gate stays enabled before the configured cutoff timestamp."""
-    from app.main import _should_set_clear_site_data
+def test_clear_site_data_helper_removed() -> None:
+    """Legacy temporary helper was removed after rollout window."""
+    import app.main as main_mod
 
-    assert _should_set_clear_site_data(datetime(2026, 3, 17, 12, 0, tzinfo=timezone.utc)) is True
-
-
-def test_should_set_clear_site_data_after_cutoff() -> None:
-    """Header gate turns off automatically after the configured cutoff timestamp."""
-    from app.main import _should_set_clear_site_data
-
-    assert _should_set_clear_site_data(datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)) is False
+    assert not hasattr(main_mod, "_should_set_clear_site_data")
 
 
-def test_clear_site_data_header_respects_gate(client) -> None:
-    """Non-health responses should only include the header while gate is active."""
-    with patch("app.main._should_set_clear_site_data", return_value=True):
-        enabled = client.get("/")
-        assert enabled.status_code == 200
-        assert enabled.headers.get("Clear-Site-Data") == '"cache", "storage"'
-
-    with patch("app.main._should_set_clear_site_data", return_value=False):
-        disabled = client.get("/")
-        assert disabled.status_code == 200
-        assert "Clear-Site-Data" not in disabled.headers
+def test_clear_site_data_header_not_emitted(client) -> None:
+    """Root responses should not include Clear-Site-Data now that rollout ended."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "Clear-Site-Data" not in resp.headers
 
 
 def test_seed_api_sources_backfills_hunter_enrichment_quota_without_extra_query() -> None:
