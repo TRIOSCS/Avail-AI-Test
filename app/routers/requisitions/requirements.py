@@ -365,9 +365,29 @@ async def add_requirements(
         finally:
             bg_db.close()
 
+    # Auto-source: search all API connectors for newly created requirements
+    async def _auto_source_batch(requirement_ids: list[int]):
+        from ...database import SessionLocal
+        from ...search_service import search_requirement as _search
+
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                try:
+                    req_obj = bg_db.get(Requirement, rid)
+                    if not req_obj:
+                        continue
+                    await _search(req_obj, bg_db)
+                    logger.info("Auto-sourced requirement %s (%s)", rid, req_obj.primary_mpn)
+                except Exception:
+                    logger.debug("Auto-source failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
     if created:
         background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
         background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
+        background_tasks.add_task(_auto_source_batch, [r.id for r in created])
 
     # Duplicate detection
     duplicates = []
@@ -539,8 +559,36 @@ async def upload_requirements(
         finally:
             bg_db.close()
 
+    # Auto-source uploaded requirements via API connectors
+    async def _auto_source_uploaded(requisition_id: int, count: int):
+        from ...database import SessionLocal
+        from ...search_service import search_requirement as _search
+
+        bg_db = SessionLocal()
+        try:
+            try:
+                reqs = (
+                    bg_db.query(Requirement)
+                    .filter(Requirement.requisition_id == requisition_id)
+                    .order_by(Requirement.id.desc())
+                    .limit(count)
+                    .all()
+                )
+            except Exception:
+                logger.debug("Auto-source query failed for requisition %s", requisition_id, exc_info=True)
+                return
+            for r_item in reqs:
+                try:
+                    await _search(r_item, bg_db)
+                    logger.info("Auto-sourced uploaded requirement %s (%s)", r_item.id, r_item.primary_mpn)
+                except Exception:
+                    logger.debug("Auto-source failed for requirement %s", r_item.id, exc_info=True)
+        finally:
+            bg_db.close()
+
     if created:
         background_tasks.add_task(_nc_enqueue_uploaded, req_id, created)
+        background_tasks.add_task(_auto_source_uploaded, req_id, created)
 
     return {"created": created, "total_rows": len(rows)}
 

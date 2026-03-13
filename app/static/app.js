@@ -9952,7 +9952,7 @@ async function createRequisition() {
         const nrCF = document.getElementById('nrContactField'); if (nrCF) { nrCF.classList.add('u-hidden'); nrCF.style.display = ''; }
         const nrCS = document.getElementById('nrContactSelect'); if (nrCS) nrCS.innerHTML = '<option value="">— Select contact —</option>';
         await loadRequisitions();
-        expandToSubTab(data.id, 'sightings');
+        expandToSubTab(data.id, 'workspace');
         showToast('Requisition created — add parts below', 'info');
     } catch (e) { showToast('Failed to create requisition', 'error'); }
     _createReqPending = false;
@@ -15040,7 +15040,7 @@ function _rfqRenderPartList(reqId) {
     const tbody = document.getElementById('rfqPartBody-' + reqId);
     if (!tbody) return;
     if (_rfqPartsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-placeholder">No parts added yet</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="4" class="empty-placeholder">No parts added yet — <a style="cursor:pointer;color:var(--blue)" onclick="event.stopPropagation();addDrillRow(${reqId})">+ Add Part</a></td></tr>`;
         return;
     }
     tbody.innerHTML = _rfqPartsData.map(p => _rfqPartRow(p)).join('');
