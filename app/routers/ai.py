@@ -748,7 +748,7 @@ async def ai_apply_freeform_rfq(
     """Create requisition + requirements from edited RFQ template."""
     from app.cache.decorators import invalidate_prefix
 
-    from ...utils.normalization import normalize_mpn_key
+    from ..utils.normalization import normalize_mpn_key
 
     if not payload.customer_site_id:
         raise HTTPException(400, "customer_site_id required")
@@ -768,8 +768,8 @@ async def ai_apply_freeform_rfq(
     db.add(req)
     db.flush()
 
-    from ...schemas.requisitions import RequirementCreate
-    from ...search_service import resolve_material_card
+    from ..schemas.requisitions import RequirementCreate
+    from ..search_service import resolve_material_card
 
     for item in payload.requirements[:50]:
         try:
@@ -809,8 +809,8 @@ async def ai_save_freeform_offers(
     """Save freeform-parsed offers to a requisition (after user review)."""
     from app.dependencies import get_req_for_user
 
-    from ...utils.normalization import fuzzy_mpn_match, normalize_mpn_key
-    from ...vendor_utils import normalize_vendor_name
+    from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
+    from ..vendor_utils import normalize_vendor_name
 
     req = get_req_for_user(db, user, payload.requisition_id)
     if not req:
@@ -825,7 +825,7 @@ async def ai_save_freeform_offers(
                 if fuzzy_mpn_match(o.mpn, r.primary_mpn):
                     req_id = r.id
                     break
-        from ...search_service import resolve_material_card
+        from ..search_service import resolve_material_card
 
         mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
         norm_name = normalize_vendor_name(o.vendor_name or "")
