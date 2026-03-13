@@ -10,9 +10,18 @@ Depends on: app/routers/dashboard.py, app/models
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
 
 # ── Helpers ──────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _skip_if_dashboard_router_disabled(client):
+    has_route = any(getattr(route, "path", "") == "/api/dashboard/buyer-brief" for route in client.app.routes)
+    if not has_route:
+        pytest.skip("Dashboard router disabled in MVP mode")
 
 
 def _make_user(db, name="KPI User"):

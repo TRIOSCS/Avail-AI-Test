@@ -9,6 +9,8 @@ Depends on: app/routers/dashboard.py, conftest fixtures
 
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
+
 from app.models import (
     ActivityLog,
     Company,
@@ -23,6 +25,12 @@ from app.models.performance import AvailScoreSnapshot
 
 class TestAttentionFeed:
     """Tests for /api/dashboard/attention-feed endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/attention-feed" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def _make_req(self, db, user, name="REQ-1", status="active", deadline=None, days_ago=0):
         r = Requisition(
@@ -228,6 +236,12 @@ class TestAttentionFeed:
 
 class TestTeamLeaderboardUserRole:
     """Tests for user_role field in /api/dashboard/team-leaderboard."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/team-leaderboard" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def test_user_role_included(self, client, db_session, test_user):
         """team-leaderboard entries include user_role field."""

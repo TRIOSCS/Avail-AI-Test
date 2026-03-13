@@ -382,6 +382,12 @@ class TestCrmQuoteEmailFmtPrice:
 
 
 class TestEnrichmentBackfillEmails:
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(getattr(route, "path", "") == "/api/enrichment/backfill-emails" for route in admin_client.app.routes)
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_backfill_activity_log_contacts(self, admin_client, db_session, test_vendor_card):
         al = ActivityLog(
             user_id=1,
@@ -590,6 +596,14 @@ class TestEnrichmentBackfillEmails:
 
 
 class TestEnrichmentDeepScan:
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/deep-email-scan/{user_id}" for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def _setup_user(self, admin_user, db_session):
         admin_user.m365_connected = True
         admin_user.access_token = "fake-token"

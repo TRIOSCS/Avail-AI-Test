@@ -10,6 +10,8 @@ Covers:
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.models import (
     ActivityLog,
     Company,
@@ -67,6 +69,12 @@ class TestCapOutlierLowered:
 class TestMorningBriefTargetUser:
     """Morning brief should use salesperson_id user's name in AI prompt."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/morning-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
     def test_default_uses_logged_in_user(self, mock_claude, client, db_session, test_user):
         mock_claude.return_value = {"text": "Brief for you."}
@@ -100,6 +108,12 @@ class TestMorningBriefTargetUser:
 
 class TestQuotesAwaitingConsistency:
     """The AI prompt should use the same quotes_awaiting value as stats."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/morning-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
     def test_ai_prompt_matches_stats(self, mock_claude, client, db_session, test_user):

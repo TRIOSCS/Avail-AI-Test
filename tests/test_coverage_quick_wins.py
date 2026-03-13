@@ -248,6 +248,12 @@ class TestSiteUnassignGuard:
 
 
 class TestDashboardTimezoneAware:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/needs-attention" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_needs_attention_with_tz_aware_last_at(self, client, db_session, test_user):
         """Timezone-aware last_at hits the else branch on line 153.
 

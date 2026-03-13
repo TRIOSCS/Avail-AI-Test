@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ── Scheduler Job Wrappers ───────────────────────────────────────────
 
 
@@ -255,6 +257,12 @@ class TestSchedulerMonthlyEnrichment:
 
 
 class TestPerformanceRouter:
+    @pytest.fixture(autouse=True)
+    def _skip_if_performance_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/performance/avail-scores" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Performance router disabled in MVP mode")
+
     def test_avail_scores_invalid_month(self, client):
         resp = client.get("/api/performance/avail-scores?role=buyer&month=bad")
         assert resp.status_code == 400

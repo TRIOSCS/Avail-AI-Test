@@ -12,6 +12,13 @@ from app.models.crm import Company, CustomerSite
 from tests.conftest import engine  # noqa: F401
 
 
+@pytest.fixture(autouse=True)
+def _skip_if_enrichment_router_disabled(client):
+    has_route = any(getattr(route, "path", "") == "/api/enrichment/verify-email" for route in client.app.routes)
+    if not has_route:
+        pytest.skip("Enrichment router disabled in MVP mode")
+
+
 @pytest.fixture
 def test_co(db_session):
     co = Company(name="API Test Corp", domain="apitest.com", is_active=True)

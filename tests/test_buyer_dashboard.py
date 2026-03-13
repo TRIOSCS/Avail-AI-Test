@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import (
     Contact,
     Offer,
@@ -12,6 +14,12 @@ from app.models import (
 
 class TestBuyerBrief:
     """Tests for the /api/dashboard/buyer-brief endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/buyer-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def _make_req(self, db, user, name="REQ-1", status="active", deadline=None, days_ago=0):
         r = Requisition(

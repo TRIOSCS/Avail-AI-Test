@@ -60,14 +60,18 @@ def setup_logging() -> None:
         )
     if is_production:
         # Rotate file for persistent logs on the server (always JSON for parsing)
-        logger.add(
-            "/var/log/avail/avail.log",
-            level=log_level,
-            rotation="50 MB",
-            retention="7 days",
-            compression="gz",
-            serialize=True,
-        )
+        try:
+            logger.add(
+                "/var/log/avail/avail.log",
+                level=log_level,
+                rotation="50 MB",
+                retention="7 days",
+                compression="gz",
+                serialize=True,
+            )
+        except OSError as exc:
+            # CI/test environments may not have writable /var/log permissions.
+            logger.warning("File logging disabled: {}", exc)
 
     # Intercept stdlib logging → route through Loguru
     # This makes all existing logging.getLogger() calls use Loguru

@@ -38,6 +38,12 @@ from app.models.intelligence import MaterialVendorHistory
 class TestDashboardInvalidDeadline:
     """Attention feed: invalid deadline string triggers except branch."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/attention-feed" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_invalid_deadline_skipped_in_attention_feed(self, client, db_session, test_user):
         """Req with non-date deadline is skipped silently (no crash)."""
         r = Requisition(
@@ -65,6 +71,12 @@ class TestDashboardInvalidDeadline:
 
 class TestDashboardBuyPlanAttentionFeed:
     """Attention feed includes pending buy plans (Source 5)."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/attention-feed" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def test_buyplan_pending_appears_in_attention_feed(self, client, db_session, test_user, test_quote):
         """A draft buy plan shows as buyplan_pending in attention feed."""
@@ -141,6 +153,12 @@ class TestDashboardBuyPlanAttentionFeed:
 class TestBuyerBriefBuyPlanNames:
     """Buyer-brief financial section resolves customer names for recent BPs."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/buyer-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_recent_buyplans_include_customer_name(self, client, db_session, test_user, test_quote, test_requisition):
         """Recent buy plans in buyer-brief resolve customer names via req (lines 808-809)."""
         test_requisition.customer_name = "Delta Corp"
@@ -178,6 +196,12 @@ class TestBuyerBriefBuyPlanNames:
 
 class TestBuyerBriefPendingBPNames:
     """Buyer-brief pending buy plans resolve customer names."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/buyer-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def test_pending_buyplans_resolve_customer_name(self, client, db_session, test_user, test_quote, test_requisition):
         """Pending buy plans in buyer-brief have customer_name from requisition (lines 1063-1064)."""

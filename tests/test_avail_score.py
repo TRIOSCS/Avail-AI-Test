@@ -592,6 +592,11 @@ class TestGetAvailScores:
 # ── API Endpoint Tests ──────────────────────────────────────────────
 
 
+def _has_performance_routes(app) -> bool:
+    """Performance router is disabled when MVP mode is enabled."""
+    return any(getattr(route, "path", "") == "/api/performance/avail-scores" for route in app.routes)
+
+
 class TestAvailScoreAPI:
     def test_get_avail_scores_buyer(self, db_session):
         """GET /api/performance/avail-scores?role=buyer returns data."""
@@ -611,6 +616,10 @@ class TestAvailScoreAPI:
         client = TestClient(app)
 
         resp = client.get("/api/performance/avail-scores?role=buyer&month=2026-02")
+        if not _has_performance_routes(app):
+            assert resp.status_code == 404
+            app.dependency_overrides.clear()
+            return
         assert resp.status_code == 200
         data = resp.json()
         assert data["role"] == "buyer"
@@ -636,6 +645,10 @@ class TestAvailScoreAPI:
         client = TestClient(app)
 
         resp = client.get("/api/performance/avail-scores?role=sales&month=2026-02")
+        if not _has_performance_routes(app):
+            assert resp.status_code == 404
+            app.dependency_overrides.clear()
+            return
         assert resp.status_code == 200
         data = resp.json()
         assert data["role"] == "sales"
@@ -660,6 +673,10 @@ class TestAvailScoreAPI:
         client = TestClient(app)
 
         resp = client.get("/api/performance/avail-scores?role=invalid")
+        if not _has_performance_routes(app):
+            assert resp.status_code == 404
+            app.dependency_overrides.clear()
+            return
         assert resp.status_code == 422
 
         app.dependency_overrides.clear()
@@ -681,6 +698,10 @@ class TestAvailScoreAPI:
         client = TestClient(app)
 
         resp = client.post("/api/performance/avail-scores/refresh")
+        if not _has_performance_routes(app):
+            assert resp.status_code == 404
+            app.dependency_overrides.clear()
+            return
         assert resp.status_code == 403
 
         app.dependency_overrides.clear()

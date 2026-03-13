@@ -165,8 +165,8 @@ class TestSourcesGaps:
     async def test_abstract_do_search_pass(self):
         from app.connectors.sources import BaseConnector
 
-        result = await BaseConnector._do_search(MagicMock(), "PN")
-        assert result is None
+        with pytest.raises(NotImplementedError):
+            await BaseConnector._do_search(MagicMock(), "PN")
 
     @pytest.mark.asyncio
     async def test_nexar_do_search_aggregate_query_success(self):
