@@ -13,9 +13,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
+from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, RiskFlag, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
-from ...schemas.responses import QuoteDetailResponse
+from ...schemas.responses import QuoteDetailResponse, QuoteSummaryResponse
+from ...utils.sanitize import sanitize_dict
 from ._helpers import (
     _PRICED_STATUSES,
     _build_quote_email_html,
@@ -26,6 +27,26 @@ from ._helpers import (
 )
 
 router = APIRouter()
+_QUOTE_LINE_TEXT_FIELDS = [
+    "mpn",
+    "manufacturer",
+    "lead_time",
+    "condition",
+    "date_code",
+    "firmware",
+    "hardware_code",
+    "packaging",
+    "notes",
+]
+
+
+def _sanitize_quote_line_items(line_items: list[dict]) -> list[dict]:
+    cleaned = []
+    for item in line_items:
+        row = dict(item)
+        sanitize_dict(row, _QUOTE_LINE_TEXT_FIELDS)
+        cleaned.append(row)
+    return cleaned
 
 
 # ── Quotes ───────────────────────────────────────────────────────────────
@@ -107,6 +128,94 @@ async def list_quotes(req_id: int, user: User = Depends(require_user), db: Sessi
     return [quote_to_dict(q, db) for q in quotes]
 
 
+@router.get(
+    "/api/requisitions/{req_id}/quote-summary",
+    response_model=QuoteSummaryResponse,
+    response_model_exclude_none=True,
+)
+async def get_quote_summary(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Return a lightweight quote workflow summary for a requisition."""
+    from ...dependencies import get_req_for_user
+    from ...models import BuyPlan
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    total_offer_count = db.query(Offer).filter(Offer.requisition_id == req_id).count()
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc(), Quote.id.desc())
+        .first()
+    )
+    if not quote:
+        return {
+            "requisition_id": req_id,
+            "has_quote": False,
+            "has_buy_plan": False,
+            "selected_offer_count": 0,
+            "total_offer_count": total_offer_count,
+            "risk_flags": [],
+        }
+
+    selected_offer_ids = [li.get("offer_id") for li in (quote.line_items or []) if li.get("offer_id")]
+    plan = db.query(BuyPlan).filter(BuyPlan.quote_id == quote.id).order_by(BuyPlan.id.desc()).first()
+    flag_rows = []
+    if selected_offer_ids:
+        flag_rows = db.query(RiskFlag).filter(RiskFlag.source_offer_id.in_(selected_offer_ids)).all()
+
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": bool(plan),
+        "selected_offer_count": len(selected_offer_ids),
+        "total_offer_count": total_offer_count,
+        "risk_flags": [
+            {
+                "id": flag.id,
+                "type": flag.type,
+                "severity": flag.severity,
+                "message": flag.message,
+                "source": flag.source,
+            }
+            for flag in flag_rows
+        ],
+        "quote_id": quote.id,
+        "quote_number": quote.quote_number,
+        "quote_status": quote.status,
+        "quote_revision": quote.revision,
+        "line_count": len(quote.line_items or []),
+        "subtotal": float(quote.subtotal) if quote.subtotal is not None else None,
+        "total_margin_pct": float(quote.total_margin_pct) if quote.total_margin_pct is not None else None,
+        "quote_updated_at": quote.updated_at.isoformat() if quote.updated_at else None,
+        "buy_plan_id": plan.id if plan else None,
+        "buy_plan_status": plan.status if plan else None,
+        "buy_plan_line_count": len(plan.line_items or []) if plan else None,
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def build_buy_plan_from_requisition(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Compatibility bridge for older requisition-scoped buy plan entry points."""
+    from ...dependencies import get_req_for_user
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc(), Quote.id.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "Cannot create buy plan without a quote")
+
+    raise HTTPException(410, "Use /api/quotes/{quote_id}/buy-plan-v3/build for the current workflow")
+
+
 @router.post("/api/requisitions/{req_id}/quote")
 async def create_quote(
     req_id: int,
@@ -122,7 +231,7 @@ async def create_quote(
     if not req.customer_site_id:
         raise HTTPException(400, "Requisition must be linked to a customer site before quoting")
     offer_ids = payload.offer_ids
-    line_items = [li.model_dump() for li in payload.line_items] if payload.line_items else []
+    line_items = _sanitize_quote_line_items([li.model_dump() for li in payload.line_items]) if payload.line_items else []
     if offer_ids and not line_items:
         offers = db.query(Offer).options(joinedload(Offer.requirement)).filter(Offer.id.in_(offer_ids)).all()
         quoted_prices = _preload_last_quoted_prices(db)
@@ -276,7 +385,7 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        quote.line_items = _sanitize_quote_line_items(updates.pop("line_items"))
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell

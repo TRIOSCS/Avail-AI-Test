@@ -18,6 +18,7 @@ from ...models import (
     Quote,
     Requirement,
     Requisition,
+    RiskFlag,
     User,
     VendorCard,
     VendorReview,
@@ -26,6 +27,7 @@ from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
 from ...utils.normalization import normalize_mpn_key
+from ...utils.sanitize import sanitize_dict
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
@@ -107,6 +109,22 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
         conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
 
+    offer_ids = [o.id for o in offers]
+    risk_flag_map: dict[int, list[dict]] = {}
+    if offer_ids:
+        flag_rows = db.query(RiskFlag).filter(RiskFlag.source_offer_id.in_(offer_ids)).all()
+        for flag in flag_rows:
+            risk_flag_map.setdefault(flag.source_offer_id, []).append(
+                {
+                    "id": flag.id,
+                    "type": flag.type,
+                    "severity": flag.severity,
+                    "message": flag.message,
+                    "source": flag.source,
+                    "created_at": flag.created_at.isoformat() if flag.created_at else None,
+                }
+            )
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -158,6 +176,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_flag_map.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -316,15 +335,33 @@ async def create_offer(
     if not req:
         raise HTTPException(404, "Requisition not found")
 
+    cleaned = sanitize_dict(
+        payload.model_dump(),
+        [
+            "mpn",
+            "vendor_name",
+            "manufacturer",
+            "lead_time",
+            "date_code",
+            "condition",
+            "packaging",
+            "firmware",
+            "hardware_code",
+            "warranty",
+            "country_of_origin",
+            "notes",
+            "vendor_website",
+        ],
+    )
     card = None
 
     # 1) If frontend passed a vendor_card_id, use it directly
-    if payload.vendor_card_id:
-        card = db.get(VendorCard, payload.vendor_card_id)
+    if cleaned.get("vendor_card_id"):
+        card = db.get(VendorCard, cleaned["vendor_card_id"])
 
     # 2) Exact match on normalized name
     if not card:
-        norm_name = normalize_vendor_name(payload.vendor_name)
+        norm_name = normalize_vendor_name(cleaned["vendor_name"])
         card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
 
     # 3) Fuzzy match: ILIKE prefix search + fuzzy scoring
@@ -336,7 +373,7 @@ async def create_offer(
             candidates = db.query(VendorCard).filter(VendorCard.normalized_name.ilike(f"{prefix}%")).limit(20).all()
             if candidates:
                 matches = fuzzy_match_vendor(
-                    payload.vendor_name,
+                    cleaned["vendor_name"],
                     [c.display_name for c in candidates],
                     threshold=88,
                 )
@@ -345,17 +382,17 @@ async def create_offer(
                     card = next(c for c in candidates if c.display_name == best_name)
                     # Append submitted name as alternate for future exact lookups
                     alts = list(card.alternate_names or [])
-                    if payload.vendor_name not in alts and payload.vendor_name != card.display_name:
-                        alts.append(payload.vendor_name)
+                    if cleaned["vendor_name"] not in alts and cleaned["vendor_name"] != card.display_name:
+                        alts.append(cleaned["vendor_name"])
                         card.alternate_names = alts
 
     # 4) No match — create new card
     _enrich_new_card = None
     if not card:
         domain = ""
-        if payload.vendor_website:
+        if cleaned.get("vendor_website"):
             domain = (
-                payload.vendor_website.replace("https://", "")
+                cleaned["vendor_website"].replace("https://", "")
                 .replace("http://", "")
                 .replace("www.", "")
                 .split("/")[0]
@@ -363,7 +400,7 @@ async def create_offer(
             )
         card = VendorCard(
             normalized_name=norm_name,
-            display_name=payload.vendor_name,
+            display_name=cleaned["vendor_name"],
             domain=domain or None,
             emails=[],
             phones=[],
@@ -379,34 +416,34 @@ async def create_offer(
     from ...search_service import resolve_material_card
     from ...utils.normalization import normalize_mpn_key
 
-    mat_card = resolve_material_card(payload.mpn, db)
+    mat_card = resolve_material_card(cleaned["mpn"], db)
 
     offer = Offer(
         requisition_id=req_id,
-        requirement_id=payload.requirement_id,
+        requirement_id=cleaned.get("requirement_id"),
         material_card_id=mat_card.id if mat_card else None,
-        normalized_mpn=normalize_mpn_key(payload.mpn) if payload.mpn else None,
+        normalized_mpn=normalize_mpn_key(cleaned["mpn"]) if cleaned.get("mpn") else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
         vendor_name_normalized=card.normalized_name,
-        mpn=payload.mpn,
-        manufacturer=payload.manufacturer,
-        qty_available=payload.qty_available,
-        unit_price=payload.unit_price,
-        lead_time=payload.lead_time,
-        date_code=payload.date_code,
-        condition=payload.condition,
-        packaging=payload.packaging,
-        firmware=payload.firmware,
-        hardware_code=payload.hardware_code,
-        moq=payload.moq,
-        warranty=payload.warranty,
-        country_of_origin=payload.country_of_origin,
-        source=payload.source,
-        vendor_response_id=payload.vendor_response_id,
+        mpn=cleaned["mpn"],
+        manufacturer=cleaned.get("manufacturer"),
+        qty_available=cleaned.get("qty_available"),
+        unit_price=cleaned.get("unit_price"),
+        lead_time=cleaned.get("lead_time"),
+        date_code=cleaned.get("date_code"),
+        condition=cleaned.get("condition"),
+        packaging=cleaned.get("packaging"),
+        firmware=cleaned.get("firmware"),
+        hardware_code=cleaned.get("hardware_code"),
+        moq=cleaned.get("moq"),
+        warranty=cleaned.get("warranty"),
+        country_of_origin=cleaned.get("country_of_origin"),
+        source=cleaned.get("source"),
+        vendor_response_id=cleaned.get("vendor_response_id"),
         entered_by_id=user.id,
-        notes=payload.notes,
-        status=payload.status,
+        notes=cleaned.get("notes"),
+        status=cleaned.get("status"),
     )
     db.add(offer)
     old_status = req.status
@@ -576,6 +613,25 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+    sanitize_dict(
+        changes,
+        [
+            "mpn",
+            "vendor_name",
+            "manufacturer",
+            "lead_time",
+            "date_code",
+            "condition",
+            "packaging",
+            "firmware",
+            "hardware_code",
+            "warranty",
+            "country_of_origin",
+            "notes",
+        ],
+    )
+    if offer.status == "sold" and changes.get("status") == "active":
+        raise HTTPException(400, "Sold offers cannot be reset to active via generic update")
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

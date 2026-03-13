@@ -122,7 +122,10 @@ class NcSessionManager:
             )
             login_page.raise_for_status()
 
-            soup = BeautifulSoup(login_page.text, "lxml")
+            try:
+                soup = BeautifulSoup(login_page.text, "lxml")
+            except Exception:
+                soup = BeautifulSoup(login_page.text, "html.parser")
             token_input = soup.find("input", {"name": "__RequestVerificationToken"})
             if not token_input:
                 logger.error("NC login: could not find __RequestVerificationToken")

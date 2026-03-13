@@ -10636,7 +10636,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
