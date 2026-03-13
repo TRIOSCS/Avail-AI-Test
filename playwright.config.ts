@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none python -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
+    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
     port,
     timeout: 15000,
     reuseExistingServer: false,
