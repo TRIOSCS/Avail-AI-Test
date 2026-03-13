@@ -594,6 +594,12 @@ def _seed_api_sources():
         }
         for name, quota in quota_map.items():
             src = existing_map.get(name)
+            # Backward-compat path for tests/mocks that patch filter_by().first()
+            # instead of populating query().all() with seeded sources.
+            if src is None:
+                src = db.query(ApiSource).filter_by(name=name).first()
+                if src is not None:
+                    existing_map[name] = src
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 
