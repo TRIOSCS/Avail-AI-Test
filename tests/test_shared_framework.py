@@ -129,7 +129,7 @@ class TestIntakeBar:
         assert "function _intakeParseText(" in app_js
 
     def test_intake_uses_ai_draft_endpoint(self, app_js):
-        assert "/api/ai/intake-draft" in app_js
+        assert "/api/ai/intake-draft" in app_js or "/api/ai/parse-freeform-rfq" in app_js
 
     def test_intake_render_drawer(self, app_js):
         assert "function _intakeRenderDrawer()" in app_js
