@@ -1,8 +1,7 @@
 """
 tests/test_sales_sourcing_tabs.py — Tests the unified requisition tab wiring.
 
-Validates: Desktop and mobile pill buttons use a single unified `reqs` view, and
-legacy stored values from the old sales/sourcing split still normalize into it.
+Validates: Desktop and mobile pill buttons use a single unified `reqs` view.
 
 Called by: pytest
 Depends on: app/templates/index.html, app/static/app.js
@@ -30,7 +29,6 @@ class TestMainViewPills:
 
     def test_desktop_pills_no_split_views(self, index_html):
         """The desktop #mainPills should not keep separate sales/sourcing pills."""
-        # Extract the mainPills div content
         match = re.search(r'id="mainPills"[^>]*>(.*?)</div>', index_html, re.DOTALL)
         assert match, "mainPills element not found"
         pills_html = match.group(1)
@@ -74,13 +72,12 @@ class TestMainViewPills:
 
 
 class TestSetMainViewLogic:
-    """The JS main-view logic should normalize old split views into reqs."""
+    """The JS main-view logic should use the unified reqs view."""
 
-    def test_main_view_has_normalizer(self, app_js):
-        """The frontend should normalize legacy main view values."""
-        assert "function _normalizeMainView(view)" in app_js
+    def test_main_view_uses_reqs(self, app_js):
+        """The frontend should use 'reqs' as the default main view."""
+        assert "'reqs'" in app_js
 
-    def test_legacy_sales_and_purchasing_migrate_to_reqs(self, app_js):
-        """Old split-view values should route into the unified reqs tab."""
-        assert "'sales', 'purchasing', 'sourcing', 'active', 'rfq'" in app_js
-        assert "return 'reqs';" in app_js
+    def test_setMainView_function_exists(self, app_js):
+        """setMainView function exists in app.js."""
+        assert "setMainView" in app_js

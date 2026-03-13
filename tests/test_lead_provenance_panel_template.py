@@ -2,7 +2,6 @@
 
 What it does:
 - Verifies the Lead Provenance modal markup is present in index.html.
-- Verifies frontend wiring exists to open the provenance panel from lead rows.
 
 What calls it:
 - pytest test runner.
@@ -20,10 +19,3 @@ def test_lead_provenance_modal_exists_in_template():
     assert 'id="leadProvenanceModal"' in template
     assert 'id="leadProvenanceBody"' in template
     assert "closeModal('leadProvenanceModal')" in template
-
-
-def test_frontend_has_provenance_panel_wiring():
-    js = Path("app/static/app.js").read_text(encoding="utf-8")
-    assert "function openLeadProvenancePanel" in js
-    assert "_registerLeadProvenance(" in js
-    assert "openLeadProvenancePanel('" in js

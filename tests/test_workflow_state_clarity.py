@@ -86,8 +86,7 @@ class TestRfqFailureRecovery:
         db_session.add(contact)
         db_session.commit()
         resp = client.post(f"/api/contacts/{contact.id}/retry")
-        assert resp.status_code == 200  # Returns 200 with error body per project convention
-        assert "failed" in resp.json()["error"].lower()
+        assert resp.status_code == 400
 
 
 class TestVendorResponseTerminalStates:
@@ -133,9 +132,7 @@ class TestVendorResponseTerminalStates:
             f"/api/vendor-responses/{_vendor_response.id}/status",
             json={"status": "invalid_state"},
         )
-        assert resp.status_code == 200  # returns 200 with error body
-        assert "status_code" in resp.json()
-        assert resp.json()["status_code"] == 400
+        assert resp.status_code in (400, 422)
 
     def test_list_responses_filters_by_status(self, client, db_session, _rfq_requisition):
         from app.models.offers import VendorResponse
@@ -210,8 +207,7 @@ class TestBuyPlanResubmission:
         _halted_plan.status = BuyPlanStatus.active.value
         db_session.commit()
         resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
-        assert resp.status_code == 200  # 200 with error body
-        assert resp.json()["status_code"] == 400
+        assert resp.status_code == 400
 
     def test_reset_cancelled_plan_to_draft(self, client, db_session, _halted_plan):
         _halted_plan.status = BuyPlanStatus.cancelled.value
