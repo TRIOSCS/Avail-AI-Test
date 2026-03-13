@@ -214,10 +214,12 @@ class TestFollowUpPanelRefresh:
 
 class TestRfqErrorToasts:
     def test_retry_rfq_uses_friendly_error_toast(self, app_js):
-        assert "Couldn\\'t retry RFQ — " in app_js
+        assert "Couldn\\'t re-quote — " in app_js
+        assert "friendlyError(e, 'please try again')" in app_js
 
     def test_update_status_uses_friendly_error_toast(self, app_js):
-        assert "Couldn\\'t update response status — " in app_js
+        assert "Couldn\\'t update — " in app_js
+        assert "friendlyError(e, 'please try again')" in app_js
 
 
 class TestRfqFollowUpModuleWireup:
