@@ -307,13 +307,13 @@ class CompareQuotesRequest(BaseModel):
 class ParseFreeformRfqRequest(BaseModel):
     """Input for AI freeform RFQ parsing (customer text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str
 
 
 class ParseFreeformOfferRequest(BaseModel):
     """Input for AI freeform offer parsing (vendor text)."""
 
-    raw_text: str = Field(min_length=1)
+    raw_text: str
     requisition_id: int | None = None  # Optional: pass for RFQ context to improve matching
 
 
