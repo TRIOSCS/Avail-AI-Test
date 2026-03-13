@@ -1,0 +1,68 @@
+{#
+  material_card.html — Material card popup detail showing MPN info and sighting history.
+  Receives: card (MaterialCard model object), sightings (list of Sighting objects).
+  Called by: views.py material_card_detail endpoint.
+  Depends on: sighting_row.html partial, MaterialCard and Sighting models.
+#}
+<div class="material-card-detail">
+    <div class="material-card-header">
+        <h3>{{ card.display_mpn }}</h3>
+        {% if card.manufacturer %}
+            <span class="text-muted">{{ card.manufacturer }}</span>
+        {% endif %}
+    </div>
+
+    {% if card.description %}
+    <p class="material-description">{{ card.description }}</p>
+    {% endif %}
+
+    <div class="material-meta">
+        {% if card.lifecycle_status %}
+        <span class="meta-tag lifecycle-{{ card.lifecycle_status }}">
+            {{ card.lifecycle_status|upper }}
+        </span>
+        {% endif %}
+        {% if card.category %}
+        <span class="meta-tag">{{ card.category }}</span>
+        {% endif %}
+        {% if card.package_type %}
+        <span class="meta-tag">{{ card.package_type }}</span>
+        {% endif %}
+        {% if card.rohs_status %}
+        <span class="meta-tag rohs-{{ card.rohs_status }}">
+            RoHS: {{ card.rohs_status }}
+        </span>
+        {% endif %}
+    </div>
+
+    <div class="material-stats">
+        <span>Searched {{ card.search_count or 0 }} times</span>
+        {% if card.last_searched_at %}
+        <span>Last: {{ card.last_searched_at.strftime('%Y-%m-%d') }}</span>
+        {% endif %}
+    </div>
+
+    {# Sightings history #}
+    <h4>Sighting History ({{ sightings|length }})</h4>
+    {% if sightings %}
+    <table class="data-table data-table-compact">
+        <thead>
+            <tr>
+                <th>Vendor</th>
+                <th>MPN</th>
+                <th>Price</th>
+                <th>Qty</th>
+                <th>Source</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sighting in sightings %}
+                {% include "partials/sourcing/sighting_row.html" %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No sightings recorded yet.</p>
+    {% endif %}
+</div>

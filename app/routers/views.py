@@ -19,11 +19,13 @@ from app.dependencies import require_user, wants_html
 from app.models import (
     ActivityLog,
     BuyPlan,
+    MaterialCard,
     Offer,
     Quote,
     Requirement,
     Requisition,
     RequisitionTask,
+    Sighting,
     User,
 )
 from app.utils.sql_helpers import escape_like
@@ -333,4 +335,176 @@ async def requisition_tab(
     return templates.TemplateResponse(
         f"partials/requisitions/tabs/{tab_name}.html",
         context,
+    )
+
+
+# ── Sourcing results ─────────────────────────────────────────────
+
+# Source type to filter category mapping
+_SOURCE_FILTERS = {
+    "live": {"brokerbin", "nexar", "digikey", "mouser", "oemsecrets", "sourcengine", "ebay"},
+    "historical": {"material_history", "sighting_history"},
+    "affinity": {"vendor_affinity"},
+}
+
+
+def _filter_results(results: list, filter_value: str) -> list:
+    """Filter sourcing results by source category."""
+    if filter_value == "all" or not filter_value:
+        return results
+    allowed_types = _SOURCE_FILTERS.get(filter_value, set())
+    return [r for r in results if r.get("source_type", "") in allowed_types]
+
+
+def _sort_results(results: list, sort_by: str) -> list:
+    """Sort sourcing results by the given field."""
+    if sort_by == "price_asc":
+        return sorted(results, key=lambda r: (r.get("unit_price") is None, r.get("unit_price") or 0))
+    elif sort_by == "price_desc":
+        return sorted(results, key=lambda r: (r.get("unit_price") is None, -(r.get("unit_price") or 0)))
+    elif sort_by == "qty_desc":
+        return sorted(results, key=lambda r: (r.get("qty_available") is None, -(r.get("qty_available") or 0)))
+    # Default: confidence descending
+    return sorted(results, key=lambda r: (r.get("confidence_pct", 0), r.get("score", 0)), reverse=True)
+
+
+@router.get("/views/sourcing/{req_row_id}/results")
+async def sourcing_results(
+    req_row_id: int,
+    request: Request,
+    filter: str = "all",
+    sort_by: str = "confidence",
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return sourcing results partial for a requirement row.
+
+    Loads sightings from the DB for the given requirement, applies filter/sort,
+    and renders the results panel with source progress pills.
+    """
+    requirement = db.query(Requirement).filter(Requirement.id == req_row_id).first()
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    logger.debug("Sourcing results req_row_id={} filter={} sort={}", req_row_id, filter, sort_by)
+
+    # Load sightings and convert to result dicts
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.requirement_id == req_row_id)
+        .order_by(Sighting.score.desc())
+        .all()
+    )
+
+    results = []
+    for s in sightings:
+        results.append({
+            "vendor_name": s.vendor_name,
+            "mpn": s.mpn_matched or requirement.primary_mpn,
+            "mpn_matched": s.mpn_matched,
+            "manufacturer": s.manufacturer,
+            "qty_available": s.qty_available,
+            "unit_price": s.unit_price,
+            "currency": s.currency or "USD",
+            "source_type": s.source_type or "unknown",
+            "source_badge": (s.source_type or "unknown").replace("_", " ").title(),
+            "confidence_pct": round((s.confidence or 0) * 100),
+            "confidence_color": "green" if (s.confidence or 0) >= 0.75 else ("amber" if (s.confidence or 0) >= 0.5 else "red"),
+            "is_authorized": s.is_authorized or False,
+            "score": s.score or 0,
+            "material_card_id": s.material_card_id,
+        })
+
+    # Build source progress from seen source types
+    seen_sources = {}
+    for r in results:
+        st = r["source_type"]
+        seen_sources[st] = seen_sources.get(st, 0) + 1
+    sources = [{"name": name.replace("_", " ").title(), "done": True, "count": count}
+               for name, count in seen_sources.items()]
+
+    # Apply filter and sort
+    results = _filter_results(results, filter)
+    results = _sort_results(results, sort_by)
+
+    return templates.TemplateResponse(
+        "partials/sourcing/results.html",
+        {
+            "request": request,
+            "results": results,
+            "req_row_id": req_row_id,
+            "sources": sources,
+            "filter": filter,
+            "sort_by": sort_by,
+        },
+    )
+
+
+@router.get("/views/materials/{material_id}")
+async def material_card_detail(
+    material_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return material card detail partial with sighting history."""
+    card = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Material card not found")
+
+    logger.debug("Material card detail id={} mpn={}", material_id, card.display_mpn)
+
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.material_card_id == material_id)
+        .order_by(Sighting.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        "partials/sourcing/material_card.html",
+        {
+            "request": request,
+            "card": card,
+            "sightings": sightings,
+        },
+    )
+
+
+@router.get("/views/sourcing/{req_row_id}/stream")
+async def sourcing_stream(
+    req_row_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """SSE stream placeholder for live sourcing progress.
+
+    Returns the current search progress as a static HTML partial.
+    Full SSE streaming (EventSourceResponse with async generator) will be
+    implemented when the search service is wired for incremental results.
+    """
+    requirement = db.query(Requirement).filter(Requirement.id == req_row_id).first()
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    logger.debug("SSE stream requested for req_row_id={}", req_row_id)
+
+    # Build source progress from existing sightings
+    sightings = (
+        db.query(Sighting.source_type, sqlfunc.count(Sighting.id))
+        .filter(Sighting.requirement_id == req_row_id)
+        .group_by(Sighting.source_type)
+        .all()
+    )
+
+    sources = [
+        {"name": (st or "unknown").replace("_", " ").title(), "done": True, "count": cnt}
+        for st, cnt in sightings
+    ]
+
+    return templates.TemplateResponse(
+        "partials/sourcing/search_progress.html",
+        {"request": request, "sources": sources},
     )
