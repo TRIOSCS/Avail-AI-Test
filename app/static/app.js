@@ -3584,14 +3584,18 @@ function _populateInsightsBody(body, data) {
 }
 
 // ---------------------------------------------------------------------------
-// Simple Task Checklist (flat list with checkboxes)
+// Simple Task Checklist (flat list with status actions)
 // ---------------------------------------------------------------------------
 
 function _renderDdTasks(reqId, tasks, panel) {
     tasks = tasks || [];
     var pending = tasks.filter(function(t) { return t.status !== 'done'; });
     var done = tasks.filter(function(t) { return t.status === 'done'; });
-    // Show pending first, then done at the bottom
+    // Sort pending: in_progress first, then todo
+    pending.sort(function(a, b) {
+        var order = { in_progress: 0, todo: 1 };
+        return (order[a.status] || 1) - (order[b.status] || 1);
+    });
     var sorted = pending.concat(done);
 
     // Header bar with count + add button
@@ -3599,7 +3603,13 @@ function _renderDdTasks(reqId, tasks, panel) {
     header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px';
     var label = document.createElement('span');
     label.style.cssText = 'font-size:11px;color:var(--muted)';
-    label.textContent = pending.length + ' open' + (done.length ? ', ' + done.length + ' done' : '');
+    var inProg = pending.filter(function(t) { return t.status === 'in_progress'; }).length;
+    var todoCount = pending.length - inProg;
+    var parts = [];
+    if (inProg) parts.push(inProg + ' active');
+    if (todoCount) parts.push(todoCount + ' to do');
+    if (done.length) parts.push(done.length + ' done');
+    label.textContent = parts.join(', ') || '0 tasks';
     header.appendChild(label);
 
     var addBtn = document.createElement('button');
@@ -3631,36 +3641,99 @@ function _renderDdTasks(reqId, tasks, panel) {
 
 function _renderTaskCheckItem(task, reqId) {
     var isDone = task.status === 'done';
+    var isInProgress = task.status === 'in_progress';
     var row = document.createElement('div');
-    row.className = 'task-check-item' + (isDone ? ' task-done' : '');
+    row.className = 'task-check-item' + (isDone ? ' task-done' : '') + (isInProgress ? ' task-active' : '');
 
     // Priority indicator
     var priColors = { 1: 'var(--green, #22c55e)', 2: 'var(--amber, #f59e0b)', 3: 'var(--red, #ef4444)' };
     row.style.borderLeftColor = priColors[task.priority] || priColors[2];
 
-    // Checkbox
-    var cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.checked = isDone;
-    cb.className = 'task-checkbox';
-    cb.onchange = function() { _toggleTaskStatus(reqId, task.id, cb.checked ? 'done' : 'todo'); };
-    row.appendChild(cb);
+    // Status action buttons (replacing checkbox)
+    var actions = document.createElement('div');
+    actions.className = 'task-check-actions';
+    if (isDone) {
+        var reopenBtn = document.createElement('button');
+        reopenBtn.className = 'btn btn-ghost btn-sm task-status-btn';
+        reopenBtn.textContent = 'Reopen';
+        reopenBtn.title = 'Move back to To Do';
+        reopenBtn.onclick = function(e) { e.stopPropagation(); _toggleTaskStatus(reqId, task.id, 'todo'); };
+        actions.appendChild(reopenBtn);
+    } else if (isInProgress) {
+        var doneBtn = document.createElement('button');
+        doneBtn.className = 'btn btn-sm task-status-btn task-btn-done';
+        doneBtn.textContent = 'Done';
+        doneBtn.title = 'Mark as done';
+        doneBtn.onclick = function(e) { e.stopPropagation(); _showInlineCompleteModal(reqId, task); };
+        actions.appendChild(doneBtn);
+    } else {
+        // todo state
+        var startBtn = document.createElement('button');
+        startBtn.className = 'btn btn-sm task-status-btn task-btn-start';
+        startBtn.textContent = 'Start';
+        startBtn.title = 'Mark as in progress';
+        startBtn.onclick = function(e) { e.stopPropagation(); _toggleTaskStatus(reqId, task.id, 'in_progress'); };
+        actions.appendChild(startBtn);
+    }
+    row.appendChild(actions);
 
-    // Title
+    // Content wrapper
+    var content = document.createElement('div');
+    content.className = 'task-check-content';
+
+    // Title row
+    var titleRow = document.createElement('div');
+    titleRow.style.cssText = 'display:flex;align-items:center;gap:6px';
     var title = document.createElement('span');
     title.className = 'task-check-title';
     title.textContent = task.title;
-    row.appendChild(title);
+    titleRow.appendChild(title);
 
-    // Due date
+    // Status badge
+    var badge = document.createElement('span');
+    badge.className = 'task-check-badge task-badge-' + task.status;
+    badge.textContent = isInProgress ? 'Active' : isDone ? 'Done' : 'To Do';
+    titleRow.appendChild(badge);
+    content.appendChild(titleRow);
+
+    // Meta row: assignee, creator, due date
+    var meta = document.createElement('div');
+    meta.className = 'task-check-meta';
+    if (task.assignee_name) {
+        var assignee = document.createElement('span');
+        assignee.textContent = task.assignee_name;
+        meta.appendChild(assignee);
+    }
+    if (task.creator_name && task.creator_name !== task.assignee_name) {
+        var from = document.createElement('span');
+        from.textContent = 'from ' + task.creator_name;
+        meta.appendChild(from);
+    }
     if (task.due_at) {
         var dueSpan = document.createElement('span');
         dueSpan.className = 'task-check-due';
         var dueDate = new Date(task.due_at);
         if (dueDate < new Date() && !isDone) dueSpan.classList.add('task-overdue');
         dueSpan.textContent = _shortDate(task.due_at);
-        row.appendChild(dueSpan);
+        meta.appendChild(dueSpan);
     }
+    if (task.ai_risk_flag) {
+        var risk = document.createElement('span');
+        risk.style.cssText = 'color:var(--amber);font-weight:500';
+        risk.textContent = task.ai_risk_flag;
+        meta.appendChild(risk);
+    }
+    content.appendChild(meta);
+
+    // Completion note (if done)
+    if (isDone && task.completion_note) {
+        var note = document.createElement('div');
+        note.className = 'task-check-note';
+        note.textContent = task.completion_note;
+        content.appendChild(note);
+    }
+
+    row.appendChild(content);
 
     // Delete button
     var delBtn = document.createElement('button');
@@ -3671,6 +3744,50 @@ function _renderTaskCheckItem(task, reqId) {
     row.appendChild(delBtn);
 
     return row;
+}
+
+// Inline completion modal for per-req tasks
+function _showInlineCompleteModal(reqId, task) {
+    var old = document.getElementById('tqCompleteModal');
+    if (old) old.remove();
+    var overlay = document.createElement('div');
+    overlay.id = 'tqCompleteModal';
+    overlay.className = 'modal-overlay';
+    overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+    var box = document.createElement('div');
+    box.className = 'modal-box';
+    box.style.maxWidth = '440px';
+    box.innerHTML =
+        '<h3 style="margin:0 0 12px;font-size:15px">Complete Task</h3>' +
+        '<p style="font-size:12px;color:var(--muted);margin:0 0 12px">' + _escHtml(task.title) + '</p>' +
+        '<textarea id="tqCompleteNote" placeholder="How was this resolved? (required)" rows="4" style="width:100%;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:13px;resize:vertical"></textarea>' +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">' +
+            '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'tqCompleteModal\').remove()">Cancel</button>' +
+            '<button class="btn btn-sm" id="tqCompleteSubmit" style="background:var(--green,#22c55e);color:#fff">Mark Done</button>' +
+        '</div>';
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    document.getElementById('tqCompleteNote').focus();
+    document.getElementById('tqCompleteSubmit').onclick = async function() {
+        var note = document.getElementById('tqCompleteNote').value.trim();
+        if (!note) { document.getElementById('tqCompleteNote').style.borderColor = 'var(--red)'; return; }
+        try {
+            await apiFetch('/api/tasks/' + task.id + '/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ completion_note: note }),
+            });
+            overlay.remove();
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].tasks;
+            var drow = document.getElementById('d-' + reqId);
+            var panel = drow ? drow.querySelector('.dd-panel') : null;
+            if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+            _tqLoadBadges();
+            if (typeof showToast === 'function') showToast('Task completed', 'success');
+        } catch (e) {
+            if (typeof showToast === 'function') showToast('Failed to complete task', 'error');
+        }
+    };
 }
 
 function _shortDate(iso) {
@@ -3691,7 +3808,9 @@ async function _toggleTaskStatus(reqId, taskId, newStatus) {
         var drow = document.getElementById('d-' + reqId);
         var panel = drow ? drow.querySelector('.dd-panel') : null;
         if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
-        if (typeof showToast === 'function') showToast(newStatus === 'done' ? 'Task completed' : 'Task reopened', 'success');
+        _tqLoadBadges();
+        var msgs = { todo: 'Task reopened', in_progress: 'Task started', done: 'Task completed' };
+        if (typeof showToast === 'function') showToast(msgs[newStatus] || 'Task updated', 'success');
     } catch (e) {
         if (typeof showToast === 'function') showToast('Failed to update task', 'error');
     }
@@ -3712,8 +3831,22 @@ function _deleteTask(reqId, taskId) {
     }, { confirmLabel: 'Delete', danger: true });
 }
 
-function _showInlineTaskForm(reqId, panel) {
+async function _showInlineTaskForm(reqId, panel) {
     if (document.getElementById('taskForm-' + reqId)) return;
+
+    // Load users for assignee dropdown
+    var users = [];
+    try { users = await apiFetch('/api/users/list'); } catch(e) { users = []; }
+
+    var userOpts = '<option value="">-- Assign to --</option>';
+    for (var i = 0; i < users.length; i++) {
+        userOpts += '<option value="' + users[i].id + '">' + _escHtml(users[i].name || users[i].email) + '</option>';
+    }
+
+    // Default due date = 2 days from now
+    var defaultDue = new Date();
+    defaultDue.setDate(defaultDue.getDate() + 2);
+    var dueStr = defaultDue.toISOString().split('T')[0];
 
     var form = document.createElement('div');
     form.id = 'taskForm-' + reqId;
@@ -3722,17 +3855,13 @@ function _showInlineTaskForm(reqId, panel) {
     form.innerHTML =
         '<input id="taskTitle-' + reqId + '" type="text" placeholder="Task title..." class="task-input">' +
         '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">' +
-            '<select id="taskType-' + reqId + '" class="task-select">' +
-                '<option value="sourcing">Sourcing</option>' +
-                '<option value="sales">Sales</option>' +
-                '<option value="general">General</option>' +
-            '</select>' +
+            '<select id="taskAssignee-' + reqId + '" class="task-select">' + userOpts + '</select>' +
             '<select id="taskPriority-' + reqId + '" class="task-select">' +
                 '<option value="1">Low</option>' +
                 '<option value="2" selected>Medium</option>' +
                 '<option value="3">High</option>' +
             '</select>' +
-            '<input id="taskDue-' + reqId + '" type="date" class="task-select" style="width:auto">' +
+            '<input id="taskDue-' + reqId + '" type="date" value="' + dueStr + '" class="task-select" style="width:auto">' +
             '<button class="btn btn-sm" onclick="_submitNewTask(' + reqId + ')">Add</button>' +
             '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'taskForm-' + reqId + '\').remove()">Cancel</button>' +
         '</div>';
@@ -3745,17 +3874,27 @@ function _showInlineTaskForm(reqId, panel) {
 
 async function _submitNewTask(reqId) {
     var titleEl = document.getElementById('taskTitle-' + reqId);
-    var typeEl = document.getElementById('taskType-' + reqId);
+    var assigneeEl = document.getElementById('taskAssignee-' + reqId);
     var priEl = document.getElementById('taskPriority-' + reqId);
     var dueEl = document.getElementById('taskDue-' + reqId);
     if (!titleEl || !titleEl.value.trim()) return;
+    if (!assigneeEl || !assigneeEl.value) {
+        assigneeEl.style.borderColor = 'var(--red)';
+        if (typeof showToast === 'function') showToast('Please select an assignee', 'error');
+        return;
+    }
+    if (!dueEl || !dueEl.value) {
+        dueEl.style.borderColor = 'var(--red)';
+        if (typeof showToast === 'function') showToast('Please select a due date', 'error');
+        return;
+    }
 
     var body = {
         title: titleEl.value.trim(),
-        task_type: typeEl.value,
+        assigned_to_id: parseInt(assigneeEl.value),
         priority: parseInt(priEl.value),
+        due_at: new Date(dueEl.value).toISOString(),
     };
-    if (dueEl.value) body.due_at = new Date(dueEl.value).toISOString();
 
     try {
         await apiFetch('/api/requisitions/' + reqId + '/tasks', {
@@ -3767,9 +3906,12 @@ async function _submitNewTask(reqId) {
         var drow = document.getElementById('d-' + reqId);
         var panel = drow ? drow.querySelector('.dd-panel') : null;
         if (panel) await _loadDdSubTab(reqId, 'tasks', panel);
+        _tqLoadBadges();
         if (typeof showToast === 'function') showToast('Task created', 'success');
     } catch (e) {
-        if (typeof showToast === 'function') showToast('Failed to create task', 'error');
+        var msg = 'Failed to create task';
+        try { var err = await e.json(); msg = err.detail || msg; } catch(x) {}
+        if (typeof showToast === 'function') showToast(msg, 'error');
     }
 }
 
