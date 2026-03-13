@@ -1,0 +1,7 @@
+{
+  "install": "pip install -r requirements-dev.txt && . $NVM_DIR/nvm.sh && nvm install 20 && nvm alias default 20 && npm ci",
+  "env": {
+    "TESTING": "1",
+    "PYTHONPATH": "/workspace"
+  }
+}
