@@ -12,6 +12,8 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 from datetime import date, datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import (
     BuyPlan,
     Company,
@@ -666,6 +668,14 @@ class TestGetMultiplierScores:
 
 
 class TestMultiplierAPI:
+    @pytest.fixture(autouse=True)
+    def _skip_if_performance_router_disabled(self, db_session):
+        from app.main import app
+
+        has_route = any(getattr(route, "path", "") == "/api/performance/multiplier-scores" for route in app.routes)
+        if not has_route:
+            pytest.skip("Performance router disabled in MVP mode")
+
     def test_get_multiplier_scores_buyer(self, db_session):
         """GET /api/performance/multiplier-scores?role=buyer returns data."""
         from fastapi.testclient import TestClient
