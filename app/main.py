@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +23,16 @@ from .models import (
     ApiSource,
 )
 from .models.config import ApiUsageLog
+
+_CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Temporary gate: emit Clear-Site-Data header until cutoff date."""
+    if now is None:
+        now = datetime.now(timezone.utc)
+    return now < _CLEAR_SITE_DATA_CUTOFF
+
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -366,6 +377,9 @@ async def request_id_middleware(request: Request, call_next):
 
         path = request.url.path
 
+        if path != "/health" and _should_set_clear_site_data():
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
+
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
             if "/assets/" in path:  # Vite-hashed filenames — immutable
@@ -566,7 +580,7 @@ def _seed_api_sources():
             del existing_map["newark"]
             logger.info("Removed duplicate 'newark' source (merged into 'element14')")
 
-        # Backfill known monthly quotas (only sets if currently NULL)
+        # Backfill known monthly quotas using existing_map (no extra queries)
         quota_map = {
             "apollo_enrichment": 10000,
             "hunter_enrichment": 500,
@@ -578,7 +592,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 
