@@ -154,7 +154,7 @@ class TestApiContracts:
         resp = client.get("/api/buy-plans-v3?status=draft")
         assert resp.status_code == 200
 
-    def test_offer_status_transition_validated(self, client):
+    def test_offer_status_transition_validated(self, client, db_session):
         """Offer status can be corrected from sold back to active via update."""
         # Create a req with an offer
         co = client.post("/api/companies", json={"name": "Status Corp"}).json()
@@ -183,17 +183,12 @@ class TestApiContracts:
             assert body["status"] == "active"
             return
 
-        # Some builds return a minimal ack payload; verify persisted status via list endpoint.
-        offers_resp = client.get(f"/api/requisitions/{req['id']}/offers")
-        assert offers_resp.status_code == 200
-        matched = [
-            o
-            for g in offers_resp.json().get("groups", [])
-            for o in g.get("offers", [])
-            if o.get("id") == offer["id"]
-        ]
-        assert matched
-        assert matched[0].get("status") == "active"
+        # Some builds return a minimal ack payload; verify persisted status in DB.
+        from app.models import Offer
+
+        refreshed = db_session.get(Offer, offer["id"])
+        assert refreshed is not None
+        assert refreshed.status == "active"
 
     def test_quote_result_status_changed_accurate(self, client):
         """Quote result endpoint returns accurate status_changed flag."""
