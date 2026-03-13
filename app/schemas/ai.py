@@ -299,6 +299,67 @@ class SaveFreeformOffersRequest(BaseModel):
     offers: list[DraftOfferItem] = Field(min_length=1)
 
 
+# ── Intake Draft (AI paste parsing) ──────────────────────────────────
+
+
+class IntakeRequirementItem(BaseModel):
+    """Single parsed requirement from free-text intake."""
+
+    mpn: str
+    quantity: int | None = None
+    target_price: float | None = None
+    condition: str | None = None
+    packaging: str | None = None
+    manufacturer: str | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_mpn_val(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("mpn required")
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_cond(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_pkg(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Input for AI intake draft — paste text from customer/vendor emails."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("text required")
+        return v
+
+
+class IntakeDraftResponse(BaseModel):
+    """Response from AI intake draft parsing."""
+
+    document_type: str = "unclear"
+    customer_name: str | None = None
+    requirements: list[IntakeRequirementItem] = []
+    offers: list[DraftOfferItem] = []
+    raw_summary: str | None = None
+
+
 # ── Free-text paste parsing (unified RFQ/Offer flow) ────────────────────
 
 
