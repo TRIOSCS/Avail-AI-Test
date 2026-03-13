@@ -494,7 +494,7 @@ class TestRequirementPanelTabs:
     """Verify the requirement detail panel has five tabs in correct order."""
 
     def test_rfq_workspace_tab_order(self, app_js):
-        """RFQ workspace panel tabs are: Offers, Sightings, Activity, Tasks, Notes."""
+        """RFQ workspace panel tabs are: Offers, Tasks, Notes, History, Sightings."""
         import re
 
         tabs_block = re.search(
@@ -505,24 +505,24 @@ class TestRequirementPanelTabs:
         assert tabs_block, "rfq-panel-tabs block not found"
         tabs_html = tabs_block.group(1)
         tab_names = re.findall(r">(\w+)</button>", tabs_html)
-        assert tab_names == ["Offers", "Sightings", "Activity", "Tasks", "Notes"]
+        assert tab_names == ["Offers", "Tasks", "Notes", "History", "Sightings"]
 
     def test_rfq_load_tab_handles_all_tabs(self, app_js):
-        """_rfqLoadTab switch covers offers, sightings, activity, tasks, notes."""
-        for tab in ["'offers'", "'sightings'", "'activity'", "'tasks'", "'notes'"]:
+        """_rfqLoadTab switch covers offers, tasks, notes, history, sightings."""
+        for tab in ["'offers'", "'tasks'", "'notes'", "'history'", "'sightings'"]:
             assert f"case {tab}:" in app_js
 
     def test_rfq_render_tab_handles_all_tabs(self, app_js):
         """_rfqRenderTab dispatches to all five renderers."""
         assert "_rfqRenderOffers" in app_js
-        assert "_rfqRenderSightings" in app_js
-        assert "_rfqRenderActivity" in app_js
         assert "_rfqRenderTasks" in app_js
         assert "_rfqRenderNotes" in app_js
+        assert "_rfqRenderHistory" in app_js
+        assert "_rfqRenderSightings" in app_js
 
     def test_inline_part_expand_tabs(self, app_js):
-        """Inline part expansion has all five tabs."""
-        assert "['offers', 'sightings', 'activity', 'tasks', 'notes']" in app_js
+        """Inline part expansion uses compact tab set."""
+        assert "['offers', 'notes', 'tasks']" in app_js
 
     def test_tasks_tab_has_create_button(self, app_js):
         """Tasks tab includes the + Assign Task button."""
