@@ -102,11 +102,16 @@ def parse_results_html(html: str) -> list[NcSighting]:
     sticky header clone to avoid double-counting).
     """
     from bs4 import BeautifulSoup
+    from bs4.exceptions import FeatureNotFound
 
     if not html or not html.strip():
         return []
 
-    soup = BeautifulSoup(html, "lxml")
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        # CI/dev containers may not include libxml2-backed parser.
+        soup = BeautifulSoup(html, "html.parser")
     sightings = []
 
     # Find all region containers
