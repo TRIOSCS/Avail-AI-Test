@@ -152,7 +152,6 @@ class TestSidebarNavigation:
     """Full coverage of sidebar navigation groups and buttons."""
 
     ALL_NAV_IDS = [
-        "navScorecard",
         "navReqs",
         "navProactive",
         "navMaterials",
@@ -171,7 +170,6 @@ class TestSidebarNavigation:
         "navCustomers": "view-customers",
         "navProactive": "view-proactive",
         "navBuyPlans": "view-buyplans",
-        "navScorecard": "view-scorecard",
         "navStrategic": "view-strategic",
         "navProspecting": "view-suggested",
         "navSettings": "view-settings",
@@ -193,7 +191,6 @@ class TestSidebarNavigation:
             ("navCustomers", "view-customers"),
             ("navProactive", "view-proactive"),
             ("navBuyPlans", "view-buyplans"),
-            ("navScorecard", "view-scorecard"),
             ("navStrategic", "view-strategic"),
             ("navProspecting", "view-suggested"),
         ],
@@ -816,21 +813,7 @@ class TestProspectingView:
             assert authed_page.locator(f"#{f_id}").count() > 0, f"#{f_id} missing"
 
 
-# ── 14. SCORECARD VIEW ──────────────────────────────────────────────
-
-
-class TestScorecardView:
-    """Tests for the scorecard view."""
-
-    def test_scorecard_view_loads(self, authed_page, base_url):
-        """Scorecard view loads."""
-        wait_for_app(authed_page, base_url)
-        nav_click(authed_page, "navScorecard")
-        authed_page.wait_for_timeout(1000)
-        expect(authed_page.locator("#view-scorecard")).to_be_visible()
-
-
-# ── 16. SETTINGS VIEW ───────────────────────────────────────────────
+# ── 14. SETTINGS VIEW ───────────────────────────────────────────────
 
 
 class TestSettingsView:
@@ -1105,7 +1088,6 @@ class TestConsoleErrors:
             "navCustomers",
             "navProactive",
             "navBuyPlans",
-            "navScorecard",
             "navStrategic",
             "navProspecting",
             "navReqs",

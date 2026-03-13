@@ -5653,8 +5653,7 @@ let _perfVendorOrder = 'desc';
 let _perfActiveOnly = true;
 
 function showPerformance() {
-    // Redirect to scorecard page (backward compat)
-    sidebarNav('scorecard', document.getElementById('navScorecard'));
+    // Scorecard removed — no-op
 }
 
 async function loadManagerDigest() {
