@@ -1,0 +1,83 @@
+{#
+  detail.html — Prospect detail drawer with enrichment data and actions.
+  Receives: prospect (ORM object), user.
+  Called by: views.py prospect_detail endpoint.
+  Depends on: Alpine.js (close), HTMX (enrich), enrichment_panel.html.
+#}
+<div class="drawer" @close-drawer.window="$el.innerHTML = ''">
+    <div class="drawer-header">
+        <h2>{{ prospect.name }}</h2>
+        <div class="drawer-meta">
+            {% if prospect.industry %}
+            <span class="meta-item">{{ prospect.industry }}</span>
+            {% endif %}
+            {% if prospect.region %}
+            <span class="meta-item">{{ prospect.region }}</span>
+            {% endif %}
+            <span class="badge badge-{{ prospect.status or 'suggested' }}">{{ prospect.status or 'suggested' }}</span>
+        </div>
+        <div class="drawer-actions">
+            {% if prospect.status != 'claimed' %}
+            <button class="btn btn-sm"
+                    hx-post="/views/prospecting/{{ prospect.id }}/claim"
+                    hx-target="#prospect-{{ prospect.id }}"
+                    hx-swap="outerHTML">
+                Claim
+            </button>
+            {% endif %}
+            {% with entity_type="prospect", entity_id=prospect.id %}
+                {% include "partials/shared/enrich_button.html" %}
+            {% endwith %}
+            <button class="btn btn-sm" @click="$dispatch('close-drawer')">Close</button>
+        </div>
+    </div>
+
+    {# Company info #}
+    <div class="detail-section">
+        <h3>Company Info</h3>
+        <dl class="detail-grid">
+            <dt>Domain</dt>
+            <dd>{{ prospect.domain or '-' }}</dd>
+            <dt>Website</dt>
+            <dd>{% if prospect.website %}<a href="{{ prospect.website }}" target="_blank">{{ prospect.website }}</a>{% else %}-{% endif %}</dd>
+            <dt>Employee Range</dt>
+            <dd>{{ prospect.employee_count_range or '-' }}</dd>
+            <dt>Revenue Range</dt>
+            <dd>{{ prospect.revenue_range or '-' }}</dd>
+            <dt>HQ Location</dt>
+            <dd>{{ prospect.hq_location or '-' }}</dd>
+            <dt>Discovery Source</dt>
+            <dd>{{ prospect.discovery_source or '-' }}</dd>
+        </dl>
+    </div>
+
+    {# Score breakdown #}
+    <div class="detail-section">
+        <h3>Scoring</h3>
+        <dl class="detail-grid">
+            <dt>Fit Score</dt>
+            <dd>{{ prospect.fit_score or 0 }}/100</dd>
+            <dt>Readiness Score</dt>
+            <dd>{{ prospect.readiness_score or 0 }}/100</dd>
+        </dl>
+        {% if prospect.fit_reasoning %}
+        <p class="fit-reasoning">{{ prospect.fit_reasoning }}</p>
+        {% endif %}
+        {% if prospect.ai_writeup %}
+        <div class="ai-writeup">
+            <h4>AI Summary</h4>
+            <p>{{ prospect.ai_writeup }}</p>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Enrichment results #}
+    {% include "partials/prospecting/enrichment_panel.html" %}
+
+    {% if prospect.description %}
+    <div class="detail-section">
+        <h3>Description</h3>
+        <p>{{ prospect.description }}</p>
+    </div>
+    {% endif %}
+</div>

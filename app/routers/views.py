@@ -25,6 +25,7 @@ from app.models import (
     CustomerSite,
     MaterialCard,
     Offer,
+    ProspectAccount,
     Quote,
     QuoteLine,
     Requirement,
@@ -1356,5 +1357,222 @@ async def buy_plan_detail(
             "user": user,
             "bp": bp,
             "lines": lines,
+        },
+    )
+
+
+# ── Prospecting views ────────────────────────────────────────────────
+
+
+def _query_prospects(db: Session, q: str, industry: str, revenue: str,
+                     region: str, source: str, page: int):
+    """Build a filtered, paginated prospect query.
+
+    Returns (prospects_list, page, total_pages, filter_options) where
+    filter_options is a dict of distinct values for each filter dropdown.
+    """
+    base = db.query(ProspectAccount).filter(
+        ProspectAccount.status.notin_(["dismissed", "converted"])
+    )
+
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                ProspectAccount.name.ilike(f"%{safe_q}%"),
+                ProspectAccount.domain.ilike(f"%{safe_q}%"),
+                ProspectAccount.industry.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    if industry.strip():
+        base = base.filter(ProspectAccount.industry == industry)
+    if revenue.strip():
+        base = base.filter(ProspectAccount.revenue_range == revenue)
+    if region.strip():
+        base = base.filter(ProspectAccount.region == region)
+    if source.strip():
+        base = base.filter(ProspectAccount.discovery_source == source)
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    prospects = (
+        base.order_by(ProspectAccount.fit_score.desc())
+        .offset(offset)
+        .limit(PER_PAGE)
+        .all()
+    )
+
+    # Distinct filter values for dropdowns
+    all_base = db.query(ProspectAccount).filter(
+        ProspectAccount.status.notin_(["dismissed", "converted"])
+    )
+    industries = sorted({
+        r[0] for r in all_base.with_entities(ProspectAccount.industry).distinct().all()
+        if r[0]
+    })
+    revenues = sorted({
+        r[0] for r in all_base.with_entities(ProspectAccount.revenue_range).distinct().all()
+        if r[0]
+    })
+    regions = sorted({
+        r[0] for r in all_base.with_entities(ProspectAccount.region).distinct().all()
+        if r[0]
+    })
+    sources = sorted({
+        r[0] for r in all_base.with_entities(ProspectAccount.discovery_source).distinct().all()
+        if r[0]
+    })
+
+    return prospects, page, total_pages, {
+        "industries": industries,
+        "revenues": revenues,
+        "regions": regions,
+        "sources": sources,
+    }
+
+
+@router.get("/views/prospecting")
+async def prospecting_page(
+    request: Request,
+    q: str = "",
+    industry: str = "",
+    revenue: str = "",
+    region: str = "",
+    source: str = "",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Prospect pool page."""
+    logger.debug("Prospecting page view by user={}", user.email if user else "unknown")
+    prospects, page, total_pages, filters = _query_prospects(
+        db, q, industry, revenue, region, source, page
+    )
+    return templates.TemplateResponse(
+        "partials/prospecting/list.html",
+        {
+            "request": request,
+            "user": user,
+            "prospects": prospects,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "industry": industry,
+            "revenue": revenue,
+            "region": region,
+            "source": source,
+            "message": "No prospects found.",
+            **filters,
+        },
+    )
+
+
+@router.get("/views/prospecting/rows")
+async def prospecting_rows(
+    request: Request,
+    q: str = "",
+    industry: str = "",
+    industry_filter: str = "",
+    revenue: str = "",
+    revenue_filter: str = "",
+    region: str = "",
+    region_filter: str = "",
+    source: str = "",
+    source_filter: str = "",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Prospect rows partial with server-side filtering and pagination."""
+    eff_industry = industry or industry_filter
+    eff_revenue = revenue or revenue_filter
+    eff_region = region or region_filter
+    eff_source = source or source_filter
+    logger.debug(
+        "Prospecting rows q='{}' industry='{}' revenue='{}' region='{}' source='{}'",
+        q, eff_industry, eff_revenue, eff_region, eff_source,
+    )
+    prospects, page, total_pages, _filters = _query_prospects(
+        db, q, eff_industry, eff_revenue, eff_region, eff_source, page
+    )
+
+    from fastapi.responses import HTMLResponse
+
+    row_html_parts = []
+    for prospect in prospects:
+        rendered = templates.get_template(
+            "partials/prospecting/prospect_row.html"
+        ).render(prospect=prospect)
+        row_html_parts.append(rendered)
+
+    if not row_html_parts:
+        empty = templates.get_template("partials/shared/empty_state.html").render(
+            message="No prospects found.",
+        )
+        row_html_parts.append(f'<tr><td colspan="6">{empty}</td></tr>')
+
+    if total_pages > 1:
+        pagination = templates.get_template("partials/shared/pagination.html").render(
+            page=page, total_pages=total_pages,
+            url="/views/prospecting/rows", target_id="prospect-table-body",
+        )
+        row_html_parts.append(pagination)
+
+    return HTMLResponse("\n".join(row_html_parts))
+
+
+@router.get("/views/prospecting/{prospect_id}")
+async def prospect_detail(
+    prospect_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Prospect detail partial."""
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).first()
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+
+    logger.debug("Prospect detail id={} by user={}", prospect_id, user.email)
+    return templates.TemplateResponse(
+        "partials/prospecting/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "prospect": prospect,
+        },
+    )
+
+
+@router.post("/views/prospecting/{prospect_id}/claim")
+async def prospect_claim(
+    prospect_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim a prospect — returns updated prospect row."""
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).first()
+    if not prospect:
+        raise HTTPException(status_code=404, detail="Prospect not found")
+
+    from datetime import datetime, timezone
+
+    prospect.status = "claimed"
+    prospect.claimed_by = user.id
+    prospect.claimed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(prospect)
+
+    logger.info("Prospect {} claimed by user={}", prospect_id, user.email)
+    return templates.TemplateResponse(
+        "partials/prospecting/prospect_row.html",
+        {
+            "request": request,
+            "prospect": prospect,
         },
     )

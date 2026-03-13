@@ -1,0 +1,19 @@
+{#
+  enrich_button.html — Reusable enrichment button for companies, vendors, prospects.
+  Receives: entity_type (string: "company", "vendor", "prospect"), entity_id (int).
+  Called by: prospect_row.html, detail.html, company detail.html, vendor detail.html.
+  Depends on: HTMX (hx-post), Alpine.js (enriching state).
+#}
+<div x-data="{ enriching: false }">
+    <button class="btn btn-sm btn-enrich"
+            hx-post="/api/enrich/{{ entity_type }}/{{ entity_id }}"
+            hx-target="#enrich-results-{{ entity_id }}"
+            hx-swap="innerHTML"
+            hx-indicator="#enrich-spinner-{{ entity_id }}"
+            @htmx:before-request="enriching = true"
+            @htmx:after-request="enriching = false"
+            :disabled="enriching">
+        <span x-show="!enriching">Enrich</span>
+        <span x-show="enriching" id="enrich-spinner-{{ entity_id }}">Enriching...</span>
+    </button>
+</div>
