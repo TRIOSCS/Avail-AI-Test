@@ -119,6 +119,7 @@ class IntakeDraftRequest(BaseModel):
     """Raw text payload for AI intake drafting."""
 
     text: str = Field(min_length=1)
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod
@@ -135,6 +136,44 @@ class IntakeDraftResponse(BaseModel):
     document_type: str = "unclear"
     requirements: list[IntakeRequirementItem] = []
     offers: list[DraftOfferItem] = []
+
+
+class FreeTextLineItem(BaseModel):
+    """Legacy free-text line item schema for compatibility endpoints."""
+
+    mpn: str
+    manufacturer: str | None = None
+    quantity: int = 1
+    target_price: float | None = None
+    currency: str = "USD"
+    condition: str | None = None
+    date_code: str | None = None
+    lead_time: str | None = None
+    packaging: str | None = None
+    moq: int | None = None
+    notes: str | None = None
+
+
+class FreeTextParseRequest(BaseModel):
+    """Legacy request payload for /api/ai/parse-free-text."""
+
+    text: str = Field(min_length=1)
+
+
+class FreeTextSaveRfqRequest(BaseModel):
+    """Legacy request payload for saving parsed RFQ line items."""
+
+    name: str = Field(min_length=1)
+    customer_name: str | None = None
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
+
+
+class FreeTextSaveOffersRequest(BaseModel):
+    """Legacy request payload for saving parsed offer line items."""
+
+    requisition_id: int = Field(ge=1)
+    vendor_name: str = Field(min_length=1)
+    line_items: list[FreeTextLineItem] = Field(min_length=1)
 
 
 class RfqDraftRequest(BaseModel):
