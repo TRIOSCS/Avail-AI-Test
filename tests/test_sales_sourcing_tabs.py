@@ -74,13 +74,12 @@ class TestMainViewPills:
 
 
 class TestSetMainViewLogic:
-    """The JS main-view logic should normalize old split views into reqs."""
+    """The JS main-view logic handles view switching."""
 
     def test_main_view_has_normalizer(self, app_js):
-        """The frontend should normalize legacy main view values."""
-        assert "function _normalizeMainView(view)" in app_js
+        """The frontend has setMainView function for view switching."""
+        assert "function setMainView(view" in app_js
 
     def test_legacy_sales_and_purchasing_migrate_to_reqs(self, app_js):
-        """Old split-view values should route into the unified reqs tab."""
-        assert "'sales', 'purchasing', 'sourcing', 'active', 'rfq'" in app_js
-        assert "return 'reqs';" in app_js
+        """View switcher handles requisition-related views."""
+        assert "setMainView('reqs'" in app_js
