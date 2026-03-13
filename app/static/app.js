@@ -1351,6 +1351,13 @@ window.addEventListener('popstate', (e) => {
 const _viewScrollPos = {};  // viewId → scrollTop
 let _currentViewId = 'view-list';
 
+/** Navigate to a requisition's drill-down view by ID. */
+function goToReq(reqId) {
+    if (!reqId) return;
+    showView('requisitions');
+    toggleDrillDown(reqId);
+}
+
 export function showView(viewId) {
     // Save scroll position for the view we're leaving
     var scroller = document.querySelector('.main-scroll');
@@ -15734,7 +15741,7 @@ Object.assign(window, {
     // Dashboard / Command Center
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
-    goToReq, _goBackFromBreadcrumb, _toggleColGear, toggleColVisibility,
+    goToReq, _toggleColGear, toggleColVisibility,
     // Scorecard
     showScorecard, setScPeriod,
     // Unified state helpers
