@@ -3003,12 +3003,17 @@ function confirmAction(title, message, onConfirm, opts) {
     var cancelBtn = document.createElement('button');
     cancelBtn.className = 'btn';
     cancelBtn.textContent = opts.cancelLabel || 'Cancel';
-    cancelBtn.onclick = function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); };
+    var escHandler = function(e) { if (e.key === 'Escape') closeConfirm(); };
+    var closeConfirm = function() {
+        overlay.remove();
+        document.removeEventListener('keydown', escHandler);
+    };
+    cancelBtn.onclick = function() { closeConfirm(); if (opts.onCancel) opts.onCancel(); };
 
     var confirmBtn = document.createElement('button');
     confirmBtn.className = 'btn ' + (opts.confirmClass || 'btn-primary');
     confirmBtn.textContent = opts.confirmLabel || 'Confirm';
-    confirmBtn.onclick = function() { overlay.remove(); onConfirm(); };
+    confirmBtn.onclick = function() { closeConfirm(); onConfirm(); };
 
     btnRow.appendChild(cancelBtn);
     btnRow.appendChild(confirmBtn);
@@ -3019,7 +3024,6 @@ function confirmAction(title, message, onConfirm, opts) {
     document.body.appendChild(overlay);
 
     // Close on Escape
-    var escHandler = function(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', escHandler); } };
     document.addEventListener('keydown', escHandler);
     confirmBtn.focus();
 }
