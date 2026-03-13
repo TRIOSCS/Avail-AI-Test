@@ -3481,16 +3481,19 @@ async function _loadDdSubTab(reqId, tabName, panel) {
         panel.style.maxHeight = '';
         panel.style.padding = '';
     }
-    if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
+    // Workspace is cached as `true` after first render, but must re-render if the
+    // panel content was replaced (e.g. by _renderDrillDownTable via addDrillRow).
+    if (cached && tabName !== 'workspace') { _renderDdTab(reqId, tabName, cached, panel); return; }
 
     panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
     try {
         let data;
         switch (tabName) {
             case 'workspace':
-                // Part-centric RFQ workspace — renders its own layout
+                // Part-centric RFQ workspace — re-render if workspace element is gone.
                 panel.style.maxHeight = 'none';
                 panel.style.padding = '0';
+                if (cached && panel.querySelector('.rfq-workspace')) return; // still intact
                 await rfqOpenWorkspace(reqId, panel);
                 _ddTabCache[reqId][tabName] = true;
                 return;
@@ -7867,7 +7870,20 @@ function _restoreDrillCell(td, r, field) {
     td.innerHTML = display;
 }
 
+// Returns true if the RFQ workspace split-pane is currently rendered for this req.
+// Used to decide whether to update the workspace UI vs the legacy dtbl table.
+function _isWorkspaceActive(rfqId) {
+    return !!document.getElementById('rfqWorkspace-' + rfqId);
+}
+window._isWorkspaceActive = _isWorkspaceActive;
+
 function addDrillRow(rfqId) {
+    // If the workspace split-pane is showing, add the part inline there
+    // instead of replacing the entire dd-panel with the legacy dtbl layout.
+    if (_isWorkspaceActive(rfqId)) {
+        _rfqAddPartInline(rfqId);
+        return;
+    }
     if (_addRowActive[rfqId]) {
         const dd = document.getElementById('d-' + rfqId)?.querySelector('.dd-panel');
         const mpnInput = dd?.querySelector('.add-row-mpn');
@@ -7998,8 +8014,13 @@ async function _saveAddRow(rfqId) {
             rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
         }
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
-        _addRowActive[rfqId] = true;
-        _renderDrillDownTable(rfqId);
+        if (_isWorkspaceActive(rfqId)) {
+            _rfqPartsData = _ddReqCache[rfqId] || [];
+            _rfqRenderPartList(rfqId);
+        } else {
+            _addRowActive[rfqId] = true;
+            _renderDrillDownTable(rfqId);
+        }
         _refreshReqRow(rfqId);
         showToast('Part added \u2014 enter next part or press Esc to finish', 'success');
         const drow = document.getElementById('d-' + rfqId);
@@ -8019,7 +8040,7 @@ async function _saveAddRow(rfqId) {
 
 function _cancelAddRow(rfqId) {
     delete _addRowActive[rfqId];
-    _renderDrillDownTable(rfqId);
+    if (!_isWorkspaceActive(rfqId)) _renderDrillDownTable(rfqId);
 }
 
 async function deleteDrillRow(rfqId, reqId) {
@@ -8031,18 +8052,25 @@ async function deleteDrillRow(rfqId, reqId) {
             const idx = reqs.findIndex(x => x.id === reqId);
             if (idx >= 0) reqs.splice(idx, 1);
         }
-        // Sync tab cache
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = reqs; _ddTabCache[rfqId].details = reqs; }
-        // Update counts from the modified cache
         const rfq = _reqListData.find(r => r.id === rfqId);
         if (rfq) {
             const freshReqs = reqs || [];
             rfq.requirement_count = freshReqs.length;
             rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
         }
-        _renderDrillDownTable(rfqId);
+        if (_isWorkspaceActive(rfqId)) {
+            _rfqPartsData = reqs || [];
+            _rfqRenderPartList(rfqId);
+            if (_rfqActivePartId === reqId) {
+                _rfqActivePartId = null;
+                const right = document.getElementById('rfqRight-' + rfqId);
+                if (right) { right.className = 'rfq-right empty'; right.innerHTML = '<span>Select a part to view details</span>'; }
+            }
+        } else {
+            _renderDrillDownTable(rfqId);
+        }
         _refreshReqRow(rfqId);
-        // Update header count
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
             const hdr = drow.querySelector('span[style*="font-weight:700"]');
@@ -8077,7 +8105,12 @@ function ddUploadFile(rfqId) {
                 rfq.requirement_count = freshReqs.length;
                 rfq.sourced_count = freshReqs.filter(r => (r.sighting_count || 0) > 0).length;
             }
-            _renderDrillDownTable(rfqId);
+            if (_isWorkspaceActive(rfqId)) {
+                _rfqPartsData = _ddReqCache[rfqId] || [];
+                _rfqRenderPartList(rfqId);
+            } else {
+                _renderDrillDownTable(rfqId);
+            }
             _refreshReqRow(rfqId);
             const drow = document.getElementById('d-' + rfqId);
             if (drow) {
@@ -10846,9 +10879,16 @@ async function loadRequirements() {
     catch(e) { logCatchError('loadRequirements', e); showToast('Failed to load requirements', 'error'); return; }
     if (currentReqId !== reqId) return; // RFQ changed while loading
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
-    // Auto-select all requirements
-    selectedRequirements = new Set(reqData.map(r => r.id));
+    // Also refresh workspace if it's open for this req
+    if (_isWorkspaceActive(reqId)) {
+        _ddReqCache[reqId] = reqData;
+        _rfqPartsData = reqData;
+        _rfqRenderPartList(reqId);
+    }
+    // Legacy standalone sourcing view (reqTable may not exist)
     const el = document.getElementById('reqTable');
+    if (!el) return;
+    selectedRequirements = new Set(reqData.map(r => r.id));
     const filterBar = document.getElementById('reqFilterBar');
     if (!reqData.length) {
         el.innerHTML = '<tr><td colspan="12" class="empty">No parts yet — add one below</td></tr>';
@@ -10861,6 +10901,7 @@ async function loadRequirements() {
 }
 function renderRequirementsTable() {
     const el = document.getElementById('reqTable');
+    if (!el) return;
     const q = (document.getElementById('reqFilter')?.value || '').trim().toUpperCase();
     const pill = reqFilterType;
     const sort = document.getElementById('reqSort')?.value || 'default';
@@ -10962,7 +11003,7 @@ function editReqCell(td, reqId, field) {
     const save = async () => {
         if (_cancelled) return;
         const val = el.value.trim();
-        if (val === currentVal) { loadRequirements(); return; }
+        if (val === currentVal) { renderRequirementsTable(); return; }
         const body = {};
         if (field === 'target_price') {
             body[field] = val ? parseFloat(val) : null;
@@ -10985,7 +11026,7 @@ function editReqCell(td, reqId, field) {
     }
     el.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
-        if (e.key === 'Escape') { _cancelled = true; loadRequirements(); }
+        if (e.key === 'Escape') { _cancelled = true; renderRequirementsTable(); }
     });
 }
 
@@ -11130,7 +11171,6 @@ async function searchAll() {
             expandedGroups = new Set(Object.keys(results));
             renderSources();
             updateRequirementCounts();
-            switchTab('sources', document.querySelectorAll('#reqTabs .tab')[1]);
             // Update status in cached list (draft→active after submit)
             const reqInfo = _reqListData.find(r => r.id === currentReqId);
             if (reqInfo && reqInfo.status === 'draft') {
@@ -11145,9 +11185,10 @@ async function searchAll() {
 
 function updateRequirementCounts() {
     const rows = document.querySelectorAll('#reqTable tr');
+    if (!rows.length) return;
     for (const reqId of Object.keys(searchResults)) {
         const group = searchResults[reqId];
-        // Count unique vendors (fresh + material history, deduplicated)
+        // Count unique fresh vendors
         const uniqueVendors = new Set(
             (group.sightings || [])
                 .filter(s => !s.is_historical)
@@ -11155,14 +11196,13 @@ function updateRequirementCounts() {
                 .filter(Boolean)
         );
         const count = uniqueVendors.size;
-        // Update the RESULTS column in the matching row
+        // Table columns: [0]=checkbox [1]=MPN [2]=qty [3]=subs [4]=target$ [5]=fw [6]=dc [7]=hw [8]=pkg [9]=cond [10]=results [11]=delete
         for (const row of rows) {
             const cells = row.querySelectorAll('td');
-            if (cells.length >= 5) {
-                const mpn = cells[0].textContent.trim();
-                if (mpn === (group.label || '').trim()) {
-                    cells[4].textContent = count;
-                }
+            if (cells.length < 11) continue;
+            const mpn = cells[1].textContent.trim();
+            if (mpn === (group.label || '').trim()) {
+                cells[10].textContent = count;
             }
         }
     }
@@ -16180,8 +16220,12 @@ async function rfqOpenWorkspace(reqId, container) {
 
     container.innerHTML = `<div class="rfq-workspace" id="rfqWorkspace-${reqId}">
         <div class="rfq-left" id="rfqLeft-${reqId}">
+            <div class="rfq-left-header">
+                <span class="rfq-left-title">Parts</span>
+                <button class="btn btn-sm rfq-add-btn" onclick="event.stopPropagation();_rfqAddPartInline(${reqId})" title="Add a new part">+ Add</button>
+            </div>
             <table class="rfq-part-list"><thead><tr>
-                <th>MPN</th><th>Qty / Target</th><th>Status</th><th>Progress</th>
+                <th>MPN</th><th>Qty / Target</th><th>Status</th><th>Progress</th><th></th>
             </tr></thead><tbody id="rfqPartBody-${reqId}"></tbody></table>
         </div>
         <div class="rfq-right empty" id="rfqRight-${reqId}">
@@ -16208,11 +16252,123 @@ function _rfqRenderPartList(reqId) {
     const tbody = document.getElementById('rfqPartBody-' + reqId);
     if (!tbody) return;
     if (_rfqPartsData.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="empty-placeholder">No parts added yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-placeholder">No parts added yet — click "+ Add" to start</td></tr>';
         return;
     }
     tbody.innerHTML = _rfqPartsData.map(p => _rfqPartRow(p)).join('');
 }
+
+// Shows an inline add-part row at the top of the workspace left panel.
+function _rfqAddPartInline(rfqId) {
+    const tbody = document.getElementById('rfqPartBody-' + rfqId);
+    if (!tbody) return;
+    const existing = tbody.querySelector('.rfq-add-part-inline');
+    if (existing) { existing.querySelector('input')?.focus(); return; }
+
+    const tr = document.createElement('tr');
+    tr.className = 'rfq-add-part-inline';
+    tr.innerHTML = `<td colspan="5" style="padding:6px 10px;background:var(--teal-light)">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input class="rfq-add-mpn" placeholder="MPN *" autocomplete="off"
+                style="font-family:'JetBrains Mono',monospace;font-size:12px;padding:3px 8px;border:1px solid var(--teal);border-radius:4px;flex:1;min-width:100px;background:var(--white)">
+            <input class="rfq-add-qty" type="number" min="1" value="1" placeholder="Qty"
+                style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;width:64px;background:var(--white)">
+            <input class="rfq-add-price" type="number" step="0.01" min="0" placeholder="Target $"
+                style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;width:90px;background:var(--white)">
+            <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();_rfqSaveNewPart(${rfqId})" style="font-size:11px">Add</button>
+            <button class="btn btn-sm" onclick="event.stopPropagation();this.closest('tr').remove()"
+                style="font-size:11px;color:var(--muted)" title="Cancel">\u00d7</button>
+        </div>
+        <div style="font-size:9px;color:var(--muted);margin-top:2px">Enter to add &middot; Esc to cancel</div>
+    </td>`;
+    tbody.insertBefore(tr, tbody.firstChild);
+    const mpnInput = tr.querySelector('.rfq-add-mpn');
+    mpnInput.focus();
+
+    const keyHandler = e => {
+        if (e.key === 'Enter') { e.preventDefault(); _rfqSaveNewPart(rfqId); }
+        if (e.key === 'Escape') { e.preventDefault(); tr.remove(); }
+    };
+    tr.querySelectorAll('input').forEach(inp => inp.addEventListener('keydown', keyHandler));
+}
+window._rfqAddPartInline = _rfqAddPartInline;
+
+async function _rfqSaveNewPart(rfqId) {
+    const tbody = document.getElementById('rfqPartBody-' + rfqId);
+    if (!tbody) return;
+    const tr = tbody.querySelector('.rfq-add-part-inline');
+    if (!tr) return;
+    const mpnInput = tr.querySelector('.rfq-add-mpn');
+    const qtyInput = tr.querySelector('.rfq-add-qty');
+    const priceInput = tr.querySelector('.rfq-add-price');
+    const mpn = mpnInput?.value.trim();
+    if (!mpn) {
+        if (mpnInput) { mpnInput.style.borderColor = 'var(--red)'; mpnInput.focus(); }
+        return;
+    }
+
+    const body = { primary_mpn: mpn, target_qty: parseInt(qtyInput?.value) || 1 };
+    const priceVal = priceInput?.value.trim();
+    if (priceVal) { const pf = parseFloat(priceVal); if (!isNaN(pf) && pf >= 0) body.target_price = pf; }
+
+    tr.querySelectorAll('input, button').forEach(el => el.disabled = true);
+    try {
+        const addResult = await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body });
+        const dups = addResult?.duplicates;
+        if (dups?.length) {
+            showToast('Duplicate: ' + dups.map(d => `${d.mpn} (RFQ-${d.req_id})`).join(', '), 'warning');
+        }
+        const parts = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+        _ddReqCache[rfqId] = parts;
+        if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = parts; _ddTabCache[rfqId].details = parts; }
+        _rfqPartsData = parts;
+        _rfqRenderPartList(rfqId);
+        const rfq = _reqListData.find(r => r.id === rfqId);
+        if (rfq) {
+            rfq.requirement_count = parts.length;
+            rfq.sourced_count = parts.filter(r => (r.sighting_count || 0) > 0).length;
+        }
+        _refreshReqRow(rfqId);
+        showToast(`${mpn} added`, 'success');
+        // Keep form for next entry — re-insert at top (rendered list replaced it)
+        _rfqAddPartInline(rfqId);
+    } catch(e) {
+        logCatchError('_rfqSaveNewPart', e);
+        showToast('Failed to add part', 'error');
+        tr.querySelectorAll('input, button').forEach(el => el.disabled = false);
+        if (mpnInput) { mpnInput.style.borderColor = 'var(--red)'; mpnInput.focus(); }
+    }
+}
+window._rfqSaveNewPart = _rfqSaveNewPart;
+
+// Confirms and deletes a part from the workspace part list.
+async function _rfqDeletePart(rfqId, partId) {
+    confirmAction('Remove Part', 'Remove this part from the requisition?', async function() {
+        try {
+            await apiFetch(`/api/requirements/${partId}`, { method: 'DELETE' });
+            const reqs = _ddReqCache[rfqId];
+            if (reqs) {
+                const idx = reqs.findIndex(x => x.id === partId);
+                if (idx >= 0) reqs.splice(idx, 1);
+            }
+            if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = reqs; _ddTabCache[rfqId].details = reqs; }
+            _rfqPartsData = reqs || [];
+            _rfqRenderPartList(rfqId);
+            if (_rfqActivePartId === partId) {
+                _rfqActivePartId = null;
+                const right = document.getElementById('rfqRight-' + rfqId);
+                if (right) { right.className = 'rfq-right empty'; right.innerHTML = '<span>Select a part to view details</span>'; }
+            }
+            const rfq = _reqListData.find(r => r.id === rfqId);
+            if (rfq) {
+                rfq.requirement_count = (reqs || []).length;
+                rfq.sourced_count = (reqs || []).filter(r => (r.sighting_count || 0) > 0).length;
+            }
+            _refreshReqRow(rfqId);
+        } catch(e) { showToast('Failed to remove part', 'error'); }
+    }, { confirmClass: 'btn-danger', confirmLabel: 'Remove' });
+}
+window._rfqDeletePart = _rfqDeletePart;
 
 function _rfqPartRow(p) {
     const active = p.id === _rfqActivePartId ? ' active' : '';
@@ -16250,6 +16406,7 @@ function _rfqPartRow(p) {
         <td class="mono" style="font-size:10px;white-space:nowrap;color:var(--text2)">${qtyTarget}</td>
         <td><div class="rfq-chips">${chips}</div></td>
         <td>${stepper}</td>
+        <td style="padding:4px 6px;width:28px"><button class="btn btn-danger btn-sm rfq-del-btn" onclick="event.stopPropagation();_rfqDeletePart(${_rfqActiveReqId},${p.id})" title="Remove part">\u00d7</button></td>
     </tr>`;
 }
 
