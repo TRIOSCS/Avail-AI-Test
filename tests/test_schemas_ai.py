@@ -9,14 +9,15 @@ import pytest
 from pydantic import ValidationError
 
 from app.schemas.ai import (
+    ApplyFreeformRfqRequest,
     DraftOfferItem,
-    IntakeDraftRequest,
-    IntakeDraftResponse,
-    IntakeRequirementItem,
+    ParseFreeformOfferRequest,
+    ParseFreeformRfqRequest,
     ProspectContactSave,
     ProspectFinderRequest,
     RfqDraftRequest,
     SaveDraftOffersRequest,
+    SaveFreeformOffersRequest,
 )
 
 
@@ -66,39 +67,55 @@ class TestSaveDraftOffersRequest:
             )
 
 
-class TestIntakeRequirementItem:
-    def test_normalizes_fields(self):
-        item = IntakeRequirementItem(
-            mpn=" lm317t ",
-            quantity=25,
-            condition="Factory New",
-            packaging="Tape & Reel",
-        )
-        assert item.mpn == "LM317T"
-        assert item.condition == "new"
-        assert item.packaging == "reel"
-
-    def test_blank_mpn_raises(self):
-        with pytest.raises(ValidationError, match="mpn required"):
-            IntakeRequirementItem(mpn="   ")
-
-
-class TestIntakeDraftRequest:
-    def test_strips_text(self):
-        payload = IntakeDraftRequest(text="  vendor quote text  ")
-        assert payload.text == "vendor quote text"
+class TestParseFreeformRfqRequest:
+    def test_valid(self):
+        payload = ParseFreeformRfqRequest(raw_text="Need LM317T x500")
+        assert payload.raw_text == "Need LM317T x500"
 
     def test_blank_text_raises(self):
-        with pytest.raises(ValidationError, match="text required"):
-            IntakeDraftRequest(text="   ")
+        with pytest.raises(ValidationError):
+            ParseFreeformRfqRequest(raw_text="")
 
 
-class TestIntakeDraftResponse:
-    def test_defaults(self):
-        resp = IntakeDraftResponse()
-        assert resp.document_type == "unclear"
-        assert resp.requirements == []
-        assert resp.offers == []
+class TestParseFreeformOfferRequest:
+    def test_valid(self):
+        payload = ParseFreeformOfferRequest(raw_text="LM317T 500pcs @ 0.45", requisition_id=12)
+        assert payload.requisition_id == 12
+
+    def test_blank_text_raises(self):
+        with pytest.raises(ValidationError):
+            ParseFreeformOfferRequest(raw_text="")
+
+
+class TestApplyFreeformRfqRequest:
+    def test_valid(self):
+        payload = ApplyFreeformRfqRequest(
+            name="Acme - March RFQ",
+            customer_site_id=7,
+            requirements=[{"primary_mpn": "LM317T", "target_qty": 500}],
+        )
+        assert payload.name == "Acme - March RFQ"
+        assert payload.customer_site_id == 7
+
+    def test_empty_requirements_raises(self):
+        with pytest.raises(ValidationError):
+            ApplyFreeformRfqRequest(name="Acme", customer_site_id=7, requirements=[])
+
+
+class TestSaveFreeformOffersRequest:
+    def test_valid(self):
+        payload = SaveFreeformOffersRequest(
+            requisition_id=1,
+            offers=[DraftOfferItem(vendor_name="Acme", mpn="ABC123")],
+        )
+        assert len(payload.offers) == 1
+
+    def test_zero_req_id_raises(self):
+        with pytest.raises(ValidationError):
+            SaveFreeformOffersRequest(
+                requisition_id=0,
+                offers=[DraftOfferItem(vendor_name="Acme", mpn="ABC123")],
+            )
 
 
 class TestRfqDraftRequest:
