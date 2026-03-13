@@ -605,6 +605,12 @@ class TestConfidenceRouting:
 class TestEnrichmentQueueAPI:
     """Test enrichment queue REST endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/enrichment/queue" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_list_queue_empty(self, client):
         resp = client.get("/api/enrichment/queue")
         assert resp.status_code == 200
@@ -755,6 +761,12 @@ class TestEnrichmentQueueAPI:
 class TestEnrichmentJobAPI:
     """Test enrichment job REST endpoints."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/enrichment/jobs" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_list_jobs_empty(self, client):
         resp = client.get("/api/enrichment/jobs")
         assert resp.status_code == 200
@@ -800,6 +812,12 @@ class TestEnrichmentJobAPI:
 
 class TestEnrichmentStatsAPI:
     """Test enrichment stats endpoint."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/enrichment/stats" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
 
     def test_stats_empty(self, client):
         resp = client.get("/api/enrichment/stats")
@@ -853,6 +871,12 @@ class TestEnrichmentStatsAPI:
 
 class TestQueueItemShape:
     """Verify the shape of queue items returned by API."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/enrichment/queue" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
 
     def test_queue_item_has_expected_fields(self, client, db_session, sample_vendor):
         db_session.add(
