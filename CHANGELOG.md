@@ -2,6 +2,13 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-13 — Test library alignment for freeform intake + mixed frontend runners
+
+### Applied
+- Split `npm run test:frontend` into the correct runner sequence so Vitest no longer tries to execute the Node-native `.unit.test.mjs` / `.e2e.test.mjs` files.
+- Added `pytest-timeout` to `requirements-dev.txt` so the checked-in `pytest.ini` timeout flags work in fresh environments.
+- Replaced stale AI intake schema/assertion coverage that still expected `/api/ai/intake-draft` and `Intake*` models with tests for the current freeform intake schemas and endpoints.
+
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
 ### Applied

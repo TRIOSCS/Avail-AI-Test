@@ -650,55 +650,12 @@ def test_save_parsed_offers(ai_client, db_session, ai_test_user):
 
 
 # ---------------------------------------------------------------------------
-# Intake Draft (4 tests)
+# Freeform parsing compatibility coverage
 # ---------------------------------------------------------------------------
 
 
-def test_intake_draft_ai_disabled(ai_client):
-    """POST /api/ai/intake-draft with AI off returns 403."""
-    with patch("app.routers.ai._ai_enabled", return_value=False):
-        resp = ai_client.post("/api/ai/intake-draft", json={"text": "Need 500 pcs of LM317T"})
-    assert resp.status_code == 403
-
-
-def test_intake_draft_success(ai_client):
-    """POST /api/ai/intake-draft returns structured RFQ draft data."""
-    draft = {
-        "document_type": "rfq",
-        "confidence": 0.88,
-        "summary": "Parsed two requested parts.",
-        "requisition_name": "Acme RFQ intake",
-        "customer_name": "Acme Medical",
-        "vendor_name": None,
-        "notes": "Customer pasted from email.",
-        "requirements": [
-            {
-                "mpn": "LM317T",
-                "quantity": 500,
-                "manufacturer": "Texas Instruments",
-                "target_price": 0.45,
-            }
-        ],
-        "offers": [],
-    }
-    mock_parse = AsyncMock(return_value=draft)
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.services.ai_intake_parser.parse_freeform_intake", mock_parse),
-    ):
-        resp = ai_client.post("/api/ai/intake-draft", json={"text": "Customer needs LM317T qty 500 at $0.45"})
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["document_type"] == "rfq"
-    assert data["confidence"] == 0.88
-    assert data["requirements"][0]["mpn"] == "LM317T"
-    mock_parse.assert_awaited_once_with("Customer needs LM317T qty 500 at $0.45", None)
-
-
-def test_intake_draft_builds_requisition_context(ai_client, db_session, ai_test_user):
-    """POST /api/ai/intake-draft passes current requisition parts as context."""
+def test_parse_freeform_offer_builds_requisition_context(ai_client, db_session, ai_test_user):
+    """POST /api/ai/parse-freeform-offer passes current requisition parts as context."""
     from app.models import Requirement, Requisition
 
     req = Requisition(
@@ -720,39 +677,38 @@ def test_intake_draft_builds_requisition_context(ai_client, db_session, ai_test_
     )
     db_session.commit()
 
-    mock_parse = AsyncMock(
-        return_value={
-            "document_type": "offer",
-            "confidence": 0.9,
-            "summary": "Parsed vendor quote.",
-            "requisition_name": "Vendor offer intake",
-            "customer_name": None,
-            "vendor_name": "Acme Vendor",
-            "notes": None,
-            "requirements": [],
-            "offers": [{"vendor_name": "Acme Vendor", "mpn": "LM317T"}],
-        }
-    )
+    mock_parse = AsyncMock(return_value={"vendor_name": "Acme Vendor", "offers": [{"mpn": "LM317T"}]})
 
     with (
         patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.services.ai_intake_parser.parse_freeform_intake", mock_parse),
+        patch("app.services.freeform_parser_service.parse_freeform_offer", mock_parse),
     ):
         resp = ai_client.post(
-            "/api/ai/intake-draft",
-            json={"text": "We can offer LM317T 250 pcs", "requisition_id": req.id},
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "We can offer LM317T 250 pcs", "requisition_id": req.id},
         )
 
     assert resp.status_code == 200
     _, context = mock_parse.await_args.args
-    assert context == [{"mpn": "LM317T", "qty": 250, "target_price": 0.55}]
+    assert context == [{"mpn": "LM317T", "qty": 250}]
 
 
-def test_intake_draft_req_not_found(ai_client):
-    """POST /api/ai/intake-draft with bad requisition_id returns 404."""
-    with patch("app.routers.ai._ai_enabled", return_value=True):
-        resp = ai_client.post("/api/ai/intake-draft", json={"text": "offer text", "requisition_id": 99999})
-    assert resp.status_code == 404
+def test_parse_freeform_offer_no_result(ai_client):
+    """POST /api/ai/parse-freeform-offer returns parsed=False when parser returns None."""
+    with (
+        patch("app.routers.ai._ai_enabled", return_value=True),
+        patch(
+            "app.services.freeform_parser_service.parse_freeform_offer",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
+    ):
+        resp = ai_client.post(
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "Vendor sent a messy quote"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["parsed"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -1444,7 +1400,7 @@ def test_parse_freeform_rfq_no_result(ai_client):
     ):
         resp = ai_client.post(
             "/api/ai/parse-freeform-rfq",
-            json={"raw_text": ""},
+            json={"raw_text": "Customer sent an unclear request"},
         )
     assert resp.status_code == 200
     assert resp.json()["parsed"] is False

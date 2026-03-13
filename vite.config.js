@@ -130,6 +130,7 @@ export default defineConfig({
   test: {
     root: resolve(__dirname),
     include: ["tests/frontend/**/*.test.{js,mjs,ts}"],
+    exclude: ["tests/frontend/**/*.unit.test.mjs", "tests/frontend/**/*.e2e.test.mjs"],
     environment: "jsdom",
   },
 
