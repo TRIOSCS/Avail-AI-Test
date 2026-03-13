@@ -11,11 +11,19 @@ Depends on: app/routers/dashboard/briefs.py, app/routers/dashboard/overview.py, 
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import Company, CustomerSite, Offer, Requisition
 
 
 class TestHotOffersDataQuality:
     """Tests for price cap and same-requisition filtering in /api/dashboard/hot-offers."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_hot_offers_route_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/hot-offers" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def _make_offer(self, db, req_id, price=1.50, vendor="Arrow", mpn="LM317T", days_ago=0):
         o = Offer(
@@ -122,6 +130,12 @@ class TestHotOffersDataQuality:
 
 class TestAttentionFeedNumericTitles:
     """Tests for numeric-only title filtering in /api/dashboard/attention-feed (TT-032)."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_attention_feed_route_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/attention-feed" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def _make_req(self, db, user, name="REQ-1", status="active", deadline=None, days_ago=0):
         r = Requisition(
