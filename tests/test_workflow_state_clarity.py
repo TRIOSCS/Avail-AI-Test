@@ -210,8 +210,7 @@ class TestBuyPlanResubmission:
         _halted_plan.status = BuyPlanStatus.active.value
         db_session.commit()
         resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
-        assert resp.status_code == 200  # 200 with error body
-        assert resp.json()["status_code"] == 400
+        assert resp.status_code == 400
 
     def test_reset_cancelled_plan_to_draft(self, client, db_session, _halted_plan):
         _halted_plan.status = BuyPlanStatus.cancelled.value
