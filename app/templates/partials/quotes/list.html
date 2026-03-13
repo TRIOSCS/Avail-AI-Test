@@ -1,0 +1,66 @@
+{# list.html — Quotes list page with filter tabs, search, and sortable table.
+   Called by: GET /views/quotes (views.py)
+   Depends on: quote_row.html, shared/empty_state.html, shared/pagination.html #}
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <h2>Quotes</h2>
+</div>
+
+{# Filter tabs: All / Draft / Sent / Won / Lost #}
+<div x-data="{ filter: '{{ status }}' }" style="margin-bottom:1rem;">
+  <div class="tab-bar" role="tablist" style="display:flex; gap:0.5rem; border-bottom:1px solid #e2e8f0; padding-bottom:0.5rem;">
+    {% for tab_value, tab_label in [('', 'All'), ('draft', 'Draft'), ('sent', 'Sent'), ('won', 'Won'), ('lost', 'Lost')] %}
+    <button role="tab"
+            class="tab-btn"
+            :class="{ 'active': filter === '{{ tab_value }}' }"
+            @click="filter = '{{ tab_value }}'"
+            hx-get="/views/quotes/rows?status={{ tab_value }}"
+            hx-target="#quote-table-body"
+            hx-include="[name='q'], [name='sort']"
+            hx-swap="innerHTML">
+      {{ tab_label }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+
+{# Search input #}
+<div style="margin-bottom:1rem;">
+  <input type="search" name="q" value="{{ q }}"
+         placeholder="Search quotes..."
+         hx-get="/views/quotes/rows"
+         hx-target="#quote-table-body"
+         hx-trigger="input changed delay:300ms, search"
+         hx-include="[name='sort']"
+         style="width:100%; max-width:400px; padding:0.5rem;">
+</div>
+
+{# Sort selector #}
+<input type="hidden" name="sort" value="{{ sort }}">
+
+<table class="data-table" style="width:100%; border-collapse:collapse;">
+  <thead>
+    <tr>
+      <th>Quote #</th>
+      <th>Customer</th>
+      <th>Lines</th>
+      <th>Total</th>
+      <th>Status</th>
+      <th>Date</th>
+    </tr>
+  </thead>
+  <tbody id="quote-table-body">
+    {% if quotes %}
+      {% for quote in quotes %}
+        {% include "partials/quotes/quote_row.html" %}
+      {% endfor %}
+    {% else %}
+      <tr><td colspan="6">
+        {% include "partials/shared/empty_state.html" %}
+      </td></tr>
+    {% endif %}
+    {% if total_pages > 1 %}
+      {% include "partials/shared/pagination.html" %}
+    {% endif %}
+  </tbody>
+</table>

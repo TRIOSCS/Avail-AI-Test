@@ -1,0 +1,99 @@
+{# detail.html — Quote detail page with header, action buttons, and line items editor.
+   Called by: GET /views/quotes/{quote_id} (views.py)
+   Depends on: quote object, line_items list, line_item_row.html #}
+
+<div class="quote-detail" id="quote-detail-{{ quote.id }}">
+  {# Header #}
+  <div class="detail-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+    <div>
+      <h2>{{ quote.quote_number }}
+        <span class="badge badge-{{ quote.status }}">{{ quote.status }}</span>
+      </h2>
+      <p style="color:#64748b;">
+        {{ quote.customer_name }} &mdash; Rev {{ quote.revision or 1 }}
+      </p>
+    </div>
+    <div style="display:flex; gap:0.5rem;">
+      <button hx-get="/views/quotes" hx-target="#main-content" hx-push-url="true"
+              class="btn btn-secondary">&larr; Back</button>
+      {% if quote.status == 'draft' %}
+      <button hx-post="/api/quotes/{{ quote.id }}/send" hx-target="#quote-detail-{{ quote.id }}" hx-swap="outerHTML"
+              class="btn btn-primary">Send Quote</button>
+      {% endif %}
+      {% if quote.status == 'sent' %}
+      <button hx-post="/api/quotes/{{ quote.id }}/result" hx-target="#quote-detail-{{ quote.id }}" hx-swap="outerHTML"
+              class="btn btn-secondary">Mark Result</button>
+      {% endif %}
+      {% if quote.status in ('won', 'lost') %}
+      <button hx-post="/api/quotes/{{ quote.id }}/revise" hx-target="#quote-detail-{{ quote.id }}" hx-swap="outerHTML"
+              class="btn btn-secondary">Revise</button>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Summary row #}
+  <div class="quote-summary" style="display:flex; gap:2rem; margin-bottom:1.5rem; padding:1rem; background:#f8fafc; border-radius:8px;">
+    <div>
+      <span style="color:#64748b; font-size:0.85rem;">Subtotal</span>
+      <div style="font-size:1.2rem; font-weight:600;">${{ '%.2f' | format(quote.subtotal or 0) }}</div>
+    </div>
+    <div>
+      <span style="color:#64748b; font-size:0.85rem;">Cost</span>
+      <div style="font-size:1.2rem; font-weight:600;">${{ '%.2f' | format(quote.total_cost or 0) }}</div>
+    </div>
+    <div>
+      <span style="color:#64748b; font-size:0.85rem;">Margin</span>
+      <div style="font-size:1.2rem; font-weight:600;">{{ '%.1f' | format(quote.total_margin_pct or 0) }}%</div>
+    </div>
+    <div>
+      <span style="color:#64748b; font-size:0.85rem;">Terms</span>
+      <div>{{ quote.payment_terms or 'N/A' }}</div>
+    </div>
+  </div>
+
+  {# Global markup control #}
+  <div x-data="{ markup: '' }" style="margin-bottom:1rem; display:flex; gap:0.5rem; align-items:center;">
+    <label>Apply markup %:</label>
+    <input type="number" x-model="markup" step="0.1" style="width:80px; padding:0.25rem;">
+    <button class="btn btn-secondary btn-sm"
+            hx-post="/api/quotes/{{ quote.id }}/markup"
+            hx-target="#line-items-body"
+            hx-swap="innerHTML"
+            :hx-vals="JSON.stringify({ markup_pct: markup })">
+      Apply All
+    </button>
+  </div>
+
+  {# Line items table #}
+  <table class="data-table" style="width:100%; border-collapse:collapse;">
+    <thead>
+      <tr>
+        <th>MPN</th>
+        <th>Qty</th>
+        <th>Cost</th>
+        <th>Sell Price</th>
+        <th>Line Total</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="line-items-body">
+      {% if line_items %}
+        {% for line in line_items %}
+          {% include "partials/quotes/line_item_row.html" %}
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="6" style="text-align:center; padding:2rem; color:#94a3b8;">
+          No line items yet.
+        </td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {# Notes #}
+  {% if quote.notes %}
+  <div style="margin-top:1.5rem;">
+    <h4>Notes</h4>
+    <p style="color:#475569;">{{ quote.notes }}</p>
+  </div>
+  {% endif %}
+</div>

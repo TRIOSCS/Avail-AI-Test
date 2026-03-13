@@ -19,17 +19,23 @@ from app.dependencies import require_user, wants_html
 from app.models import (
     ActivityLog,
     BuyPlan,
+    BuyPlanLine,
+    BuyPlanV3,
     Company,
     CustomerSite,
     MaterialCard,
     Offer,
     Quote,
+    QuoteLine,
     Requirement,
     Requisition,
     RequisitionTask,
     Sighting,
     SiteContact,
     User,
+    VendorCard,
+    VendorContact,
+    VendorReview,
 )
 from app.utils.sql_helpers import escape_like
 
@@ -754,4 +760,601 @@ async def company_tab(
     return templates.TemplateResponse(
         f"partials/companies/tabs/{tab_name}.html",
         context,
+    )
+
+
+# ── Quotes + Offers views ────────────────────────────────────────
+
+
+def _query_quotes(db: Session, q: str, status: str, sort: str, page: int):
+    """Build a filtered, sorted, paginated quote query.
+
+    Returns (quotes_list, page, total_pages) where each item is a
+    lightweight namespace suitable for the list template.
+    """
+    base = (
+        db.query(Quote, CustomerSite.site_name)
+        .outerjoin(CustomerSite, Quote.customer_site_id == CustomerSite.id)
+    )
+
+    # Search filter
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                Quote.quote_number.ilike(f"%{safe_q}%"),
+                CustomerSite.site_name.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    # Status filter
+    if status:
+        base = base.filter(Quote.status == status)
+
+    # Sort
+    allowed_sorts = {
+        "created_at": Quote.created_at,
+        "total": Quote.subtotal,
+        "status": Quote.status,
+    }
+    sort_col = allowed_sorts.get(sort, Quote.created_at)
+    sort_expr = sort_col.desc() if sort in ("created_at", "total") else sort_col.asc()
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    rows = base.order_by(sort_expr).offset(offset).limit(PER_PAGE).all()
+
+    quotes = []
+    for qobj, site_name in rows:
+        line_count = (
+            db.query(sqlfunc.count(QuoteLine.id))
+            .filter(QuoteLine.quote_id == qobj.id)
+            .scalar()
+        ) or 0
+        quotes.append(
+            type("Q", (), {
+                "id": qobj.id,
+                "quote_number": qobj.quote_number,
+                "customer_name": site_name or "",
+                "line_count": line_count,
+                "total": float(qobj.subtotal) if qobj.subtotal else 0,
+                "status": qobj.status or "draft",
+                "created_at": qobj.created_at,
+            })
+        )
+    return quotes, page, total_pages
+
+
+@router.get("/views/quotes")
+async def quotes_page(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    sort: str = "created_at",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Quotes list page."""
+    logger.debug("Quotes page view by user={}", user.email if user else "unknown")
+    quotes, page, total_pages = _query_quotes(db, q, status, sort, page)
+    return templates.TemplateResponse(
+        "partials/quotes/list.html",
+        {
+            "request": request,
+            "user": user,
+            "quotes": quotes,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "status": status,
+            "sort": sort,
+            "url": "/views/quotes/rows",
+            "target_id": "quote-table-body",
+            "message": "No quotes found.",
+        },
+    )
+
+
+@router.get("/views/quotes/rows")
+async def quotes_rows(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    sort: str = "created_at",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Quote table rows partial (HTMX swap target)."""
+    logger.debug("Quotes rows partial q='{}' status='{}' sort={}", q, status, sort)
+    quotes, page, total_pages = _query_quotes(db, q, status, sort, page)
+
+    from fastapi.responses import HTMLResponse
+
+    row_html_parts = []
+    for quote in quotes:
+        rendered = templates.get_template("partials/quotes/quote_row.html").render(quote=quote)
+        row_html_parts.append(rendered)
+
+    if not row_html_parts:
+        empty = templates.get_template("partials/shared/empty_state.html").render(
+            message="No quotes found.",
+        )
+        row_html_parts.append(f'<tr><td colspan="6">{empty}</td></tr>')
+
+    if total_pages > 1:
+        pagination = templates.get_template("partials/shared/pagination.html").render(
+            page=page, total_pages=total_pages, url="/views/quotes/rows", target_id="quote-table-body",
+        )
+        row_html_parts.append(pagination)
+
+    return HTMLResponse("\n".join(row_html_parts))
+
+
+@router.get("/views/quotes/{quote_id}")
+async def quote_detail(
+    quote_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Quote detail page with line items editor."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Resolve customer name from site
+    site = db.query(CustomerSite).filter(CustomerSite.id == quote.customer_site_id).first()
+    quote.customer_name = site.site_name if site else ""
+
+    line_items = (
+        db.query(QuoteLine)
+        .filter(QuoteLine.quote_id == quote_id)
+        .order_by(QuoteLine.id)
+        .all()
+    )
+
+    logger.debug("Quote detail id={} by user={}", quote_id, user.email)
+    return templates.TemplateResponse(
+        "partials/quotes/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "quote": quote,
+            "quote_id": quote_id,
+            "line_items": line_items,
+        },
+    )
+
+
+@router.get("/views/offers")
+async def offers_page(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    sort: str = "created_at",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Offers gallery/list page."""
+    logger.debug("Offers page view by user={}", user.email if user else "unknown")
+
+    base = db.query(Offer)
+
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                Offer.vendor_name.ilike(f"%{safe_q}%"),
+                Offer.mpn.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    if status:
+        base = base.filter(Offer.status == status)
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    offers = base.order_by(Offer.created_at.desc()).offset(offset).limit(PER_PAGE).all()
+
+    return templates.TemplateResponse(
+        "partials/quotes/offers_list.html",
+        {
+            "request": request,
+            "user": user,
+            "offers": offers,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "status": status,
+            "sort": sort,
+        },
+    )
+
+
+# ── Vendors views ────────────────────────────────────────────────
+
+
+def _query_vendors(db: Session, q: str, sort: str, dir: str, page: int):
+    """Build a filtered, sorted, paginated vendor query.
+
+    Returns (vendors_list, page, total_pages) where each item is a
+    lightweight namespace suitable for the list template.
+    """
+    contact_count_sq = sqlfunc.count(VendorContact.id).label("contact_count")
+    base = (
+        db.query(VendorCard, contact_count_sq)
+        .outerjoin(VendorContact, VendorContact.vendor_card_id == VendorCard.id)
+        .group_by(VendorCard.id)
+    )
+
+    # Search filter
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                VendorCard.display_name.ilike(f"%{safe_q}%"),
+                VendorCard.domain.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    # Sort
+    allowed_sorts = {
+        "name": VendorCard.display_name,
+        "health_score": VendorCard.vendor_score,
+        "last_activity": VendorCard.last_activity_at,
+    }
+    sort_col = allowed_sorts.get(sort, VendorCard.display_name)
+    sort_expr = sort_col.asc() if dir == "asc" else sort_col.desc()
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    rows = base.order_by(sort_expr).offset(offset).limit(PER_PAGE).all()
+
+    vendors = [
+        type("V", (), {
+            "id": v.id,
+            "name": v.display_name,
+            "health_score": round(v.vendor_score, 1) if v.vendor_score is not None else None,
+            "contact_count": cnt or 0,
+            "last_activity": v.last_activity_at.strftime("%b %d, %Y") if v.last_activity_at else None,
+        })
+        for v, cnt in rows
+    ]
+    return vendors, page, total_pages
+
+
+@router.get("/views/vendors")
+async def vendors_page(
+    request: Request,
+    q: str = "",
+    sort: str = "name",
+    dir: str = "asc",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Vendors list page."""
+    logger.debug("Vendors page view by user={}", user.email if user else "unknown")
+    vendors, page, total_pages = _query_vendors(db, q, sort, dir, page)
+    return templates.TemplateResponse(
+        "partials/vendors/list.html",
+        {
+            "request": request,
+            "user": user,
+            "vendors": vendors,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "sort": sort,
+            "dir": dir,
+            "message": "No vendors found.",
+        },
+    )
+
+
+@router.get("/views/vendors/rows")
+async def vendors_rows(
+    request: Request,
+    q: str = "",
+    sort: str = "name",
+    dir: str = "asc",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Vendor table rows partial (HTMX swap target)."""
+    logger.debug("Vendors rows partial q='{}' sort={} dir={}", q, sort, dir)
+    vendors, page, total_pages = _query_vendors(db, q, sort, dir, page)
+
+    from fastapi.responses import HTMLResponse
+
+    row_html_parts = []
+    for vendor in vendors:
+        rendered = templates.get_template("partials/vendors/vendor_row.html").render(vendor=vendor)
+        row_html_parts.append(rendered)
+
+    if not row_html_parts:
+        empty = templates.get_template("partials/shared/empty_state.html").render(
+            message="No vendors found.",
+        )
+        row_html_parts.append(f'<tr><td colspan="5">{empty}</td></tr>')
+
+    if total_pages > 1:
+        pagination = templates.get_template("partials/shared/pagination.html").render(
+            page=page, total_pages=total_pages, url="/views/vendors/rows", target_id="vendor-table-body",
+        )
+        row_html_parts.append(pagination)
+
+    return HTMLResponse("\n".join(row_html_parts))
+
+
+@router.get("/views/vendors/{vendor_id}")
+async def vendor_detail(
+    vendor_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Vendor detail drawer partial."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    contact_count = (
+        db.query(sqlfunc.count(VendorContact.id))
+        .filter(VendorContact.vendor_card_id == vendor_id)
+        .scalar()
+    ) or 0
+
+    logger.debug("Vendor detail id={} by user={}", vendor_id, user.email)
+    return templates.TemplateResponse(
+        "partials/vendors/detail.html",
+        {"request": request, "user": user, "vendor": vendor, "contact_count": contact_count},
+    )
+
+
+_VENDOR_TABS = {"overview", "contacts", "analytics", "offers"}
+
+
+@router.get("/views/vendors/{vendor_id}/tab/{tab_name}")
+async def vendor_tab(
+    vendor_id: int,
+    tab_name: str,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Vendor tab content partial."""
+    if tab_name not in _VENDOR_TABS:
+        raise HTTPException(status_code=404, detail=f"Unknown tab: {tab_name}")
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    logger.debug("Vendor tab id={} tab={} by user={}", vendor_id, tab_name, user.email)
+
+    context: dict = {"request": request, "vendor": vendor, "vendor_id": vendor_id}
+
+    if tab_name == "overview":
+        reviews = (
+            db.query(VendorReview)
+            .filter(VendorReview.vendor_card_id == vendor_id)
+            .all()
+        )
+        if reviews:
+            context["avg_rating"] = sum(r.rating for r in reviews) / len(reviews)
+            context["review_count"] = len(reviews)
+        else:
+            context["avg_rating"] = None
+            context["review_count"] = 0
+
+    elif tab_name == "contacts":
+        contacts = (
+            db.query(VendorContact)
+            .filter(VendorContact.vendor_card_id == vendor_id)
+            .order_by(VendorContact.full_name)
+            .all()
+        )
+        context["contacts"] = contacts
+
+    elif tab_name == "analytics":
+        pass  # vendor object has all analytics fields
+
+    elif tab_name == "offers":
+        offers = (
+            db.query(Offer)
+            .filter(Offer.vendor_name == vendor.display_name)
+            .order_by(Offer.created_at.desc())
+            .all()
+        )
+        context["offers"] = offers
+
+    return templates.TemplateResponse(
+        f"partials/vendors/tabs/{tab_name}.html",
+        context,
+    )
+
+
+# ── Buy Plans views ─────────────────────────────────────────────
+
+
+def _query_buy_plans(db: Session, user: User, q: str, status: str, mine: bool, sort: str, dir: str, page: int):
+    """Build a filtered, sorted, paginated buy plan query.
+
+    Returns (buy_plans_list, page, total_pages) where each item is a
+    lightweight namespace suitable for the list template.
+    """
+    line_count_sq = sqlfunc.count(BuyPlanLine.id)
+    base = (
+        db.query(BuyPlanV3, line_count_sq, User.name.label("submitted_by_name"))
+        .outerjoin(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlanV3.id)
+        .outerjoin(User, BuyPlanV3.submitted_by_id == User.id)
+        .outerjoin(Requisition, BuyPlanV3.requisition_id == Requisition.id)
+        .group_by(BuyPlanV3.id, User.name)
+    )
+
+    # "My Only" filter — show only plans submitted by this user
+    if mine:
+        base = base.filter(BuyPlanV3.submitted_by_id == user.id)
+
+    # Search filter
+    if q.strip():
+        safe_q = escape_like(q.strip())
+        base = base.filter(
+            or_(
+                Requisition.customer_name.ilike(f"%{safe_q}%"),
+                BuyPlanV3.sales_order_number.ilike(f"%{safe_q}%"),
+                BuyPlanV3.customer_po_number.ilike(f"%{safe_q}%"),
+            )
+        )
+
+    # Status filter
+    if status:
+        base = base.filter(BuyPlanV3.status == status)
+
+    # Sort
+    allowed_sorts = {
+        "created_at": BuyPlanV3.created_at,
+        "total": BuyPlanV3.total_cost,
+        "customer": Requisition.customer_name,
+        "name": BuyPlanV3.id,
+    }
+    sort_col = allowed_sorts.get(sort, BuyPlanV3.created_at)
+    sort_expr = sort_col.asc() if dir == "asc" else sort_col.desc()
+
+    total = base.count()
+    total_pages = max(1, math.ceil(total / PER_PAGE))
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * PER_PAGE
+
+    rows = base.order_by(sort_expr).offset(offset).limit(PER_PAGE).all()
+
+    buy_plans = [
+        type("BP", (), {
+            "id": bp.id,
+            "name": f"BP-{bp.id}",
+            "customer_name": bp.requisition.customer_name if bp.requisition else "",
+            "line_count": cnt or 0,
+            "total_cost": bp.total_cost,
+            "status": bp.status,
+            "submitted_by_name": submitted_name or "",
+            "created_at": bp.created_at,
+        })
+        for bp, cnt, submitted_name in rows
+    ]
+    return buy_plans, page, total_pages
+
+
+@router.get("/views/buy-plans")
+async def buy_plans_page(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    mine: bool = False,
+    sort: str = "created_at",
+    dir: str = "desc",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buy plans list page."""
+    logger.debug("Buy plans page view by user={}", user.email if user else "unknown")
+    buy_plans, page, total_pages = _query_buy_plans(db, user, q, status, mine, sort, dir, page)
+    return templates.TemplateResponse(
+        "partials/buy_plans/list.html",
+        {
+            "request": request,
+            "user": user,
+            "buy_plans": buy_plans,
+            "page": page,
+            "total_pages": total_pages,
+            "q": q,
+            "status": status,
+            "mine": mine,
+            "sort": sort,
+            "dir": dir,
+            "message": "No buy plans found.",
+        },
+    )
+
+
+@router.get("/views/buy-plans/rows")
+async def buy_plans_rows(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    mine: bool = False,
+    sort: str = "created_at",
+    dir: str = "desc",
+    page: int = Query(1, ge=1),
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buy plan table rows partial (HTMX swap target)."""
+    logger.debug("Buy plans rows partial q='{}' status='{}' mine={}", q, status, mine)
+    buy_plans, page, total_pages = _query_buy_plans(db, user, q, status, mine, sort, dir, page)
+
+    from fastapi.responses import HTMLResponse
+
+    row_html_parts = []
+    for bp in buy_plans:
+        rendered = templates.get_template("partials/buy_plans/buy_plan_row.html").render(bp=bp)
+        row_html_parts.append(rendered)
+
+    if not row_html_parts:
+        empty = templates.get_template("partials/shared/empty_state.html").render(
+            message="No buy plans found.",
+        )
+        row_html_parts.append(f'<tr><td colspan="7">{empty}</td></tr>')
+
+    if total_pages > 1:
+        pagination = templates.get_template("partials/shared/pagination.html").render(
+            page=page, total_pages=total_pages, url="/views/buy-plans/rows", target_id="bp-table-body",
+        )
+        row_html_parts.append(pagination)
+
+    return HTMLResponse("\n".join(row_html_parts))
+
+
+@router.get("/views/buy-plans/{bp_id}")
+async def buy_plan_detail(
+    bp_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buy plan detail page with workflow actions."""
+    bp = db.query(BuyPlanV3).filter(BuyPlanV3.id == bp_id).first()
+    if not bp:
+        raise HTTPException(status_code=404, detail="Buy plan not found")
+
+    lines = (
+        db.query(BuyPlanLine)
+        .filter(BuyPlanLine.buy_plan_id == bp_id)
+        .order_by(BuyPlanLine.id)
+        .all()
+    )
+
+    logger.debug("Buy plan detail bp_id={} by user={}", bp_id, user.email)
+    return templates.TemplateResponse(
+        "partials/buy_plans/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "bp": bp,
+            "lines": lines,
+        },
     )
