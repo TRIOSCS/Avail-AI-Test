@@ -84,6 +84,59 @@ class SaveDraftOffersRequest(BaseModel):
         return v
 
 
+class IntakeRequirementItem(BaseModel):
+    """Normalized requirement row extracted from intake text."""
+
+    mpn: str
+    quantity: int | None = None
+    condition: str | None = None
+    packaging: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_and_require_mpn(cls, v: str) -> str:
+        normalized = normalize_mpn(v or "")
+        if not normalized:
+            raise ValueError("mpn required")
+        return normalized
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_intake_condition(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_intake_packaging(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Raw text payload for AI intake drafting."""
+
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def strip_and_require_text(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("text required")
+        return cleaned
+
+
+class IntakeDraftResponse(BaseModel):
+    """Structured output from AI intake drafting."""
+
+    document_type: str = "unclear"
+    requirements: list[IntakeRequirementItem] = []
+    offers: list[DraftOfferItem] = []
+
+
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)
