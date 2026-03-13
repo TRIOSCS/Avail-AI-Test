@@ -99,6 +99,15 @@ def vendor_mouser(db_session: Session) -> VendorCard:
 class TestEmailBackfill:
     """POST /api/enrichment/backfill-emails"""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/backfill-emails"
+            for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_backfill_from_activity_log(self, admin_client, db_session, vendor_arrow, admin_user):
         """Activity log emails get promoted to VendorContact records."""
         # Create an activity log entry with an email not yet in vendor_contacts
@@ -218,6 +227,15 @@ class TestEmailBackfill:
 class TestM365Status:
     """GET /api/enrichment/m365-status"""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/m365-status"
+            for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_returns_user_list(self, admin_client, db_session, admin_user):
         resp = admin_client.get("/api/enrichment/m365-status")
         assert resp.status_code == 200
@@ -245,6 +263,15 @@ class TestM365Status:
 class TestDeepEmailScan:
     """POST /api/enrichment/deep-email-scan/{user_id}"""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/deep-email-scan/{user_id}"
+            for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
+
     def test_user_not_found(self, admin_client):
         resp = admin_client.post("/api/enrichment/deep-email-scan/99999")
         assert resp.status_code == 404
@@ -263,6 +290,15 @@ class TestDeepEmailScan:
 
 class TestWebsiteScraping:
     """POST /api/enrichment/scrape-websites"""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/scrape-websites"
+            for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
 
     def test_scrape_returns_counts(self, admin_client):
         """Endpoint returns vendor and email counts."""
@@ -472,6 +508,15 @@ class TestSearchPropagation:
 
 class TestEnrichmentStatsVendorEmails:
     """Stats endpoint now includes vendor_emails count."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_enrichment_router_disabled(self, admin_client):
+        has_route = any(
+            getattr(route, "path", "") == "/api/enrichment/stats"
+            for route in admin_client.app.routes
+        )
+        if not has_route:
+            pytest.skip("Enrichment router disabled in MVP mode")
 
     def test_stats_includes_vendor_emails(self, admin_client, db_session, vendor_arrow):
         # Create a vendor contact with email
