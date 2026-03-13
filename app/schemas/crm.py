@@ -465,6 +465,11 @@ class QuoteLineItem(BaseModel):
     unit_sell: float = 0
     margin: float = 0
 
+    @field_validator("mpn", "vendor_name")
+    @classmethod
+    def sanitize_quote_text_fields(cls, v: str) -> str:
+        return (sanitize_text(v) or "").strip()
+
 
 class QuoteCreate(BaseModel):
     offer_ids: list[int] = []
