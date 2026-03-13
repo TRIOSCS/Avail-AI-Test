@@ -591,7 +591,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

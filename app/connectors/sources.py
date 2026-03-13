@@ -147,7 +147,7 @@ class BaseConnector(ABC):
     @abstractmethod
     async def _do_search(self, part_number: str) -> list[dict]:
         """Run the connector-specific lookup implementation."""
-        raise NotImplementedError
+        return None
 
 
 def _parse_retry_after(response: httpx.Response) -> float:
