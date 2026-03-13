@@ -35,6 +35,9 @@ from ..models import (
 from ..schemas.ai import (
     ApplyFreeformRfqRequest,
     CompareQuotesRequest,
+    FreeTextParseRequest,
+    FreeTextSaveOffersRequest,
+    FreeTextSaveRfqRequest,
     NormalizePartsRequest,
     ParseEmailRequest,
     ParseFreeformOfferRequest,
@@ -867,3 +870,121 @@ async def ai_save_freeform_offers(
         created.append(offer.id)
     db.commit()
     return {"created": len(created), "offer_ids": created}
+
+
+# ── Feature 7: Unified free-text paste → parse/save ─────────────────────
+
+
+@router.post("/api/ai/parse-free-text")
+@limiter.limit("10/minute")
+async def ai_parse_free_text(
+    payload: FreeTextParseRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse free-form text (auto-detect RFQ vs offer) via AI."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.free_text_parser import parse_free_text
+
+    result = await parse_free_text(payload.text)
+    if not result or not result.get("line_items"):
+        return {"parsed": False, "reason": "No parts extracted"}
+    return {"parsed": True, **result}
+
+
+@router.post("/api/ai/save-free-text-rfq")
+@limiter.limit("5/minute")
+async def ai_save_free_text_rfq(
+    payload: FreeTextSaveRfqRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save free-text-parsed RFQ as requisition + requirements."""
+    from ..search_service import resolve_material_card
+    from ..utils.normalization import normalize_mpn_key
+
+    req = Requisition(
+        name=payload.name.strip(),
+        customer_name=payload.customer_name,
+        created_by=user.id,
+        status="draft",
+    )
+    if payload.customer_site_id:
+        req.customer_site_id = payload.customer_site_id
+    db.add(req)
+    db.flush()
+
+    created_count = 0
+    for item in payload.line_items[:50]:
+        mpn = (item.get("mpn") or "").strip()
+        if not mpn:
+            continue
+        mat_card = resolve_material_card(mpn, db)
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=mat_card.id if mat_card else None,
+            target_qty=item.get("quantity") or 1,
+            target_price=item.get("target_price"),
+        )
+        db.add(r)
+        created_count += 1
+    db.commit()
+    return {
+        "ok": True,
+        "requisition_id": req.id,
+        "requisition_name": req.name,
+        "requirements_created": created_count,
+    }
+
+
+@router.post("/api/ai/save-free-text-offers")
+@limiter.limit("5/minute")
+async def ai_save_free_text_offers(
+    payload: FreeTextSaveOffersRequest,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save free-text-parsed offers to an existing requisition."""
+    req_obj = db.query(Requisition).filter(Requisition.id == payload.requisition_id).first()
+    if not req_obj:
+        raise HTTPException(404, "Requisition not found")
+
+    norm_name = normalize_vendor_name(payload.vendor_name or "")
+    card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
+    if not card:
+        card = VendorCard(
+            normalized_name=norm_name,
+            display_name=payload.vendor_name or "Unknown",
+            emails=[],
+            phones=[],
+        )
+        db.add(card)
+        db.flush()
+
+    created_count = 0
+    for item in payload.line_items[:50]:
+        mpn = (item.get("mpn") or "").strip()
+        if not mpn:
+            continue
+        new_offer = Offer(
+            requisition_id=req_obj.id,
+            vendor_card_id=card.id,
+            vendor_name=card.display_name,
+            vendor_name_normalized=card.normalized_name,
+            mpn=mpn,
+            qty_available=item.get("quantity") or 1,
+            unit_price=item.get("target_price"),
+            source="free_text",
+            entered_by_id=user.id,
+            status="active",
+        )
+        db.add(new_offer)
+        created_count += 1
+    db.commit()
+    return {"ok": True, "offers_created": created_count}
