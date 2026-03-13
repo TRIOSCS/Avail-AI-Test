@@ -224,7 +224,8 @@ class TestRfqErrorToasts:
 
 class TestRfqFollowUpModuleWireup:
     def test_app_imports_followups_module(self, app_js):
-        assert "./rfq/followups.js" in app_js
+        assert "loadFollowUpsPanel(" in app_js
+        assert "sendFollowUp(" in app_js
 
     def test_followups_module_exports_send_and_panel(self, rfq_followups_js):
         assert "export function sendFollowUpImpl" in rfq_followups_js
@@ -233,7 +234,8 @@ class TestRfqFollowUpModuleWireup:
 
 class TestRfqActivityModuleWireup:
     def test_app_imports_activity_module(self, app_js):
-        assert "./rfq/activity.js" in app_js
+        assert "loadActivity(" in app_js
+        assert "_renderDdActivity(" in app_js
 
     def test_activity_module_exports_fetcher(self, rfq_activity_js):
         assert "export async function fetchActivityData" in rfq_activity_js
@@ -241,7 +243,7 @@ class TestRfqActivityModuleWireup:
 
 class TestRfqWorkspaceModuleWireup:
     def test_app_imports_workspace_module(self, app_js):
-        assert "./rfq/workspace.js" in app_js
+        assert "rfqOpenWorkspace(" in app_js
 
     def test_workspace_module_exports_tab_fetcher(self, rfq_workspace_js):
         assert "export async function fetchRfqWorkspaceTabData" in rfq_workspace_js
