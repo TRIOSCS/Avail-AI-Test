@@ -11,6 +11,8 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.models.auth import User
 from app.models.teams_alert_config import TeamsAlertConfig
 from app.services import teams_alert_service
@@ -169,7 +171,14 @@ def test_resolve_director_id_none(db_session):
 # ── Config CRUD endpoints ──────────────────────────────────────────
 
 
-def test_config_crud(client, db_session, test_user):
+@pytest.fixture
+def _skip_if_teams_alert_router_disabled(client):
+    has_route = any(getattr(route, "path", "") == "/api/teams-alerts/config" for route in client.app.routes)
+    if not has_route:
+        pytest.skip("Teams alerts router disabled in MVP mode")
+
+
+def test_config_crud(client, db_session, test_user, _skip_if_teams_alert_router_disabled):
     """Full CRUD cycle for alert config."""
     # GET — no config yet
     resp = client.get("/api/teams-alerts/config")
