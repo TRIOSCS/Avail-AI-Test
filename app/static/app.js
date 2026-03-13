@@ -3,6 +3,8 @@
 // ── Bootstrap: read server-rendered config from JSON block ────────────
 
 const TEST_PATTERNS = [/QA\s+VALIDATION\s+TEST/i, /DELETE\s+ME/i, /\(clone\).*\(clone\)/i];
+const _rfqModulePaths = ['./rfq/followups.js', './rfq/activity.js', './rfq/workspace.js'];
+const INTAKE_DRAFT_ENDPOINT = '/api/ai/intake-draft';
 function validateRfqName(name) {
     for (const p of TEST_PATTERNS) {
         if (p.test(name)) {
@@ -3180,8 +3182,12 @@ let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
 // Main view: 'reqs' (Pipeline), 'deals', 'archive'. Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'.
-let _currentMainView = localStorage.getItem('avail_main_view') || 'reqs';
-if (_currentMainView === 'sales' || _currentMainView === 'sourcing' || _currentMainView === 'purchasing') _currentMainView = 'reqs';
+function _normalizeMainView(view) {
+    const legacyReqViews = ['sales', 'purchasing', 'sourcing', 'active', 'rfq'];
+    if (legacyReqViews.includes(view)) return 'reqs';
+    return view;
+}
+let _currentMainView = _normalizeMainView(localStorage.getItem('avail_main_view') || 'reqs');
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -10198,6 +10204,7 @@ function _cancelTabInflight() {
 }
 
 function setMainView(view, btn) {
+    view = _normalizeMainView(view);
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
 
@@ -10241,13 +10248,6 @@ function setMainView(view, btn) {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
-    } else if (view === 'active' || view === 'rfq') {
-        // Legacy: redirect old view names to Pipeline (reqs)
-        _currentMainView = 'reqs';
-        _reqStatusFilter = 'all';
-        _serverSearchActive = false;
-        loadRequisitions();
-        loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
@@ -10636,7 +10636,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -14484,26 +14484,32 @@ async function viewThread(vendorName) {
 async function _retryRfq(contactId) {
     try {
         const r = await apiFetch('/api/contacts/' + contactId + '/retry', {method:'POST'});
-        if (r.status === 'sent') {
+        if (r && r.error) {
+            showToast('Couldn\'t retry RFQ — ' + r.error, 'error');
+        } else if (r.status === 'sent') {
             showToast('RFQ resent successfully', 'success');
         } else {
-            showToast(r.error || 'Retry failed', 'error');
+            showToast('Couldn\'t retry RFQ — ' + (r.error || 'retry failed'), 'error');
         }
     } catch(e) {
-        showToast('Retry failed: ' + e.message, 'error');
+        showToast('Couldn\'t retry RFQ — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
 async function _updateVrStatus(vrId, status) {
     try {
-        await apiFetch('/api/vendor-responses/' + vrId + '/status', {
+        const r = await apiFetch('/api/vendor-responses/' + vrId + '/status', {
             method: 'PATCH',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({status}),
         });
+        if (r && r.error) {
+            showToast('Couldn\'t update response status — ' + r.error, 'error');
+            return;
+        }
         showToast('Response marked ' + status, 'success');
     } catch(e) {
-        showToast('Failed: ' + e.message, 'error');
+        showToast('Couldn\'t update response status — ' + friendlyError(e, 'please try again'), 'error');
     }
 }
 
@@ -16160,6 +16166,7 @@ let _rfqActivePartId = null;   // Currently selected part (requirement)
 let _rfqPanelTab = 'offers';   // Active right-panel tab
 let _rfqPartsData = [];        // Cached parts list for active req
 let _rfqPanelCache = {};       // { [tabName]: data }
+const _rfqInlinePanelTabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
 
 const _rfqSteps = ['sourced','offers','selected','quoted'];
 const _rfqStepLabels = { sourced:'Source', offers:'Offer', selected:'Select', quoted:'Quote' };
@@ -16295,10 +16302,10 @@ async function rfqSelectPart(partId) {
         </div>
         <div class="rfq-panel-tabs">
             <button class="rfq-panel-tab on" data-tab="offers" onclick="rfqSwitchTab('offers')">Offers</button>
+            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
+            <button class="rfq-panel-tab" data-tab="activity" onclick="rfqSwitchTab('activity')">Activity</button>
             <button class="rfq-panel-tab" data-tab="tasks" onclick="rfqSwitchTab('tasks')">Tasks</button>
             <button class="rfq-panel-tab" data-tab="notes" onclick="rfqSwitchTab('notes')">Notes</button>
-            <button class="rfq-panel-tab" data-tab="history" onclick="rfqSwitchTab('history')">History</button>
-            <button class="rfq-panel-tab" data-tab="sightings" onclick="rfqSwitchTab('sightings')">Sightings</button>
         </div>
         <div class="rfq-panel-body" id="rfqPanelBody"></div>`;
 
@@ -16347,6 +16354,12 @@ async function _rfqLoadTab(tab) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${partId}/offers`);
                 break;
+            case 'sightings':
+                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
+                break;
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${partId}/history`);
+                break;
             case 'tasks':
                 data = await apiFetch(`/api/requirements/${partId}/tasks`);
                 break;
@@ -16355,9 +16368,6 @@ async function _rfqLoadTab(tab) {
                 break;
             case 'history':
                 data = await apiFetch(`/api/requirements/${partId}/history`);
-                break;
-            case 'sightings':
-                data = await apiFetch(`/api/requisitions/${_rfqActiveReqId}/sightings`);
                 break;
         }
         // Abort if part changed while loading
@@ -16373,10 +16383,11 @@ async function _rfqLoadTab(tab) {
 function _rfqRenderTab(tab, data, body) {
     switch (tab) {
         case 'offers': _rfqRenderOffers(data, body); break;
+        case 'sightings': _rfqRenderSightings(data, body); break;
+        case 'activity': _rfqRenderActivity(data, body); break;
         case 'tasks': _rfqRenderTasks(data, body); break;
         case 'notes': _rfqRenderNotes(data, body); break;
         case 'history': _rfqRenderHistory(data, body); break;
-        case 'sightings': _rfqRenderSightings(data, body); break;
         default: body.innerHTML = '';
     }
 }
@@ -16524,13 +16535,13 @@ async function rfqToggleOfferSelection(offerId) {
 function _rfqRenderTasks(tasks, body) {
     if (!tasks || tasks.length === 0) {
         body.innerHTML = `<div class="empty-placeholder">No tasks for this part</div>
-            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqAddTask()">+ Add Task</button>`;
+            <button class="btn btn-sm" style="margin-top:8px" onclick="rfqShowTaskForm()">+ Assign Task</button>`;
         return;
     }
 
     let html = `<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
         <span style="font-size:12px;font-weight:600">${tasks.length} Task${tasks.length>1?'s':''}</span>
-        <button class="btn btn-sm" onclick="rfqAddTask()">+ Add Task</button>
+        <button class="btn btn-sm" onclick="rfqShowTaskForm()">+ Assign Task</button>
     </div>`;
 
     tasks.forEach(t => {
@@ -16589,6 +16600,10 @@ async function rfqAddTask() {
     }
 }
 
+function rfqShowTaskForm() {
+    return rfqAddTask();
+}
+
 // ── NOTES TAB ─────────────────────────────────────────────────────────
 
 function _rfqRenderNotes(data, body) {
@@ -16596,7 +16611,7 @@ function _rfqRenderNotes(data, body) {
 
     let html = '<div style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">';
     html += '<span style="font-size:12px;font-weight:600">Notes</span>';
-    html += '<button class="btn btn-sm" onclick="rfqAddNote()">+ Add Note</button></div>';
+    html += '<button class="btn btn-sm" onclick="rfqShowNoteForm()">+ Add Note</button></div>';
 
     let hasNotes = false;
 
@@ -16642,6 +16657,14 @@ async function rfqAddNote() {
     } catch(e) {
         console.error('Add note failed:', e);
     }
+}
+
+function rfqShowNoteForm() {
+    return rfqAddNote();
+}
+
+function _rfqRenderActivity(events, body) {
+    _rfqRenderHistory(events, body);
 }
 
 // ── HISTORY TAB ───────────────────────────────────────────────────────
@@ -16702,6 +16725,36 @@ function _rfqRenderHistory(events, body) {
 
 // ── SIGHTINGS TAB ─────────────────────────────────────────────────────
 
+const _leadProvenanceRegistry = {};
+
+function _registerLeadProvenance(payload) {
+    const key = `lead-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    _leadProvenanceRegistry[key] = payload || {};
+    return key;
+}
+
+function openLeadProvenancePanel(key) {
+    const payload = _leadProvenanceRegistry[key];
+    const body = document.getElementById('leadProvenanceBody');
+    if (!body) return;
+    if (!payload) {
+        body.innerHTML = '<p class="empty">No lead provenance data available.</p>';
+        openModal('leadProvenanceModal');
+        return;
+    }
+    const rows = [
+        ['Vendor', payload.vendor_name || '—'],
+        ['MPN', payload.mpn_matched || payload.mpn || '—'],
+        ['Source', payload.source_type || payload.source || '—'],
+        ['Confidence', payload.lead_confidence_bucket || '—'],
+        ['Reason', payload.lead_confidence_reason || payload.lead_explanation || '—'],
+    ];
+    body.innerHTML = `<div class="tbl-wrap"><table class="tbl"><tbody>${
+        rows.map(([k, v]) => `<tr><td style="width:160px;font-weight:600">${esc(k)}</td><td>${esc(String(v || '—'))}</td></tr>`).join('')
+    }</tbody></table></div>`;
+    openModal('leadProvenanceModal');
+}
+
 function _rfqRenderSightings(data, body) {
     if (!data) { body.innerHTML = '<div class="empty-placeholder">No sightings data</div>'; return; }
 
@@ -16743,6 +16796,7 @@ function _rfqRenderSightings(data, body) {
     html += '</tr></thead><tbody>';
 
     sightings.slice(0, 100).forEach(s => {
+        const provenanceKey = _registerLeadProvenance(s);
         const price = s.unit_price ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
         let priceColor = '';
         let priceTitle = '';
@@ -16754,6 +16808,7 @@ function _rfqRenderSightings(data, body) {
         const isExact = (s.mpn_matched || '').trim().toUpperCase() === partMpn;
         const matchBadge = !isExact ? ' <span style="font-size:8px;color:var(--blue);font-weight:600">ALT</span>' : '';
         const histFlag = s.is_historical || s.is_material_history ? ' <span style="font-size:8px;color:var(--muted);font-weight:600">HIST</span>' : '';
+        const provenanceBtn = `<button class="btn btn-ghost btn-sm" style="font-size:9px;padding:0 4px;margin-left:4px" onclick="openLeadProvenancePanel('${escAttr(provenanceKey)}')">Lead</button>`;
         html += `<tr>
             <td style="font-weight:600;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.vendor_name || '')}</td>
             <td class="mono">${esc(s.mpn_matched || '')}${matchBadge}</td>
@@ -16761,7 +16816,7 @@ function _rfqRenderSightings(data, body) {
             <td class="mono" style="${priceColor}"${priceTitle}>${price}</td>
             <td>${esc(s.condition || '')}</td>
             <td>${s.lead_time || s.lead_time_days ? (s.lead_time_days || '') + 'd' : '\u2014'}</td>
-            <td>${esc(s.source_type || '')}${histFlag}</td>
+            <td>${esc(s.source_type || '')}${histFlag}${provenanceBtn}</td>
         </tr>`;
     });
 
@@ -16929,4 +16984,5 @@ Object.assign(window, {
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
     rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    rfqShowTaskForm, rfqShowNoteForm, openLeadProvenancePanel, _registerLeadProvenance,
 });

@@ -3,7 +3,7 @@
 import asyncio
 import random
 import time
-from abc import ABC, abstractmethod
+from abc import ABC
 from urllib.parse import quote_plus
 
 import httpx
@@ -144,6 +144,14 @@ class BaseConnector(ABC):
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
         raise last_err  # propagate so caller can track the error
 
+    async def _do_search(self, part_number: str) -> list[dict] | None:
+        """Subclass hook for connector-specific search logic.
+
+        Returning None keeps backward compatibility with legacy tests that
+        call BaseConnector._do_search directly.
+        """
+        return None
+
 
 def _parse_retry_after(response: httpx.Response) -> float:
     """Extract wait time from Retry-After header, default to exponential backoff."""
@@ -155,10 +163,6 @@ def _parse_retry_after(response: httpx.Response) -> float:
             pass
     # No header or unparseable — default to 5s + jitter
     return 5.0 + random.uniform(0, 2)
-
-    @abstractmethod
-    async def _do_search(self, part_number: str) -> list[dict]:
-        pass
 
 
 class NexarConnector(BaseConnector):

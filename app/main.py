@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -298,6 +299,16 @@ _static_dir = "app/static/dist" if os.path.isdir("app/static/dist") else "app/st
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
+_CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Temporary browser cache-reset gate for post-release cleanup."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current < _CLEAR_SITE_DATA_CUTOFF
+
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
 
@@ -365,6 +376,8 @@ async def request_id_middleware(request: Request, call_next):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         path = request.url.path
+        if _should_set_clear_site_data() and path != "/health":
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
         if path.startswith("/static/"):
@@ -556,7 +569,9 @@ def _seed_api_sources():
                     if all_set:
                         status = "live"
                 is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
+                new_src = ApiSource(status=status, is_active=is_active, **src)
+                db.add(new_src)
+                existing_map[src["name"]] = new_src
 
         # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
         if "newark" in existing_map and "element14" in existing_map:
@@ -578,7 +593,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

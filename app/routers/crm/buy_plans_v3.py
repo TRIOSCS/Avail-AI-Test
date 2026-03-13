@@ -520,7 +520,7 @@ async def reset_plan_to_draft(
         db.commit()
         return {"id": plan.id, "status": plan.status}
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        return {"error": str(e), "status_code": 400}
 
 
 # ── SO Verification ──────────────────────────────────────────────────

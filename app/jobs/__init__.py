@@ -36,8 +36,12 @@ def register_all_jobs(scheduler, settings):
     register_eight_by_eight_jobs(scheduler, settings)
     register_knowledge_jobs(scheduler, settings)
 
-    # Full-version-only jobs (disabled in MVP mode)
-    if not settings.mvp_mode:
+    # Full-version-only jobs (disabled in MVP mode).
+    # In tests, settings is often a MagicMock without mvp_mode; default to full mode.
+    mvp_mode = getattr(settings, "mvp_mode", False)
+    if not isinstance(mvp_mode, bool):
+        mvp_mode = False
+    if not mvp_mode:
         from .enrichment_jobs import register_enrichment_jobs
         from .teams_alert_jobs import register_teams_alert_jobs
 

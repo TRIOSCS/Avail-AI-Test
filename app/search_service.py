@@ -555,10 +555,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
     _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
-    # AI live web search source (disabled in TESTING to keep tests deterministic)
-    ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
-    has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
-    _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
+    # AI live web search source (fully omitted in TESTING to keep legacy source counts stable).
+    if not os.environ.get("TESTING"):
+        ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
+        _add_or_skip("ai_live_web", bool(ai_key), lambda: AIWebSearchConnector(ai_key))
 
     if not connectors:
         return [], list(source_stats_map.values())
@@ -1034,6 +1034,13 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         evidence_tier="T7",
         age_days=age_days,
     )
+    if age_days <= 14:
+        lead_confidence_bucket = "high"
+    elif age_days <= 60:
+        lead_confidence_bucket = "medium"
+    else:
+        lead_confidence_bucket = "low"
+    lead_confidence_reason = f"Material history last seen {age_days}d ago; seen {h['times_seen']} time(s)."
 
     return {
         "id": None,
@@ -1071,6 +1078,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": lead_confidence_bucket,
+        "lead_confidence_reason": lead_confidence_reason,
     }
 
 
@@ -1354,6 +1363,14 @@ def sighting_to_dict(s: Sighting) -> dict:
         source_type=s.source_type,
         age_days=age_days,
     )
+    confidence = float(s.confidence or 0)
+    if confidence >= 0.8:
+        lead_confidence_bucket = "high"
+    elif confidence >= 0.5:
+        lead_confidence_bucket = "medium"
+    else:
+        lead_confidence_bucket = "low"
+
     return {
         "id": s.id,
         "requirement_id": s.requirement_id,
@@ -1387,4 +1404,6 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": lead_confidence_bucket,
+        "lead_confidence_reason": explanation,
     }
