@@ -28,6 +28,12 @@ class TestTeamLeaderboardRankRecomputation:
     """avail_rank and mult_rank should be recomputed from current data,
     not carried over from potentially stale snapshots."""
 
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/team-leaderboard" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def _seed_scores(self, db, users, month):
         """Create AvailScore + Multiplier snapshots with intentionally
         mismatched ranks to verify recomputation."""
@@ -128,6 +134,12 @@ class TestTeamLeaderboardRankRecomputation:
 
 class TestNeedsAttentionScope:
     """needs-attention should support scope=team to show all companies."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/needs-attention" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def _make_company(self, db, owner, name="Corp"):
         c = Company(
@@ -253,6 +265,12 @@ class TestProactiveScorecarOutlierCap:
 
 class TestBuyerBriefRevenueCap:
     """Buyer-brief buy plan queries should exclude outlier revenue values."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/buyer-brief" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def test_bp_revenue_cap_constant_exists(self):
         """Verify the revenue cap is defined in the briefs module."""
