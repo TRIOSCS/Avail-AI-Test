@@ -1,0 +1,90 @@
+{#
+  detail.html — Requisition detail view with header, tab bar, and content area.
+  Receives: req (Requisition ORM object), requirements (list), user.
+  Called by: views.py requisition_detail endpoint.
+  Depends on: Alpine.js (tab switching), HTMX (tab lazy-loading, inline edits).
+#}
+{% extends "base.html" %}
+
+{% block title %}{{ req.name }} — AvailAI{% endblock %}
+
+{% block content %}
+<div class="page-header" x-data="{ editing: false }">
+    <div class="breadcrumb">
+        <a hx-get="/views/requisitions" hx-target="#main-content" hx-push-url="true">Requisitions</a>
+        <span class="breadcrumb-sep">/</span>
+        <span>{{ req.name }}</span>
+    </div>
+
+    <div class="detail-header">
+        {# Inline-editable name #}
+        <h1 x-show="!editing" @dblclick="editing = true" class="editable-title">
+            {{ req.name }}
+        </h1>
+        <form x-show="editing" @submit.prevent="editing = false"
+              hx-put="/api/requisitions/{{ req.id }}"
+              hx-headers='{"Content-Type": "application/json"}'
+              hx-vals="js:{name: document.getElementById('req-name-input').value}"
+              hx-target="#main-content"
+              hx-swap="none"
+              class="inline-edit-form">
+            <input id="req-name-input" type="text" value="{{ req.name }}"
+                   @keyup.escape="editing = false" x-ref="nameInput" x-init="$watch('editing', v => v && $nextTick(() => $refs.nameInput.focus()))">
+            <button type="submit" class="btn btn-sm btn-primary">Save</button>
+            <button type="button" class="btn btn-sm" @click="editing = false">Cancel</button>
+        </form>
+
+        <div class="detail-meta">
+            <span class="badge badge-{{ req.status }}">{{ req.status }}</span>
+            {% if req.urgency and req.urgency != 'normal' %}
+            <span class="badge badge-{{ req.urgency }}">{{ req.urgency }}</span>
+            {% endif %}
+            {% if req.customer_name %}
+            <span class="meta-item">{{ req.customer_name }}</span>
+            {% endif %}
+            {% if req.deadline %}
+            <span class="meta-item">Due: {{ req.deadline }}</span>
+            {% endif %}
+            <span class="meta-item">{{ requirement_count }} parts</span>
+        </div>
+
+        {# Action buttons #}
+        <div class="detail-actions">
+            <button class="btn btn-sm"
+                    hx-put="/api/requisitions/{{ req.id }}/archive"
+                    hx-target="#main-content"
+                    hx-confirm="Archive this requisition?">
+                Archive
+            </button>
+            <button class="btn btn-sm btn-primary"
+                    hx-post="/api/requisitions/{{ req.id }}/clone"
+                    hx-target="#main-content">
+                Clone
+            </button>
+        </div>
+    </div>
+</div>
+
+{# Tab bar with Alpine state + HTMX lazy loading #}
+<div x-data="{ tab: 'parts' }">
+    <nav class="tab-bar">
+        {% for tab_key, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('quotes', 'Quotes'), ('buy_plans', 'Buy Plans'), ('activity', 'Activity'), ('tasks', 'Tasks')] %}
+        <button class="tab-btn"
+                :class="{ 'active': tab === '{{ tab_key }}' }"
+                @click="tab = '{{ tab_key }}'"
+                hx-get="/views/requisitions/{{ req.id }}/tab/{{ tab_key }}"
+                hx-target="#tab-content"
+                hx-swap="innerHTML">
+            {{ tab_label }}
+        </button>
+        {% endfor %}
+    </nav>
+
+    {# Tab content area — initially loaded with parts tab #}
+    <div id="tab-content"
+         hx-get="/views/requisitions/{{ req.id }}/tab/parts"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+</div>
+{% endblock %}

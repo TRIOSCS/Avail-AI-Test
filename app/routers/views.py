@@ -7,7 +7,7 @@ Depends on: app/dependencies.py, app/templates/, app/database.py
 
 import math
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy import or_
@@ -16,7 +16,16 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_user, wants_html
-from app.models import Requirement, Requisition, User
+from app.models import (
+    ActivityLog,
+    BuyPlan,
+    Offer,
+    Quote,
+    Requirement,
+    Requisition,
+    RequisitionTask,
+    User,
+)
 from app.utils.sql_helpers import escape_like
 
 templates = Jinja2Templates(directory="app/templates")
@@ -202,4 +211,126 @@ async def requisitions_create_form(request: Request, user=Depends(require_user))
     return templates.TemplateResponse(
         "partials/requisitions/create_modal.html",
         {"request": request},
+    )
+
+
+# ── Requisition detail + drill-down ───────────────────────────────
+
+
+@router.get("/views/requisitions/{req_id}")
+async def requisition_detail(
+    req_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Full requisition detail page with header, tab bar, and action buttons."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    # Sales users can only see their own requisitions
+    if user.role == "sales" and req.created_by != user.id:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    requirement_count = (
+        db.query(sqlfunc.count(Requirement.id))
+        .filter(Requirement.requisition_id == req_id)
+        .scalar()
+    ) or 0
+
+    logger.debug("Requisition detail req_id={} by user={}", req_id, user.email)
+    return templates.TemplateResponse(
+        "partials/requisitions/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "req": req,
+            "requirement_count": requirement_count,
+        },
+    )
+
+
+_VALID_TABS = {"parts", "offers", "quotes", "buy_plans", "activity", "tasks"}
+
+
+@router.get("/views/requisitions/{req_id}/tab/{tab_name}")
+async def requisition_tab(
+    req_id: int,
+    tab_name: str,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a specific tab content partial for a requisition."""
+    if tab_name not in _VALID_TABS:
+        raise HTTPException(status_code=404, detail=f"Unknown tab: {tab_name}")
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    if user.role == "sales" and req.created_by != user.id:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+    logger.debug("Requisition tab req_id={} tab={} by user={}", req_id, tab_name, user.email)
+
+    context = {"request": request, "req_id": req_id}
+
+    if tab_name == "parts":
+        requirements = (
+            db.query(Requirement)
+            .filter(Requirement.requisition_id == req_id)
+            .order_by(Requirement.id)
+            .all()
+        )
+        context["requirements"] = requirements
+
+    elif tab_name == "offers":
+        offers = (
+            db.query(Offer)
+            .filter(Offer.requisition_id == req_id)
+            .order_by(Offer.created_at.desc())
+            .all()
+        )
+        context["offers"] = offers
+
+    elif tab_name == "quotes":
+        quotes = (
+            db.query(Quote)
+            .filter(Quote.requisition_id == req_id)
+            .order_by(Quote.created_at.desc())
+            .all()
+        )
+        context["quotes"] = quotes
+
+    elif tab_name == "buy_plans":
+        buy_plans = (
+            db.query(BuyPlan)
+            .filter(BuyPlan.requisition_id == req_id)
+            .order_by(BuyPlan.created_at.desc())
+            .all()
+        )
+        context["buy_plans"] = buy_plans
+
+    elif tab_name == "activity":
+        activities = (
+            db.query(ActivityLog)
+            .filter(ActivityLog.requisition_id == req_id)
+            .order_by(ActivityLog.created_at.desc())
+            .all()
+        )
+        context["activities"] = activities
+
+    elif tab_name == "tasks":
+        tasks = (
+            db.query(RequisitionTask)
+            .filter(RequisitionTask.requisition_id == req_id)
+            .order_by(RequisitionTask.created_at.desc())
+            .all()
+        )
+        context["tasks"] = tasks
+
+    return templates.TemplateResponse(
+        f"partials/requisitions/tabs/{tab_name}.html",
+        context,
     )

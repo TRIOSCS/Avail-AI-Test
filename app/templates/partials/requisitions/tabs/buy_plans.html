@@ -1,0 +1,40 @@
+{#
+  buy_plans.html — Buy plans tab for requisition detail view.
+  Receives: buy_plans (list of BuyPlan objects), req_id (int).
+  Called by: views.py requisition_tab endpoint (tab_name='buy_plans').
+  Depends on: HTMX (status actions).
+#}
+<div class="tab-panel" id="buy-plans-panel">
+    <div class="tab-toolbar">
+        <h3>Buy Plans ({{ buy_plans|length }})</h3>
+    </div>
+
+    {% if buy_plans %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>SO #</th>
+                <th>Submitted</th>
+                <th>Approved</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bp in buy_plans %}
+            <tr id="bp-row-{{ bp.id }}">
+                <td>{{ bp.id }}</td>
+                <td><span class="badge badge-{{ bp.status }}">{{ bp.status }}</span></td>
+                <td>{{ bp.sales_order_number or '-' }}</td>
+                <td>{{ bp.submitted_at.strftime('%b %d') if bp.submitted_at else '-' }}</td>
+                <td>{{ bp.approved_at.strftime('%b %d') if bp.approved_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        No buy plans yet. Buy plans are created after a quote is won.
+    </div>
+    {% endif %}
+</div>
