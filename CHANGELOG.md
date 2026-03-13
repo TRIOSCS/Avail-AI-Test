@@ -10,6 +10,7 @@ All notable changes to the project are logged here.
 - Replaced stale AI intake schema/assertion coverage that still expected `/api/ai/intake-draft` and `Intake*` models with tests for the current freeform intake schemas and endpoints.
 - Fixed bad relative imports in `app/routers/ai.py` so the freeform RFQ/apply/save endpoints can run under the test client.
 - Forced the test harness and local Playwright web server out of MVP mode so the full router surface is available during test runs.
+- Added the missing `lxml` runtime dependency, restored the temporary Clear-Site-Data gate helper in `main.py`, fixed `BaseConnector._do_search`, and skipped `/var/log/avail` file logging during tests.
 
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 

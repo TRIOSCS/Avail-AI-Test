@@ -7,6 +7,7 @@ setup_logging()  # Must run before any other module logs
 import os
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
@@ -373,6 +374,9 @@ async def request_id_middleware(request: Request, call_next):
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
 
+        if path != "/health" and _should_set_clear_site_data():
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
+
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
             logger.info(
@@ -402,6 +406,15 @@ async def api_version_middleware(request: Request, call_next):
 
 
 # ── Health Check ──────────────────────────────────────────────────────
+_CLEAR_SITE_DATA_CUTOFF = datetime(2026, 3, 18, 0, 0, tzinfo=timezone.utc)
+
+
+def _should_set_clear_site_data(now: datetime | None = None) -> bool:
+    """Keep the temporary cache clear header enabled until the planned cutoff."""
+    current = now or datetime.now(timezone.utc)
+    return current < _CLEAR_SITE_DATA_CUTOFF
+
+
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
 BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
 

@@ -58,7 +58,7 @@ def setup_logging() -> None:
             ),
             colorize=True,
         )
-    if is_production:
+    if is_production and not os.getenv("TESTING"):
         # Rotate file for persistent logs on the server (always JSON for parsing)
         logger.add(
             "/var/log/avail/avail.log",
