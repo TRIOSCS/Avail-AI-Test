@@ -793,7 +793,7 @@ async def ai_save_free_text_offers(
         norm_name = _nvn(vendor_name)
         card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
         if not card and norm_name:
-            card = VendorCard(normalized_name=norm_name, name=vendor_name)
+            card = VendorCard(normalized_name=norm_name, display_name=vendor_name)
             db.add(card)
             db.flush()
         mat_card = resolve_material_card(norm, db)
@@ -808,7 +808,6 @@ async def ai_save_free_text_offers(
             condition=item.get("condition") or "new",
             source="free_text",
             status="active",
-            created_by=user.id,
         )
         db.add(offer)
         count += 1

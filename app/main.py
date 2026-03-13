@@ -365,6 +365,9 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
+        if _should_set_clear_site_data():
+            response.headers["Clear-Site-Data"] = '"cache", "storage"'
+
         path = request.url.path
 
         # Cache-Control for static assets (hashed filenames from Vite get long cache)
@@ -591,7 +594,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 
