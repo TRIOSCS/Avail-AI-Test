@@ -46,12 +46,40 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["rfq"])
 
 
+def _enforce_req_scope_for_user(db: Session, user: User, req_id: int) -> None:
+    """Apply owner-only requisition scope for sales/trader users."""
+    if user.role not in ("sales", "trader"):
+        return
+    allowed = db.query(Requisition.id).filter(Requisition.id == req_id, Requisition.created_by == user.id).first()
+    if not allowed:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+
+
+def _get_contact_for_user(db: Session, user: User, contact_id: int) -> Contact:
+    """Fetch contact and enforce requisition scope for owner-scoped users."""
+    contact = db.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    _enforce_req_scope_for_user(db, user, contact.requisition_id)
+    return contact
+
+
+def _get_vendor_response_for_user(db: Session, user: User, vr_id: int) -> VendorResponse:
+    """Fetch vendor response and enforce requisition scope for owner-scoped users."""
+    vr = db.get(VendorResponse, vr_id)
+    if not vr:
+        raise HTTPException(status_code=404, detail="VendorResponse not found")
+    _enforce_req_scope_for_user(db, user, vr.requisition_id)
+    return vr
+
+
 @router.post("/api/contacts/phone")
 async def log_call(
     payload: PhoneCallLog,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    _enforce_req_scope_for_user(db, user, payload.requisition_id)
     return log_phone_contact(
         db=db,
         user_id=user.id,
@@ -70,9 +98,7 @@ async def retry_failed_rfq(
     db: Session = Depends(get_db),
 ):
     """Re-send a failed RFQ email."""
-    contact = db.get(Contact, contact_id)
-    if not contact:
-        raise HTTPException(status_code=404, detail="Contact not found")
+    contact = _get_contact_for_user(db, user, contact_id)
     if contact.status != "failed":
         raise HTTPException(status_code=400, detail="Only failed contacts can be retried")
 
@@ -102,6 +128,7 @@ async def retry_failed_rfq(
 
 @router.get("/api/requisitions/{req_id}/contacts")
 async def list_contacts(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    _enforce_req_scope_for_user(db, user, req_id)
     contacts = (
         db.query(Contact)
         .options(joinedload(Contact.user))
@@ -137,6 +164,7 @@ async def send_rfq(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
+    _enforce_req_scope_for_user(db, user, req_id)
     token = await require_fresh_token(request, db)
     results = await send_batch_rfq(
         token=token,
@@ -193,6 +221,7 @@ async def poll(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
+    _enforce_req_scope_for_user(db, user, req_id)
     token = await require_fresh_token(request, db)
     results = await poll_inbox(token, db, requisition_id=req_id, scanned_by_user_id=user.id)
     return {"responses": results}
@@ -211,9 +240,7 @@ async def update_vendor_response_status(
     if new_status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}")
 
-    vr = db.get(VendorResponse, vr_id)
-    if not vr:
-        raise HTTPException(status_code=404, detail="VendorResponse not found")
+    vr = _get_vendor_response_for_user(db, user, vr_id)
 
     vr.status = new_status
     db.commit()
@@ -227,6 +254,7 @@ async def list_responses(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    _enforce_req_scope_for_user(db, user, req_id)
     query = db.query(VendorResponse).filter_by(requisition_id=req_id)
     if status != "all":
         query = query.filter(VendorResponse.status == status)
@@ -249,6 +277,7 @@ async def list_responses(
 @router.get("/api/requisitions/{req_id}/activity")
 async def get_activity(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
+    _enforce_req_scope_for_user(db, user, req_id)
     contacts = (
         db.query(Contact)
         .options(joinedload(Contact.user))
@@ -731,9 +760,7 @@ async def send_follow_up(
     """Send a follow-up email for a stale contact."""
     token = await require_fresh_token(request, db)
 
-    contact = db.query(Contact).filter_by(id=contact_id).first()
-    if not contact:
-        raise HTTPException(404, "Contact not found")
+    contact = _get_contact_for_user(db, user, contact_id)
 
     body = payload.body
     if not body:
@@ -786,8 +813,16 @@ async def send_follow_up_batch(
 
     gc = GraphClient(token)
     results = []
+    authorized_contacts: dict[int, Contact] = {}
+    for cid in contact_ids[:50]:
+        contact = db.get(Contact, cid)
+        if not contact:
+            continue
+        _enforce_req_scope_for_user(db, user, contact.requisition_id)
+        authorized_contacts[cid] = contact
+
     for cid in contact_ids[:50]:  # Cap at 50 to prevent abuse
-        contact = db.query(Contact).filter_by(id=cid).first()
+        contact = authorized_contacts.get(cid)
         if not contact or not contact.vendor_contact:
             results.append({"contact_id": cid, "status": "skipped", "reason": "not found"})
             continue

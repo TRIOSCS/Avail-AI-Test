@@ -10,6 +10,7 @@ rfq-prepare, phone call logging, activity feed, send_follow_up, send_rfq, poll.
 """
 
 from datetime import datetime, timedelta, timezone
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -180,6 +181,29 @@ def _make_contact(
     db.commit()
     db.refresh(c)
     return c
+
+
+@contextmanager
+def _client_as_user(db_session: Session, user: User):
+    """Create a TestClient with auth dependencies overridden to `user`."""
+    from app.database import get_db
+    from app.dependencies import require_buyer, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[require_buyer] = _override_user
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
 
 
 # ── GET /api/follow-ups ──────────────────────────────────────────────
@@ -1675,6 +1699,76 @@ def test_follow_ups_summary_sales_role_filtering(
         assert data["total"] == 1
     finally:
         app.dependency_overrides.clear()
+
+
+# ── NEW TESTS — Owner-scoped RFQ access controls ─────────────────────
+
+
+def test_sales_cannot_list_contacts_for_other_users_requisition(db_session, sales_user, test_user, test_requisition):
+    _make_contact(db_session, test_requisition, test_user, vendor_name="Hidden Vendor")
+
+    with _client_as_user(db_session, sales_user) as c:
+        resp = c.get(f"/api/requisitions/{test_requisition.id}/contacts")
+
+    assert resp.status_code == 404
+
+
+def test_sales_can_list_contacts_for_owned_requisition(db_session, sales_user):
+    sales_req = Requisition(
+        name="SALES-REQ-003",
+        customer_name="Sales Customer",
+        status="open",
+        created_by=sales_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(sales_req)
+    db_session.commit()
+    _make_contact(db_session, sales_req, sales_user, vendor_name="Visible Vendor")
+
+    with _client_as_user(db_session, sales_user) as c:
+        resp = c.get(f"/api/requisitions/{sales_req.id}/contacts")
+
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["vendor_name"] == "Visible Vendor"
+
+
+def test_sales_cannot_update_vendor_response_status_for_other_users_requisition(
+    db_session, sales_user, test_requisition
+):
+    vr = VendorResponse(
+        requisition_id=test_requisition.id,
+        vendor_name="Blocked Vendor",
+        vendor_email="blocked@vendor.com",
+        subject="Re: RFQ",
+        status="new",
+        confidence=0.8,
+        received_at=datetime.now(timezone.utc),
+        classification="quote",
+        body="quoted",
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    with _client_as_user(db_session, sales_user) as c:
+        resp = c.patch(f"/api/vendor-responses/{vr.id}/status", json={"status": "reviewed"})
+
+    assert resp.status_code == 404
+    db_session.refresh(vr)
+    assert vr.status == "new"
+
+
+def test_sales_cannot_send_follow_up_for_other_users_requisition(
+    db_session, sales_user, test_user, test_requisition
+):
+    ctc = _make_contact(db_session, test_requisition, test_user, vendor_name="Hidden Followup", status="sent", days_ago=5)
+
+    with patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"):
+        with _client_as_user(db_session, sales_user) as c:
+            resp = c.post(f"/api/follow-ups/{ctc.id}/send", json={"body": "Follow up"})
+
+    assert resp.status_code == 404
 
 
 # ══════════════════════════════════════════════════════════════════════
