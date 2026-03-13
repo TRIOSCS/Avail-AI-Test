@@ -1329,13 +1329,33 @@ async def create_requirement_task(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Task title is required")
+    description = (body.get("description") or "").strip() or None
+
+    assigned_to_id = body.get("assigned_to_id")
+    if assigned_to_id is not None:
+        try:
+            assigned_to_id = int(assigned_to_id)
+        except (TypeError, ValueError):
+            raise HTTPException(422, "assigned_to_id must be an integer") from None
+
+    due_at = None
+    due_raw = body.get("due_at")
+    if due_raw:
+        try:
+            due_at = datetime.fromisoformat(str(due_raw).replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(422, "due_at must be an ISO-8601 datetime") from None
+
     task = RequisitionTask(
         requisition_id=req.requisition_id,
         title=title,
+        description=description,
         task_type="general",
         status="todo",
         source="manual",
         source_ref=f"requirement:{requirement_id}",
+        assigned_to_id=assigned_to_id,
+        due_at=due_at,
         created_by=user.id,
     )
     db.add(task)
