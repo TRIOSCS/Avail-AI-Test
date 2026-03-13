@@ -118,6 +118,7 @@ jobs:
       - name: Run tests with coverage
         env:
           TESTING: "1"
+          MVP_MODE: "false"
           PYTHONPATH: ${{ github.workspace }}
         run: |
           pytest tests/ -v --tb=short \

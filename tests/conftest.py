@@ -22,6 +22,7 @@ import nest_asyncio
 nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contamination)
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
+os.environ["MVP_MODE"] = "false"  # Include full routers (performance, dashboard, etc.) in tests
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
 os.environ["DATABASE_URL"] = "sqlite://"  # Prevent any code from connecting to real PostgreSQL
 os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests

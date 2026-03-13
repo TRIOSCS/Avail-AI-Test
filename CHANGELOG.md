@@ -2,6 +2,25 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-13 — Test library refinement (post HTMX/Alpine rebuild)
+
+### Applied
+- **conftest:** Set `MVP_MODE=false` in tests so performance/dashboard/enrichment routers are included
+- **test_schemas_ai:** Removed tests for `IntakeDraftRequest`, `IntakeDraftResponse`, `IntakeRequirementItem` (schemas removed in rebuild)
+- **test_buy_plan_v3_router:** Fixed `test_submit_blank_so_rejected` and `test_other_requires_note` — assert 422 instead of expecting raised exception (FastAPI returns validation error)
+- **test_routers_ai:** Skipped 4 intake-draft tests (endpoint removed in HTMX/Alpine rebuild)
+- **test_free_text_parser:** Skipped 14 schema/endpoint tests (FreeText* schemas replaced by ParseFreeform*; legacy endpoint URLs)
+- **pytest.ini:** Removed `--cov` from addopts (CI adds it); added `--timeout=60`; added `e2e` and `slow` markers
+- **requirements-dev:** Added `pytest-timeout>=2.2.0`
+- **CI:** Added `MVP_MODE=false` to test env
+- **scripts/run_tests.sh:** New script for consistent local test runs
+
+### Result
+- ~8,777 tests pass; ~70 known failures (frontend structure, NC worker HTML parsing, scheduler config)
+- E2E/Playwright tests excluded by default; run via `pytest tests/e2e/ --headed`
+
+---
+
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
 ### Applied
