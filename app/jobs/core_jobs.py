@@ -66,11 +66,11 @@ async def _job_token_refresh():
     from ..models import User
     from ..utils.token_manager import refresh_user_token
 
-    db = SessionLocal()
+    selector_db = SessionLocal()
+    users_to_refresh: list[int] = []
     try:
         now = datetime.now(timezone.utc)
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        users_to_refresh = []
+        users = selector_db.query(User).filter(User.refresh_token.isnot(None)).all()
         for user in users:
             needs_refresh = False
             if user.token_expires_at:
@@ -80,36 +80,45 @@ async def _job_token_refresh():
                 needs_refresh = True
 
             if needs_refresh:
-                users_to_refresh.append(user)
+                users_to_refresh.append(user.id)
+    except Exception as e:
+        logger.error(f"Token refresh job error: {e}")
+        return
+    finally:
+        selector_db.close()
 
-        # Refresh all users in parallel
-        async def _safe_refresh(user):
+    # Refresh users in parallel, but each task gets its own DB session.
+    sem = asyncio.Semaphore(5)
+
+    async def _safe_refresh(user_id: int):
+        async with sem:
+            task_db = SessionLocal()
             from ..cache.intel_cache import _get_redis
 
-            lock_key = f"lock:token_refresh:{user.id}"
             r = _get_redis()
-            if r:
-                acquired = r.set(lock_key, "1", nx=True, ex=60)
-                if not acquired:
-                    logger.debug("Token refresh skipped for %s — lock held", user.email)
-                    return
+            lock_key = f"lock:token_refresh:{user_id}"
             try:
-                await refresh_user_token(user, db)
+                user = task_db.get(User, user_id)
+                if not user:
+                    return
+                if r:
+                    acquired = r.set(lock_key, "1", nx=True, ex=60)
+                    if not acquired:
+                        logger.debug("Token refresh skipped for %s — lock held", user.email)
+                        return
+                await refresh_user_token(user, task_db)
             except Exception as e:
-                logger.error(f"Token refresh error for {user.email}: {e}")
+                logger.error(f"Token refresh error for user {user_id}: {e}")
             finally:
                 if r:
                     try:
                         r.delete(lock_key)
                     except Exception:
                         pass
+                task_db.close()
 
-        if users_to_refresh:
-            await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])
-    except Exception as e:
-        logger.error(f"Token refresh job error: {e}")
-    finally:
-        db.close()
+    if users_to_refresh:
+        await asyncio.gather(*[_safe_refresh(uid) for uid in users_to_refresh])
 
 
 @_traced_job

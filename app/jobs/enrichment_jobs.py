@@ -82,32 +82,15 @@ async def _job_deep_enrichment():
     from ..database import SessionLocal
     from ..models import Company, VendorCard
 
-    db = SessionLocal()
+    selector_db = SessionLocal()
+    stale_company_ids: list[int] = []
+    stale_vendor_ids: list[int] = []
+    recent_vendor_ids: list[int] = []
     try:
         now = datetime.now(timezone.utc)
-        from ..services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
-
-        async def _safe_enrich_company(cid):
-            try:
-                db.begin_nested()
-                await deep_enrich_company(cid, db)
-                db.commit()
-            except Exception as e:
-                logger.warning(f"Enrichment sweep company {cid} error: {e}")
-                db.rollback()
-
-        async def _safe_enrich_vendor(vid):
-            try:
-                db.begin_nested()
-                await deep_enrich_vendor(vid, db)
-                db.commit()
-            except Exception as e:
-                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                db.rollback()
-
         # Companies FIRST — customer accounts are highest priority (up to 50)
         stale_companies = (
-            db.query(Company.id)
+            selector_db.query(Company.id)
             .filter(
                 (Company.deep_enrichment_at.is_(None))
                 | (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
@@ -116,18 +99,11 @@ async def _job_deep_enrichment():
             .limit(50)
             .all()
         )
-
-        if stale_companies:
-            for i in range(0, len(stale_companies), 10):
-                batch = [cid for (cid,) in stale_companies[i : i + 10]]
-                await asyncio.wait_for(
-                    asyncio.gather(*[_safe_enrich_company(cid) for cid in batch], return_exceptions=True),
-                    timeout=300,
-                )
+        stale_company_ids = [cid for (cid,) in stale_companies]
 
         # Vendors second — most active first (up to 50)
         stale_vendors = (
-            db.query(VendorCard.id)
+            selector_db.query(VendorCard.id)
             .filter(
                 (VendorCard.deep_enrichment_at.is_(None))
                 | (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
@@ -139,10 +115,11 @@ async def _job_deep_enrichment():
             .limit(50)
             .all()
         )
+        stale_vendor_ids = [vid for (vid,) in stale_vendors]
 
         # Recently created vendors (last 24h, no enrichment yet)
         recent_vendors = (
-            db.query(VendorCard.id)
+            selector_db.query(VendorCard.id)
             .filter(
                 VendorCard.created_at > now - timedelta(hours=24),
                 VendorCard.deep_enrichment_at.is_(None),
@@ -150,8 +127,47 @@ async def _job_deep_enrichment():
             .limit(20)
             .all()
         )
+        recent_vendor_ids = [vid for (vid,) in recent_vendors]
+    except Exception as e:
+        logger.error(f"Deep enrichment sweep error: {e}")
+        return
+    finally:
+        selector_db.close()
 
-        all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
+    from ..services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
+
+    async def _safe_enrich_company(cid: int):
+        task_db = SessionLocal()
+        try:
+            await deep_enrich_company(cid, task_db)
+            task_db.commit()
+        except Exception as e:
+            logger.warning(f"Enrichment sweep company {cid} error: {e}")
+            task_db.rollback()
+        finally:
+            task_db.close()
+
+    async def _safe_enrich_vendor(vid: int):
+        task_db = SessionLocal()
+        try:
+            await deep_enrich_vendor(vid, task_db)
+            task_db.commit()
+        except Exception as e:
+            logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
+            task_db.rollback()
+        finally:
+            task_db.close()
+
+    if stale_company_ids:
+        for i in range(0, len(stale_company_ids), 10):
+            batch = stale_company_ids[i : i + 10]
+            await asyncio.wait_for(
+                asyncio.gather(*[_safe_enrich_company(cid) for cid in batch], return_exceptions=True),
+                timeout=300,
+            )
+
+    all_vendor_ids = stale_vendor_ids + recent_vendor_ids
+    if all_vendor_ids:
         for i in range(0, len(all_vendor_ids), 10):
             batch = all_vendor_ids[i : i + 10]
             await asyncio.wait_for(
@@ -159,15 +175,10 @@ async def _job_deep_enrichment():
                 timeout=300,
             )
 
-        logger.info(
-            f"Deep enrichment sweep: {len(stale_companies)} companies, "
-            f"{len(stale_vendors)} vendors, {len(recent_vendors)} new vendors"
-        )
-    except Exception as e:
-        logger.error(f"Deep enrichment sweep error: {e}")
-        db.rollback()
-    finally:
-        db.close()
+    logger.info(
+        f"Deep enrichment sweep: {len(stale_company_ids)} companies, "
+        f"{len(stale_vendor_ids)} vendors, {len(recent_vendor_ids)} new vendors"
+    )
 
 
 @_traced_job

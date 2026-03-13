@@ -156,17 +156,12 @@ async def _job_deep_email_mining():
     """Deep email mining scan for all connected users."""
     from ..database import SessionLocal
     from ..models import User
-    from ..utils.token_manager import get_valid_token
-
-    db = SessionLocal()
+    selector_db = SessionLocal()
+    users_to_scan: list[int] = []
     try:
         now = datetime.now(timezone.utc)
-        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        users = selector_db.query(User).filter(User.refresh_token.isnot(None)).all()
 
-        from ..connectors.email_mining import EmailMiner
-        from ..services.deep_enrichment_service import link_contact_to_entities
-
-        users_to_scan = []
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
@@ -174,56 +169,67 @@ async def _job_deep_email_mining():
                 last_scan = _utc(user.last_deep_email_scan)
                 if now - last_scan < timedelta(hours=4):
                     continue
-            users_to_scan.append(user)
-
-        sem = asyncio.Semaphore(3)
-
-        async def _safe_deep_scan(user):
-            async with sem:
-                try:
-                    token = await get_valid_token(user, db)
-                    if not token:
-                        return
-                    miner = EmailMiner(token, db=db, user_id=user.id)
-                    scan_result = await asyncio.wait_for(
-                        miner.deep_scan_inbox(lookback_days=30, max_messages=500),
-                        timeout=120,
-                    )
-                    for domain, domain_data in scan_result.get("per_domain", {}).items():
-                        for email_addr in domain_data.get("emails", [])[:10]:
-                            try:
-                                link_contact_to_entities(
-                                    db,
-                                    email_addr,
-                                    {
-                                        "full_name": domain_data.get("sender_names", [""])[0]
-                                        if domain_data.get("sender_names")
-                                        else None,
-                                        "confidence": 0.6,
-                                    },
-                                )
-                            except Exception:
-                                pass
-
-                    user.last_deep_email_scan = now
-                    db.commit()
-                    logger.info(
-                        f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
-                        f"{scan_result.get('contacts_found', 0)} contacts"
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(f"Deep email scan TIMEOUT for {user.email}")
-                except Exception as e:
-                    logger.error(f"Deep email scan error for {user.email}: {e}")
-                    db.rollback()
-
-        if users_to_scan:
-            await asyncio.gather(*[_safe_deep_scan(u) for u in users_to_scan])
+            users_to_scan.append(user.id)
     except Exception as e:
         logger.error(f"Deep email mining error: {e}")
-        db.rollback()
+        return
     finally:
-        db.close()
+        selector_db.close()
+
+    sem = asyncio.Semaphore(3)
+
+    async def _safe_deep_scan(user_id: int):
+        async with sem:
+            from ..connectors.email_mining import EmailMiner
+            from ..services.deep_enrichment_service import link_contact_to_entities
+            from ..utils.token_manager import get_valid_token
+
+            scan_db = SessionLocal()
+            try:
+                user = scan_db.get(User, user_id)
+                if not user:
+                    return
+                token = await get_valid_token(user, scan_db)
+                if not token:
+                    return
+                miner = EmailMiner(token, db=scan_db, user_id=user.id)
+                scan_result = await asyncio.wait_for(
+                    miner.deep_scan_inbox(lookback_days=30, max_messages=500),
+                    timeout=120,
+                )
+                for _domain, domain_data in scan_result.get("per_domain", {}).items():
+                    for email_addr in domain_data.get("emails", [])[:10]:
+                        try:
+                            link_contact_to_entities(
+                                scan_db,
+                                email_addr,
+                                {
+                                    "full_name": domain_data.get("sender_names", [""])[0]
+                                    if domain_data.get("sender_names")
+                                    else None,
+                                    "confidence": 0.6,
+                                },
+                            )
+                        except Exception:
+                            pass
+
+                user.last_deep_email_scan = datetime.now(timezone.utc)
+                scan_db.commit()
+                logger.info(
+                    f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
+                    f"{scan_result.get('contacts_found', 0)} contacts"
+                )
+            except asyncio.TimeoutError:
+                logger.warning(f"Deep email scan TIMEOUT for user {user_id}")
+                scan_db.rollback()
+            except Exception as e:
+                logger.error(f"Deep email scan error for user {user_id}: {e}")
+                scan_db.rollback()
+            finally:
+                scan_db.close()
+
+    if users_to_scan:
+        await asyncio.gather(*[_safe_deep_scan(uid) for uid in users_to_scan])
 
 
 @_traced_job
@@ -456,7 +462,8 @@ async def _scan_user_inbox(user, db):
     except Exception as e:
         logger.error(f"Inbox poll failed for {user.email}: {e}")
 
-    # Run independent sub-operations in parallel
+    # Use sequential sub-operations on a single session to avoid concurrent
+    # access to the same SQLAlchemy Session object.
     async def _safe_stock_scan():
         try:
             await _scan_stock_list_attachments(user, db, is_backfill)
@@ -475,11 +482,9 @@ async def _scan_user_inbox(user, db):
         except Exception as e:
             logger.error(f"Outbound scan failed for {user.email}: {e}")
 
-    await asyncio.gather(
-        _safe_stock_scan(),
-        _safe_mine_contacts(),
-        _safe_outbound_scan(),
-    )
+    await _safe_stock_scan()
+    await _safe_mine_contacts()
+    await _safe_outbound_scan()
 
     user.last_inbox_scan = datetime.now(timezone.utc)
     db.commit()
