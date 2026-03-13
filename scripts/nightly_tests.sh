@@ -15,11 +15,13 @@ echo "=== Nightly Test Run: $(date) ===" > "$LOG_FILE"
 cd /root/availai
 
 # Run full suite with coverage
+set +e
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ \
     --cov=app --cov-report=term-missing --tb=short -q \
     >> "$LOG_FILE" 2>&1
 
 EXIT_CODE=$?
+set -e
 
 # Extract coverage percentage from output
 COVERAGE=$(grep -oP 'TOTAL\s+\d+\s+\d+\s+\K\d+' "$LOG_FILE" || echo "0")

@@ -10,6 +10,20 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: availai
+          POSTGRES_PASSWORD: availai
+          POSTGRES_DB: availai
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U availai -d availai"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +33,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
 
       - name: Install system dependencies
         run: |
@@ -32,6 +52,12 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run pre-commit checks
+        run: pre-commit run --all-files --show-diff-on-failure
+
       - name: Lint with ruff
         run: ruff check app/ tests/
 
@@ -41,7 +67,7 @@ jobs:
           # Only alembic/versions/ files may use DDL.
           # Excludes: comments, docstrings, VALIDATE CONSTRAINT (data-only).
           DDL_PATTERN='\b(ALTER TABLE|CREATE TABLE|DROP TABLE|CREATE INDEX|DROP INDEX|ADD COLUMN|DROP COLUMN|ADD CONSTRAINT|DROP CONSTRAINT|CREATE UNIQUE INDEX)\b'
-          HITS=$(grep -rEn "$DDL_PATTERN" app/ scripts/ --include='*.py' \
+          HITS=$(grep -rEin "$DDL_PATTERN" app/ scripts/ --include='*.py' \
             --exclude-dir=__pycache__ \
             | grep -v '^\s*#' \
             | grep -v 'VALIDATE CONSTRAINT' \
@@ -71,6 +97,23 @@ jobs:
           heads = scripts.get_heads()
           assert len(heads) <= 1, f'Multiple migration heads detected: {heads}'
           "
+
+      - name: Alembic upgrade/downgrade smoke test
+        env:
+          DATABASE_URL: postgresql://availai:availai@localhost:5432/availai
+          SECRET_KEY: ci-secret-key
+          SESSION_SECRET: ci-session-secret
+          TESTING: "0"
+        run: |
+          alembic upgrade head
+          alembic downgrade -1
+          alembic upgrade head
+
+      - name: Frontend build
+        run: npm run build
+
+      - name: Frontend tests
+        run: npm run test:frontend
 
       - name: Run tests with coverage
         env:

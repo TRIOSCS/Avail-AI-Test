@@ -22,10 +22,17 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
           pip install bandit pip-audit
+          npm ci
 
       - name: Bandit security linter
         run: bandit -r app/ -c pyproject.toml -f json -o bandit-report.json || true
@@ -36,6 +43,9 @@ jobs:
 
       - name: pip-audit vulnerability scan
         run: pip-audit --strict --desc
+
+      - name: npm audit vulnerability scan
+        run: npm audit --audit-level=high
 
       - name: Upload Bandit report
         if: always()

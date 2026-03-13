@@ -153,3 +153,7 @@ echo "════════════════════════�
         fi
     done
 } >> "$SUMMARY_FILE"
+
+if [ "$TOTAL_FAIL" -gt 0 ] || [ "$TOTAL_TIMEOUT" -gt 0 ]; then
+    exit 1
+fi

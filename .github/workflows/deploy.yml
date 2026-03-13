@@ -31,19 +31,20 @@ jobs:
 
             echo "=== Backing up database ==="
             mkdir -p /root/backups
-            docker compose exec -T db pg_dump -U availai availai > /root/backups/avail_${TIMESTAMP}.sql
+            docker compose exec -T db pg_dump --clean --if-exists -U availai availai > /root/backups/avail_${TIMESTAMP}.sql
             echo "DB backup: /root/backups/avail_${TIMESTAMP}.sql ($(du -h /root/backups/avail_${TIMESTAMP}.sql | cut -f1))"
 
             echo "=== Backing up code ==="
             cp -r /root/availai /root/backups/code_${TIMESTAMP}
 
             echo "=== Downloading release ${{ github.event.release.tag_name }} ==="
-            DOWNLOAD_URL=$(echo '${{ toJSON(github.event.release.assets) }}' | python3 -c "import sys,json; assets=json.load(sys.stdin); print(assets[0]['browser_download_url'] if assets else '')")
+            DOWNLOAD_URL=$(echo '${{ toJSON(github.event.release.assets) }}' | python3 -c "import sys,json; assets=json.load(sys.stdin); print(next((a['browser_download_url'] for a in assets if a.get('browser_download_url','').endswith('.zip')), assets[0]['browser_download_url'] if assets else ''))")
             if [ -z "$DOWNLOAD_URL" ]; then echo "ERROR: No release asset found"; exit 1; fi
             curl -L -o /tmp/release.zip "$DOWNLOAD_URL"
 
             echo "=== Extracting ==="
             cd /root/availai
+            find /root/availai -mindepth 1 -maxdepth 1 ! -name ".env" ! -name "fix_queue" -exec rm -rf {} +
             unzip -o /tmp/release.zip -d /root/availai
 
             echo "=== Rebuilding ==="
@@ -65,10 +66,15 @@ jobs:
               echo "  Attempt $i/12 — waiting..."
             done
 
-            echo "ERROR: Health check failed after 60s — rolling back"
+            echo "ERROR: Health check failed after 60s — rolling back code + database"
             rm -rf /root/availai
             cp -r /root/backups/code_${TIMESTAMP} /root/availai
             cd /root/availai
+            if docker compose exec -T db psql -U availai -d availai < /root/backups/avail_${TIMESTAMP}.sql; then
+              echo "Database restore completed"
+            else
+              echo "CRITICAL: Database restore failed"
+            fi
             docker compose build --no-cache app
             docker compose up -d
             sleep 10

@@ -168,8 +168,8 @@ for pid in "${PIDS[@]}"; do
         STATUS="ERROR"
         ERROR=$((ERROR+1))
     else
-        STATUS="PASS"
-        PASS=$((PASS+1))
+        STATUS="ERROR"
+        ERROR=$((ERROR+1))
     fi
 
     RESULTS+=("$area:$STATUS")
@@ -209,4 +209,4 @@ if [ -n "$PREV_RUN" ] && [ -n "$PREV_RUN_ID" ] && [ "$PREV_RUN_ID" != "$RUN_ID" 
     done
 fi
 
-exit $FAIL  # non-zero if any failures
+exit $((FAIL + ERROR))  # non-zero for failures, errors, and timeouts

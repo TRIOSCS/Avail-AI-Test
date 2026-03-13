@@ -11,8 +11,16 @@ echo "Rebuilding..."
 docker compose up -d --build
 
 echo "Waiting for app to be healthy..."
-until docker compose ps app --format '{{.Status}}' | grep -q healthy; do
+MAX_CHECKS=150  # 5 minutes at 2s interval
+for i in $(seq 1 "$MAX_CHECKS"); do
+    if docker compose ps app --format '{{.Status}}' | grep -q healthy; then
+        break
+    fi
     sleep 2
+    if [ "$i" -eq "$MAX_CHECKS" ]; then
+        echo "✗ App did not become healthy within 5 minutes"
+        exit 1
+    fi
 done
 
 # Caddy auto-recovers via health checks — no restart needed.
