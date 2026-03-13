@@ -9,6 +9,8 @@ Depends on: conftest (client, db_session, test_user, sales_user)
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import ActivityLog, Company, CustomerSite
 
 # ── TT-026: Sales notification count endpoint ───────────────────────
@@ -125,6 +127,12 @@ class TestBellBadgeCount:
 
 class TestNeedsAttentionFallback:
     """When scope=my and the user owns no companies, fall back to all active."""
+
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/needs-attention" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
 
     def test_fallback_to_all_when_no_owned(self, client, db_session, test_user):
         """User with no owned companies gets empty list (no fallback)."""
