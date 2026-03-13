@@ -6,7 +6,6 @@ Covers:
 3. offers.py — _record_offer_won_history site guard
 4. quotes.py — _record_quote_won_history site guard
 5. requisitions.py — NC enqueue inner function
-6. avail_score_service.py — pipeline hygiene + quote followup branches
 7. company_utils.py — _rank tie-break
 8. tagging.py — race condition exception handler
 
@@ -227,67 +226,6 @@ class TestNCEnqueue:
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  9. AVAIL SCORE — pipeline hygiene + quote followup branches
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestAvailScoreBranches:
-    """Cover lines 419 (no created_at) and 699 (no sent_at)."""
-
-    def test_pipeline_hygiene_no_created_at(self, db_session):
-        """Reqs with no created_at are skipped (line 418-419)."""
-        from app.services.avail_score_service import _buyer_b4_pipeline_hygiene
-
-        req = SimpleNamespace(id=1, created_at=None)
-        score, raw = _buyer_b4_pipeline_hygiene(db_session, [1], [req])
-        assert score >= 0
-
-    def test_quote_followup_no_sent_at(self, db_session, test_user):
-        """Quotes with no sent_at are skipped (line 698-699)."""
-        from app.services.avail_score_service import _sales_b3_quote_followup
-
-        now = datetime.now(timezone.utc)
-
-        req = Requisition(
-            name="REQ-QF",
-            customer_name="Test",
-            status="open",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        co = Company(name="Score Co", is_active=True, created_at=now)
-        db_session.add(co)
-        db_session.flush()
-
-        site = CustomerSite(company_id=co.id, site_name="Score Site")
-        db_session.add(site)
-        db_session.flush()
-
-        q = Quote(
-            requisition_id=req.id,
-            customer_site_id=site.id,
-            quote_number="Q-SCORE",
-            status="sent",
-            line_items=[],
-            created_by_id=test_user.id,
-            sent_at=None,
-            created_at=now,
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        score, raw = _sales_b3_quote_followup(
-            db_session,
-            test_user.id,
-            now - timedelta(days=30),
-            now + timedelta(days=1),
-        )
-        assert score >= 0
-
-
 # ══════════════════════════════════════════════════════════════════════
 #  10. COMPANY UTILS — _rank tie-break
 # ══════════════════════════════════════════════════════════════════════

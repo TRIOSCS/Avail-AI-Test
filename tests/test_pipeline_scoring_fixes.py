@@ -19,10 +19,6 @@ from app.models import (
     CustomerSite,
     User,
 )
-from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
-
-# ---- Bug 1: avail_rank recomputed in team-leaderboard ----
-
 
 # ---- Bug 3: Proactive scorecard outlier cap ----
 

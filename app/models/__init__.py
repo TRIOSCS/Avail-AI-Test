@@ -71,15 +71,6 @@ from .notification import Notification  # noqa: F401
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
 
-# Performance Tracking
-from .performance import (  # noqa: F401
-    AvailScoreSnapshot,
-    BuyerLeaderboardSnapshot,
-    BuyerVendorStats,
-    MultiplierScoreSnapshot,
-    StockListHash,
-    VendorMetricsSnapshot,
-)
 
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
@@ -122,8 +113,6 @@ from .teams_alert_config import TeamsAlertConfig  # noqa: F401
 from .teams_notification_log import TeamsNotificationLog  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
-# Unified Score (cross-role leaderboard)
-from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 
 # Vendors
 from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401

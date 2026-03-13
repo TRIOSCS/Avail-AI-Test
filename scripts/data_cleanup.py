@@ -33,7 +33,6 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models import (
     ActivityLog,
-    BuyerVendorStats,
     Company,
     CustomerSite,
     EnrichmentQueue,
@@ -42,10 +41,8 @@ from app.models import (
     Requirement,
     RoutingAssignment,
     Sighting,
-    StockListHash,
     VendorCard,
     VendorContact,
-    VendorMetricsSnapshot,
     VendorReview,
 )
 from app.utils.normalization import (
@@ -234,21 +231,6 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     # Offers
     db.query(Offer).filter_by(vendor_card_id=loser_id).update({"vendor_card_id": winner_id}, synchronize_session=False)
 
-    # VendorMetricsSnapshot — check unique on vendor_card_id+snapshot_date
-    existing_dates = {
-        r[0] for r in db.query(VendorMetricsSnapshot.snapshot_date).filter_by(vendor_card_id=winner_id).all()
-    }
-    for vms in db.query(VendorMetricsSnapshot).filter_by(vendor_card_id=loser_id).all():
-        if vms.snapshot_date in existing_dates:
-            db.delete(vms)
-        else:
-            vms.vendor_card_id = winner_id
-
-    # StockListHashes
-    db.query(StockListHash).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
     # VendorContacts — check unique on vendor_card_id+email
     existing_emails = {r[0] for r in db.query(VendorContact.email).filter_by(vendor_card_id=winner_id).all()}
     for vc in db.query(VendorContact).filter_by(vendor_card_id=loser_id).all():
@@ -271,14 +253,6 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     db.query(ActivityLog).filter_by(vendor_card_id=loser_id).update(
         {"vendor_card_id": winner_id}, synchronize_session=False
     )
-
-    # BuyerVendorStats — check unique on user_id+vendor_card_id
-    existing_bvs_users = {r[0] for r in db.query(BuyerVendorStats.user_id).filter_by(vendor_card_id=winner_id).all()}
-    for bvs in db.query(BuyerVendorStats).filter_by(vendor_card_id=loser_id).all():
-        if bvs.user_id in existing_bvs_users:
-            db.delete(bvs)
-        else:
-            bvs.vendor_card_id = winner_id
 
     # RoutingAssignments
     db.query(RoutingAssignment).filter_by(vendor_card_id=loser_id).update(

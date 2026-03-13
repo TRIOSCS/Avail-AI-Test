@@ -63,8 +63,6 @@ function safeUrl(url) {
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
 const _debouncedUpdateBpTotals = debounce(() => updateBpTotals(), 150);
 const _debouncedUpdateProactivePreview = debounce(() => updateProactivePreview(), 150);
-const _debouncedLoadVendorScorecards = debounce(() => loadVendorScorecards(), 300);
-
 // ── CRM State ──────────────────────────────────────────────────────────
 // Client-side company detail cache — avoids re-fetching when toggling drawers
 const _companyDetailCache = {};  // {companyId: {data, ts}}
@@ -5646,443 +5644,6 @@ function renderProactiveScorecard(data) {
     el.innerHTML = summaryCards + breakdownHtml;
 }
 
-// ── Performance Tracking ─────────────────────────────────────────────
-
-let _perfVendorSort = 'composite_score';
-let _perfVendorOrder = 'desc';
-let _perfActiveOnly = true;
-
-function showPerformance() {
-    // Scorecard removed — no-op
-}
-
-async function loadManagerDigest() {
-    const el = document.getElementById('perfDigestPanel');
-    if (!el) return;
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const data = await apiFetch('/api/sales/manager-digest');
-        let html = '<div style="padding:0 16px">';
-        // Summary cards
-        const s = data.summary || data;
-        html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">';
-        const cards = [
-            { label: 'Active RFQs', val: s.active_rfqs ?? s.total_active ?? '—', color: 'var(--blue)' },
-            { label: 'Offers Today', val: s.offers_today ?? s.new_offers ?? '—', color: 'var(--green)' },
-            { label: 'Quotes Sent', val: s.quotes_sent ?? s.total_quotes ?? '—', color: 'var(--purple)' },
-            { label: 'Pending Follow-ups', val: s.pending_followups ?? s.follow_ups ?? '—', color: 'var(--amber)' },
-            { label: 'Response Rate', val: s.response_rate != null ? Math.round(s.response_rate) + '%' : '—', color: 'var(--teal)' }
-        ];
-        for (const c of cards) {
-            html += `<div class="card-v2" style="padding:16px;min-width:120px;text-align:center">
-                <div style="font-size:24px;font-weight:800;color:${c.color}">${c.val}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">${c.label}</div>
-            </div>`;
-        }
-        html += '</div>';
-        // Team activity table
-        const team = data.team || data.team_activity || [];
-        if (team.length) {
-            html += '<h3 style="font-size:14px;margin-bottom:8px">Team Activity</h3>';
-            html += '<table class="tbl"><thead><tr><th>Name</th><th>RFQs</th><th>Offers</th><th>Quotes</th><th>Response Rate</th><th>Last Active</th></tr></thead><tbody>';
-            for (const m of team) {
-                html += `<tr>
-                    <td><b>${esc(m.name || m.user_name || '')}</b></td>
-                    <td class="mono">${m.rfqs ?? m.active_rfqs ?? '—'}</td>
-                    <td class="mono">${m.offers ?? m.total_offers ?? '—'}</td>
-                    <td class="mono">${m.quotes ?? m.total_quotes ?? '—'}</td>
-                    <td class="mono">${m.response_rate != null ? Math.round(m.response_rate) + '%' : '—'}</td>
-                    <td style="font-size:11px">${m.last_active ? fmtDateTime(m.last_active) : '—'}</td>
-                </tr>`;
-            }
-            html += '</tbody></table>';
-        }
-        html += '</div>';
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="empty">Failed to load digest</p>';
-    }
-}
-
-let _availScoreRole = 'buyer';
-async function loadAvailScores(role) {
-    if (role) _availScoreRole = role;
-    const el = document.getElementById('perfAvailScorePanel');
-    if (!el) return;
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const data = await apiFetch(`/api/performance/avail-scores?role=${_availScoreRole}`);
-        const entries = data.entries || [];
-        const month = data.month || '';
-        let html = '<div style="padding:0 16px">';
-        // Role toggle
-        html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-            <div class="fpills fpills-sm">
-                <button type="button" class="fp fp-sm ${_availScoreRole==='buyer'?'on':''}" onclick="loadAvailScores('buyer')">Buyers</button>
-                <button type="button" class="fp fp-sm ${_availScoreRole==='sales'?'on':''}" onclick="loadAvailScores('sales')">Sales</button>
-            </div>
-        </div>`;
-        if (!entries.length) {
-            html += '<p class="empty">No Avail Score data yet — scores are computed daily</p></div>';
-            el.innerHTML = html;
-            return;
-        }
-        html += _renderAvailScoreTable(entries, _availScoreRole, month);
-        html += '</div>';
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>';
-    }
-}
-
-async function loadVendorScorecards(sortBy, order) {
-    if (sortBy) _perfVendorSort = sortBy;
-    if (order) _perfVendorOrder = order;
-    const el = document.getElementById('perfVendorPanel');
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const search = document.getElementById('perfVendorSearch')?.value || '';
-        const data = await apiFetch(`/api/performance/vendors?sort_by=${_perfVendorSort}&order=${_perfVendorOrder}&limit=100&search=${encodeURIComponent(search)}`);
-        renderVendorScorecards(data);
-    } catch (e) {
-        el.innerHTML = `<p class="empty">Error loading scorecards</p>`;
-    }
-}
-
-function renderVendorScorecards(data) {
-    const el = document.getElementById('perfVendorPanel');
-    const items = data.items || [];
-    if (!items.length) {
-        el.innerHTML = '<p class="empty">No vendor scorecard data yet — scorecards are computed daily</p>';
-        return;
-    }
-
-    function sa(col) {
-        if (col !== _perfVendorSort) return '<span class="sort-arrow">\u21c5</span>';
-        return `<span class="sort-arrow">${_perfVendorOrder === 'asc' ? '\u25b2' : '\u25bc'}</span>`;
-    }
-    function thC(col) { return col === _perfVendorSort ? ' class="sorted"' : ''; }
-    function toggleSort(col) {
-        if (_perfVendorSort === col) _perfVendorOrder = _perfVendorOrder === 'desc' ? 'asc' : 'desc';
-        else { _perfVendorSort = col; _perfVendorOrder = 'desc'; }
-        loadVendorScorecards();
-    }
-
-    function metricCell(val, invert) {
-        if (val === null || val === undefined) return '<td class="metric-cell na">N/A</td>';
-        const score = invert ? 1 - val : val;
-        let cls = 'metric-red';
-        if (score >= 0.7) cls = 'metric-green';
-        else if (score >= 0.4) cls = 'metric-yellow';
-        return `<td class="metric-cell ${cls}">${(val * 100).toFixed(0)}%</td>`;
-    }
-
-    window._perfToggleSort = toggleSort;
-
-    const searchBar = `<div style="margin:0 16px 10px;display:flex;align-items:center;gap:12px">
-        <input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="sbox" oninput="_debouncedLoadVendorScorecards()" style="width:300px">
-        <label style="font-size:11px;display:flex;align-items:center;gap:4px;color:var(--muted);cursor:pointer;white-space:nowrap"><input type="checkbox" id="perfActiveOnly" ${_perfActiveOnly ? 'checked' : ''} onchange="_perfActiveOnly=this.checked;loadVendorScorecards()"> Active only</label>
-    </div>`;
-
-    let html = searchBar + `<div style="overflow-x:auto;padding:0 16px"><table class="tbl">
-        <thead><tr>
-            <th onclick="window._perfToggleSort('composite_score')"${thC('composite_score')}>Vendor ${sa('composite_score')}</th>
-            <th onclick="window._perfToggleSort('response_rate')"${thC('response_rate')}>Response Rate ${sa('response_rate')}</th>
-            <th onclick="window._perfToggleSort('quote_conversion')"${thC('quote_conversion')}>Quote Rate ${sa('quote_conversion')}</th>
-            <th onclick="window._perfToggleSort('po_conversion')"${thC('po_conversion')}>PO Rate ${sa('po_conversion')}</th>
-            <th onclick="window._perfToggleSort('avg_review_rating')"${thC('avg_review_rating')}>Reviews ${sa('avg_review_rating')}</th>
-            <th onclick="window._perfToggleSort('composite_score')"${thC('composite_score')}>Score ${sa('composite_score')}</th>
-        </tr></thead><tbody>`;
-
-    let filteredItems = items;
-    if (_perfActiveOnly) {
-        filteredItems = items.filter(v => v.interaction_count > 0);
-    }
-
-    for (const v of filteredItems) {
-        if (!v.is_sufficient_data) {
-            html += `<tr class="cold-start"><td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(0, 28) : ''}<strong>${esc(v.vendor_name)}</strong></td>${metricCell(v.response_rate)}<td colspan="4" class="metric-cell na" style="text-align:center;font-style:italic">Low data (${v.interaction_count} interactions)</td></tr>`;
-            continue;
-        }
-        const reviewDisplay = v.avg_review_rating !== null && v.avg_review_rating !== undefined
-            ? `<td class="metric-cell ${v.avg_review_rating >= 0.7 ? 'metric-green' : v.avg_review_rating >= 0.4 ? 'metric-yellow' : 'metric-red'}">${(v.avg_review_rating * 5).toFixed(1)}/5</td>`
-            : '<td class="metric-cell na">N/A</td>';
-        const ringScore = v.composite_score != null ? Math.round(v.composite_score * 100) : 0;
-        html += `<tr>
-            <td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(ringScore, 28) : ''}<strong>${esc(v.vendor_name)}</strong></td>
-            ${metricCell(v.response_rate)}
-            ${metricCell(v.quote_conversion)}
-            ${metricCell(v.po_conversion)}
-            ${reviewDisplay}
-            ${metricCell(v.composite_score)}
-        </tr>`;
-    }
-
-    html += '</tbody></table></div>';
-    if (window.__isAdmin) {
-        html += `<div style="margin:10px 16px 0"><button class="btn btn-ghost btn-sm" onclick="refreshVendorScorecards()">Refresh Scorecards</button></div>`;
-    }
-    el.innerHTML = html;
-}
-
-async function refreshVendorScorecards() {
-    try {
-        await apiFetch('/api/performance/vendors/refresh', {method:'POST'});
-        loadVendorScorecards();
-    } catch (e) {
-        showToast('Couldn\'t refresh — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-// ── Buyer Leaderboard ──
-
-let _leaderboardMonth = '';
-
-async function loadBuyerLeaderboard(month) {
-    const el = document.getElementById('perfBuyerPanel');
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const monthsData = await apiFetch('/api/performance/buyers/months');
-        const months = monthsData.months || [];
-        if (!month) {
-            _leaderboardMonth = months.length ? months[0] : new Date().toISOString().slice(0,7);
-        } else {
-            _leaderboardMonth = month;
-        }
-        const data = await apiFetch(`/api/performance/buyers?month=${_leaderboardMonth.slice(0,7)}`);
-        renderBuyerLeaderboard(data, months);
-    } catch (e) {
-        el.innerHTML = '<p class="empty">No leaderboard data yet — computed daily</p>';
-    }
-}
-
-function renderBuyerLeaderboard(data, months) {
-    const el = document.getElementById('perfBuyerPanel');
-    const entries = data.entries || [];
-
-    let monthSelector = `<select class="tb-select" onchange="loadBuyerLeaderboard(this.value)">`;
-    for (const m of months) {
-        const label = new Date(m + '-15').toLocaleDateString('en-US', {month:'long', year:'numeric'});
-        monthSelector += `<option value="${m}" ${m === _leaderboardMonth ? 'selected' : ''}>${label}</option>`;
-    }
-    monthSelector += '</select>';
-
-    const totalPts = entries.reduce((s, e) => s + e.total_points, 0);
-    const topScorer = entries.length ? entries[0].user_name : '\u2014';
-    const totalOffers = entries.reduce((s, e) => s + e.offers_logged, 0);
-    const ytdTotalPts = entries.reduce((s, e) => s + (e.ytd_total_points || 0), 0);
-
-    let html = `<div style="display:flex;align-items:center;gap:10px;margin:0 16px 12px;flex-wrap:wrap">
-        <div>${monthSelector}</div>
-        ${window.__isAdmin ? '<button class="tb-btn" onclick="refreshBuyerLeaderboard()">Refresh</button>' : ''}
-    </div>`;
-
-    html += `<div class="perf-summary" style="padding:0 16px">
-        <div class="perf-card"><div class="perf-card-num">${totalOffers}</div><div class="perf-card-label">Offers Logged</div></div>
-        <div class="perf-card"><div class="perf-card-num">${totalPts}</div><div class="perf-card-label">Monthly Points</div></div>
-        <div class="perf-card"><div class="perf-card-num">${topScorer}</div><div class="perf-card-label">Top Scorer</div></div>
-        <div class="perf-card"><div class="perf-card-num">${ytdTotalPts}</div><div class="perf-card-label">YTD Points</div></div>
-    </div>`;
-
-    if (!entries.length) {
-        html += '<p class="empty">No data for this month</p>';
-        el.innerHTML = html;
-        return;
-    }
-
-    const currentEmail = (window.__userEmail || '').toLowerCase();
-
-    html += `<div style="overflow-x:auto;padding:0 16px"><table class="tbl"><thead><tr>
-        <th>#</th><th>Buyer</th>
-        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Inventory Lists (x2)</th>
-        <th>Total</th>
-        <th style="border-left:2px solid var(--border)">YTD Offers</th><th>YTD PO Conf.</th><th>YTD Points</th>
-    </tr></thead><tbody>`;
-
-    for (const e of entries) {
-        const isMe = e.user_id && e.user_id === window.userId;
-        let rowCls = '';
-        if (e.rank === 1) rowCls = 'sc-gold';
-        else if (e.rank === 2) rowCls = 'sc-silver';
-        else if (isMe) rowCls = 'lb-highlight';
-        const medal = e.rank === 1 ? ' \ud83e\udd47' : e.rank === 2 ? ' \ud83e\udd48' : e.rank === 3 ? ' \ud83e\udd49' : '';
-        html += `<tr class="${rowCls}">
-            <td><strong>${e.rank}${medal}</strong></td>
-            <td>${e.user_name || 'Unknown'}</td>
-            <td>${e.offers_logged} <span class="pts">(${e.points_offers})</span></td>
-            <td>${e.offers_quoted} <span class="pts">(${e.points_quoted})</span></td>
-            <td>${e.offers_in_buyplan} <span class="pts">(${e.points_buyplan})</span></td>
-            <td>${e.offers_po_confirmed} <span class="pts">(${e.points_po})</span></td>
-            <td>${e.stock_lists_uploaded || 0} <span class="pts">(${e.points_stock || 0})</span></td>
-            <td><strong>${e.total_points}</strong></td>
-            <td style="border-left:2px solid var(--border)">${e.ytd_offers_logged || 0}</td>
-            <td>${e.ytd_offers_po_confirmed || 0}</td>
-            <td><strong>${e.ytd_total_points || 0}</strong></td>
-        </tr>`;
-    }
-    html += '</tbody></table></div>';
-    el.innerHTML = html;
-}
-
-async function refreshBuyerLeaderboard() {
-    try {
-        await apiFetch('/api/performance/buyers/refresh', {method:'POST'});
-        loadBuyerLeaderboard(_leaderboardMonth);
-    } catch (e) {
-        showToast('Couldn\'t refresh — ' + friendlyError(e, 'please try again'), 'error');
-    }
-}
-
-// ── Salesperson Scorecard ────────────────────────────────────────────
-
-let _salesScorecardMonth = null;
-let _salesScorecardData = null;
-let _salesSortCol = 'won_revenue';
-let _salesSortDir = 'desc';
-
-async function loadSalespersonScorecard(month) {
-    const el = document.getElementById('perfSalesPanel');
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        if (!month) {
-            _salesScorecardMonth = new Date().toISOString().slice(0,7);
-        } else {
-            _salesScorecardMonth = month;
-        }
-        const data = await apiFetch(`/api/performance/salespeople?month=${_salesScorecardMonth}`);
-        _salesScorecardData = data;
-        renderSalespersonScorecard(data);
-    } catch (e) {
-        el.innerHTML = '<p class="empty">No scorecard data available</p>';
-    }
-}
-
-function _sortSalesEntries(entries, col, dir) {
-    return entries.slice().sort((a, b) => {
-        let av, bv;
-        if (col.startsWith('ytd_')) {
-            const k = col.slice(4);
-            av = a.ytd[k] ?? 0;
-            bv = b.ytd[k] ?? 0;
-        } else {
-            av = a.monthly[col] ?? 0;
-            bv = b.monthly[col] ?? 0;
-        }
-        return dir === 'desc' ? bv - av : av - bv;
-    });
-}
-
-function sortSalesScorecard(col) {
-    if (_salesSortCol === col) {
-        _salesSortDir = _salesSortDir === 'desc' ? 'asc' : 'desc';
-    } else {
-        _salesSortCol = col;
-        _salesSortDir = 'desc';
-    }
-    if (_salesScorecardData) renderSalespersonScorecard(_salesScorecardData);
-}
-
-function renderSalespersonScorecard(data) {
-    const el = document.getElementById('perfSalesPanel');
-    const entries = data.entries || [];
-
-    const now = new Date();
-    let monthSelector = `<select class="tb-select" onchange="loadSalespersonScorecard(this.value)">`;
-    for (let i = 0; i < 12; i++) {
-        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const val = d.toISOString().slice(0,7);
-        const label = d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
-        monthSelector += `<option value="${val}" ${val === _salesScorecardMonth ? 'selected' : ''}>${label}</option>`;
-    }
-    monthSelector += '</select>';
-
-    const totalRev = entries.reduce((s, e) => s + (e.monthly.won_revenue || 0), 0);
-    const totalOrders = entries.reduce((s, e) => s + (e.monthly.orders_won || 0), 0);
-    const totalQuotes = entries.reduce((s, e) => s + (e.monthly.quotes_sent || 0), 0);
-    const ytdRev = entries.reduce((s, e) => s + (e.ytd.won_revenue || 0), 0);
-
-    let html = `<div style="display:flex;align-items:center;gap:10px;margin:0 16px 12px;flex-wrap:wrap">
-        <div>${monthSelector}</div>
-    </div>`;
-
-    html += `<div class="perf-summary" style="padding:0 16px">
-        <div class="perf-card"><div class="perf-card-num">$${totalRev.toLocaleString()}</div><div class="perf-card-label">Monthly Revenue</div></div>
-        <div class="perf-card"><div class="perf-card-num">${totalOrders}</div><div class="perf-card-label">Orders Won</div></div>
-        <div class="perf-card"><div class="perf-card-num">${totalQuotes}</div><div class="perf-card-label">Quotes Sent</div></div>
-        <div class="perf-card"><div class="perf-card-num">$${ytdRev.toLocaleString()}</div><div class="perf-card-label">YTD Revenue</div></div>
-    </div>`;
-
-    if (!entries.length) {
-        html += '<p class="empty">No data for this month</p>';
-        el.innerHTML = html;
-        return;
-    }
-
-    const sorted = _sortSalesEntries(entries, _salesSortCol, _salesSortDir);
-
-    const byRev = entries.slice().sort((a, b) => (b.monthly.won_revenue || 0) - (a.monthly.won_revenue || 0));
-    const gold_id = byRev[0] && byRev[0].monthly.won_revenue > 0 ? byRev[0].user_id : null;
-    const silver_id = byRev[1] && byRev[1].monthly.won_revenue > 0 ? byRev[1].user_id : null;
-
-    const cols = [
-        {key:'new_accounts', label:'Accounts'},
-        {key:'new_contacts', label:'Contacts'},
-        {key:'calls_made', label:'Calls'},
-        {key:'emails_sent', label:'Emails/RFQs'},
-        {key:'requisitions_entered', label:'Reqs'},
-        {key:'quotes_sent', label:'Quotes Sent'},
-        {key:'orders_won', label:'Orders Won'},
-        {key:'won_revenue', label:'Revenue', fmt:'$'},
-        {key:'proactive_sent', label:'Proactive Sent'},
-        {key:'proactive_converted', label:'Proactive Conv.'},
-        {key:'proactive_revenue', label:'Proactive Rev.', fmt:'$'},
-        {key:'boms_uploaded', label:'Excess Lists'},
-    ];
-
-    const ytdCols = [
-        {key:'orders_won', label:'YTD Orders'},
-        {key:'won_revenue', label:'YTD Revenue', fmt:'$'},
-        {key:'proactive_revenue', label:'YTD Proactive Rev.', fmt:'$'},
-    ];
-
-    function sa(key) {
-        if (_salesSortCol !== key) return '<span class="sort-arrow">\u21c5</span>';
-        return `<span class="sort-arrow">${_salesSortDir === 'asc' ? '\u25b2' : '\u25bc'}</span>`;
-    }
-    function thC(key) { return _salesSortCol === key ? ' class="sorted"' : ''; }
-
-    html += `<div style="overflow-x:auto;padding:0 16px"><table class="tbl"><thead><tr>
-        <th>#</th><th>Salesperson</th>`;
-    for (const c of cols) {
-        html += `<th${thC(c.key)} onclick="sortSalesScorecard('${c.key}')">${c.label} ${sa(c.key)}</th>`;
-    }
-    for (const c of ytdCols) {
-        html += `<th style="border-left:2px solid var(--border)"${thC('ytd_'+c.key)} onclick="sortSalesScorecard('ytd_${c.key}')">${c.label} ${sa('ytd_'+c.key)}</th>`;
-    }
-    html += '</tr></thead><tbody>';
-
-    for (let i = 0; i < sorted.length; i++) {
-        const e = sorted[i];
-        const rank = i + 1;
-        let rowCls = '';
-        let medal = '';
-        if (e.user_id === gold_id) { rowCls = 'class="sc-gold"'; medal = ' \ud83e\udd47'; }
-        else if (e.user_id === silver_id) { rowCls = 'class="sc-silver"'; medal = ' \ud83e\udd48'; }
-
-        html += `<tr ${rowCls}><td><strong>${rank}${medal}</strong></td><td>${e.user_name || 'Unknown'}</td>`;
-        for (const c of cols) {
-            const v = e.monthly[c.key] ?? 0;
-            html += `<td>${c.fmt === '$' ? '$' + Number(v).toLocaleString() : v}</td>`;
-        }
-        for (const c of ytdCols) {
-            const v = e.ytd[c.key] ?? 0;
-            html += `<td style="border-left:2px solid var(--border)">${c.fmt === '$' ? '$' + Number(v).toLocaleString() : v}</td>`;
-        }
-        html += '</tr>';
-    }
-    html += '</tbody></table></div>';
-    el.innerHTML = html;
-}
 
 function openSettingsTab(panel) {
     showView('view-settings');
@@ -8377,7 +7938,7 @@ async function _submitMobileOffer(reqId) {
 Object.assign(window, {
     _refreshCustPipeline,
     _debouncedFilterSiteContacts,
-    _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
+    _debouncedFilterDrawerContacts,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
     calcMarginPct, isValidEmail, isValidPhone, marginColor,
@@ -8388,8 +7949,8 @@ Object.assign(window, {
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
     dismissProactiveGroup, editCredential,
-    loadBuyPlans, loadBuyPlanV3, loadBuyerLeaderboard, toggleBpMyOnly,
-    loadQuote, loadSpecificQuote, loadSalespersonScorecard,
+    loadBuyPlans, loadBuyPlanV3, toggleBpMyOnly,
+    loadQuote, loadSpecificQuote,
     markQuoteResult, onSourcesSearch,
     openAddSiteContact, openAddSiteModal, openBuyPlanDetailV3,
     openFlagIssueV3, openHaltSOV3,
@@ -8398,8 +7959,8 @@ Object.assign(window, {
     openEditSiteModal, openLogNoteModal, openLostModal,
     openOfferGallery, openPricingHistory, openProactiveSendModal,
     openRejectBuyPlanModal, quickCreateCompany,
-    refreshBuyerLeaderboard, refreshTeamsChannels,
-    refreshVendorScorecards, rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
+    refreshTeamsChannels,
+    rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
     reopenQuote, resubmitBuyPlan, reviseQuote,
     saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
     saveParsedOffers, saveQuoteDraft, scToggle,
@@ -8439,7 +8000,7 @@ Object.assign(window, {
     loadTransferPanel, loadTransferPreview, toggleTransferSite,
     toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,
     // Cross-file calls from app.js
-    goToCompany, showBuyPlans, showCustomers, showPerformance,
+    goToCompany, showBuyPlans, showCustomers,
     showProactiveOffers, showSettings,
     // Proactive UI functions called from HTML onclick
     switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
@@ -8447,7 +8008,6 @@ Object.assign(window, {
     toggleProactiveSelect, toggleAllProactiveInGroup, doNotOfferMatch, doNotOfferSelected,
     sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
     loadProactiveScorecard,
-    loadAvailScores,
     invalidateCompanyCache,
     // API Health Dashboard
     showApiHealth, loadApiHealthDashboard, refreshApiHealthDashboard,

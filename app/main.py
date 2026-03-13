@@ -174,7 +174,6 @@ OPENAPI_TAGS = [
     {"name": "ai", "description": "AI chat, response re-parsing, and prospect contacts"},
     {"name": "v13", "description": "Activity logging, webhooks, ownership, and sales dashboard"},
     {"name": "proactive", "description": "Proactive offer matching, sending, and scorecard"},
-    {"name": "performance", "description": "Vendor scorecards and buyer leaderboard"},
     {"name": "admin", "description": "User management, system config, and diagnostics"},
     {"name": "emails", "description": "Email mining, inbox scan, and thread views"},
     {"name": "enrichment", "description": "Contact and company enrichment queue and backfills"},
@@ -612,7 +611,6 @@ from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
 from .routers.materials import router as materials_router
 from .routers.nc_admin import router as nc_admin_router
 from .routers.outreach import router as outreach_router
-from .routers.performance import router as performance_router
 from .routers.proactive import router as proactive_router
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
@@ -668,5 +666,4 @@ app.include_router(vendors_crud_router)
 if not settings.mvp_mode:
     app.include_router(apollo_sync_router)
     app.include_router(enrichment_router)
-    app.include_router(performance_router)
     app.include_router(teams_actions_router)

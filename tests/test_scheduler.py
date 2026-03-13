@@ -168,7 +168,6 @@ def test_configure_scheduler_always_includes_performance_and_cache():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "performance_tracking" in job_ids
     assert "cache_cleanup" in job_ids
 
 

@@ -677,18 +677,6 @@ def main():
         print(f"  Proactive:        {totals['proactive']}")
         print(f"{'=' * 60}")
 
-        # Recompute multiplier scores with new data
-        print("\n  Recomputing multiplier scores with new data...")
-        try:
-            from datetime import date
-
-            from app.services.multiplier_score_service import compute_all_multiplier_scores
-
-            result = compute_all_multiplier_scores(db, date.today().replace(day=1))
-            print(f"  Multiplier scores: {result}")
-        except Exception as e:
-            print(f"  Multiplier recompute failed: {e}")
-
         # Save workflow notes
         if WORKFLOW_NOTES:
             print("\n  WORKFLOW NOTES:")

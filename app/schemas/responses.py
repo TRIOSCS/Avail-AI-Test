@@ -159,18 +159,6 @@ class BuyPlanListItem(BaseModel, extra="allow"):
     total_revenue: float = 0
 
 
-# ── Performance ─────────────────────────────────────────────────────────
-
-
-class VendorScorecardListResponse(PaginatedResponse, extra="allow"):
-    vendors: list[dict] = Field(default_factory=list)
-
-
-class BuyerLeaderboardResponse(BaseModel, extra="allow"):
-    month: str = ""
-    entries: list[dict] = Field(default_factory=list)
-
-
 # ── Sources ─────────────────────────────────────────────────────────────
 
 

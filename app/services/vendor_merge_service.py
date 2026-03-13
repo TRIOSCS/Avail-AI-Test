@@ -28,12 +28,9 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
     """
     from ..models import (
         ActivityLog,
-        BuyerVendorStats,
         EnrichmentQueue,
         Offer,
         ProspectContact,
-        StockListHash,
-        VendorMetricsSnapshot,
         VendorReview,
     )
 
@@ -74,9 +71,6 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
         (VendorContact, "vendor_card_id"),
         (VendorReview, "vendor_card_id"),
         (Offer, "vendor_card_id"),
-        (VendorMetricsSnapshot, "vendor_card_id"),
-        (StockListHash, "vendor_card_id"),
-        (BuyerVendorStats, "vendor_card_id"),
         (ActivityLog, "vendor_card_id"),
         (EnrichmentQueue, "vendor_card_id"),
         (ProspectContact, "vendor_card_id"),
