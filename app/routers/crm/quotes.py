@@ -56,6 +56,72 @@ async def get_quote(req_id: int, user: User = Depends(require_user), db: Session
     return quote_to_dict(quote, db)
 
 
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def get_quote_summary(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Lightweight quote tab projection for the requisition detail panel."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc())
+        .first()
+    )
+    from ...models.buy_plan import BuyPlanV3
+
+    has_bp = db.query(BuyPlanV3).filter(BuyPlanV3.requisition_id == req_id).first() is not None
+    if not quote:
+        return {
+            "requisition_id": req_id,
+            "has_quote": False,
+            "has_buy_plan": has_bp,
+        }
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": has_bp,
+        "quote_id": quote.id,
+        "quote_number": quote.quote_number,
+        "quote_status": quote.status,
+        "line_count": len(quote.line_items or []),
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_buy_plan_from_requisition(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create or return buy plan for a requisition (requires a quote)."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "No quote exists for this requisition")
+    from ...models.buy_plan import BuyPlanV3
+
+    existing = db.query(BuyPlanV3).filter(BuyPlanV3.requisition_id == req_id).first()
+    if existing:
+        return {"id": existing.id, "status": existing.status}
+    plan = BuyPlanV3(
+        quote_id=quote.id,
+        requisition_id=req_id,
+        status="draft",
+        submitted_by_id=user.id,
+    )
+    db.add(plan)
+    db.commit()
+    return {"id": plan.id, "status": plan.status}
+
+
 @router.get("/api/quotes/recent-terms")
 async def recent_quote_terms(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Return payment/shipping terms from the 5 most recent quotes for copy-from-quote UX."""
