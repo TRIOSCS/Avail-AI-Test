@@ -1034,6 +1034,12 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         evidence_tier="T7",
         age_days=age_days,
     )
+    legacy_bucket_map = {
+        "strong": "high",
+        "moderate": "medium",
+        "weak": "low",
+    }
+    lead_confidence_bucket = legacy_bucket_map.get(quality, "low")
 
     return {
         "id": None,
@@ -1071,6 +1077,9 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
         "lead_explanation": explanation,
+        # Backward-compatibility aliases used by older clients/tests.
+        "lead_confidence_bucket": lead_confidence_bucket,
+        "lead_confidence_reason": explanation,
     }
 
 
