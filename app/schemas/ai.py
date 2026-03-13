@@ -84,6 +84,59 @@ class SaveDraftOffersRequest(BaseModel):
         return v
 
 
+class IntakeRequirementItem(BaseModel):
+    """Single parsed requirement from freeform intake text."""
+
+    mpn: str
+    quantity: int | None = None
+    condition: str | None = None
+    packaging: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_required_mpn(cls, v: str) -> str:
+        normalized = normalize_mpn(v.strip()) if v else ""
+        if not normalized:
+            raise ValueError("mpn required")
+        return normalized
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_intake_condition(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_intake_packaging(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+
+class IntakeDraftRequest(BaseModel):
+    """Raw intake text payload sent for AI draft parsing."""
+
+    text: str = Field(min_length=1)
+
+    @field_validator("text")
+    @classmethod
+    def strip_non_blank_text(cls, v: str) -> str:
+        text = v.strip()
+        if not text:
+            raise ValueError("text required")
+        return text
+
+
+class IntakeDraftResponse(BaseModel):
+    """Backward-compatible AI intake response envelope."""
+
+    document_type: str = "unclear"
+    requirements: list[IntakeRequirementItem] = Field(default_factory=list)
+    offers: list[DraftOfferItem] = Field(default_factory=list)
+
+
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)
