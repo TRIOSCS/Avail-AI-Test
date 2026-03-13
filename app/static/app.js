@@ -8480,7 +8480,6 @@ async function submitLogOffer() {
 }
 
 function renderReqList() {
-    _renderBreadcrumb();
     // Deal board view uses its own renderer
     if (_currentMainView === 'deals') { _renderDealBoard(); return; }
     // Remember which drill-downs were open so we can restore them after re-render
