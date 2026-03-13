@@ -162,10 +162,11 @@ class TestSourcengineDoSearchGap:
 
 class TestSourcesGaps:
     @pytest.mark.asyncio
-    async def test_abstract_do_search_defined(self):
-        from app.connectors.sources import BaseConnector
+    async def test_subclass_do_search_defined(self):
+        """Connector subclasses define _do_search for the search template method."""
+        from app.connectors.sources import NexarConnector
 
-        assert hasattr(BaseConnector, "_do_search")
+        assert hasattr(NexarConnector, "_do_search")
 
     @pytest.mark.asyncio
     async def test_nexar_do_search_aggregate_query_success(self):
