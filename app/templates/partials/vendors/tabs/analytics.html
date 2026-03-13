@@ -1,0 +1,69 @@
+{#
+  tabs/analytics.html — Vendor analytics scorecard with response rate, ghost rate, scores.
+  Receives: vendor (ORM object).
+  Called by: views.py vendor_tab endpoint (tab_name='analytics').
+  Depends on: none (read-only display).
+#}
+<div class="tab-panel">
+    <h3>Vendor Scorecard</h3>
+
+    <div class="detail-grid">
+        <div class="detail-field">
+            <label>Vendor Score</label>
+            <span>{{ vendor.vendor_score | round(1) if vendor.vendor_score is not none else '-' }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Engagement Score</label>
+            <span>{{ vendor.engagement_score | round(1) if vendor.engagement_score is not none else '-' }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Response Rate</label>
+            <span>{{ (vendor.response_rate * 100) | round(1) if vendor.response_rate is not none else '-' }}{% if vendor.response_rate is not none %}%{% endif %}</span>
+        </div>
+        <div class="detail-field">
+            <label>Ghost Rate</label>
+            <span>{{ (vendor.ghost_rate * 100) | round(1) if vendor.ghost_rate is not none else '-' }}{% if vendor.ghost_rate is not none %}%{% endif %}</span>
+        </div>
+        <div class="detail-field">
+            <label>Avg Response Time</label>
+            <span>{{ vendor.avg_response_hours | round(1) if vendor.avg_response_hours is not none else '-' }}{% if vendor.avg_response_hours is not none %} hrs{% endif %}</span>
+        </div>
+        <div class="detail-field">
+            <label>Win Rate</label>
+            <span>{{ (vendor.overall_win_rate * 100) | round(1) if vendor.overall_win_rate is not none else '-' }}{% if vendor.overall_win_rate is not none %}%{% endif %}</span>
+        </div>
+    </div>
+
+    <h3>Activity Summary</h3>
+
+    <div class="detail-grid">
+        <div class="detail-field">
+            <label>Total Outreach</label>
+            <span>{{ vendor.total_outreach or 0 }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Total Responses</label>
+            <span>{{ vendor.total_responses or 0 }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Total Wins</label>
+            <span>{{ vendor.total_wins or 0 }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Total POs</label>
+            <span>{{ vendor.total_pos or 0 }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Total Revenue</label>
+            <span>{{ '$%.2f' | format(vendor.total_revenue or 0) }}</span>
+        </div>
+        <div class="detail-field">
+            <label>Cancellation Rate</label>
+            <span>{{ (vendor.cancellation_rate * 100) | round(1) if vendor.cancellation_rate is not none else '-' }}{% if vendor.cancellation_rate is not none %}%{% endif %}</span>
+        </div>
+    </div>
+
+    {% if vendor.engagement_computed_at %}
+    <p class="meta-text">Scores last computed: {{ vendor.engagement_computed_at.strftime('%b %d, %Y') }}</p>
+    {% endif %}
+</div>

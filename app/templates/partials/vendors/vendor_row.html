@@ -1,0 +1,15 @@
+{#
+  vendor_row.html — Single table row for a vendor in the list view.
+  Receives: vendor dict with id, name, health_score, contact_count, last_activity.
+  Called by: list.html loop, views.py vendors_rows endpoint.
+  Depends on: HTMX (hx-get for detail drawer click).
+#}
+<tr id="vendor-{{ vendor.id }}" class="clickable-row"
+    hx-get="/views/vendors/{{ vendor.id }}" hx-target="#detail-drawer" hx-swap="innerHTML">
+    <td><input type="checkbox" name="vendor_check" :value="'{{ vendor.id }}'"
+               x-model="selected" @click.stop></td>
+    <td>{{ vendor.name }}</td>
+    <td>{{ vendor.health_score or '-' }}</td>
+    <td>{{ vendor.contact_count or 0 }}</td>
+    <td>{{ vendor.last_activity or '-' }}</td>
+</tr>

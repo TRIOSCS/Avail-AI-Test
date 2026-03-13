@@ -1,0 +1,82 @@
+{#
+  list.html — Vendor list page with HTMX search, sort headers, bulk select, detail drawer.
+  Receives: vendors (list), page, total_pages, q, sort, dir.
+  Called by: views.py vendors_page endpoint.
+  Depends on: vendor_row.html, pagination.html, HTMX, Alpine.js.
+#}
+{% extends "base.html" %}
+
+{% block title %}Vendors — AvailAI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Vendors</h1>
+    <button class="btn btn-primary"
+            @click="$dispatch('open-modal')"
+            hx-get="/views/vendors/create-form"
+            hx-target="#modal-content">
+        New Vendor
+    </button>
+</div>
+
+{# Search toolbar #}
+<div class="toolbar">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="Search vendors..."
+           hx-get="/views/vendors/rows"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#vendor-table-body"
+           hx-include="[name='sort'],[name='dir']">
+    <input type="hidden" name="sort" value="{{ sort }}">
+    <input type="hidden" name="dir" value="{{ dir }}">
+</div>
+
+{# Sortable table with bulk select #}
+<div x-data="{ selected: [] }">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th class="col-check">
+                    <input type="checkbox" @click="selected = $event.target.checked ? [...document.querySelectorAll('[name=vendor_check]')].map(e => e.value) : []">
+                </th>
+                <th hx-get="/views/vendors/rows?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                    hx-target="#vendor-table-body"
+                    class="sortable{% if sort == 'name' %} sorted-{{ dir }}{% endif %}">
+                    Name
+                </th>
+                <th hx-get="/views/vendors/rows?sort=health_score&dir={% if sort == 'health_score' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                    hx-target="#vendor-table-body"
+                    class="sortable{% if sort == 'health_score' %} sorted-{{ dir }}{% endif %}">
+                    Health Score
+                </th>
+                <th>Contacts</th>
+                <th hx-get="/views/vendors/rows?sort=last_activity&dir={% if sort == 'last_activity' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                    hx-target="#vendor-table-body"
+                    class="sortable{% if sort == 'last_activity' %} sorted-{{ dir }}{% endif %}">
+                    Last Activity
+                </th>
+            </tr>
+        </thead>
+        <tbody id="vendor-table-body">
+            {% if vendors %}
+                {% for vendor in vendors %}
+                    {% include "partials/vendors/vendor_row.html" %}
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="5">
+                    {% include "partials/shared/empty_state.html" with context %}
+                </td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+    {% with url="/views/vendors/rows", target_id="vendor-table-body" %}
+        {% include "partials/shared/pagination.html" %}
+    {% endwith %}
+{% endif %}
+
+{# Detail drawer — filled via HTMX when a row is clicked #}
+<div id="detail-drawer"></div>
+{% endblock %}

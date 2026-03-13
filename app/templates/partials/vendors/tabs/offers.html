@@ -1,0 +1,38 @@
+{#
+  tabs/offers.html — Historical offers from this vendor.
+  Receives: offers (list of Offer ORM objects), vendor_id (int).
+  Called by: views.py vendor_tab endpoint (tab_name='offers').
+  Depends on: none (read-only display).
+#}
+<div class="tab-panel">
+    <h3>Offers History</h3>
+
+    {% if offers %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>MPN</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Status</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for offer in offers %}
+            <tr>
+                <td>{{ offer.mpn or '-' }}</td>
+                <td>{{ offer.qty_available or '-' }}</td>
+                <td>{{ '$%.4f' | format(offer.unit_price) if offer.unit_price else '-' }}</td>
+                <td><span class="badge">{{ offer.status or 'unknown' }}</span></td>
+                <td>{{ offer.created_at.strftime('%b %d, %Y') if offer.created_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <p>No offers from this vendor yet.</p>
+    </div>
+    {% endif %}
+</div>
