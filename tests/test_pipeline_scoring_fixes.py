@@ -10,16 +10,7 @@ Called by: pytest
 Depends on: app/routers/dashboard/, app/services/proactive_service.py
 """
 
-from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
-
-from app.models import (
-    ActivityLog,
-    Company,
-    CustomerSite,
-    User,
-)
-from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 
 # ---- Bug 1: avail_rank recomputed in team-leaderboard ----
 
@@ -76,4 +67,3 @@ class TestProactiveScorecarOutlierCap:
         # Only the normal offer's revenue should be counted
         assert result["anticipated_revenue"] == 5000.0
         assert result["total_sent"] == 2
-

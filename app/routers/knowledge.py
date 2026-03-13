@@ -403,5 +403,3 @@ async def refresh_mpn_insights(
         "generated_at": entries[0].created_at.isoformat() if entries else None,
         "has_expired": False,
     }
-
-

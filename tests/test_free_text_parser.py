@@ -10,7 +10,6 @@ Covers: parse_free_text service, schema validation, parse/save-rfq/save-offers e
 from unittest.mock import AsyncMock, patch
 
 import pytest  # noqa: I001
-from fastapi.testclient import TestClient
 
 # ---------------------------------------------------------------------------
 # Service unit tests
@@ -117,5 +116,3 @@ async def test_normalize_line_items():
     assert result["line_items"][0]["mpn"] == "LM358N"
     assert result["line_items"][0]["quantity"] == 1
     assert result["line_items"][1]["currency"] == "EUR"
-
-

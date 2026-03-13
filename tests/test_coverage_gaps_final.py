@@ -23,11 +23,9 @@ from app.models import (
     CustomerSite,
     Offer,
     Quote,
-    Requisition,
     Sighting,
     User,
 )
-from app.models.buy_plan import BuyPlanV3
 from app.models.intelligence import MaterialVendorHistory
 
 # =====================================================================

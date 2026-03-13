@@ -43,14 +43,14 @@ BUY_PLAN_TRANSITIONS: dict[str, set[str]] = {
 
 # ── Requisition Status Transitions ──────────────────────────────────────
 REQUISITION_TRANSITIONS: dict[str, set[str]] = {
-    "draft": {"active", "sourcing", "archive", "cancelled"},
-    "active": {"sourcing", "offers", "quoting", "won", "lost", "archive", "cancelled"},
-    "sourcing": {"active", "offers", "quoting", "won", "lost", "archive", "cancelled"},
-    "offers": {"active", "sourcing", "quoting", "won", "lost", "archive", "cancelled"},
-    "quoting": {"active", "sourcing", "offers", "won", "lost", "archive", "cancelled"},
-    "won": {"active", "archive"},
-    "lost": {"active", "archive"},
-    "archive": {"active", "draft"},
+    "draft": {"active", "sourcing", "archived", "cancelled"},
+    "active": {"sourcing", "offers", "quoting", "won", "lost", "archived", "cancelled"},
+    "sourcing": {"active", "offers", "quoting", "won", "lost", "archived", "cancelled"},
+    "offers": {"active", "sourcing", "quoting", "won", "lost", "archived", "cancelled"},
+    "quoting": {"active", "sourcing", "offers", "won", "lost", "archived", "cancelled"},
+    "won": {"active", "archived"},
+    "lost": {"active", "archived"},
+    "archived": {"active", "draft"},
     "cancelled": {"active", "draft"},
 }
 

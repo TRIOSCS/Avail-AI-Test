@@ -16,10 +16,9 @@ Depends on: conftest.py fixtures, app.routers.*
 """
 
 import io
+import os
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import os
 
 import pytest
 

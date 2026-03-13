@@ -134,7 +134,7 @@ class TestDataCleanup:
         result = scan_junk_data(db_session, dry_run=False)
         assert result["dry_run"] is False
         db_session.refresh(junk)
-        assert junk.status == "archive"
+        assert junk.status == "archived"
         assert "[QUARANTINED]" in junk.name
 
 

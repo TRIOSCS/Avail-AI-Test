@@ -401,5 +401,3 @@ class TestProactiveOfferExpiry:
 
 
 # ── Fix 5: Buyer-brief optimized ────────────────────────────────────────
-
-

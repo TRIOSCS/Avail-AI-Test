@@ -156,6 +156,7 @@ async def _job_deep_email_mining():
     """Deep email mining scan for all connected users."""
     from ..database import SessionLocal
     from ..models import User
+
     selector_db = SessionLocal()
     users_to_scan: list[int] = []
     try:

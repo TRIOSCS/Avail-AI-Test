@@ -245,5 +245,3 @@ async def _job_expire_stale():
         logger.error("expire_stale job failed: {}", e)
     finally:
         db.close()
-
-

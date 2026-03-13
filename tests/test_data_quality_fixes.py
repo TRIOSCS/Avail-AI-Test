@@ -7,8 +7,7 @@ Covers:
 - TT-043: log_call_activity populates subject field
 """
 
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from datetime import datetime, timezone
 
 from app.models import (
     ActivityLog,

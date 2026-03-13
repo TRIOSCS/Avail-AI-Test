@@ -61,7 +61,7 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
     }
 
     # Scan requisitions
-    reqs = db.query(Requisition).filter(Requisition.status != "archive").limit(5000).all()
+    reqs = db.query(Requisition).filter(Requisition.status != "archived").limit(5000).all()
     for r in reqs:
         if _is_test_data(r.name) or _is_test_data(r.customer_name):
             results["requisitions"].append(
@@ -72,7 +72,7 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
                 }
             )
             if not dry_run:
-                r.status = "archive"
+                r.status = "archived"
                 r.name = f"[QUARANTINED] {r.name}"
             results["total_flagged"] += 1
 

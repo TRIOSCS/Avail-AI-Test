@@ -2453,8 +2453,8 @@ export function showToast(msg, type = 'info', durationOrOpts = 3000) {
     toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
     toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:400px;opacity:0;transition:opacity .2s;display:flex;align-items:center;gap:10px`;
-    // Safe: all callers use esc() for user-controlled values before passing to showToast
-    let html = `<span style="flex:1">${msg}</span>`;
+    // Escape message for defense-in-depth (callers may pass API/user data)
+    let html = `<span style="flex:1">${esc(String(msg ?? ''))}</span>`;
     if (action && action.label) {
         html += `<button class="toast-action-btn" style="background:none;border:1px solid ${colors[type]||colors.info};color:${colors[type]||colors.info};padding:2px 8px;border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap">${esc(action.label)}</button>`;
     }

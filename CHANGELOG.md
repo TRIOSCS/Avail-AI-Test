@@ -2,6 +2,27 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-13 — Frontend XSS hardening (innerHTML sanitization)
+
+### Security
+- **showToast (app.js):** Message is now escaped with `esc()` before insertion into innerHTML so API or user-controlled toast text cannot inject HTML/script. Defense-in-depth in case callers pass unescaped data.
+- **Connector test error (crm.js):** Source test result `data.error` is now escaped when rendered in the test result div so connector error messages cannot inject HTML.
+
+---
+
+## 2026-03-13 — Requisition status consistency & archive count fix
+
+### Bug Fixes
+- **Requisition archive count always zero:** `GET /api/requisitions/counts` was counting `status == "archive"` but the DB stores `"archived"`. Fixed to count `status.in_(["archived", "won", "lost", "closed"])` so the dashboard archive widget shows the correct total.
+- **Data cleanup quarantine wrong status:** `data_cleanup_service.scan_junk_data()` set quarantined requisitions to `"archive"` instead of `"archived"`, leaving invalid state. Now sets `"archived"` and filter uses `!= "archived"`.
+- **Status machine mismatch:** `status_machine.REQUISITION_TRANSITIONS` used `"archive"` as key and target; canonical value is `"archived"` (RequisitionStatus.archived). Updated all transitions to use `"archived"` for consistency with enums and routers.
+
+### Tests
+- **test_remediation_waves:** Assertion updated to expect `status == "archived"` after quarantine.
+- **test_requisition_counts_archive_includes_archived:** New test ensures archive count includes archived/won/lost/closed requisitions.
+
+---
+
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
 ### Applied

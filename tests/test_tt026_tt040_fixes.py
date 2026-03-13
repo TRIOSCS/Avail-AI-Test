@@ -9,7 +9,7 @@ Depends on: conftest (client, db_session, test_user, sales_user)
 
 from datetime import datetime, timedelta, timezone
 
-from app.models import ActivityLog, Company, CustomerSite
+from app.models import ActivityLog
 
 # ── TT-026: Sales notification count endpoint ───────────────────────
 
@@ -121,5 +121,3 @@ class TestBellBadgeCount:
 
 
 # ── TT-040: needs-attention fallback ─────────────────────────────────
-
-

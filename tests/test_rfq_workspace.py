@@ -9,7 +9,7 @@ Called by: pytest
 Depends on: routers/requisitions/requirements.py, conftest fixtures
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from app.models import ChangeLog, Offer, RequisitionTask
 

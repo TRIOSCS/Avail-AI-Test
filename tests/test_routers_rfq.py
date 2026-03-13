@@ -9,8 +9,8 @@ Covers: _enrich_with_vendor_cards filtering, follow-ups, contacts, responses,
 rfq-prepare, phone call logging, activity feed, send_follow_up, send_rfq, poll.
 """
 
-from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1759,10 +1759,10 @@ def test_sales_cannot_update_vendor_response_status_for_other_users_requisition(
     assert vr.status == "new"
 
 
-def test_sales_cannot_send_follow_up_for_other_users_requisition(
-    db_session, sales_user, test_user, test_requisition
-):
-    ctc = _make_contact(db_session, test_requisition, test_user, vendor_name="Hidden Followup", status="sent", days_ago=5)
+def test_sales_cannot_send_follow_up_for_other_users_requisition(db_session, sales_user, test_user, test_requisition):
+    ctc = _make_contact(
+        db_session, test_requisition, test_user, vendor_name="Hidden Followup", status="sent", days_ago=5
+    )
 
     with patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"):
         with _client_as_user(db_session, sales_user) as c:

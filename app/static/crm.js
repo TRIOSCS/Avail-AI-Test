@@ -6446,7 +6446,7 @@ async function testSourceCred(sourceId) {
         } else if (data.status === 'no_results') {
             resultEl.innerHTML = '<div class="s-test-result s-test-warn">Connected successfully, but no results for test MPN (LM358N)</div>';
         } else {
-            resultEl.innerHTML = `<div class="s-test-result s-test-err">Test failed: ${data.error || 'Unknown error'}</div>`;
+            resultEl.innerHTML = `<div class="s-test-result s-test-err">Test failed: ${esc(data.error || 'Unknown error')}</div>`;
         }
         // Update local data without full rebuild (preserves test result)
         const src = _sourcesData.find(s => s.id === sourceId);

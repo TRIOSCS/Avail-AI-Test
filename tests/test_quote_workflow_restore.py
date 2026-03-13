@@ -163,4 +163,3 @@ class TestSanitization:
         assert "<script>" not in result["name"]
         assert result["notes"] == "safe text"
         assert result["price"] == 1.5
-
