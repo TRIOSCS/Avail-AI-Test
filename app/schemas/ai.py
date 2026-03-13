@@ -250,6 +250,7 @@ class IntakeDraftRequest(BaseModel):
     """Paste of customer/vendor text for AI classification and parsing."""
 
     text: str
+    requisition_id: int | None = None
 
     @field_validator("text")
     @classmethod
