@@ -25,6 +25,7 @@ from app.utils.normalization import (
     normalize_mpn,
     normalize_packaging,
 )
+from app.utils.sanitize import sanitize_text
 from app.utils.normalization_helpers import (
     normalize_country,
     normalize_phone_e164,
@@ -371,7 +372,7 @@ class OfferCreate(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Field must not be blank")
-        return v
+        return sanitize_text(v) or v
 
     @field_validator("condition")
     @classmethod
@@ -452,6 +453,13 @@ class QuoteLineItem(BaseModel):
     unit_cost: float = 0
     unit_sell: float = 0
     margin: float = 0
+
+    @field_validator("mpn", "vendor_name")
+    @classmethod
+    def sanitize_text_fields(cls, v: str) -> str:
+        if not v:
+            return v
+        return sanitize_text(v) or ""
 
 
 class QuoteCreate(BaseModel):

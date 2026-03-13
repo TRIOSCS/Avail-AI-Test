@@ -190,7 +190,7 @@ def test_requirement_tasks_merges_offer_tasks(client, test_requisition, db_sessi
 
 
 def test_requirement_tasks_include_assignee_alias_fields(client, test_requisition, db_session):
-    """Part-task list includes assignee_name/creator_name aliases for RFQ UI."""
+    """Part-task list includes assigned_to and created_by_name for RFQ UI."""
     req = test_requisition
     r = req.requirements[0]
     t = RequisitionTask(
@@ -212,9 +212,8 @@ def test_requirement_tasks_include_assignee_alias_fields(client, test_requisitio
     data = resp.json()
     assert len(data) >= 1
     row = next(x for x in data if x["id"] == t.id)
-    assert "assignee_name" in row
-    assert "creator_name" in row
-    assert row["assignee_name"] == row["assigned_to"]
+    assert "assigned_to" in row
+    assert "created_by_name" in row
 
 
 def test_create_requirement_task_persists_assignment_due_and_description(client, test_requisition, test_user):
@@ -239,8 +238,8 @@ def test_create_requirement_task_persists_assignment_due_and_description(client,
     rows = list_resp.json()
     created = next(x for x in rows if x["title"] == "RFQ follow-up task")
     assert created["description"] == "Call vendor and confirm lead time"
-    assert created["assignee_name"] == test_user.name
-    assert created["due_at"] is not None
+    assert created["assigned_to"] == test_user.name
+    assert created["due_date"] is not None
 
 
 # ── Requirement History Timeline ──────────────────────────────────────

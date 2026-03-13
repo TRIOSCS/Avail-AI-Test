@@ -175,6 +175,10 @@ class TestApiContracts:
         resp_sold = client.patch(f"/api/offers/{offer['id']}/mark-sold")
         assert resp_sold.status_code == 200
 
+        # Mark-sold again on already-sold offer — app allows idempotently, returns 200
+        resp_sold2 = client.patch(f"/api/offers/{offer['id']}/mark-sold")
+        assert resp_sold2.status_code == 200
+
         # Try invalid transition: sold → active (should fail)
         resp = client.put(f"/api/offers/{offer['id']}", json={"status": "active"})
         assert resp.status_code == 400

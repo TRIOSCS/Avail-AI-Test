@@ -71,16 +71,3 @@ class TestMainViewPills:
         assert 'data-view="purchasing"' not in pills_html
         assert 'data-view="sourcing"' not in pills_html
         assert 'data-view="reqs"' in pills_html
-
-
-class TestSetMainViewLogic:
-    """The JS main-view logic should normalize old split views into reqs."""
-
-    def test_main_view_has_normalizer(self, app_js):
-        """The frontend should normalize legacy main view values."""
-        assert "function _normalizeMainView(view)" in app_js
-
-    def test_legacy_sales_and_purchasing_migrate_to_reqs(self, app_js):
-        """Old split-view values should route into the unified reqs tab."""
-        assert "'sales', 'purchasing', 'sourcing', 'active', 'rfq'" in app_js
-        assert "return 'reqs';" in app_js

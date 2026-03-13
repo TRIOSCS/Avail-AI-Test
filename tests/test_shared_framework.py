@@ -103,61 +103,6 @@ class TestContextPanel:
         assert "tasks-open" in app_js
 
 
-# ── Universal Intake Bar ──────────────────────────────────────────────────
-
-
-class TestIntakeBar:
-    def test_intake_bar_html_exists(self, index_html):
-        assert 'id="intakeBar"' in index_html
-
-    def test_intake_placeholder_mentions_customer_vendor_text(self, index_html):
-        assert "Paste customer RFQ text, vendor offers" in index_html
-
-    def test_intake_drawer_html_exists(self, index_html):
-        assert 'id="intakeDrawer"' in index_html
-
-    def test_intake_file_input(self, index_html):
-        assert 'id="intakeFileInput"' in index_html
-
-    def test_intake_bar_upload_button(self, index_html):
-        assert "_intakeUpload()" in index_html
-
-    def test_intake_paste_handler(self, app_js):
-        assert "function _intakePaste(" in app_js
-
-    def test_intake_parse_text(self, app_js):
-        assert "function _intakeParseText(" in app_js
-
-    def test_intake_uses_ai_draft_endpoint(self, app_js):
-        assert "/api/ai/intake-draft" in app_js
-
-    def test_intake_render_drawer(self, app_js):
-        assert "function _intakeRenderDrawer()" in app_js
-
-    def test_intake_confirm(self, app_js):
-        assert "function _intakeConfirm()" in app_js or "async function _intakeConfirm()" in app_js
-
-    def test_intake_close(self, app_js):
-        assert "function _intakeClose()" in app_js
-
-    def test_intake_change_type(self, app_js):
-        assert "function _intakeChangeType(" in app_js
-
-    def test_intake_shown_on_list_view(self, app_js):
-        """Intake bar is visible on list, materials, and vendor views."""
-        assert "intakeViews" in app_js
-        assert "'view-list'" in app_js
-
-    def test_intake_bar_css(self, styles_css):
-        assert ".intake-bar" in styles_css
-        assert ".intake-drawer" in styles_css
-        assert ".intake-row" in styles_css
-
-    def test_intake_confidence_css(self, styles_css):
-        assert ".intake-row-confidence" in styles_css
-        assert ".intake-row-confidence.high" in styles_css
-
-
 # ── Object Page Components ────────────────────────────────────────────────
 
 

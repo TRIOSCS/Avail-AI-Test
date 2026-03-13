@@ -669,24 +669,37 @@ class TestLoggingConfigJsonStdout:
 
     def test_production_json_logging(self):
         """Line 42: production + EXTRA_LOGS=1 -> JSON stdout handler."""
+        import tempfile
+
         from loguru import logger
 
         from app.logging_config import setup_logging
 
         logger.remove()
-        with patch.dict(
-            os.environ,
-            {
-                "APP_URL": "https://app.availai.net",
-                "EXTRA_LOGS": "1",
-                "LOG_LEVEL": "INFO",
-            },
-        ):
-            setup_logging()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                log_path = os.path.join(tmpdir, "avail.log")
+                real_add = logger.add
 
-        # Should have at least one handler configured
-        assert len(logger._core.handlers) > 0
-        logger.remove()  # Clean up
+                def patched_add(sink, *args, **kwargs):
+                    if str(sink).startswith("/var/log/"):
+                        sink = log_path
+                    return real_add(sink, *args, **kwargs)
+
+                with patch.dict(
+                    os.environ,
+                    {
+                        "APP_URL": "https://app.availai.net",
+                        "EXTRA_LOGS": "1",
+                        "LOG_LEVEL": "INFO",
+                    },
+                ), patch("app.logging_config.logger.add", patched_add):
+                    setup_logging()
+
+                # Should have at least one handler configured
+                assert len(logger._core.handlers) > 0
+        finally:
+            logger.remove()
 
 
 # ══════════════════════════════════════════════════════════════════════

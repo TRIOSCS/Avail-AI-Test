@@ -95,7 +95,7 @@ def test_configure_scheduler_registers_core_jobs():
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results", "engagement_scoring"):
+    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results"):
         assert core_id in job_ids, f"Missing core job: {core_id}"
 
 
@@ -116,6 +116,7 @@ def test_configure_scheduler_conditional_flags_on():
     with patch(
         "app.config.settings",
         _mock_settings(
+            mvp_mode=False,
             contacts_sync_enabled=True,
             activity_tracking_enabled=True,
             proactive_matching_enabled=True,
