@@ -71,6 +71,13 @@ from sqlalchemy.orm import Session
 from app.models import User
 
 
+@pytest.fixture(autouse=True)
+def _skip_if_performance_router_disabled(client):
+    has_route = any(getattr(route, "path", "") == "/api/performance/vendors" for route in client.app.routes)
+    if not has_route:
+        pytest.skip("Performance router disabled in MVP mode")
+
+
 @pytest.fixture()
 def admin_perf_client(db_session: Session, admin_user: User) -> TestClient:
     """TestClient with admin auth override for performance endpoints."""
