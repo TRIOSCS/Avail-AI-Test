@@ -16,7 +16,7 @@ Each row has 14 <td> cells:
   11=.ncsqrs, 12=Supplier, 13=.spn(sponsor)
 
 Called by: worker loop (after search_engine)
-Depends on: beautifulsoup4, lxml
+Depends on: beautifulsoup4 (uses lxml when available, falls back to stdlib parser)
 """
 
 import json
@@ -101,12 +101,16 @@ def parse_results_html(html: str) -> list[NcSighting]:
     with region headers and table.searchresultstable (excluding #trv_0
     sticky header clone to avoid double-counting).
     """
-    from bs4 import BeautifulSoup
+    from bs4 import BeautifulSoup, FeatureNotFound
 
     if not html or not html.strip():
         return []
 
-    soup = BeautifulSoup(html, "lxml")
+    try:
+        soup = BeautifulSoup(html, "lxml")
+    except FeatureNotFound:
+        logger.warning("NC parser: lxml parser unavailable, falling back to html.parser")
+        soup = BeautifulSoup(html, "html.parser")
     sightings = []
 
     # Find all region containers
