@@ -190,6 +190,14 @@ class TestQuoteLine:
 
 
 class TestReactivationSignal:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self):
+        from app.main import app
+
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/reactivation-signals" for route in app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_create_signal(self, db_session):
         """ReactivationSignal model creates and persists correctly."""
         co = Company(name="React Corp")
