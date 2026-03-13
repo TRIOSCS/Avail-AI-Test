@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
+from .teams_action_tokens import create_teams_action_token
+
 # In-memory fallback for rate limiting when Redis is unavailable
 _rate_limits: dict[str, datetime] = {}
 _RATE_LIMIT_SECONDS = 3600  # 1 hour
@@ -561,19 +563,21 @@ async def send_buyplan_approval_card(
     token: str | None = None,
 ) -> bool:
     """Interactive buy plan approval card with Approve/Reject buttons."""
+    approve_token = create_teams_action_token(plan_id, "buyplan_approve")
+    reject_token = create_teams_action_token(plan_id, "buyplan_reject")
 
     actions = [
         {
             "type": "Action.Submit",
             "title": "Approve",
             "style": "positive",
-            "data": {"action": "buyplan_approve", "plan_id": plan_id},
+            "data": {"action": "buyplan_approve", "plan_id": plan_id, "action_token": approve_token},
         },
         {
             "type": "Action.Submit",
             "title": "Reject",
             "style": "destructive",
-            "data": {"action": "buyplan_reject", "plan_id": plan_id},
+            "data": {"action": "buyplan_reject", "plan_id": plan_id, "action_token": reject_token},
         },
         {
             "type": "Action.OpenUrl",

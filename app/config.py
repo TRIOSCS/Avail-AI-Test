@@ -160,6 +160,7 @@ class Settings(BaseSettings):
     teams_team_id: str = ""
     teams_channel_id: str = ""
     teams_hot_threshold: float = 10000
+    teams_card_action_token_ttl_seconds: int = 604800
 
     # --- RFQ ---
     follow_up_days: int = 3

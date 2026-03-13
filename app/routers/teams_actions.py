@@ -9,23 +9,17 @@ Depends on: app/models, app/services/buyplan_service, app/dependencies
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from loguru import logger
-from pydantic import BaseModel
 
 from ..database import SessionLocal
-from ..dependencies import require_user
+from ..services.teams_action_tokens import verify_teams_action_token
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
 
-class CardActionPayload(BaseModel):
-    action: str
-    plan_id: int | None = None
-
-
 @router.post("/card-action")
-async def handle_card_action(request: Request, user=Depends(require_user)):
+async def handle_card_action(request: Request):
     """Handle Action.Submit callbacks from Teams Adaptive Cards.
 
     Teams sends the action data as JSON. We parse and dispatch to the
@@ -39,12 +33,31 @@ async def handle_card_action(request: Request, user=Depends(require_user)):
     # Teams wraps action data in "value" when using Action.Submit
     action_data = body.get("value") or body
     action = action_data.get("action", "")
-    plan_id = action_data.get("plan_id")
+    token = str(action_data.get("action_token") or "")
+
+    try:
+        plan_id = int(action_data.get("plan_id")) if action_data.get("plan_id") is not None else None
+    except (TypeError, ValueError):
+        plan_id = None
 
     if action in ("buyplan_approve", "buyplan_reject") and plan_id:
+        is_valid, reason = verify_teams_action_token(token, plan_id, action)
+        if not is_valid:
+            logger.warning("Rejected Teams card action={} plan_id={} reason={}", action, plan_id, reason)
+            if reason == "expired":
+                return _response_card(
+                    "Action Expired",
+                    "This approval card has expired. Open AVAIL and approve/reject from the buy plan page.",
+                    "warning",
+                )
+            return _response_card(
+                "Action Blocked",
+                "This card action is invalid. Please open AVAIL and retry from the buy plan page.",
+                "attention",
+            )
         return await _handle_buyplan_action(plan_id, action)
     else:
-        logger.warning("Unknown Teams card action: %s", action)
+        logger.warning("Unknown Teams card action: {}", action)
         return _response_card("Unknown Action", "This action is not recognized.", "warning")
 
 
@@ -61,7 +74,7 @@ async def _handle_buyplan_action(plan_id: int, action: str) -> dict:
         plan = db.get(BuyPlan, plan_id)
         if not plan:
             return _response_card("Not Found", f"Buy plan #{plan_id} not found.", "attention")
-        if plan.status != "pending":
+        if plan.status not in ("pending", "pending_approval"):
             return _response_card("Already Processed", f"Buy plan #{plan_id} is already {plan.status}.", "warning")
 
         plan.status = verb
@@ -73,7 +86,7 @@ async def _handle_buyplan_action(plan_id: int, action: str) -> dict:
         logger.info("Buy plan #{} {} via Teams card action", plan_id, verb)
         return _response_card(verb.title(), f"Buy plan #{plan_id} has been {verb} via Teams.", color)
     except Exception as e:
-        logger.error("Teams card action %s failed: %s", verb, e)
+        logger.error("Teams card action {} failed: {}", verb, e)
         db.rollback()
         return _response_card("Error", "Failed to process action. Please try again or contact support.", "attention")
     finally:
