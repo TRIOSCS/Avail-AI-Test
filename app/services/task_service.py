@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.models.auth import User
 from app.models.task import RequisitionTask
 
 # ---------------------------------------------------------------------------
@@ -355,6 +356,117 @@ def on_quote_expiring(db: Session, requisition_id: int, quote_id: int):
         source_ref=f"expiry:{quote_id}",
         priority=3,
         due_at=datetime.now(timezone.utc) + timedelta(days=2),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Team workload overview
+# ---------------------------------------------------------------------------
+
+
+def get_team_workload(db: Session) -> list[dict]:
+    """Get task counts per user for the team workload dashboard.
+
+    Returns a list of dicts with user info and task counts broken down
+    by status (todo, in_progress, done, overdue).
+    """
+    now = datetime.now(timezone.utc)
+    users = db.query(User).order_by(User.name).all()
+    result = []
+    for u in users:
+        todo = (
+            db.query(func.count(RequisitionTask.id))
+            .filter(RequisitionTask.assigned_to_id == u.id, RequisitionTask.status == "todo")
+            .scalar()
+        ) or 0
+        in_progress = (
+            db.query(func.count(RequisitionTask.id))
+            .filter(RequisitionTask.assigned_to_id == u.id, RequisitionTask.status == "in_progress")
+            .scalar()
+        ) or 0
+        overdue = (
+            db.query(func.count(RequisitionTask.id))
+            .filter(
+                RequisitionTask.assigned_to_id == u.id,
+                RequisitionTask.status != "done",
+                RequisitionTask.due_at < now,
+            )
+            .scalar()
+        ) or 0
+        waiting_on = (
+            db.query(func.count(RequisitionTask.id))
+            .filter(
+                RequisitionTask.created_by == u.id,
+                RequisitionTask.assigned_to_id != u.id,
+                RequisitionTask.status != "done",
+            )
+            .scalar()
+        ) or 0
+        total_open = todo + in_progress
+        if total_open == 0 and waiting_on == 0:
+            continue  # Skip users with no task activity
+        result.append({
+            "user_id": u.id,
+            "name": u.name or u.email,
+            "email": u.email,
+            "todo": todo,
+            "in_progress": in_progress,
+            "overdue": overdue,
+            "waiting_on": waiting_on,
+            "total_open": total_open,
+        })
+    # Sort: most open tasks first
+    result.sort(key=lambda x: x["total_open"], reverse=True)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Done feed — recently completed tasks across the team
+# ---------------------------------------------------------------------------
+
+
+def get_done_feed(db: Session, *, limit: int = 50) -> list[RequisitionTask]:
+    """Get recently completed tasks across all users, newest first."""
+    return (
+        db.query(RequisitionTask)
+        .filter(RequisitionTask.status == "done", RequisitionTask.completed_at.isnot(None))
+        .order_by(RequisitionTask.completed_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+# ---------------------------------------------------------------------------
+# Filtered task search
+# ---------------------------------------------------------------------------
+
+
+def search_tasks(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    status: str | None = None,
+    priority: int | None = None,
+    requisition_id: int | None = None,
+    query: str | None = None,
+    limit: int = 100,
+) -> list[RequisitionTask]:
+    """Search tasks with optional filters. Used by the Task Queue filter UI."""
+    q = db.query(RequisitionTask)
+    if user_id:
+        q = q.filter(RequisitionTask.assigned_to_id == user_id)
+    if status:
+        q = q.filter(RequisitionTask.status == status)
+    if priority:
+        q = q.filter(RequisitionTask.priority == priority)
+    if requisition_id:
+        q = q.filter(RequisitionTask.requisition_id == requisition_id)
+    if query:
+        q = q.filter(RequisitionTask.title.ilike(f"%{query}%"))
+    return (
+        q.order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at.desc())
+        .limit(limit)
+        .all()
     )
 
 

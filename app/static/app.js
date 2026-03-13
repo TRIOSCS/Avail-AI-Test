@@ -4061,23 +4061,31 @@ function _renderMyTaskItem(task) {
 
 // ---------------------------------------------------------------------------
 // Task Queue — full-page cross-requisition task management
-// Shows "My Tasks", "Waiting On", and "Completed" tabs.
+// Tabs: My Tasks, Waiting On, Done Feed, Team workload overview.
+// Filter bar with search, priority, and requisition filters.
 // Called by: sidebarNav('taskqueue'), popstate handler
-// Depends on: /api/tasks/mine, /api/tasks/waiting, /api/tasks/mine/summary
+// Depends on: /api/tasks/mine, /api/tasks/waiting, /api/tasks/mine/summary,
+//             /api/tasks/team, /api/tasks/done-feed, /api/tasks/search
 // ---------------------------------------------------------------------------
 
 var _tqCurrentTab = 'mine';
+var _tqAllTasks = [];  // cached for client-side filtering
+var _tqReqFilterLoaded = false;
 
 window.showTaskQueue = function showTaskQueue() {
     showView('view-taskqueue');
     _tqLoadTab(_tqCurrentTab);
     _tqLoadBadges();
+    _tqLoadReqFilter();
 };
 
 window._tqSwitchTab = function(tab, btn) {
     _tqCurrentTab = tab;
     document.querySelectorAll('#tqTabs .tq-tab').forEach(function(t) { t.classList.remove('active'); });
     if (btn) btn.classList.add('active');
+    // Show filters on mine/waiting tabs, hide on feed/team
+    var filters = document.getElementById('tqFilters');
+    if (filters) filters.style.display = (tab === 'mine' || tab === 'waiting') ? 'flex' : 'none';
     _tqLoadTab(tab);
 };
 
@@ -4098,43 +4106,293 @@ async function _tqLoadBadges() {
     } catch (e) { /* silent */ }
 }
 
+async function _tqLoadReqFilter() {
+    if (_tqReqFilterLoaded) return;
+    var sel = document.getElementById('tqFilterReq');
+    if (!sel) return;
+    try {
+        var reqs = await apiFetch('/api/requisitions?limit=200');
+        var list = Array.isArray(reqs) ? reqs : (reqs.items || []);
+        for (var i = 0; i < list.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = list[i].id;
+            opt.textContent = list[i].name || ('Req #' + list[i].id);
+            sel.appendChild(opt);
+        }
+        _tqReqFilterLoaded = true;
+    } catch (e) { /* silent */ }
+}
+
 async function _tqLoadTab(tab) {
     var container = document.getElementById('tqContent');
     if (!container) return;
     container.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Loading...</div>';
+
+    if (tab === 'team') {
+        await _tqLoadTeam(container);
+        return;
+    }
+    if (tab === 'feed') {
+        await _tqLoadDoneFeed(container);
+        return;
+    }
+
     try {
         var tasks;
         if (tab === 'mine') {
             tasks = await apiFetch('/api/tasks/mine');
         } else if (tab === 'waiting') {
             tasks = await apiFetch('/api/tasks/waiting');
-        } else if (tab === 'done') {
-            tasks = await apiFetch('/api/tasks/mine?status=done');
         }
         if (!Array.isArray(tasks)) tasks = [];
-        container.innerHTML = '';
-        if (!tasks.length) {
-            var emptyMsg = tab === 'mine' ? 'No tasks assigned to you' : tab === 'waiting' ? 'No tasks waiting on others' : 'No completed tasks';
-            container.innerHTML = '<div class="tq-empty">' + emptyMsg + '</div>';
-            return;
-        }
-        // Sort: overdue first, then by due date, then created
-        tasks.sort(function(a, b) {
-            if (a.status !== b.status) {
-                var order = { in_progress: 0, todo: 1, done: 2 };
-                return (order[a.status] || 1) - (order[b.status] || 1);
-            }
-            if (!a.due_at && !b.due_at) return 0;
-            if (!a.due_at) return 1;
-            if (!b.due_at) return -1;
-            return new Date(a.due_at) - new Date(b.due_at);
-        });
-        for (var i = 0; i < tasks.length; i++) {
-            container.appendChild(_tqRenderTask(tasks[i], tab));
-        }
+        _tqAllTasks = tasks;
+        _tqRenderFilteredTasks(tab);
     } catch (e) {
         container.innerHTML = '<div class="tq-empty" style="color:var(--red)">Failed to load tasks</div>';
     }
+}
+
+// Client-side filtering of the cached task list
+window._tqApplyFilters = function() {
+    _tqRenderFilteredTasks(_tqCurrentTab);
+};
+
+window._tqClearFilters = function() {
+    var search = document.getElementById('tqSearchInput');
+    var pri = document.getElementById('tqFilterPriority');
+    var req = document.getElementById('tqFilterReq');
+    if (search) search.value = '';
+    if (pri) pri.value = '';
+    if (req) req.value = '';
+    _tqRenderFilteredTasks(_tqCurrentTab);
+};
+
+function _tqRenderFilteredTasks(tab) {
+    var container = document.getElementById('tqContent');
+    if (!container) return;
+
+    var tasks = _tqAllTasks.slice();
+
+    // Apply filters
+    var searchVal = (document.getElementById('tqSearchInput') || {}).value || '';
+    var priVal = (document.getElementById('tqFilterPriority') || {}).value || '';
+    var reqVal = (document.getElementById('tqFilterReq') || {}).value || '';
+
+    if (searchVal.trim()) {
+        var q = searchVal.trim().toLowerCase();
+        tasks = tasks.filter(function(t) {
+            return (t.title && t.title.toLowerCase().indexOf(q) !== -1) ||
+                   (t.description && t.description.toLowerCase().indexOf(q) !== -1) ||
+                   (t.assignee_name && t.assignee_name.toLowerCase().indexOf(q) !== -1) ||
+                   (t.creator_name && t.creator_name.toLowerCase().indexOf(q) !== -1);
+        });
+    }
+    if (priVal) {
+        var priNum = parseInt(priVal);
+        tasks = tasks.filter(function(t) { return t.priority === priNum; });
+    }
+    if (reqVal) {
+        var reqNum = parseInt(reqVal);
+        tasks = tasks.filter(function(t) { return t.requisition_id === reqNum; });
+    }
+
+    container.innerHTML = '';
+    if (!tasks.length) {
+        var emptyMsg = tab === 'mine' ? 'No tasks assigned to you' : 'No tasks waiting on others';
+        if (searchVal || priVal || reqVal) emptyMsg = 'No tasks match your filters';
+        container.innerHTML = '<div class="tq-empty">' + emptyMsg + '</div>';
+        return;
+    }
+
+    // Sort: in_progress first, then todo, then by due date
+    tasks.sort(function(a, b) {
+        if (a.status !== b.status) {
+            var order = { in_progress: 0, todo: 1, done: 2 };
+            return (order[a.status] || 1) - (order[b.status] || 1);
+        }
+        if (!a.due_at && !b.due_at) return 0;
+        if (!a.due_at) return 1;
+        if (!b.due_at) return -1;
+        return new Date(a.due_at) - new Date(b.due_at);
+    });
+
+    for (var i = 0; i < tasks.length; i++) {
+        container.appendChild(_tqRenderTask(tasks[i], tab));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Done Feed — recently completed tasks across the team
+// ---------------------------------------------------------------------------
+
+async function _tqLoadDoneFeed(container) {
+    try {
+        var tasks = await apiFetch('/api/tasks/done-feed?limit=50');
+        if (!Array.isArray(tasks)) tasks = [];
+        container.innerHTML = '';
+        if (!tasks.length) {
+            container.innerHTML = '<div class="tq-empty">No completed tasks yet</div>';
+            return;
+        }
+        for (var i = 0; i < tasks.length; i++) {
+            container.appendChild(_tqRenderFeedItem(tasks[i]));
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="tq-empty" style="color:var(--red)">Failed to load done feed</div>';
+    }
+}
+
+function _tqRenderFeedItem(task) {
+    var card = document.createElement('div');
+    card.className = 'tq-feed-item';
+
+    // Left: checkmark icon
+    var icon = document.createElement('div');
+    icon.className = 'tq-feed-icon';
+    icon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+    card.appendChild(icon);
+
+    // Content
+    var content = document.createElement('div');
+    content.className = 'tq-feed-content';
+
+    var title = document.createElement('div');
+    title.className = 'tq-feed-title';
+    title.textContent = task.title;
+    content.appendChild(title);
+
+    var meta = document.createElement('div');
+    meta.className = 'tq-feed-meta';
+    var parts = [];
+    if (task.assignee_name) parts.push('Completed by ' + task.assignee_name);
+    if (task.requisition_name) parts.push(task.requisition_name);
+    if (task.completed_at) {
+        var d = new Date(task.completed_at);
+        parts.push(_tqRelativeTime(d));
+    }
+    meta.textContent = parts.join(' \u00B7 ');
+    content.appendChild(meta);
+
+    if (task.completion_note) {
+        var note = document.createElement('div');
+        note.className = 'tq-feed-note';
+        note.textContent = task.completion_note;
+        content.appendChild(note);
+    }
+
+    card.appendChild(content);
+
+    // Click to navigate
+    if (task.requisition_id) {
+        card.style.cursor = 'pointer';
+        card.onclick = function() { goToReq(task.requisition_id); };
+    }
+
+    return card;
+}
+
+function _tqRelativeTime(date) {
+    var now = new Date();
+    var diff = Math.floor((now - date) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+    return _shortDate(date.toISOString());
+}
+
+// ---------------------------------------------------------------------------
+// Team Workload Overview
+// ---------------------------------------------------------------------------
+
+async function _tqLoadTeam(container) {
+    try {
+        var team = await apiFetch('/api/tasks/team');
+        if (!Array.isArray(team)) team = [];
+        container.innerHTML = '';
+        if (!team.length) {
+            container.innerHTML = '<div class="tq-empty">No task activity across the team</div>';
+            return;
+        }
+
+        // Summary bar
+        var totalOpen = 0, totalOverdue = 0;
+        for (var s = 0; s < team.length; s++) {
+            totalOpen += team[s].total_open || 0;
+            totalOverdue += team[s].overdue || 0;
+        }
+        var summary = document.createElement('div');
+        summary.className = 'tq-team-summary';
+        summary.innerHTML =
+            '<div class="tq-team-stat"><span class="tq-team-stat-num">' + team.length + '</span><span class="tq-team-stat-label">Active Members</span></div>' +
+            '<div class="tq-team-stat"><span class="tq-team-stat-num">' + totalOpen + '</span><span class="tq-team-stat-label">Open Tasks</span></div>' +
+            '<div class="tq-team-stat tq-team-stat-warn"><span class="tq-team-stat-num">' + totalOverdue + '</span><span class="tq-team-stat-label">Overdue</span></div>';
+        container.appendChild(summary);
+
+        // Person cards
+        for (var i = 0; i < team.length; i++) {
+            container.appendChild(_tqRenderPersonCard(team[i]));
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="tq-empty" style="color:var(--red)">Failed to load team data</div>';
+    }
+}
+
+function _tqRenderPersonCard(person) {
+    var card = document.createElement('div');
+    card.className = 'tq-person-card';
+    if (person.overdue > 0) card.classList.add('tq-person-overdue');
+
+    // Avatar + name
+    var header = document.createElement('div');
+    header.className = 'tq-person-header';
+    var initials = (person.name || '?').split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
+    var avatar = document.createElement('div');
+    avatar.className = 'tq-person-avatar';
+    avatar.textContent = initials;
+    header.appendChild(avatar);
+    var nameEl = document.createElement('div');
+    nameEl.className = 'tq-person-name';
+    nameEl.textContent = person.name || person.email;
+    header.appendChild(nameEl);
+    card.appendChild(header);
+
+    // Stats row
+    var stats = document.createElement('div');
+    stats.className = 'tq-person-stats';
+    stats.innerHTML =
+        '<div class="tq-person-stat">' +
+            '<span class="tq-person-stat-num" style="color:var(--blue)">' + (person.in_progress || 0) + '</span>' +
+            '<span class="tq-person-stat-label">Active</span>' +
+        '</div>' +
+        '<div class="tq-person-stat">' +
+            '<span class="tq-person-stat-num">' + (person.todo || 0) + '</span>' +
+            '<span class="tq-person-stat-label">To Do</span>' +
+        '</div>' +
+        '<div class="tq-person-stat">' +
+            '<span class="tq-person-stat-num" style="color:' + (person.overdue > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (person.overdue || 0) + '</span>' +
+            '<span class="tq-person-stat-label">Overdue</span>' +
+        '</div>' +
+        '<div class="tq-person-stat">' +
+            '<span class="tq-person-stat-num" style="color:var(--amber)">' + (person.waiting_on || 0) + '</span>' +
+            '<span class="tq-person-stat-label">Waiting</span>' +
+        '</div>';
+    card.appendChild(stats);
+
+    // Capacity bar
+    var maxTasks = 10;
+    var pct = Math.min((person.total_open / maxTasks) * 100, 100);
+    var barColor = pct > 80 ? 'var(--red)' : pct > 50 ? 'var(--amber)' : 'var(--green)';
+    var bar = document.createElement('div');
+    bar.className = 'tq-person-bar';
+    bar.innerHTML =
+        '<div class="tq-person-bar-track">' +
+            '<div class="tq-person-bar-fill" style="width:' + pct + '%;background:' + barColor + '"></div>' +
+        '</div>' +
+        '<span class="tq-person-bar-label">' + person.total_open + ' open</span>';
+    card.appendChild(bar);
+
+    return card;
 }
 
 function _tqRenderTask(task, tab) {

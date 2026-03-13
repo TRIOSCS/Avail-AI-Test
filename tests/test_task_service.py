@@ -541,3 +541,169 @@ class TestWaitingAPI:
         data = resp.json()
         assert len(data) == 1
         assert data[0]["title"] == "Delegated task"
+
+
+# ---------------------------------------------------------------------------
+# Team workload, done feed, and search API tests
+# ---------------------------------------------------------------------------
+
+
+class TestTeamWorkloadAPI:
+    def test_team_workload_returns_users_with_tasks(
+        self, client, test_requisition: Requisition, test_user: User, db_session: Session
+    ):
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="User task",
+            assigned_to_id=test_user.id,
+        )
+        resp = client.get("/api/tasks/team")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) >= 1
+        user_entry = next((u for u in data if u["user_id"] == test_user.id), None)
+        assert user_entry is not None
+        assert user_entry["todo"] >= 1
+        assert user_entry["total_open"] >= 1
+
+    def test_team_workload_skips_users_with_no_tasks(
+        self, client, db_session: Session
+    ):
+        # Create a user with no tasks
+        idle_user = User(email="idle@test.com", name="Idle User")
+        db_session.add(idle_user)
+        db_session.flush()
+        resp = client.get("/api/tasks/team")
+        assert resp.status_code == 200
+        data = resp.json()
+        idle_entry = next((u for u in data if u["user_id"] == idle_user.id), None)
+        assert idle_entry is None
+
+    def test_team_workload_counts_overdue(
+        self, client, test_requisition: Requisition, test_user: User, db_session: Session
+    ):
+        past_due = datetime.now(timezone.utc) - timedelta(hours=1)
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Overdue task",
+            assigned_to_id=test_user.id,
+            source="system",
+            due_at=past_due,
+        )
+        resp = client.get("/api/tasks/team")
+        assert resp.status_code == 200
+        data = resp.json()
+        user_entry = next((u for u in data if u["user_id"] == test_user.id), None)
+        assert user_entry is not None
+        assert user_entry["overdue"] >= 1
+
+
+class TestDoneFeedAPI:
+    def test_done_feed_returns_completed_tasks(
+        self, client, test_requisition: Requisition, test_user: User, db_session: Session
+    ):
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Completed task",
+            assigned_to_id=test_user.id,
+        )
+        task_service.complete_task(db_session, task.id, test_user.id, "All done")
+        resp = client.get("/api/tasks/done-feed")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) >= 1
+        assert data[0]["title"] == "Completed task"
+        assert data[0]["completion_note"] == "All done"
+
+    def test_done_feed_excludes_open_tasks(
+        self, client, test_requisition: Requisition, db_session: Session
+    ):
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Still open",
+        )
+        resp = client.get("/api/tasks/done-feed")
+        assert resp.status_code == 200
+        data = resp.json()
+        open_tasks = [t for t in data if t["title"] == "Still open"]
+        assert len(open_tasks) == 0
+
+    def test_done_feed_respects_limit(self, client):
+        resp = client.get("/api/tasks/done-feed?limit=5")
+        assert resp.status_code == 200
+
+
+class TestSearchAPI:
+    def test_search_by_title(
+        self, client, test_requisition: Requisition, db_session: Session
+    ):
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Find LM317T vendors",
+        )
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Send quote to customer",
+        )
+        resp = client.get("/api/tasks/search?q=LM317T")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert "LM317T" in data[0]["title"]
+
+    def test_search_by_priority(
+        self, client, test_requisition: Requisition, db_session: Session
+    ):
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="High pri",
+            priority=3,
+        )
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Low pri",
+            priority=1,
+        )
+        resp = client.get("/api/tasks/search?priority=3")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(t["priority"] == 3 for t in data)
+
+    def test_search_by_status(
+        self, client, test_requisition: Requisition, db_session: Session
+    ):
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="In progress task",
+        )
+        task_service.update_task_status(db_session, task.id, "in_progress")
+        resp = client.get("/api/tasks/search?status=in_progress")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(t["status"] == "in_progress" for t in data)
+
+    def test_search_by_requisition(
+        self, client, test_requisition: Requisition, db_session: Session
+    ):
+        task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Req-specific task",
+        )
+        resp = client.get(f"/api/tasks/search?requisition_id={test_requisition.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(t["requisition_id"] == test_requisition.id for t in data)
+
+    def test_search_no_filters_returns_all(self, client):
+        resp = client.get("/api/tasks/search")
+        assert resp.status_code == 200

@@ -3475,3 +3475,39 @@ body { line-height: 1.42; }
 .tq-form-group label { display: block; font-size: 11px; font-weight: 600; color: var(--muted, #64748b); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px; }
 .tq-form-input { width: 100%; border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 7px 10px; font-size: 13px; background: var(--card, #fff); color: var(--fg, #1e293b); transition: border-color .15s; }
 .tq-form-input:focus { border-color: var(--blue, #3b6ea8); outline: none; box-shadow: 0 0 0 2px rgba(59,110,168,.15); }
+
+/* Task Queue — Filter bar */
+.tq-filters { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 0; }
+.tq-filter-input { border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 6px 10px; font-size: 12px; flex: 1; min-width: 160px; background: var(--card); }
+.tq-filter-input:focus { border-color: var(--blue); outline: none; }
+.tq-filter-select { border: 1px solid var(--border, #e2e8f0); border-radius: 6px; padding: 6px 8px; font-size: 12px; background: var(--card); min-width: 120px; }
+
+/* Task Queue — Done Feed */
+.tq-feed-item { display: flex; gap: 10px; padding: 10px 12px; background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 8px; transition: background .15s; }
+.tq-feed-item:hover { background: var(--bg2, #f8fafc); }
+.tq-feed-icon { flex-shrink: 0; width: 28px; height: 28px; background: var(--green-light, #f0fdfa); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.tq-feed-content { flex: 1; min-width: 0; }
+.tq-feed-title { font-size: 13px; font-weight: 600; color: var(--fg, #1e293b); }
+.tq-feed-meta { font-size: 11px; color: var(--muted, #64748b); margin-top: 2px; }
+.tq-feed-note { font-size: 12px; color: var(--green, #0f766e); background: var(--green-light, #f0fdfa); padding: 4px 8px; border-radius: 4px; margin-top: 6px; line-height: 1.4; }
+
+/* Task Queue — Team Workload Overview */
+.tq-team-summary { display: flex; gap: 12px; margin-bottom: 16px; }
+.tq-team-stat { flex: 1; background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 12px 16px; text-align: center; }
+.tq-team-stat-warn .tq-team-stat-num { color: var(--red, #ef4444); }
+.tq-team-stat-num { font-size: 24px; font-weight: 700; color: var(--fg, #1e293b); display: block; }
+.tq-team-stat-label { font-size: 11px; color: var(--muted, #64748b); text-transform: uppercase; letter-spacing: .3px; }
+.tq-person-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e8f0); border-radius: 8px; padding: 14px 16px; transition: box-shadow .15s; }
+.tq-person-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.tq-person-card.tq-person-overdue { border-left: 3px solid var(--red, #ef4444); }
+.tq-person-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.tq-person-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--blue, #3b6ea8); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+.tq-person-name { font-size: 14px; font-weight: 600; color: var(--fg, #1e293b); }
+.tq-person-stats { display: flex; gap: 16px; margin-bottom: 10px; }
+.tq-person-stat { text-align: center; }
+.tq-person-stat-num { font-size: 18px; font-weight: 700; display: block; color: var(--fg); }
+.tq-person-stat-label { font-size: 10px; color: var(--muted, #64748b); text-transform: uppercase; }
+.tq-person-bar { display: flex; align-items: center; gap: 8px; }
+.tq-person-bar-track { flex: 1; height: 6px; background: var(--bg2, #f1f5f9); border-radius: 3px; overflow: hidden; }
+.tq-person-bar-fill { height: 100%; border-radius: 3px; transition: width .3s ease; }
+.tq-person-bar-label { font-size: 10px; color: var(--muted); white-space: nowrap; }

@@ -1400,7 +1400,22 @@
         <div class="tq-tabs" id="tqTabs">
             <button class="tq-tab active" data-tab="mine" onclick="window._tqSwitchTab('mine',this)">My Tasks <span id="tqMineBadge" class="tq-tab-badge">0</span></button>
             <button class="tq-tab" data-tab="waiting" onclick="window._tqSwitchTab('waiting',this)">Waiting On <span id="tqWaitingBadge" class="tq-tab-badge">0</span></button>
-            <button class="tq-tab" data-tab="done" onclick="window._tqSwitchTab('done',this)">Completed</button>
+            <button class="tq-tab" data-tab="feed" onclick="window._tqSwitchTab('feed',this)">Done Feed</button>
+            <button class="tq-tab" data-tab="team" onclick="window._tqSwitchTab('team',this)">Team</button>
+        </div>
+        <!-- Filters bar (shown on mine/waiting tabs) -->
+        <div id="tqFilters" class="tq-filters" style="display:none">
+            <input id="tqSearchInput" type="text" placeholder="Search tasks..." class="tq-filter-input" oninput="window._tqApplyFilters()">
+            <select id="tqFilterPriority" class="tq-filter-select" onchange="window._tqApplyFilters()">
+                <option value="">All Priorities</option>
+                <option value="3">High</option>
+                <option value="2">Medium</option>
+                <option value="1">Low</option>
+            </select>
+            <select id="tqFilterReq" class="tq-filter-select" onchange="window._tqApplyFilters()">
+                <option value="">All Requisitions</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="window._tqClearFilters()">Clear</button>
         </div>
         <div id="tqContent" class="tq-content"></div>
     </div>

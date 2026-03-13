@@ -157,6 +157,50 @@ def get_waiting_on_tasks(
     return [task_service.task_to_response(t) for t in tasks]
 
 
+@my_tasks_router.get("/team")
+def get_team_workload(
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Team workload overview: task counts per user."""
+    return task_service.get_team_workload(db)
+
+
+@my_tasks_router.get("/done-feed")
+def get_done_feed(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Recently completed tasks across the team."""
+    tasks = task_service.get_done_feed(db, limit=limit)
+    return [task_service.task_to_response(t) for t in tasks]
+
+
+@my_tasks_router.get("/search")
+def search_tasks(
+    status: str | None = Query(None),
+    priority: int | None = Query(None),
+    requisition_id: int | None = Query(None),
+    assigned_to_id: int | None = Query(None),
+    q: str | None = Query(None, min_length=1),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_user),
+):
+    """Search and filter tasks across all requisitions."""
+    tasks = task_service.search_tasks(
+        db,
+        user_id=assigned_to_id,
+        status=status,
+        priority=priority,
+        requisition_id=requisition_id,
+        query=q,
+        limit=limit,
+    )
+    return [task_service.task_to_response(t) for t in tasks]
+
+
 @my_tasks_router.patch("/{task_id}/status")
 def patch_my_task_status(
     task_id: int,
