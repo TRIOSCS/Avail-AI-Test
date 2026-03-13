@@ -100,7 +100,7 @@ class TestBuyPlanBridge:
 
     @pytest.fixture(autouse=True)
     def _skip_if_buy_plan_route_missing(self, client):
-        has_route = any(getattr(route, "path", "").endswith("/buy-plan") for route in client.app.routes)
+        has_route = any(getattr(route, "path", "") == "/api/requisitions/{req_id}/buy-plan" for route in client.app.routes)
         if not has_route:
             pytest.skip("Requisition buy-plan bridge route not enabled in this app build")
 
