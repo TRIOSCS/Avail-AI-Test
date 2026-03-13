@@ -61,6 +61,24 @@ _CONNECTOR_SOURCE_MAP = {
 }
 
 
+def _lead_confidence_bucket(score: float | int | None) -> str:
+    value = float(score or 0)
+    if value >= 70:
+        return "high"
+    if value >= 40:
+        return "medium"
+    return "low"
+
+
+def _lead_confidence_reason(score: float | int | None) -> str:
+    bucket = _lead_confidence_bucket(score)
+    if bucket == "high":
+        return "Strong signal: recent, complete, and high-confidence offer data."
+    if bucket == "medium":
+        return "Moderate signal: usable data exists, but confidence is mixed."
+    return "Low signal: limited or stale data, requires additional verification."
+
+
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
@@ -558,7 +576,16 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # AI live web search source (disabled in TESTING to keep tests deterministic)
     ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
-    _add_or_skip("ai_live_web", has_ai_live, lambda: AIWebSearchConnector(ai_key))
+    if "ai_live_web" in disabled_sources:
+        source_stats_map["ai_live_web"] = {
+            "source": "ai_live_web",
+            "results": 0,
+            "ms": 0,
+            "error": None,
+            "status": "disabled",
+        }
+    elif has_ai_live:
+        connectors.append(AIWebSearchConnector(ai_key))
 
     if not connectors:
         return [], list(source_stats_map.values())
@@ -1071,6 +1098,8 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "material_card_id": h["material_card_id"],
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": _lead_confidence_bucket(score),
+        "lead_confidence_reason": _lead_confidence_reason(score),
     }
 
 
@@ -1387,4 +1416,6 @@ def sighting_to_dict(s: Sighting) -> dict:
         "is_stale": (age_days or 0) > 90,
         "lead_quality": quality,
         "lead_explanation": explanation,
+        "lead_confidence_bucket": _lead_confidence_bucket(score),
+        "lead_confidence_reason": _lead_confidence_reason(score),
     }

@@ -36,8 +36,10 @@ def register_all_jobs(scheduler, settings):
     register_eight_by_eight_jobs(scheduler, settings)
     register_knowledge_jobs(scheduler, settings)
 
-    # Full-version-only jobs (disabled in MVP mode)
-    if not settings.mvp_mode:
+    # Full-version-only jobs (disabled in MVP mode).
+    raw_mvp_mode = getattr(settings, "mvp_mode", False)
+    mvp_mode = raw_mvp_mode if isinstance(raw_mvp_mode, bool) else False
+    if not mvp_mode:
         from .enrichment_jobs import register_enrichment_jobs
         from .teams_alert_jobs import register_teams_alert_jobs
 

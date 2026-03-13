@@ -13,9 +13,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
+from ...models import ActivityLog, BuyPlan, BuyPlanV3, CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
+from ...utils.sanitize import sanitize_text
 from ._helpers import (
     _PRICED_STATUSES,
     _build_quote_email_html,
@@ -26,6 +27,28 @@ from ._helpers import (
 )
 
 router = APIRouter()
+
+
+def _sanitize_quote_line_items(items: list[dict]) -> list[dict]:
+    """Strip unsafe HTML/script payloads from editable quote line item text fields."""
+    clean = []
+    for raw in items:
+        row = dict(raw)
+        for field in (
+            "mpn",
+            "manufacturer",
+            "lead_time",
+            "condition",
+            "date_code",
+            "firmware",
+            "hardware_code",
+            "packaging",
+            "notes",
+        ):
+            if field in row and isinstance(row[field], str):
+                row[field] = sanitize_text(row[field])
+        clean.append(row)
+    return clean
 
 
 # ── Quotes ───────────────────────────────────────────────────────────────
@@ -105,6 +128,69 @@ async def list_quotes(req_id: int, user: User = Depends(require_user), db: Sessi
         .all()
     )
     return [quote_to_dict(q, db) for q in quotes]
+
+
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def quote_summary(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Lightweight quote tab summary for requisition detail screens."""
+    from ...dependencies import get_req_for_user
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.revision.desc()).first()
+    if not quote:
+        return {
+            "requisition_id": req_id,
+            "has_quote": False,
+            "has_buy_plan": False,
+            "quote_number": None,
+            "quote_status": None,
+            "line_count": 0,
+        }
+
+    has_buy_plan = bool(db.query(BuyPlan.id).filter(BuyPlan.quote_id == quote.id).first()) or bool(
+        db.query(BuyPlanV3.id).filter(BuyPlanV3.quote_id == quote.id).first()
+    )
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": has_buy_plan,
+        "quote_number": quote.quote_number,
+        "quote_status": quote.status or "draft",
+        "line_count": len(quote.line_items or []),
+    }
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_buy_plan_from_requisition(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    """Compatibility bridge: create/get buy plan from latest requisition quote."""
+    from ...dependencies import get_req_for_user
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.revision.desc()).first()
+    if not quote:
+        raise HTTPException(400, "Quote required before creating a buy plan")
+
+    existing = db.query(BuyPlan).filter(BuyPlan.requisition_id == req_id).order_by(BuyPlan.id.desc()).first()
+    if existing:
+        return {"id": existing.id, "status": existing.status, "quote_id": existing.quote_id, "existing": True}
+
+    plan = BuyPlan(
+        requisition_id=req_id,
+        quote_id=quote.id,
+        status="draft",
+        line_items=quote.line_items or [],
+        submitted_by_id=user.id,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return {"id": plan.id, "status": plan.status, "quote_id": quote.id, "requisition_id": req_id}
 
 
 @router.post("/api/requisitions/{req_id}/quote")
@@ -276,13 +362,15 @@ async def update_quote(
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        quote.line_items = _sanitize_quote_line_items(updates.pop("line_items"))
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell
         quote.total_cost = total_cost
         quote.total_margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
     for field, value in updates.items():
+        if isinstance(value, str) and field in {"payment_terms", "shipping_terms", "notes"}:
+            value = sanitize_text(value)
         setattr(quote, field, value)
     db.commit()
     # Eager-load relations for serialization

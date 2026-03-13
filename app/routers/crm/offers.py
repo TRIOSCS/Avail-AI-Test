@@ -18,6 +18,7 @@ from ...models import (
     Quote,
     Requirement,
     Requisition,
+    RiskFlag,
     User,
     VendorCard,
     VendorReview,
@@ -26,6 +27,7 @@ from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
 from ...utils.normalization import normalize_mpn_key
+from ...utils.sanitize import sanitize_text
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
@@ -59,6 +61,25 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         )
         .all()
     )
+    offer_ids = [o.id for o in offers]
+    risk_map: dict[int, list[dict]] = {}
+    if offer_ids:
+        risk_rows = (
+            db.query(RiskFlag)
+            .filter(RiskFlag.source_offer_id.in_(offer_ids))
+            .order_by(RiskFlag.created_at.desc())
+            .all()
+        )
+        for rf in risk_rows:
+            risk_map.setdefault(rf.source_offer_id, []).append(
+                {
+                    "id": rf.id,
+                    "type": rf.type,
+                    "severity": rf.severity,
+                    "message": rf.message,
+                    "source": rf.source,
+                }
+            )
 
     # Cross-reference quoted offers — collect offer_ids used in quotes
     quoted_map: dict[int, str] = {}  # offer_id → quote_number
@@ -158,6 +179,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_map.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -316,6 +338,19 @@ async def create_offer(
     if not req:
         raise HTTPException(404, "Requisition not found")
 
+    vendor_name = sanitize_text(payload.vendor_name) or ""
+    mpn = sanitize_text(payload.mpn) if payload.mpn else payload.mpn
+    manufacturer = sanitize_text(payload.manufacturer) if payload.manufacturer else payload.manufacturer
+    lead_time = sanitize_text(payload.lead_time) if payload.lead_time else payload.lead_time
+    date_code = sanitize_text(payload.date_code) if payload.date_code else payload.date_code
+    condition = sanitize_text(payload.condition) if payload.condition else payload.condition
+    packaging = sanitize_text(payload.packaging) if payload.packaging else payload.packaging
+    firmware = sanitize_text(payload.firmware) if payload.firmware else payload.firmware
+    hardware_code = sanitize_text(payload.hardware_code) if payload.hardware_code else payload.hardware_code
+    warranty = sanitize_text(payload.warranty) if payload.warranty else payload.warranty
+    country_of_origin = sanitize_text(payload.country_of_origin) if payload.country_of_origin else payload.country_of_origin
+    notes = sanitize_text(payload.notes) if payload.notes else payload.notes
+
     card = None
 
     # 1) If frontend passed a vendor_card_id, use it directly
@@ -324,7 +359,7 @@ async def create_offer(
 
     # 2) Exact match on normalized name
     if not card:
-        norm_name = normalize_vendor_name(payload.vendor_name)
+        norm_name = normalize_vendor_name(vendor_name)
         card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
 
     # 3) Fuzzy match: ILIKE prefix search + fuzzy scoring
@@ -336,7 +371,7 @@ async def create_offer(
             candidates = db.query(VendorCard).filter(VendorCard.normalized_name.ilike(f"{prefix}%")).limit(20).all()
             if candidates:
                 matches = fuzzy_match_vendor(
-                    payload.vendor_name,
+                    vendor_name,
                     [c.display_name for c in candidates],
                     threshold=88,
                 )
@@ -345,8 +380,8 @@ async def create_offer(
                     card = next(c for c in candidates if c.display_name == best_name)
                     # Append submitted name as alternate for future exact lookups
                     alts = list(card.alternate_names or [])
-                    if payload.vendor_name not in alts and payload.vendor_name != card.display_name:
-                        alts.append(payload.vendor_name)
+                    if vendor_name not in alts and vendor_name != card.display_name:
+                        alts.append(vendor_name)
                         card.alternate_names = alts
 
     # 4) No match — create new card
@@ -355,7 +390,7 @@ async def create_offer(
         domain = ""
         if payload.vendor_website:
             domain = (
-                payload.vendor_website.replace("https://", "")
+                sanitize_text(payload.vendor_website).replace("https://", "")
                 .replace("http://", "")
                 .replace("www.", "")
                 .split("/")[0]
@@ -363,7 +398,7 @@ async def create_offer(
             )
         card = VendorCard(
             normalized_name=norm_name,
-            display_name=payload.vendor_name,
+            display_name=vendor_name,
             domain=domain or None,
             emails=[],
             phones=[],
@@ -379,33 +414,33 @@ async def create_offer(
     from ...search_service import resolve_material_card
     from ...utils.normalization import normalize_mpn_key
 
-    mat_card = resolve_material_card(payload.mpn, db)
+    mat_card = resolve_material_card(mpn, db)
 
     offer = Offer(
         requisition_id=req_id,
         requirement_id=payload.requirement_id,
         material_card_id=mat_card.id if mat_card else None,
-        normalized_mpn=normalize_mpn_key(payload.mpn) if payload.mpn else None,
+        normalized_mpn=normalize_mpn_key(mpn) if mpn else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
         vendor_name_normalized=card.normalized_name,
-        mpn=payload.mpn,
-        manufacturer=payload.manufacturer,
+        mpn=mpn,
+        manufacturer=manufacturer,
         qty_available=payload.qty_available,
         unit_price=payload.unit_price,
-        lead_time=payload.lead_time,
-        date_code=payload.date_code,
-        condition=payload.condition,
-        packaging=payload.packaging,
-        firmware=payload.firmware,
-        hardware_code=payload.hardware_code,
+        lead_time=lead_time,
+        date_code=date_code,
+        condition=condition,
+        packaging=packaging,
+        firmware=firmware,
+        hardware_code=hardware_code,
         moq=payload.moq,
-        warranty=payload.warranty,
-        country_of_origin=payload.country_of_origin,
+        warranty=warranty,
+        country_of_origin=country_of_origin,
         source=payload.source,
         vendor_response_id=payload.vendor_response_id,
         entered_by_id=user.id,
-        notes=payload.notes,
+        notes=notes,
         status=payload.status,
     )
     db.add(offer)
@@ -592,6 +627,22 @@ async def update_offer(
         "status",
     ]
     old_dict = {f: getattr(offer, f) for f in trackable}
+    if old_dict.get("status") == "sold" and changes.get("status") == "active":
+        raise HTTPException(400, "Invalid status transition: sold -> active")
+
+    for field in (
+        "vendor_name",
+        "lead_time",
+        "condition",
+        "warranty",
+        "manufacturer",
+        "date_code",
+        "packaging",
+        "notes",
+        "country_of_origin",
+    ):
+        if field in changes and isinstance(changes[field], str):
+            changes[field] = sanitize_text(changes[field])
     for field, value in changes.items():
         setattr(offer, field, value)
     new_dict = {f: getattr(offer, f) for f in trackable}

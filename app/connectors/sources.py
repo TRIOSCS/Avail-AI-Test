@@ -92,6 +92,11 @@ class BaseConnector(ABC):
         async with self._semaphore:
             return await self._search_with_retry(part_number)
 
+    @abstractmethod
+    async def _do_search(self, part_number: str) -> list[dict]:
+        """Connector-specific search implementation."""
+        pass
+
     async def _search_with_retry(self, part_number: str) -> list[dict]:
         last_err = None
         for attempt in range(self.max_retries + 1):
@@ -155,10 +160,6 @@ def _parse_retry_after(response: httpx.Response) -> float:
             pass
     # No header or unparseable — default to 5s + jitter
     return 5.0 + random.uniform(0, 2)
-
-    @abstractmethod
-    async def _do_search(self, part_number: str) -> list[dict]:
-        pass
 
 
 class NexarConnector(BaseConnector):
