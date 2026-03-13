@@ -26,6 +26,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
 os.environ["DATABASE_URL"] = "sqlite://"  # Prevent any code from connecting to real PostgreSQL
 os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests
 os.environ["CACHE_BACKEND"] = "none"  # Disable cache backend in tests
+os.environ.setdefault("MVP_MODE", "false")  # Most tests exercise the full router surface
 os.environ.setdefault("AGENT_API_KEY", "test-agent-key-secret")  # Agent session tests
 
 from datetime import datetime, timezone
