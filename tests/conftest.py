@@ -122,6 +122,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     )
     for item in items:
         file_name = os.path.basename(str(getattr(item, "path", item.fspath)))
+        # Playwright/browser suites regularly exceed 30s waiting windows;
+        # disable hard timeout for those tests only.
+        item_path = str(getattr(item, "path", item.fspath))
+        if "/tests/e2e/" in item_path or file_name == "test_browser_e2e.py":
+            item.add_marker(pytest.mark.timeout(0))
+
         if file_name in _LEGACY_REWRITE_TEST_FILES:
             item.add_marker(pytest.mark.skip(reason=reason))
 

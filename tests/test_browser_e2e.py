@@ -12,7 +12,9 @@ Depends on: running Docker app (docker compose up -d)
 
 import base64
 import json
+import os
 import subprocess
+from urllib.parse import urlparse
 
 import itsdangerous
 import pytest
@@ -27,32 +29,43 @@ SESSION_COOKIE = None
 
 def _get_app_ip():
     """Get the app container's IP address on the Docker network."""
-    result = subprocess.run(
-        ["docker", "inspect", "availai-app-1", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "availai-app-1", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
 
 
 def _get_secret_key():
     """Get the session secret from the running app container."""
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "exec",
-            "-T",
-            "app",
-            "python3",
-            "-c",
-            "from app.config import settings; print(settings.secret_key)",
-        ],
-        capture_output=True,
-        text=True,
-        cwd="/root/availai",
-    )
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "exec",
+                "-T",
+                "app",
+                "python3",
+                "-c",
+                "from app.config import settings; print(settings.secret_key)",
+            ],
+            capture_output=True,
+            text=True,
+            cwd="/root/availai",
+            timeout=10,
+        )
+        secret = result.stdout.strip()
+        if secret:
+            return secret
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    return os.getenv("SESSION_SECRET", os.getenv("SECRET_KEY", ""))
 
 
 def _make_session_cookie(secret_key: str, user_id: int = 1) -> str:
@@ -66,13 +79,20 @@ def _make_session_cookie(secret_key: str, user_id: int = 1) -> str:
 def setup_app_connection():
     """Resolve app IP and generate session cookie once per test session."""
     global APP_CONTAINER_IP, APP_BASE_URL, SESSION_COOKIE
-    APP_CONTAINER_IP = _get_app_ip()
-    if not APP_CONTAINER_IP:
-        pytest.skip("App container not running (docker compose up -d first)")
-    APP_BASE_URL = f"http://{APP_CONTAINER_IP}:8000"
+
+    env_base_url = os.getenv("E2E_BASE_URL", "").strip()
+    if env_base_url:
+        APP_BASE_URL = env_base_url
+        APP_CONTAINER_IP = urlparse(APP_BASE_URL).hostname or ""
+    else:
+        APP_CONTAINER_IP = _get_app_ip()
+        if not APP_CONTAINER_IP:
+            pytest.skip("Docker not available or app container not running")
+        APP_BASE_URL = f"http://{APP_CONTAINER_IP}:8000"
+
     secret = _get_secret_key()
     if not secret:
-        pytest.skip("Could not read secret key from app container")
+        pytest.skip("Could not resolve session secret (set SESSION_SECRET or start Docker app)")
     SESSION_COOKIE = _make_session_cookie(secret, user_id=1)
 
 
@@ -84,8 +104,7 @@ def auth_page(page: Page):
             {
                 "name": "session",
                 "value": SESSION_COOKIE,
-                "domain": APP_CONTAINER_IP,
-                "path": "/",
+                "url": APP_BASE_URL,
             }
         ]
     )
