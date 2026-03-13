@@ -22,6 +22,21 @@ def _override_teams_action_session(monkeypatch, db_session):
     monkeypatch.setattr("app.routers.teams_actions.SessionLocal", lambda: db_session)
 
 
+@pytest.fixture(autouse=True)
+def _ensure_teams_router_mounted():
+    """MVP mode can skip this router; mount it explicitly for endpoint tests."""
+    from app.main import app
+    from app.routers.teams_actions import router as teams_actions_router
+
+    has_route = any(
+        getattr(route, "path", None) == "/api/teams/card-action" and "POST" in getattr(route, "methods", set())
+        for route in app.router.routes
+    )
+    if not has_route:
+        app.include_router(teams_actions_router)
+    yield
+
+
 def _mk_buy_plan(db_session, test_requisition, test_quote, test_user, status="pending_approval"):
     plan = BuyPlan(
         requisition_id=test_requisition.id,
