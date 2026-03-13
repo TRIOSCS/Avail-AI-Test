@@ -274,9 +274,19 @@ async def update_quote(
         raise HTTPException(404, "Quote not found")
     if quote.status not in ("draft", None):
         raise HTTPException(400, "Only draft quotes can be edited")
+    from ...utils.sanitize import sanitize_text
+
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
-        quote.line_items = updates.pop("line_items")
+        # Sanitize text fields in line items to prevent stored XSS
+        sanitized_items = []
+        for item in updates.pop("line_items") or []:
+            if isinstance(item, dict):
+                for field in ("mpn", "manufacturer", "notes", "description"):
+                    if field in item and isinstance(item[field], str):
+                        item[field] = sanitize_text(item[field])
+            sanitized_items.append(item)
+        quote.line_items = sanitized_items
         total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
         total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell

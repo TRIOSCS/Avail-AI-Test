@@ -696,3 +696,114 @@ async def unclaim_requisition_endpoint(
     changed = unclaim_requisition(req, db, actor=user)
     db.commit()
     return {"ok": True, "unclaimed": changed}
+
+
+# ── Quote Summary (lightweight projection) ────────────────────────────────
+
+
+@router.get("/api/requisitions/{req_id}/quote-summary")
+async def get_quote_summary(
+    req_id: int,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a lightweight quote status summary for the requisition.
+
+    Used by the RFQ workspace Quote tab to show the current state without
+    loading the full quote object.
+    """
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+
+    from ...models.buy_plan import BuyPlanV3
+
+    buy_plan = (
+        db.query(BuyPlanV3).filter(BuyPlanV3.requisition_id == req_id).first()
+    )
+
+    if not quote:
+        return {
+            "requisition_id": req_id,
+            "has_quote": False,
+            "has_buy_plan": buy_plan is not None,
+            "quote_status": None,
+            "quote_number": None,
+            "line_count": 0,
+            "subtotal": None,
+            "sent_at": None,
+        }
+
+    line_count = len(quote.line_items) if quote.line_items else 0
+    return {
+        "requisition_id": req_id,
+        "has_quote": True,
+        "has_buy_plan": buy_plan is not None,
+        "quote_id": quote.id,
+        "quote_number": quote.quote_number,
+        "quote_status": quote.status,
+        "line_count": line_count,
+        "subtotal": float(quote.subtotal) if quote.subtotal else None,
+        "sent_at": quote.created_at.isoformat() if quote.created_at else None,
+    }
+
+
+# ── Buy Plan Bridge (create from quote) ──────────────────────────────────
+
+
+@router.post("/api/requisitions/{req_id}/buy-plan")
+async def create_buy_plan_from_quote(
+    req_id: int,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a buy plan for this requisition from its current quote.
+
+    Returns 400 if no quote exists. Returns existing buy plan if already created.
+    """
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    quote = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.created_at.desc())
+        .first()
+    )
+    if not quote:
+        raise HTTPException(400, "No quote exists for this requisition — create a quote first")
+
+    from ...models.buy_plan import BuyPlanStatus, BuyPlanV3
+
+    existing = db.query(BuyPlanV3).filter(BuyPlanV3.quote_id == quote.id).first()
+    if existing:
+        return {
+            "ok": True,
+            "buy_plan_id": existing.id,
+            "status": existing.status,
+            "created": False,
+        }
+
+    bp = BuyPlanV3(
+        requisition_id=req_id,
+        quote_id=quote.id,
+        created_by_id=user.id,
+        status=BuyPlanStatus.draft.value,
+    )
+    db.add(bp)
+    db.commit()
+    db.refresh(bp)
+    return {
+        "ok": True,
+        "buy_plan_id": bp.id,
+        "status": bp.status,
+        "created": True,
+    }

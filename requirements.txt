@@ -31,6 +31,7 @@ redis[hiredis]==7.3.0
 starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.14.3
+lxml==6.0.2
 patchright==1.58.2
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.13.1

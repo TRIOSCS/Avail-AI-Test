@@ -107,6 +107,25 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         vr_rows = db.query(VendorResponse.id, VendorResponse.confidence).filter(VendorResponse.id.in_(vr_ids)).all()
         conf_map = {vr.id: round(vr.confidence * 100) if vr.confidence is not None else None for vr in vr_rows}
 
+    # Batch-fetch risk flags for all offer IDs
+    offer_ids_all = [o.id for o in offers]
+    risk_flag_map: dict[int, list] = {}
+    if offer_ids_all:
+        try:
+            from ...models.risk_flag import RiskFlag
+
+            rf_rows = (
+                db.query(RiskFlag)
+                .filter(RiskFlag.source_offer_id.in_(offer_ids_all))
+                .all()
+            )
+            for rf in rf_rows:
+                risk_flag_map.setdefault(rf.source_offer_id, []).append(
+                    {"type": rf.type, "severity": rf.severity, "message": rf.message}
+                )
+        except Exception:
+            pass  # risk_flags are optional — don't break existing offer loads
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -158,6 +177,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
                 "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
                 "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
                 "parse_confidence": conf_map.get(o.vendor_response_id),
+                "risk_flags": risk_flag_map.get(o.id, []),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
@@ -311,10 +331,19 @@ async def create_offer(
     db: Session = Depends(get_db),
 ):
     from ...dependencies import get_req_for_user
+    from ...utils.sanitize import sanitize_text
 
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
+
+    # Sanitize user-supplied text fields to prevent stored XSS
+    if payload.vendor_name:
+        payload.vendor_name = sanitize_text(payload.vendor_name)
+    if payload.mpn:
+        payload.mpn = sanitize_text(payload.mpn)
+    if payload.notes:
+        payload.notes = sanitize_text(payload.notes)
 
     card = None
 
@@ -576,6 +605,16 @@ async def update_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
     changes = payload.model_dump(exclude_unset=True)
+
+    # Validate status transition when status is being changed
+    if "status" in changes and changes["status"] != offer.status:
+        from ...services.status_machine import validate_transition
+
+        try:
+            validate_transition("offer", offer.status, changes["status"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+
     # Snapshot old values for changelog
     trackable = [
         "vendor_name",

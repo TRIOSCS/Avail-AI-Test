@@ -1944,7 +1944,7 @@ class TestFetchFresh:
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
-        assert len(stats) == 8
+        assert len(stats) == 9  # 8 regular + ai_live_web (always skipped in TESTING)
 
     @pytest.mark.asyncio
     async def test_api_source_stats_updated(self, db_session):
