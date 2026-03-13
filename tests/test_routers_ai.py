@@ -654,6 +654,7 @@ def test_save_parsed_offers(ai_client, db_session, ai_test_user):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="intake-draft endpoint removed in HTMX/Alpine rebuild; intake uses client-side parse")
 def test_intake_draft_ai_disabled(ai_client):
     """POST /api/ai/intake-draft with AI off returns 403."""
     with patch("app.routers.ai._ai_enabled", return_value=False):
@@ -661,6 +662,7 @@ def test_intake_draft_ai_disabled(ai_client):
     assert resp.status_code == 403
 
 
+@pytest.mark.skip(reason="intake-draft endpoint removed in HTMX/Alpine rebuild")
 def test_intake_draft_success(ai_client):
     """POST /api/ai/intake-draft returns structured RFQ draft data."""
     draft = {
@@ -697,6 +699,7 @@ def test_intake_draft_success(ai_client):
     mock_parse.assert_awaited_once_with("Customer needs LM317T qty 500 at $0.45", None)
 
 
+@pytest.mark.skip(reason="intake-draft endpoint removed in HTMX/Alpine rebuild")
 def test_intake_draft_builds_requisition_context(ai_client, db_session, ai_test_user):
     """POST /api/ai/intake-draft passes current requisition parts as context."""
     from app.models import Requirement, Requisition
@@ -748,6 +751,7 @@ def test_intake_draft_builds_requisition_context(ai_client, db_session, ai_test_
     assert context == [{"mpn": "LM317T", "qty": 250, "target_price": 0.55}]
 
 
+@pytest.mark.skip(reason="intake-draft endpoint removed in HTMX/Alpine rebuild")
 def test_intake_draft_req_not_found(ai_client):
     """POST /api/ai/intake-draft with bad requisition_id returns 404."""
     with patch("app.routers.ai._ai_enabled", return_value=True):

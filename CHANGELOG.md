@@ -2,6 +2,26 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-13 — Test library refinement (HTMX/Alpine rebuild)
+
+### Applied
+- **pytest-timeout:** Added to requirements-dev.txt so pytest.ini `--timeout=30` is enforced (prevents hanging tests)
+- **conftest:** Set `MVP_MODE=false` so enrichment, performance, teams, apollo routers are included in tests
+- **conftest:** Made `event_loop` fixture autouse and set as default loop (fixes `run_until_complete` in sync tests)
+- **conftest:** Added `run_async` fixture for running async coros from sync tests
+- **ai router:** Fixed relative imports (`...` → `..`) in apply-freeform-rfq and save-freeform-offers (ImportError)
+- **test_schemas_ai:** Removed obsolete IntakeDraftRequest/Response/RequirementItem tests (schemas removed in rebuild)
+- **test_routers_ai:** Skipped intake-draft tests (endpoint removed; intake uses client-side parse)
+- **test_shared_framework:** Updated intake placeholder and AI endpoint assertions for HTMX/Alpine changes
+- **vitest.config.js:** Added explicit config for frontend tests (include, timeout, environment)
+- **scripts/run_all_tests.sh:** New unified test runner (pytest + vitest + optional e2e)
+
+### Result
+- Backend: 8781 passed, 80 failed, 5 skipped (down from 392 failures)
+- Failures remain in: rfq_frontend_validation, nc_worker, search_service, scheduler, workflow_state_clarity, etc.
+
+---
+
 ## 2026-03-12 — PR review fixes (docs/plans/2026-03-08-pr-review-fixes.md)
 
 ### Applied

@@ -22,6 +22,7 @@ import nest_asyncio
 nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contamination)
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
+os.environ["MVP_MODE"] = "false"  # Include enrichment, performance, teams, apollo routers in tests
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
 os.environ["DATABASE_URL"] = "sqlite://"  # Prevent any code from connecting to real PostgreSQL
 os.environ["REDIS_URL"] = ""  # Prevent Redis connection attempts in tests
@@ -55,14 +56,27 @@ from app.models import (
 # ── Event loop isolation ─────────────────────────────────────────────
 # Provide a fresh event loop per test to prevent cross-test pollution
 # (e.g. Playwright e2e tests leaving a running loop).
+# autouse=True ensures sync tests using run_until_complete get this loop.
+
+
+@pytest.fixture(autouse=True)
+def event_loop():
+    """Create a fresh event loop for each test; set as default so get_event_loop() works."""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    yield loop
+    asyncio.set_event_loop(None)
+    loop.close()
 
 
 @pytest.fixture()
-def event_loop():
-    """Create a fresh event loop for each test function."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+def run_async(event_loop):
+    """Run an async coroutine from a sync test. Use: run_async(some_async_func())."""
+
+    def _run(coro):
+        return event_loop.run_until_complete(coro)
+
+    return _run
 
 
 # ── In-memory SQLite engine ──────────────────────────────────────────
