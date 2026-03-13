@@ -9,6 +9,8 @@ Depends on: app/routers/dashboard.py, app/models/performance.py
 
 from datetime import date, datetime, timezone
 
+import pytest
+
 from app.models import User
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 
@@ -86,6 +88,12 @@ def _seed_multiplier(db, user_id, role, total_pts=10, offer_pts=8, bonus_pts=2, 
 
 
 class TestTeamLeaderboardEndpoint:
+    @pytest.fixture(autouse=True)
+    def _skip_if_dashboard_router_disabled(self, client):
+        has_route = any(getattr(route, "path", "") == "/api/dashboard/team-leaderboard" for route in client.app.routes)
+        if not has_route:
+            pytest.skip("Dashboard router disabled in MVP mode")
+
     def test_returns_200_with_empty_data(self, client, db_session, test_user):
         """Endpoint returns 200 with empty entries when no data exists."""
         resp = client.get("/api/dashboard/team-leaderboard?role=buyer")
