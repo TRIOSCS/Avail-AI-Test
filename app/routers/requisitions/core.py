@@ -73,7 +73,9 @@ async def requisition_counts(
     open_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["open", "active", "sourcing", "draft"]))
     )
-    archive_cnt = db.scalar(select(sqlfunc.count(Requisition.id)).where(Requisition.status == "archive"))
+    archive_cnt = db.scalar(
+        select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["archived", "won", "lost", "closed"]))
+    )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
 
 

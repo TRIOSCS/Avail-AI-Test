@@ -11,6 +11,31 @@ Depends on: routers/requisitions/requirements.py, routers/crm/quotes.py, conftes
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi.testclient import TestClient
+
+from app.database import get_db
+from app.dependencies import require_buyer, require_fresh_token, require_sales, require_user
+from app.main import app
+
+
+def _make_user_client(db_session, user) -> TestClient:
+    """Build a client authenticated as the requested user."""
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return user
+
+    async def _override_fresh_token():
+        return "mock-token"
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[require_buyer] = _override_user
+    app.dependency_overrides[require_sales] = _override_user
+    app.dependency_overrides[require_fresh_token] = _override_fresh_token
+    return TestClient(app)
 
 # ── Part-level Offers ───────────────────────────────────────────────
 
@@ -206,6 +231,39 @@ def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_se
     assert len(data["notes"]) == 1
     assert data["notes"][0]["vendor_name"] == "Mouser"
     assert data["notes"][0]["note"] == "Good price, ships fast"
+
+
+@pytest.mark.parametrize("path_suffix", ["offers", "notes", "tasks", "history"])
+def test_part_level_get_endpoints_forbid_other_sales_users(db_session, sales_user, test_requisition, path_suffix):
+    """Sales users cannot inspect another user's part-level workspace data."""
+    from app.models import Requirement
+
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    sales_client = _make_user_client(db_session, sales_user)
+    try:
+        resp = sales_client.get(f"/api/requirements/{req.id}/{path_suffix}")
+        assert resp.status_code == 403
+    finally:
+        sales_client.close()
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("path_suffix", "payload"),
+    [("notes", {"text": "Should be blocked"}), ("tasks", {"title": "Blocked task"})],
+)
+def test_part_level_write_endpoints_forbid_other_sales_users(db_session, sales_user, test_requisition, path_suffix, payload):
+    """Sales users cannot write part-level notes or tasks on another user's requisition."""
+    from app.models import Requirement
+
+    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    sales_client = _make_user_client(db_session, sales_user)
+    try:
+        resp = sales_client.post(f"/api/requirements/{req.id}/{path_suffix}", json=payload)
+        assert resp.status_code == 403
+    finally:
+        sales_client.close()
+        app.dependency_overrides.clear()
 
 
 # ── Part-level Tasks ────────────────────────────────────────────────

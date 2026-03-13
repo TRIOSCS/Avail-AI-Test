@@ -3142,14 +3142,39 @@ div[style*="display:flex"] > .status-strip .status-strip-label { font-size: 8px;
 .part-row.part-expanded td { border-bottom:none; }
 .part-detail-row td { padding:0 !important; }
 .part-detail-panel { padding:8px 16px 12px 36px; background:var(--bg2); border-bottom:1px solid var(--border); }
-.part-detail-tabs { display:flex; gap:2px; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:0; }
+.part-detail-tabs { display:flex; gap:2px; margin-bottom:10px; border-bottom:1px solid var(--border); padding-bottom:0; flex-wrap:wrap; }
 .part-tab { background:none; border:none; padding:4px 10px; font-size:10px; font-weight:600;
   color:var(--muted); cursor:pointer; border-radius:3px 3px 0 0; font-family:inherit;
   border-bottom:2px solid transparent; transition:all .15s; }
 .part-tab:hover { color:var(--text); }
 .part-tab.on { color:var(--teal); border-bottom-color:var(--teal); }
 .part-detail-content { min-height:30px; }
+.part-empty-state { padding:12px; background:var(--card, #fff); border:1px dashed var(--border); border-radius:6px; color:var(--muted); font-size:11px; text-align:center; }
+.part-empty-state-error { color:var(--red); border-color:rgba(220, 38, 38, .25); background:rgba(220, 38, 38, .04); }
+.part-section { margin-bottom:12px; }
+.part-section-title { font-size:11px; font-weight:700; margin-bottom:6px; color:var(--muted); }
+.part-note-box { min-height:32px; padding:8px 10px; background:var(--card, #fff); border:1px solid var(--border); border-radius:6px; font-size:11px; cursor:pointer; line-height:1.5; white-space:pre-wrap; }
 .part-note-box:hover { background:var(--bg3) !important; }
+.part-card-list { display:flex; flex-direction:column; gap:8px; }
+.part-card { padding:8px 10px; background:var(--card, #fff); border:1px solid var(--border); border-radius:6px; }
+.part-card-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+.part-card-title { font-size:11px; font-weight:700; color:var(--text); }
+.part-card-meta { font-size:10px; color:var(--muted); margin-top:2px; }
+.part-card-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:8px 12px; margin-top:8px; }
+.part-card-label { display:block; font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:var(--muted); }
+.part-card-value { display:block; font-size:11px; color:var(--text); margin-top:2px; }
+.part-card-note { margin-top:8px; font-size:11px; color:var(--text); line-height:1.45; }
+.part-pill-row { display:flex; gap:4px; flex-wrap:wrap; justify-content:flex-end; }
+.part-pill { display:inline-flex; align-items:center; padding:1px 6px; border-radius:999px; background:var(--bg3, #e2e8f0); color:var(--muted); font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; }
+.part-task-card-done { opacity:.7; }
+.part-task-title { font-size:11px; font-weight:700; color:var(--text); }
+.part-task-meta { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; font-size:10px; color:var(--muted); }
+.part-inline-action { font-size:10px; margin-top:8px; }
+.part-inline-form { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.part-inline-form-row { flex-direction:row; align-items:center; }
+.part-inline-input { flex:1; font-size:11px; padding:6px 8px; border:1px solid var(--border); border-radius:6px; background:var(--card, #fff); color:var(--text); }
+.part-inline-textarea { resize:vertical; min-height:56px; }
+.part-inline-submit { font-size:10px; align-self:flex-end; }
 
 /* ══════════════════════════════════════════════════════════════════════
    RFQ WORKSPACE — Part-centric left/right layout

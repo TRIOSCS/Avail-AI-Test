@@ -296,3 +296,22 @@ def test_inline_edit_prevents_blank_mpn():
     fn_body = js[fn_start:fn_end]
     assert "primary_mpn" in fn_body
     assert "MPN cannot be blank" in fn_body
+
+
+def test_part_detail_tabs_cover_sightings_and_activity():
+    """Inline requirement detail tabs include sightings and activity views."""
+    with open("app/static/app.js") as f:
+        js = f.read()
+
+    assert "['offers', 'sightings', 'activity', 'tasks', 'notes']" in js
+    assert "/api/requirements/${requirementId}/sightings" in js
+    assert "/api/requirements/${requirementId}/history" in js
+
+
+def test_part_detail_styles_define_spacing_helpers():
+    """Requirement detail panel uses reusable spacing/layout classes."""
+    with open("app/static/styles.css") as f:
+        css = f.read()
+
+    for token in [".part-empty-state", ".part-card-list", ".part-note-box", ".part-inline-form"]:
+        assert token in css

@@ -57,6 +57,17 @@ def test_requisition_counts_with_data(client, test_requisition):
     assert data["total"] >= 1
 
 
+def test_requisition_counts_include_archived_bucket(client, db_session, test_requisition):
+    """Archived requisitions contribute to the archive dashboard count."""
+    test_requisition.status = "archived"
+    db_session.commit()
+
+    resp = client.get("/api/requisitions/counts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["archive"] >= 1
+
+
 def test_list_requisitions_empty(client):
     """GET /api/requisitions returns empty list when none exist."""
     resp = client.get("/api/requisitions")

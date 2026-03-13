@@ -7555,12 +7555,18 @@ window.togglePartExpand = togglePartExpand;
 async function _renderPartDetail(reqId, requirementId, panel) {
     const key = reqId + '-' + requirementId;
     const activeTab = _partActiveTab[key] || 'offers';
-    const tabs = ['offers', 'notes', 'tasks'];
-    const tabLabels = { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' };
+    const tabs = ['offers', 'sightings', 'activity', 'tasks', 'notes'];
+    const tabLabels = {
+        offers: 'Offers',
+        sightings: 'Sightings',
+        activity: 'Activity',
+        tasks: 'Tasks',
+        notes: 'Notes',
+    };
     const pills = tabs.map(t =>
-        `<button class="part-tab${t === activeTab ? ' on' : ''}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
+        `<button class="part-tab${t === activeTab ? ' on' : ''}" data-tab="${t}" onclick="event.stopPropagation();_switchPartTab(${reqId},${requirementId},'${t}')">${tabLabels[t]}</button>`
     ).join('');
-    panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><span style="font-size:11px;color:var(--muted)">Loading\u2026</span></div>`;
+    panel.innerHTML = `<div class="part-detail-tabs">${pills}</div><div class="part-detail-content" id="pdc-${key}"><div class="part-empty-state">Loading\u2026</div></div>`;
     await _loadPartTab(reqId, requirementId, activeTab);
 }
 
@@ -7570,7 +7576,7 @@ async function _switchPartTab(reqId, requirementId, tabName) {
     const panel = document.getElementById('pdp-' + key);
     if (!panel) return;
     panel.querySelectorAll('.part-tab').forEach(t => {
-        t.classList.toggle('on', t.textContent === { offers: 'Offers', notes: 'Notes', tasks: 'Tasks' }[tabName]);
+        t.classList.toggle('on', t.dataset.tab === tabName);
     });
     await _loadPartTab(reqId, requirementId, tabName);
 }
@@ -7583,12 +7589,18 @@ async function _loadPartTab(reqId, requirementId, tabName) {
     if (!contentEl) return;
     const cached = _partDetailCache[cacheKey];
     if (cached) { _renderPartTab(reqId, requirementId, tabName, cached, contentEl); return; }
-    contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
+    contentEl.innerHTML = '<div class="part-empty-state">Loading\u2026</div>';
     try {
         let data;
         switch (tabName) {
             case 'offers':
                 data = await apiFetch(`/api/requirements/${requirementId}/offers`);
+                break;
+            case 'sightings':
+                data = await apiFetch(`/api/requirements/${requirementId}/sightings`);
+                break;
+            case 'activity':
+                data = await apiFetch(`/api/requirements/${requirementId}/history`);
                 break;
             case 'notes':
                 data = await apiFetch(`/api/requirements/${requirementId}/notes`);
@@ -7596,21 +7608,29 @@ async function _loadPartTab(reqId, requirementId, tabName) {
             case 'tasks':
                 data = await apiFetch(`/api/requirements/${requirementId}/tasks`);
                 break;
+            default:
+                data = [];
         }
         _partDetailCache[cacheKey] = data;
         _renderPartTab(reqId, requirementId, tabName, data, contentEl);
     } catch(e) {
-        contentEl.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+        contentEl.innerHTML = '<div class="part-empty-state part-empty-state-error">Failed to load part details</div>';
     }
 }
 
 function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
     switch (tabName) {
         case 'offers': _renderPartOffers(reqId, requirementId, data, contentEl); break;
+        case 'sightings': _renderPartSightings(data, contentEl); break;
+        case 'activity': _renderPartActivity(data, contentEl); break;
         case 'notes': _renderPartNotes(reqId, requirementId, data, contentEl); break;
         case 'tasks': _renderPartTasks(reqId, requirementId, data, contentEl); break;
         default: contentEl.textContent = '';
     }
+}
+
+function _partEmptyState(message, extraHtml='') {
+    return `<div class="part-empty-state">${message}</div>${extraHtml}`;
 }
 
 // ── Part-level Offers renderer ──
@@ -7618,7 +7638,7 @@ function _renderPartTab(reqId, requirementId, tabName, data, contentEl) {
 function _renderPartOffers(reqId, requirementId, data, contentEl) {
     const offers = Array.isArray(data) ? data : (data?.offers || []);
     if (!offers.length) {
-        contentEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet for this part</span>';
+        contentEl.innerHTML = _partEmptyState('No offers logged for this part yet');
         return;
     }
     // Look up target price from requirement cache for price-vs-target indicator
@@ -7648,7 +7668,7 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
             <td>${esc(o.lead_time || '\u2014')}</td>
             <td>${esc(o.condition || '\u2014')}</td>
-            <td style="font-size:10px">${esc(o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
+            <td style="font-size:10px">${esc(o.source || o.source_type || '\u2014')}${isHistorical ? ' (hist)' : ''}</td>
             <td style="color:${statusColor};font-weight:600;font-size:10px">${esc(status)}</td>
             <td style="font-size:10px;color:var(--muted)">${age}</td>
             <td style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
@@ -7658,33 +7678,121 @@ function _renderPartOffers(reqId, requirementId, data, contentEl) {
     contentEl.innerHTML = html;
 }
 
+// ── Part-level Sightings renderer ──
+// Shows fresh and historical vendor sightings for a single requirement
+function _renderPartSightings(data, contentEl) {
+    const sightings = Array.isArray(data?.sightings) ? data.sightings : [];
+    if (!sightings.length) {
+        contentEl.innerHTML = _partEmptyState('No saved sightings for this part yet');
+        return;
+    }
+
+    let html = '<div class="part-card-list">';
+    for (const s of sightings) {
+        const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
+        const price = s.unit_price != null ? '$' + Number(s.unit_price).toFixed(4) : '\u2014';
+        const source = s.source_type || s.source || '\u2014';
+        const flags = [];
+        if (s.is_historical) flags.push('<span class="part-pill">History</span>');
+        if (s.is_substitute) flags.push('<span class="part-pill">Sub</span>');
+        if (s.buyer_outcome && s.buyer_outcome !== 'open') {
+            flags.push(`<span class="part-pill">${esc(s.buyer_outcome.replaceAll('_', ' '))}</span>`);
+        }
+
+        html += `<div class="part-card">
+            <div class="part-card-header">
+                <div>
+                    <div class="part-card-title">${esc(s.vendor_name || 'Unknown vendor')}</div>
+                    <div class="part-card-meta">${esc(source)} \u00b7 ${s.created_at ? _timeAgo(s.created_at) : 'No date'}</div>
+                </div>
+                <div class="part-pill-row">${flags.join('')}</div>
+            </div>
+            <div class="part-card-grid">
+                <div><span class="part-card-label">MPN</span><span class="part-card-value mono">${esc(s.mpn_matched || s.mpn || '\u2014')}</span></div>
+                <div><span class="part-card-label">Qty</span><span class="part-card-value mono">${qty}</span></div>
+                <div><span class="part-card-label">Price</span><span class="part-card-value mono">${price}</span></div>
+                <div><span class="part-card-label">Condition</span><span class="part-card-value">${esc(s.condition || '\u2014')}</span></div>
+            </div>
+            ${(s.notes || s.comment) ? `<div class="part-card-note">${esc(s.notes || s.comment)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    contentEl.innerHTML = html;
+}
+
+// ── Part-level Activity renderer ──
+// Shows a compact history timeline for requirement changes, RFQs, offers, and tasks
+function _renderPartActivity(data, contentEl) {
+    const events = Array.isArray(data) ? data : [];
+    if (!events.length) {
+        contentEl.innerHTML = _partEmptyState('No activity recorded for this part yet');
+        return;
+    }
+
+    let html = '<div class="part-card-list">';
+    for (const evt of events) {
+        const eventType = evt.type || 'event';
+        const when = evt.completed_at || evt.created_at;
+        let title = 'Activity';
+        let detail = '';
+
+        if (eventType === 'change') {
+            title = `${evt.entity === 'offer' ? 'Offer' : 'Requirement'} change`;
+            detail = `${evt.field || 'field'}: ${evt.old_value || '\u2014'} \u2192 ${evt.new_value || '\u2014'}`;
+        } else if (eventType === 'offer_created') {
+            title = `Offer logged from ${evt.vendor_name || 'vendor'}`;
+            detail = `${evt.qty_available != null ? Number(evt.qty_available).toLocaleString() : '\u2014'} pcs \u00b7 ${evt.unit_price != null ? '$' + Number(evt.unit_price).toFixed(4) : 'No price'}`;
+        } else if (eventType === 'rfq_sent') {
+            title = `RFQ sent to ${evt.vendor_name || 'vendor'}`;
+            detail = evt.status ? `Status: ${evt.status}` : 'Awaiting reply';
+        } else if (eventType === 'task_done') {
+            title = `Task completed: ${evt.title || 'Untitled task'}`;
+            detail = evt.completed_at ? `Completed ${_timeAgo(evt.completed_at)}` : 'Marked done';
+        }
+
+        html += `<div class="part-card part-activity-card">
+            <div class="part-card-header">
+                <div>
+                    <div class="part-card-title">${esc(title)}</div>
+                    <div class="part-card-meta">${when ? _timeAgo(when) : 'No timestamp'}${evt.user ? ` \u00b7 ${esc(evt.user)}` : ''}</div>
+                </div>
+                <span class="part-pill">${esc(eventType.replaceAll('_', ' '))}</span>
+            </div>
+            ${detail ? `<div class="part-card-note">${esc(detail)}</div>` : ''}
+        </div>`;
+    }
+    html += '</div>';
+    contentEl.innerHTML = html;
+}
+
 // ── Part-level Notes renderer ──
 // Shows notes on the requirement and notes on individual offers
 function _renderPartNotes(reqId, requirementId, data, contentEl) {
     const notes = Array.isArray(data) ? data : (data?.notes || []);
     const reqs = _ddReqCache[reqId] || [];
     const req = reqs.find(x => x.id === requirementId);
+    const requirementNotes = data?.requirement_notes || req?.notes || '';
     let html = '';
-    // Requirement-level notes
-    html += `<div style="margin-bottom:12px">
-        <div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Requirement Notes</div>
-        <div class="part-note-box dd-edit" onclick="event.stopPropagation();editDrillCell(this,${reqId},${requirementId},'notes')" style="min-height:32px;padding:6px 8px;background:var(--bg2);border-radius:4px;font-size:11px;cursor:pointer">${esc(req?.notes || 'Click to add notes\u2026')}</div>
+    html += `<div class="part-section">
+        <div class="part-section-title">Requirement Notes</div>
+        <div class="part-note-box dd-edit" onclick="event.stopPropagation();editDrillCell(this,${reqId},${requirementId},'notes')">${esc(requirementNotes || 'Click to add notes\u2026')}</div>
     </div>`;
-    // Offer notes
     if (notes.length) {
-        html += '<div style="font-size:11px;font-weight:700;margin-bottom:4px;color:var(--muted)">Offer Notes</div>';
+        html += '<div class="part-section-title">Offer Notes</div><div class="part-card-list">';
         for (const n of notes) {
-            html += `<div style="padding:4px 8px;margin-bottom:4px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--blue);font-size:11px">
-                <span style="font-weight:600">${esc(n.vendor_name || 'Offer')}</span>
-                <span style="color:var(--muted);margin-left:6px">${n.created_at ? _timeAgo(n.created_at) : ''}</span>
-                <div style="margin-top:2px">${esc(n.note || n.notes || n.text || '\u2014')}</div>
+            html += `<div class="part-card part-note-entry">
+                <div class="part-card-header">
+                    <div class="part-card-title">${esc(n.vendor_name || 'Offer')}</div>
+                    <div class="part-card-meta">${n.created_at ? _timeAgo(n.created_at) : 'No date'}</div>
+                </div>
+                <div class="part-card-note">${esc(n.note || n.notes || n.text || '\u2014')}</div>
             </div>`;
         }
-    } else if (!req?.notes) {
-        html += '<span style="font-size:11px;color:var(--muted)">No notes yet</span>';
+        html += '</div>';
+    } else if (!requirementNotes) {
+        html += _partEmptyState('No notes yet');
     }
-    // Add note button
-    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartNote(${reqId},${requirementId})">+ Add Note</button>`;
+    html += `<button class="btn btn-ghost btn-sm part-inline-action" onclick="event.stopPropagation();_addPartNote(${reqId},${requirementId})">+ Add Note</button>`;
     contentEl.innerHTML = html;
 }
 
@@ -7693,22 +7801,33 @@ function _renderPartNotes(reqId, requirementId, data, contentEl) {
 function _renderPartTasks(reqId, requirementId, data, contentEl) {
     const tasks = Array.isArray(data) ? data : (data?.tasks || []);
     if (!tasks.length) {
-        contentEl.innerHTML = `<span style="font-size:11px;color:var(--muted)">No tasks for this part</span>
-            <button class="btn btn-ghost btn-sm" style="font-size:10px;margin-left:8px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+        contentEl.innerHTML = _partEmptyState(
+            'No tasks assigned to this part yet',
+            `<button class="btn btn-ghost btn-sm part-inline-action" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Assign Task</button>`
+        );
         return;
     }
-    let html = '<div style="display:flex;flex-direction:column;gap:4px">';
+    let html = '<div class="part-card-list">';
     for (const t of tasks) {
         const done = t.status === 'done' || t.status === 'completed';
         const statusIcon = done ? '\u2705' : t.status === 'in_progress' ? '\ud83d\udfe1' : '\u2b1c';
-        html += `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;background:var(--bg2);border-radius:4px;font-size:11px${done ? ';opacity:0.6;text-decoration:line-through' : ''}">
-            <span>${statusIcon}</span>
-            <span style="flex:1">${esc(t.title || t.description || '\u2014')}</span>
-            <span style="font-size:10px;color:var(--muted)">${t.due_date ? _timeAgo(t.due_date) : ''}</span>
+        const dueAt = t.due_at || t.due_date;
+        const assignee = t.assignee_name || t.assigned_to || '';
+        html += `<div class="part-card part-task-card${done ? ' part-task-card-done' : ''}">
+            <div class="part-card-header">
+                <div class="part-task-title">${statusIcon} ${esc(t.title || t.description || '\u2014')}</div>
+                <div class="part-card-meta">${dueAt ? `Due ${_timeAgo(dueAt)}` : 'No due date'}</div>
+            </div>
+            ${t.description ? `<div class="part-card-note">${esc(t.description)}</div>` : ''}
+            <div class="part-task-meta">
+                <span>${esc(t.status || 'todo')}</span>
+                ${assignee ? `<span>Assigned to ${esc(assignee)}</span>` : '<span>Unassigned</span>'}
+                ${t.creator_name || t.created_by_name ? `<span>Created by ${esc(t.creator_name || t.created_by_name)}</span>` : ''}
+            </div>
         </div>`;
     }
     html += '</div>';
-    html += `<button class="btn btn-ghost btn-sm" style="font-size:10px;margin-top:6px" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Add Task</button>`;
+    html += `<button class="btn btn-ghost btn-sm part-inline-action" onclick="event.stopPropagation();_addPartTask(${reqId},${requirementId})">+ Assign Task</button>`;
     contentEl.innerHTML = html;
 }
 
@@ -7720,9 +7839,9 @@ function _addPartNote(reqId, requirementId) {
     const existing = contentEl.querySelector('.part-note-input');
     if (existing) { existing.focus(); return; }
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
-    wrapper.innerHTML = `<textarea class="part-note-input" placeholder="Add a note\u2026" rows="2" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text);resize:vertical"></textarea>
-        <button class="btn btn-primary btn-sm" style="font-size:10px;align-self:flex-end" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.previousElementSibling.value)">Save</button>`;
+    wrapper.className = 'part-inline-form';
+    wrapper.innerHTML = `<textarea class="part-note-input part-inline-input part-inline-textarea" placeholder="Add a note\u2026" rows="2"></textarea>
+        <button class="btn btn-primary btn-sm part-inline-submit" onclick="event.stopPropagation();_savePartNote(${reqId},${requirementId},this.previousElementSibling.value)">Save</button>`;
     contentEl.appendChild(wrapper);
     wrapper.querySelector('textarea').focus();
 }
@@ -7746,9 +7865,9 @@ function _addPartTask(reqId, requirementId) {
     const existing = contentEl.querySelector('.part-task-input');
     if (existing) { existing.focus(); return; }
     const wrapper = document.createElement('div');
-    wrapper.style.cssText = 'margin-top:6px;display:flex;gap:4px';
-    wrapper.innerHTML = `<input class="part-task-input" placeholder="Task description\u2026" style="flex:1;font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)">
-        <button class="btn btn-primary btn-sm" style="font-size:10px" onclick="event.stopPropagation();_savePartTask(${reqId},${requirementId},this.previousElementSibling.value)">Add</button>`;
+    wrapper.className = 'part-inline-form part-inline-form-row';
+    wrapper.innerHTML = `<input class="part-task-input part-inline-input" placeholder="Task title\u2026">
+        <button class="btn btn-primary btn-sm part-inline-submit" onclick="event.stopPropagation();_savePartTask(${reqId},${requirementId},this.previousElementSibling.value)">Add</button>`;
     contentEl.appendChild(wrapper);
     wrapper.querySelector('input').focus();
 }

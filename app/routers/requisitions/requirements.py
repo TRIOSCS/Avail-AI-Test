@@ -132,6 +132,82 @@ def _enqueue_ics_nc_batch(requirement_ids: list[int]):
         bg_db.close()
 
 
+def _get_requirement_for_user(db: Session, user: User, requirement_id: int) -> Requirement:
+    """Load a requirement and enforce requisition-level access rules."""
+    requirement = db.query(Requirement).filter(Requirement.id == requirement_id).first()
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    if not get_req_for_user(db, user, requirement.requisition_id):
+        raise HTTPException(403, "Not authorized")
+    return requirement
+
+
+def _parse_due_at(raw_due_at) -> datetime | None:
+    """Parse optional due_at input while accepting common ISO-8601 forms."""
+    if raw_due_at in (None, ""):
+        return None
+    if not isinstance(raw_due_at, str):
+        raise HTTPException(422, "due_at must be an ISO-8601 timestamp")
+
+    due_at_str = raw_due_at.strip()
+    if not due_at_str:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(due_at_str.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise HTTPException(422, "Invalid due_at timestamp") from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _resolve_assigned_user_id(db: Session, raw_assigned_to_id) -> int | None:
+    """Validate optional assignee IDs from the requirement task form."""
+    if raw_assigned_to_id in (None, ""):
+        return None
+
+    try:
+        assigned_to_id = int(raw_assigned_to_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(422, "assigned_to_id must be an integer") from exc
+
+    if assigned_to_id <= 0:
+        raise HTTPException(422, "assigned_to_id must be a positive integer")
+    if not db.get(User, assigned_to_id):
+        raise HTTPException(422, "Assigned user not found")
+    return assigned_to_id
+
+
+def _serialize_requirement_task(task, user_map: dict[int, str]) -> dict:
+    """Shape requirement task payloads for the RFQ workspace and legacy callers."""
+    assignee_name = user_map.get(task.assigned_to_id, "")
+    creator_name = user_map.get(task.created_by, "")
+    due_at = task.due_at.isoformat() if task.due_at else None
+    return {
+        "id": task.id,
+        "title": task.title,
+        "description": task.description,
+        "task_type": task.task_type,
+        "status": task.status,
+        "priority": task.priority,
+        "assigned_to_id": task.assigned_to_id,
+        "assigned_to": assignee_name,
+        "assignee_name": assignee_name,
+        "created_by": task.created_by,
+        "created_by_name": creator_name,
+        "creator_name": creator_name,
+        "source_ref": task.source_ref,
+        "ai_risk_flag": task.ai_risk_flag,
+        "source": task.source,
+        "due_at": due_at,
+        "due_date": due_at,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+    }
+
+
 @router.get("/api/requisitions/{req_id}/requirements")
 async def list_requirements(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """List requirements for a requisition with sighting counts."""
@@ -1020,11 +1096,7 @@ async def list_requirement_sightings(
         sighting_to_dict,
     )
 
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
-    if not get_req_for_user(db, user, req_item.requisition_id):
-        raise HTTPException(403, "Not authorized")
+    req_item = _get_requirement_for_user(db, user, requirement_id)
 
     rows = (
         db.query(Sighting)
@@ -1086,9 +1158,7 @@ async def list_requirement_offers(
     historical offers (from other requisitions for the same material card).
     Each row carries is_historical and is_substitute flags for the UI.
     """
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
+    req_item = _get_requirement_for_user(db, user, requirement_id)
 
     def _offer_dict(o, *, is_historical=False, is_substitute=False, source_req_id=None):
         age_days = 0
@@ -1200,9 +1270,7 @@ async def list_requirement_notes(
     db: Session = Depends(get_db),
 ):
     """Return the requirement's own notes plus notes from its offers."""
-    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req:
-        raise HTTPException(404, "Requirement not found")
+    req = _get_requirement_for_user(db, user, requirement_id)
     # Gather notes from offers that have non-empty notes
     offer_notes = (
         db.query(Offer)
@@ -1232,9 +1300,7 @@ async def add_requirement_note(
     db: Session = Depends(get_db),
 ):
     """Append text to the requirement's notes field."""
-    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req:
-        raise HTTPException(404, "Requirement not found")
+    req = _get_requirement_for_user(db, user, requirement_id)
     new_text = (body.get("text") or "").strip()
     if not new_text:
         raise HTTPException(422, "Note text is required")
@@ -1259,9 +1325,7 @@ async def list_requirement_tasks(
     """
     from ...models import RequisitionTask
 
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
+    req_item = _get_requirement_for_user(db, user, requirement_id)
 
     # Part-level tasks
     part_ref = f"requirement:{requirement_id}"
@@ -1289,25 +1353,7 @@ async def list_requirement_tasks(
         for u in db.query(User).filter(User.id.in_(user_ids)).all():
             user_map[u.id] = u.name or u.email
 
-    return [
-        {
-            "id": t.id,
-            "title": t.title,
-            "description": t.description,
-            "task_type": t.task_type,
-            "status": t.status,
-            "priority": t.priority,
-            "assigned_to": user_map.get(t.assigned_to_id, ""),
-            "created_by_name": user_map.get(t.created_by, ""),
-            "source_ref": t.source_ref,
-            "ai_risk_flag": t.ai_risk_flag,
-            "source": t.source,
-            "due_date": t.due_at.isoformat() if t.due_at else None,
-            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
-        }
-        for t in tasks
-    ]
+    return [_serialize_requirement_task(t, user_map) for t in tasks]
 
 
 @router.post("/api/requirements/{requirement_id}/tasks")
@@ -1320,30 +1366,35 @@ async def create_requirement_task(
     """Create a task linked to a specific requirement."""
     from ...models import RequisitionTask
 
-    req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req:
-        raise HTTPException(404, "Requirement not found")
+    req = _get_requirement_for_user(db, user, requirement_id)
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Task title is required")
+    description = (body.get("description") or "").strip() or None
+    assigned_to_id = _resolve_assigned_user_id(db, body.get("assigned_to_id"))
+    due_at = _parse_due_at(body.get("due_at"))
     task = RequisitionTask(
         requisition_id=req.requisition_id,
         title=title,
+        description=description,
         task_type="general",
         status="todo",
         source="manual",
         source_ref=f"requirement:{requirement_id}",
+        assigned_to_id=assigned_to_id,
+        due_at=due_at,
         created_by=user.id,
     )
     db.add(task)
     db.commit()
     db.refresh(task)
-    return {
-        "id": task.id,
-        "title": task.title,
-        "status": task.status,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-    }
+    user_map = {}
+    if assigned_to_id:
+        assigned_user = db.get(User, assigned_to_id)
+        if assigned_user:
+            user_map[assigned_user.id] = assigned_user.name or assigned_user.email
+    user_map[user.id] = user.name or user.email
+    return _serialize_requirement_task(task, user_map)
 
 
 @router.get("/api/requirements/{requirement_id}/history")
@@ -1358,9 +1409,7 @@ async def list_requirement_history(
     """
     from ...models import RequisitionTask
 
-    req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
-    if not req_item:
-        raise HTTPException(404, "Requirement not found")
+    req_item = _get_requirement_for_user(db, user, requirement_id)
 
     events = []
 
