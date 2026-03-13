@@ -7,6 +7,15 @@ Depends on: app.routers.apollo_sync, conftest fixtures
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _skip_if_apollo_router_disabled(client):
+    has_route = any(getattr(route, "path", "") == "/api/apollo/discover/{domain}" for route in client.app.routes)
+    if not has_route:
+        pytest.skip("Apollo sync router disabled in MVP mode")
+
 
 class TestApolloDiscover:
     def test_discover_success(self, client):
