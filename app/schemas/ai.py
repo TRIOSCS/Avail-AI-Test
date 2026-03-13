@@ -84,6 +84,70 @@ class SaveDraftOffersRequest(BaseModel):
         return v
 
 
+class IntakeRequirementItem(BaseModel):
+    """Compatibility schema for AI intake requirement rows."""
+
+    mpn: str
+    quantity: int = Field(default=1, ge=1)
+    manufacturer: str | None = None
+    target_price: float | None = None
+    condition: str | None = None
+    date_codes: str | None = None
+    packaging: str | None = None
+    notes: str | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_required_mpn(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        normalized = normalize_mpn(cleaned)
+        if not normalized:
+            raise ValueError("mpn required")
+        return normalized
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_requirement_condition(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_condition(v) or v.strip() or None
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_requirement_packaging(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_packaging(v) or v.strip() or None
+
+
+class IntakeDraftRequest(BaseModel):
+    """Compatibility schema for pasted intake text."""
+
+    text: str
+
+    @field_validator("text")
+    @classmethod
+    def text_not_blank(cls, v: str) -> str:
+        cleaned = (v or "").strip()
+        if not cleaned:
+            raise ValueError("text required")
+        return cleaned
+
+
+class IntakeDraftResponse(BaseModel):
+    """Compatibility schema for AI intake parser responses."""
+
+    document_type: Literal["rfq", "offer", "unclear"] = "unclear"
+    confidence: float = 0.0
+    summary: str | None = None
+    requisition_name: str | None = None
+    customer_name: str | None = None
+    vendor_name: str | None = None
+    notes: str | None = None
+    requirements: list[IntakeRequirementItem] = []
+    offers: list[DraftOfferItem] = []
+
+
 class RfqDraftRequest(BaseModel):
     vendor_name: str
     parts: list[str] = Field(min_length=1)
