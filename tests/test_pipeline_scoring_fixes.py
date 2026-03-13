@@ -13,6 +13,8 @@ Depends on: app/routers/dashboard/, app/services/proactive_service.py
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.models import (
     ActivityLog,
     Company,
