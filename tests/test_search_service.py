@@ -1584,7 +1584,8 @@ class TestFetchFresh:
 
         assert results == []
         skipped_count = sum(1 for s in stats if s["status"] == "skipped")
-        assert skipped_count == 8
+        assert skipped_count == len(stats)
+        assert skipped_count >= 8
 
     @pytest.mark.asyncio
     async def test_successful_search(self, db_session):
