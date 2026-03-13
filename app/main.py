@@ -591,9 +591,7 @@ def _seed_api_sources():
             "nexar": 1000,
         }
         for name, quota in quota_map.items():
-            # Fallback query keeps legacy behavior in tests that mock filter_by().first()
-            # while still preferring the batched in-memory map for normal runtime.
-            src = existing_map.get(name) or db.query(ApiSource).filter_by(name=name).first()
+            src = existing_map.get(name)
             if src and not src.monthly_quota:
                 src.monthly_quota = quota
 

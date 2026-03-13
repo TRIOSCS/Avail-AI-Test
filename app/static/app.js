@@ -2974,6 +2974,37 @@ export function closeModal(id) {
     }
 }
 
+// Lead provenance modal registry/wiring.
+const _leadProvenanceRegistry = {};
+function _registerLeadProvenance(leadKey, payload) {
+    if (!leadKey) return;
+    _leadProvenanceRegistry[String(leadKey)] = payload || {};
+}
+
+function openLeadProvenancePanel(leadKey) {
+    const key = String(leadKey || '');
+    const body = document.getElementById('leadProvenanceBody');
+    const title = document.getElementById('leadProvenanceTitle');
+    const payload = _leadProvenanceRegistry[key] || {};
+    if (title) title.textContent = payload.title || 'Lead Provenance';
+    if (body) {
+        const lines = Array.isArray(payload.lines) ? payload.lines : [];
+        if (!lines.length) {
+            body.innerHTML = '<div class="empty-placeholder">No provenance details available.</div>';
+        } else {
+            body.innerHTML = lines
+                .map(line => '<div style="padding:8px 0;border-bottom:1px solid var(--border)">' + esc(String(line)) + '</div>')
+                .join('');
+        }
+    }
+    openModal('leadProvenanceModal');
+}
+
+function _leadProvenanceButton(leadKey, payload) {
+    _registerLeadProvenance(leadKey, payload);
+    return `<button type="button" class="btn btn-ghost btn-sm" onclick="openLeadProvenancePanel('${escAttr(String(leadKey || ''))}')">Provenance</button>`;
+}
+
 /* ── Confirm / Prompt replacements ─────────────────────────────────── */
 function confirmAction(title, message, onConfirm, opts) {
     opts = opts || {};
@@ -3180,8 +3211,13 @@ let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
 // Main view: 'reqs' (Pipeline), 'deals', 'archive'. Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'.
-let _currentMainView = localStorage.getItem('avail_main_view') || 'reqs';
-if (_currentMainView === 'sales' || _currentMainView === 'sourcing' || _currentMainView === 'purchasing') _currentMainView = 'reqs';
+function _normalizeMainView(view) {
+    const v = String(view || '').toLowerCase();
+    if (['sales', 'purchasing', 'sourcing', 'active', 'rfq'].includes(v)) return 'reqs';
+    if (v === 'reqs' || v === 'deals' || v === 'archive') return v;
+    return 'reqs';
+}
+let _currentMainView = _normalizeMainView(localStorage.getItem('avail_main_view') || 'reqs');
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 
@@ -10200,6 +10236,7 @@ function _cancelTabInflight() {
 function setMainView(view, btn) {
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
+    view = _normalizeMainView(view);
 
     // Ensure the requisition list container is visible (deals/archive/sales all render into view-list)
     showView('view-list');
@@ -10241,13 +10278,6 @@ function setMainView(view, btn) {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions().then(() => _renderDealBoard());
-    } else if (view === 'active' || view === 'rfq') {
-        // Legacy: redirect old view names to Pipeline (reqs)
-        _currentMainView = 'reqs';
-        _reqStatusFilter = 'all';
-        _serverSearchActive = false;
-        loadRequisitions();
-        loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
@@ -10636,7 +10666,7 @@ async function sendBulkFollowUp() {
             method: 'POST', body: { contact_ids: contactIds }
         });
         showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
-        loadFollowUps();
+        loadFollowUpsPanel();
     });
 }
 
@@ -16929,4 +16959,6 @@ Object.assign(window, {
     renderObjHeader, renderStatusStrip, renderBlockerStrip, renderAiCard,
     // RFQ workspace — part-centric layout
     rfqOpenWorkspace, rfqSelectPart, rfqSwitchTab, rfqToggleOfferSelection, rfqAddTask, rfqAddNote,
+    // Lead provenance modal
+    openLeadProvenancePanel, _registerLeadProvenance, _leadProvenanceButton,
 });
