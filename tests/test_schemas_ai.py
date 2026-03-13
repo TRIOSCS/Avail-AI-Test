@@ -10,9 +10,6 @@ from pydantic import ValidationError
 
 from app.schemas.ai import (
     DraftOfferItem,
-    IntakeDraftRequest,
-    IntakeDraftResponse,
-    IntakeRequirementItem,
     ProspectContactSave,
     ProspectFinderRequest,
     RfqDraftRequest,
@@ -66,41 +63,6 @@ class TestSaveDraftOffersRequest:
             )
 
 
-class TestIntakeRequirementItem:
-    def test_normalizes_fields(self):
-        item = IntakeRequirementItem(
-            mpn=" lm317t ",
-            quantity=25,
-            condition="Factory New",
-            packaging="Tape & Reel",
-        )
-        assert item.mpn == "LM317T"
-        assert item.condition == "new"
-        assert item.packaging == "reel"
-
-    def test_blank_mpn_raises(self):
-        with pytest.raises(ValidationError, match="mpn required"):
-            IntakeRequirementItem(mpn="   ")
-
-
-class TestIntakeDraftRequest:
-    def test_strips_text(self):
-        payload = IntakeDraftRequest(text="  vendor quote text  ")
-        assert payload.text == "vendor quote text"
-
-    def test_blank_text_raises(self):
-        with pytest.raises(ValidationError, match="text required"):
-            IntakeDraftRequest(text="   ")
-
-
-class TestIntakeDraftResponse:
-    def test_defaults(self):
-        resp = IntakeDraftResponse()
-        assert resp.document_type == "unclear"
-        assert resp.requirements == []
-        assert resp.offers == []
-
-
 class TestRfqDraftRequest:
     def test_valid(self):
         r = RfqDraftRequest(vendor_name="Acme", parts=["LM358"])
@@ -118,15 +80,19 @@ class TestRfqDraftRequest:
 # ── Additional coverage for missing lines ───────────────────────────
 
 from app.schemas.ai import (
+    ApplyFreeformRfqRequest,
     CompareQuotesRequest,
     NormalizedPart,
     NormalizePartsRequest,
     ParsedQuote,
     ParseEmailRequest,
     ParseEmailResponse,
+    ParseFreeformOfferRequest,
+    ParseFreeformRfqRequest,
     QuoteForAnalysis,
     RfqDraftEmailRequest,
     RfqDraftPart,
+    SaveFreeformOffersRequest,
 )
 
 
@@ -236,3 +202,40 @@ class TestCompareQuotesRequest:
                 part_number="LM317T",
                 quotes=[QuoteForAnalysis(vendor_name="A")],
             )
+
+
+class TestParseFreeformRfqRequest:
+    def test_valid(self):
+        r = ParseFreeformRfqRequest(raw_text="LM317T x 1000")
+        assert r.raw_text == "LM317T x 1000"
+
+    def test_empty_raises(self):
+        with pytest.raises(ValidationError):
+            ParseFreeformRfqRequest(raw_text="")
+
+
+class TestParseFreeformOfferRequest:
+    def test_valid(self):
+        r = ParseFreeformOfferRequest(raw_text="vendor quote text")
+        assert r.raw_text == "vendor quote text"
+        assert r.requisition_id is None
+
+
+class TestApplyFreeformRfqRequest:
+    def test_valid(self):
+        r = ApplyFreeformRfqRequest(
+            name="REQ-001",
+            requirements=[{"primary_mpn": "LM317T", "target_qty": 100}],
+        )
+        assert r.name == "REQ-001"
+        assert len(r.requirements) == 1
+
+
+class TestSaveFreeformOffersRequest:
+    def test_valid(self):
+        r = SaveFreeformOffersRequest(
+            requisition_id=1,
+            offers=[DraftOfferItem(vendor_name="Acme", mpn="ABC123")],
+        )
+        assert r.requisition_id == 1
+        assert len(r.offers) == 1
