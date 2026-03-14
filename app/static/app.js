@@ -7631,6 +7631,36 @@ function _ddCopyContact(text, type) {
     navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(e => console.warn('clipboard copy failed:', e));
 }
 
+function _ddLeadStatusBadge(status) {
+    const s = (status || 'new').toLowerCase();
+    const cfg = {
+        new: { label: 'NEW', bg: '#e2e8f0', color: '#334155' },
+        contacted: { label: 'CONTACTED', bg: '#dbeafe', color: '#1d4ed8' },
+        replied: { label: 'REPLIED', bg: '#d1fae5', color: '#065f46' },
+        no_stock: { label: 'NO STOCK', bg: '#fee2e2', color: '#991b1b' },
+        has_stock: { label: 'HAS STOCK', bg: '#dcfce7', color: '#166534' },
+        bad_lead: { label: 'BAD LEAD', bg: '#ffe4e6', color: '#9f1239' },
+        do_not_contact: { label: 'DO NOT CONTACT', bg: '#fecaca', color: '#7f1d1d' },
+    };
+    const c = cfg[s] || cfg.new;
+    return ` <span style="font-size:9px;padding:1px 5px;border-radius:999px;background:${c.bg};color:${c.color};font-weight:700">${c.label}</span>`;
+}
+
+function _ddSafetyBadge(s) {
+    const band = (s.vendor_safety_band || '').toLowerCase();
+    const score = s.vendor_safety_score;
+    if (!band && score == null) return '';
+    const cfg = {
+        low_risk: { label: 'LOW RISK', bg: '#dcfce7', color: '#166534' },
+        medium_risk: { label: 'MED RISK', bg: '#fef3c7', color: '#92400e' },
+        high_risk: { label: 'HIGH RISK', bg: '#fee2e2', color: '#991b1b' },
+    };
+    const c = cfg[band] || cfg.medium_risk;
+    const tip = s.vendor_safety_summary || 'Vendor safety review signal';
+    const scoreText = score != null ? ` ${Math.round(score)}` : '';
+    return ` <span style="font-size:9px;padding:1px 5px;border-radius:999px;background:${c.bg};color:${c.color};font-weight:700" title="${escAttr(tip)}">${c.label}${scoreText}</span>`;
+}
+
 function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showContact) {
     let html = '';
     for (const s of sightings) {
@@ -7671,6 +7701,8 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         const ring = _ddVendorScoreRing(s);
         const linkPill = _ddVendorLinkPill(s);
         const inlineBadges = _ddVendorInlineBadges(s);
+        const leadStatusBadge = s.lead_id ? _ddLeadStatusBadge(s.buyer_status) : '';
+        const safetyBadge = s.lead_id ? _ddSafetyBadge(s) : '';
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
         const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
         const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
@@ -7701,9 +7733,18 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
         }
         const rowBg = unavail ? 'background:rgba(220,38,38,.04);opacity:.6' : isSub ? 'background:rgba(14,116,144,.04)' : '';
         const staleOpacity = s.is_stale && !unavail ? 'opacity:0.55;' : '';
+        const statusCtl = s.lead_id ? `<select style="font-size:10px;padding:1px 4px;border:1px solid var(--border);border-radius:4px;background:var(--card);color:var(--text)" onchange="event.stopPropagation();ddSetLeadStatus(${reqId},${s.lead_id},this.value)">
+            <option value="new"${(s.buyer_status||'new')==='new' ? ' selected' : ''}>New</option>
+            <option value="contacted"${s.buyer_status==='contacted' ? ' selected' : ''}>Contacted</option>
+            <option value="replied"${s.buyer_status==='replied' ? ' selected' : ''}>Replied</option>
+            <option value="has_stock"${s.buyer_status==='has_stock' ? ' selected' : ''}>Has Stock</option>
+            <option value="no_stock"${s.buyer_status==='no_stock' ? ' selected' : ''}>No Stock</option>
+            <option value="bad_lead"${s.buyer_status==='bad_lead' ? ' selected' : ''}>Bad Lead</option>
+            <option value="do_not_contact"${s.buyer_status==='do_not_contact' ? ' selected' : ''}>Do Not Contact</option>
+        </select>` : '';
         html += `<tr style="${staleOpacity}${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
+            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : '<a onclick="event.stopPropagation();openVendorPopupByName(\''+safeVName+'\')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>'}${inlineBadges}${linkPill}${leadStatusBadge}${safetyBadge}${needsEmail}${unavailBadge}</td>
             ${showContact !== false ? `<td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>` : ''}
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
@@ -7711,7 +7752,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice, showC
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}${_ddEvidenceBadge(s.evidence_tier)}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
+            <td style="font-size:10px;color:var(--muted)">${sAge} ${statusCtl} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
         </tr>`;
     }
     return html;
@@ -7935,6 +7976,23 @@ function _ddToggleGroupInlineOffers(reqId, ids, checked) {
 function ddQuickRfq(reqId, vendorName, mpn) {
     setCurrentReqId(reqId);
     openBatchRfqModal([{ vendor_name: vendorName, parts: [mpn] }]);
+}
+
+async function ddSetLeadStatus(reqId, leadId, status) {
+    if (!leadId || !status) return;
+    try {
+        await apiFetch(`/api/leads/${leadId}/status`, {
+            method: 'PATCH',
+            body: { status }
+        });
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
+        const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
+        _ddSightingsCache[reqId] = data;
+        _renderSourcingDrillDown(reqId);
+        showToast('Lead status updated', 'success');
+    } catch (e) {
+        showToast('Status update failed — ' + friendlyError(e, 'please try again'), 'error');
+    }
 }
 
 function ddToggleSighting(reqId, sightingId) {

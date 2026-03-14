@@ -30,6 +30,7 @@ from ...models import (
     Requirement,
     Requisition,
     Sighting,
+    SourcingLead,
     User,
 )
 from ...rate_limit import limiter
@@ -38,6 +39,13 @@ from ...schemas.requisitions import (
     RequirementUpdate,
     SearchOptions,
     SightingUnavailableIn,
+)
+from ...schemas.sourcing_leads import LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
+from ...services.sourcing_leads import (
+    attach_lead_metadata_to_results,
+    append_lead_feedback,
+    get_requisition_leads,
+    update_lead_status,
 )
 from ...utils.normalization import (
     normalize_condition,
@@ -109,6 +117,23 @@ def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> No
             sighting["buyer_outcome"] = outcome
             outcome_counts[outcome] += 1
         group["buyer_outcomes"] = outcome_counts
+
+
+def _attach_lead_metadata(results: dict, db: Session) -> None:
+    """Attach canonical lead fields onto sighting payloads when available."""
+    results_by_req: dict[int, list[dict]] = {}
+    for req_id, payload in results.items():
+        if not isinstance(payload, dict):
+            continue
+        try:
+            rid = int(req_id)
+        except (TypeError, ValueError):
+            continue
+        rows = payload.get("sightings")
+        if isinstance(rows, list):
+            results_by_req[rid] = rows
+    if results_by_req:
+        attach_lead_metadata_to_results(db, results_by_req)
 
 
 def _enqueue_ics_nc_batch(requirement_ids: list[int]):
@@ -708,6 +733,7 @@ async def search_all(
     background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
 
     _enrich_with_vendor_cards(results, db)
+    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
 
     results["source_stats"] = list(merged_source_stats.values())
@@ -736,6 +762,7 @@ async def search_one(
     source_stats = search_result["source_stats"]
     results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
     _enrich_with_vendor_cards(results, db)
+    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
 
     background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
@@ -885,8 +912,93 @@ async def get_saved_sightings(
             "historical_offers": hist_offers,
         }
     _enrich_with_vendor_cards(results, db)
+    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
     return results
+
+
+@router.get("/api/requisitions/{req_id}/leads", response_model=list[LeadOut])
+async def list_requisition_leads(
+    req_id: int,
+    statuses: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List canonical sourcing leads for buyer follow-up queue."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    status_list = [s.strip().lower() for s in (statuses or "").split(",") if s.strip()] if statuses else None
+    return get_requisition_leads(db, req_id, status_list)
+
+
+@router.patch("/api/leads/{lead_id}/status")
+async def patch_lead_status(
+    lead_id: int,
+    payload: LeadStatusUpdateIn,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update lead workflow status and append buyer outcome event."""
+    lead = db.get(SourcingLead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if not get_req_for_user(db, user, lead.requisition_id):
+        raise HTTPException(403, "Not authorized for this lead")
+
+    try:
+        updated = update_lead_status(
+            db,
+            lead_id,
+            payload.status,
+            note=payload.note,
+            reason_code=payload.reason_code,
+            contact_method=payload.contact_method,
+            contact_attempt_count=payload.contact_attempt_count,
+            actor_user_id=user.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return {
+        "ok": True,
+        "lead_id": updated.id,
+        "status": updated.buyer_status,
+        "confidence_score": updated.confidence_score,
+        "confidence_band": updated.confidence_band,
+        "vendor_safety_score": updated.vendor_safety_score,
+        "vendor_safety_band": updated.vendor_safety_band,
+        "buyer_feedback_summary": updated.buyer_feedback_summary,
+    }
+
+
+@router.post("/api/leads/{lead_id}/feedback")
+async def add_lead_feedback(
+    lead_id: int,
+    payload: LeadFeedbackIn,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Append buyer feedback without changing workflow state."""
+    lead = db.get(SourcingLead, lead_id)
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if not get_req_for_user(db, user, lead.requisition_id):
+        raise HTTPException(403, "Not authorized for this lead")
+
+    updated = append_lead_feedback(
+        db,
+        lead.id,
+        note=payload.note,
+        reason_code=payload.reason_code,
+        contact_method=payload.contact_method,
+        contact_attempt_count=payload.contact_attempt_count,
+        actor_user_id=user.id,
+    )
+    if not updated:
+        raise HTTPException(404, "Lead not found")
+    return {"ok": True, "lead_id": updated.id, "status": updated.buyer_status}
 
 
 # ── Mark sighting as unavailable ─────────────────────────────────────────

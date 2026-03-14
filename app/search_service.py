@@ -33,6 +33,7 @@ from .models import (
     Sighting,
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
+from .services.sourcing_leads import sync_leads_for_sightings
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -1036,6 +1037,12 @@ def _save_sightings(
 
     # Propagate vendor emails from search results to VendorContact records
     _propagate_vendor_emails(sightings, db)
+
+    # Write-through canonical sourcing leads + evidence without changing read paths.
+    try:
+        sync_leads_for_sightings(db, req, sightings)
+    except Exception:
+        logger.warning("Sourcing lead write-through failed for requirement {}", req.id, exc_info=True)
 
     # Tag propagation: propagate material card tags to vendor entities
     try:
