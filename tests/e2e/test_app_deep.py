@@ -165,9 +165,10 @@ class TestRequisitionList:
         """The requisition list should show table rows after loading."""
         goto_rfqs(authed_page, base_url)
         authed_page.wait_for_timeout(1000)
+        expect(authed_page.locator("#reqList")).to_be_visible()
         arrows = authed_page.locator("#reqList .ea")
-        count = arrows.count()
-        assert count >= 0  # Just verify no crash
+        empty = authed_page.locator("#reqList .empty")
+        assert arrows.count() > 0 or empty.count() > 0
 
     def test_new_requisition_modal_opens(self, authed_page, base_url):
         """Clicking '+ New RFQ' opens the modal."""
@@ -210,8 +211,9 @@ class TestRequisitionSubTabs:
 
     def test_drilldown_opens(self, authed_page, base_url):
         """Clicking expand arrow opens the drill-down row."""
-        if self._open_first_req(authed_page, base_url):
-            expect(authed_page.locator("tr.drow.open").first).to_be_visible()
+        if not self._open_first_req(authed_page, base_url):
+            pytest.skip("No requisitions available")
+        expect(authed_page.locator("tr.drow.open").first).to_be_visible()
 
     def test_drilldown_tabs_work(self, authed_page, base_url):
         """Drill-down sub-tabs are clickable and switch content."""

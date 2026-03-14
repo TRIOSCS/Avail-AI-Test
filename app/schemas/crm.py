@@ -310,6 +310,7 @@ class SiteContactUpdate(BaseModel):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
+    contact_status: str | None = None
     is_primary: bool | None = None
     is_active: bool | None = None
 

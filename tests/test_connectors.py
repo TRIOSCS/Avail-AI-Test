@@ -91,6 +91,15 @@ class TestCircuitBreaker:
 
 
 class TestBaseConnector:
+    def test_abstract_do_search_is_enforced(self):
+        from app.connectors.sources import BaseConnector
+
+        class MissingImpl(BaseConnector):
+            pass
+
+        with pytest.raises(TypeError):
+            MissingImpl()
+
     @pytest.mark.asyncio
     async def test_search_returns_results(self):
         from app.connectors.sources import BaseConnector, _breakers
@@ -1474,6 +1483,35 @@ class TestNexarConnector:
         results = c._parse_aggregate(results_data, "X")
         assert len(results) == 1
         assert results[0]["confidence"] == 3
+
+    def test_parse_full_handles_non_numeric_qty_price(self):
+        c = self._make_connector()
+        results_data = [
+            {
+                "part": {
+                    "mpn": "LM317T",
+                    "manufacturer": {"name": "TI"},
+                    "sellers": [
+                        {
+                            "company": {"name": "Arrow", "homepageUrl": ""},
+                            "isAuthorized": True,
+                            "offers": [
+                                {
+                                    "inventoryLevel": "100+",
+                                    "prices": [{"price": "N/A", "currency": "USD", "quantity": 1}],
+                                    "clickUrl": "",
+                                    "sku": "S1",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            }
+        ]
+        results = c._parse_full(results_data, "LM317T")
+        assert len(results) == 1
+        assert results[0]["qty_available"] is None
+        assert results[0]["unit_price"] is None
 
     @pytest.mark.asyncio
     async def test_empty_client_id_and_no_rest_key(self):

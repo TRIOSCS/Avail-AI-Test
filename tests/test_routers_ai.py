@@ -62,12 +62,12 @@ def test_ai_enabled_mike_only_allows_mike(mike_user):
         assert _ai_enabled(mike_user) is True
 
 
-def test_ai_enabled_mike_only_allows_all(other_user):
+def test_ai_enabled_mike_only_blocks_non_allowlisted_user(other_user):
     mock_settings = _make_settings("mike_only")
     with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
 
-        assert _ai_enabled(other_user) is True
+        assert _ai_enabled(other_user) is False
 
 
 def test_ai_enabled_mike_only_case_insensitive():
@@ -448,6 +448,39 @@ def test_parse_response_not_found(ai_client):
     assert resp.status_code == 404
 
 
+def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_requisition):
+    """Sales users cannot parse responses tied to foreign requisitions."""
+    from app.models import VendorResponse
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    vr = VendorResponse(
+        requisition_id=test_requisition.id,
+        vendor_name="Scope Vendor",
+        vendor_email="scope@vendor.com",
+        subject="RE: RFQ",
+        body="Offering parts",
+        received_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+        resp = c.post(f"/api/ai/parse-response/{vr.id}")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
+
+
 def test_parse_response_success(ai_client, db_session):
     """POST /api/ai/parse-response/{id} parses and returns structured offers."""
     from app.models import Requisition, VendorResponse
@@ -553,6 +586,32 @@ def test_save_parsed_offers(ai_client, db_session, ai_test_user):
     assert all(o.source == "ai_parsed" for o in offers)
     assert all(o.entered_by_id == ai_test_user.id for o in offers)
     assert all(o.status == "pending_review" for o in offers)
+
+
+def test_save_parsed_offers_scope_enforced_for_sales(db_session, sales_user, test_requisition):
+    """Sales users cannot save parsed offers onto foreign requisitions."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    payload = {
+        "requisition_id": test_requisition.id,
+        "response_id": None,
+        "offers": [{"vendor_name": "X", "mpn": "LM317T", "qty_available": 10, "unit_price": 1.0, "currency": "USD"}],
+    }
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c:
+        resp = c.post("/api/ai/save-parsed-offers", json=payload)
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -1095,6 +1154,29 @@ def test_parse_freeform_offer_success(ai_client, db_session):
     assert data["parsed"] is True
     assert data["template"]["vendor_name"] == "Acme Vendor"
     assert len(data["template"]["offers"]) == 2
+
+
+def test_parse_freeform_offer_scope_enforced_for_sales(db_session, sales_user, test_requisition):
+    """Sales users cannot build context from foreign requisitions."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+        resp = c.post(
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
+        )
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
 
 
 def test_apply_freeform_rfq_success(ai_client, db_session, ai_test_user):

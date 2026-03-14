@@ -106,7 +106,7 @@ jobs:
           TESTING: "0"
         run: |
           alembic upgrade head
-          alembic downgrade -1
+          alembic downgrade base
           alembic upgrade head
 
       - name: Frontend build

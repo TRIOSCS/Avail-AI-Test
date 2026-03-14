@@ -38,6 +38,7 @@ def create_entry(
     requirement_id: int | None = None,
     parent_id: int | None = None,
     assigned_to_ids: list[int] | None = None,
+    commit: bool = True,
 ) -> KnowledgeEntry:
     """Create a knowledge entry with optional entity linkage."""
     entry = KnowledgeEntry(
@@ -56,7 +57,10 @@ def create_entry(
         assigned_to_ids=assigned_to_ids or [],
     )
     db.add(entry)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(entry)
     logger.info("Knowledge entry created: id={} type={} source={}", entry.id, entry_type, source)
     return entry
@@ -286,6 +290,7 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
             mpn=mpn or None,
             vendor_card_id=getattr(offer, "vendor_card_id", None),
             requisition_id=getattr(offer, "requisition_id", None),
+            commit=False,
         )
         nested.commit()
         return entry

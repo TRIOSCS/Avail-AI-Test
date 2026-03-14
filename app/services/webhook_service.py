@@ -53,6 +53,9 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         logger.warning(f"No valid token for {user.email}, skipping subscription")
         return None
 
+    # Serialize subscription creation per-user to avoid duplicate active rows
+    db.query(User).filter(User.id == user.id).with_for_update().first()
+
     # Check for existing active subscription
     existing = (
         db.query(GraphSubscription)
@@ -123,10 +126,12 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
 
     gc = GraphClient(token)
     try:
-        await gc.post_json(
+        result = await gc.patch_json(
             f"/subscriptions/{sub.subscription_id}",
             {"expirationDateTime": new_expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")},
         )
+        if "error" in result:
+            raise RuntimeError(result.get("detail") or f"Graph error {result.get('error')}")
     except Exception as e:
         logger.error(f"Failed to renew subscription {sub.subscription_id}: {e}")
         # Subscription may have expired — delete and let scheduler recreate

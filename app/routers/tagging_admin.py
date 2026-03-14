@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_user
+from app.dependencies import require_admin as require_user
 from app.models.intelligence import MaterialCard
 from app.models.tags import EntityTag, MaterialTag, Tag
 

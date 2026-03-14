@@ -24,10 +24,11 @@ class SSEBroker:
 
     def __init__(self):
         self._channels: dict[str, set[asyncio.Queue]] = defaultdict(set)
+        self._queue_maxsize = 200
 
     def subscribe(self, channel: str) -> asyncio.Queue:
         """Create a new listener queue for the given channel."""
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=self._queue_maxsize)
         self._channels[channel].add(q)
         logger.debug(f"SSE: new subscriber on '{channel}' (total: {len(self._channels[channel])})")
         return q
@@ -42,6 +43,9 @@ class SSEBroker:
         listeners = list(self._channels.get(channel, set()))
         for q in listeners:
             try:
+                if q.full():
+                    # Keep queue bounded for slow subscribers.
+                    q.get_nowait()
                 q.put_nowait({"event": event, "data": data})
             except asyncio.QueueFull:
                 logger.warning("SSE: dropped event — queue full")

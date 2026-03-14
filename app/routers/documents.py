@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import get_quote_for_user, get_req_for_user, require_user
 from ..models import User
 from ..rate_limit import limiter
 
@@ -26,9 +26,13 @@ async def download_rfq_pdf(
     """Generate and download a PDF summary of a requisition."""
     from ..services.document_service import generate_rfq_summary_pdf
 
+    req = get_req_for_user(db, user, requisition_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
     try:
         loop = asyncio.get_running_loop()
-        pdf_bytes = await loop.run_in_executor(None, generate_rfq_summary_pdf, requisition_id, db)
+        pdf_bytes = await loop.run_in_executor(None, generate_rfq_summary_pdf, req.id, db)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -53,9 +57,13 @@ async def download_quote_pdf(
     """Generate and download a PDF report for a quote."""
     from ..services.document_service import generate_quote_report_pdf
 
+    quote = get_quote_for_user(db, user, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+
     try:
         loop = asyncio.get_running_loop()
-        pdf_bytes = await loop.run_in_executor(None, generate_quote_report_pdf, quote_id, db)
+        pdf_bytes = await loop.run_in_executor(None, generate_quote_report_pdf, quote.id, db)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:

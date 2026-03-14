@@ -14,7 +14,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_user
+from app.dependencies import require_admin, require_user
 from app.schemas.knowledge import (
     AnswerCreate,
     KnowledgeEntryCreate,
@@ -109,7 +109,7 @@ def create_entry_endpoint(
     return _entry_to_response(entry)
 
 
-@router.put("/{entry_id}")
+@router.put("/{entry_id:int}")
 def update_entry_endpoint(
     entry_id: int,
     payload: KnowledgeEntryUpdate,
@@ -129,7 +129,7 @@ def update_entry_endpoint(
     return _entry_to_response(entry)
 
 
-@router.delete("/{entry_id}")
+@router.delete("/{entry_id:int}")
 def delete_entry_endpoint(
     entry_id: int,
     db: Session = Depends(get_db),
@@ -165,14 +165,11 @@ def get_knowledge_config(
 def update_knowledge_config(
     payload: dict,
     db: Session = Depends(get_db),
-    user=Depends(require_user),
+    user=Depends(require_admin),
 ):
     """Update knowledge config (admin only). Body: {key: value, ...}."""
-    from app.config import settings
     from app.models.knowledge import KnowledgeConfig
 
-    if user.email not in (settings.ADMIN_EMAILS or "").split(","):
-        raise HTTPException(403, "Admin only")
     for key, value in payload.items():
         row = db.query(KnowledgeConfig).filter(KnowledgeConfig.key == key).first()
         if row:

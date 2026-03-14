@@ -55,6 +55,11 @@ class GraphClient:
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         return await self._request_with_retry("POST", url, json_data=json_data, timeout=timeout)
 
+    async def patch_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
+        """PATCH → parsed JSON or empty dict on 204."""
+        url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
+        return await self._request_with_retry("PATCH", url, json_data=json_data, timeout=timeout)
+
     async def get_all_pages(
         self,
         path: str,
@@ -142,6 +147,8 @@ class GraphClient:
             try:
                 if method == "GET":
                     resp = await http.get(url, params=params, headers=self._base_headers, timeout=timeout)
+                elif method == "PATCH":
+                    resp = await http.patch(url, json=json_data, headers=self._base_headers, timeout=timeout)
                 else:
                     resp = await http.post(url, json=json_data, headers=self._base_headers, timeout=timeout)
 

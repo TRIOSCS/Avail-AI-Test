@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_user
+from app.dependencies import require_admin as require_user
 from app.models import IcsSearchQueue, IcsWorkerStatus
 from app.models.auth import User
 from app.services.ics_worker.queue_manager import get_queue_stats, mark_status

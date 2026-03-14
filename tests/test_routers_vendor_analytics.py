@@ -11,6 +11,7 @@ Depends on: routers/vendor_analytics.py
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.models import MaterialCard, MaterialVendorHistory, Offer, Requisition, VendorCard
@@ -208,8 +209,9 @@ def test_parts_summary(db_session, test_user, test_vendor_card):
         resp = c.get(f"/api/vendors/{test_vendor_card.id}/parts-summary")
     app.dependency_overrides.clear()
 
-    # Accept 200 (PostgreSQL) or 500 (SQLite can't run array_agg)
-    assert resp.status_code in (200, 500)
+    if resp.status_code == 500:
+        pytest.xfail("SQLite test DB cannot execute PostgreSQL-only aggregate path")
+    assert resp.status_code == 200
 
 
 def test_parts_summary_not_found(db_session, test_user):

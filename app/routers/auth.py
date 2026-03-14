@@ -275,7 +275,8 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
     if not user:
         return JSONResponse({"connected": False, "users": []})
 
-    all_users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+    is_admin = (user.role or "") == "admin"
+    all_users = db.query(User).filter(User.refresh_token.isnot(None)).all() if is_admin else [user]
     users_status = []
     for u in all_users:
         status = "connected"

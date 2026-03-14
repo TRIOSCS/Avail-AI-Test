@@ -225,9 +225,12 @@ async def list_customer_contacts(
             "notes": c.notes,
             "is_primary": c.is_primary,
             "is_active": c.is_active,
+            "contact_status": c.contact_status or "new",
             "company_id": c.customer_site.company_id if c.customer_site else None,
             "company_name": c.customer_site.company.name if c.customer_site and c.customer_site.company else None,
             "site_id": c.customer_site_id,
+            "customer_site_id": c.customer_site_id,
+            "site_contact_id": c.id,
             "site_name": c.customer_site.site_name if c.customer_site else None,
             "contact_type": "customer",
             "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -262,6 +265,7 @@ async def list_site_contacts(
             "notes": c.notes,
             "is_primary": c.is_primary,
             "is_active": c.is_active,
+            "contact_status": c.contact_status or "new",
         }
         for c in contacts
     ]

@@ -26,7 +26,7 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
-from .models import Requisition, User
+from .models import Quote, Requisition, User
 
 # ── Authentication ────────────────────────────────────────────────────
 
@@ -121,6 +121,15 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
     q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
     if user.role == "sales":
         q = q.filter_by(created_by=user.id)
+    return q.first()
+
+
+def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> Quote:
+    """Get a single quote with role-based requisition ownership checks."""
+    load_opts = options or []
+    q = db.query(Quote).options(*load_opts).join(Requisition, Quote.requisition_id == Requisition.id).filter(Quote.id == quote_id)
+    if user.role == "sales":
+        q = q.filter(Requisition.created_by == user.id)
     return q.first()
 
 

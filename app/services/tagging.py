@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
 from app.services.prefix_lookup import lookup_manufacturer_by_prefix
@@ -205,20 +206,20 @@ def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> l
                 created.append(existing)
         else:
             try:
-                mt = MaterialTag(
-                    material_card_id=material_card_id,
-                    tag_id=tag_id,
-                    confidence=confidence,
-                    source=source,
-                    classified_at=now,
-                )
-                db.add(mt)
-                db.flush()
-                created.append(mt)
-            except Exception:
-                db.rollback()
-                # Race condition — another concurrent batch inserted first
-                pass
+                with db.begin_nested():
+                    mt = MaterialTag(
+                        material_card_id=material_card_id,
+                        tag_id=tag_id,
+                        confidence=confidence,
+                        source=source,
+                        classified_at=now,
+                    )
+                    db.add(mt)
+                    db.flush()
+                    created.append(mt)
+            except IntegrityError:
+                # Race condition — another concurrent batch inserted first.
+                continue
 
     if created:
         db.flush()

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from ..services.sse_broker import broker
 
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import get_req_for_user, require_user
 from ..models import Requisition, User
 from ..schemas.requisitions2 import (
     BulkActionName,
@@ -95,7 +95,7 @@ async def requisitions_page(
 
 
 @router.get("/stream")
-async def requisitions_stream(request: Request):
+async def requisitions_stream(request: Request, _user: User = Depends(require_user)):
     """SSE endpoint — pushes table-refresh events when data changes."""
 
     async def event_generator():
@@ -195,7 +195,7 @@ async def inline_edit_cell(
     user: User = Depends(require_user),
 ):
     """Return an inline edit form for a single cell."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    req = get_req_for_user(db, user, req_id, options=[])
     if not req:
         return HTMLResponse("Not found", status_code=404)
     users = get_team_users(db) if field == InlineEditField.owner else []
@@ -215,7 +215,7 @@ async def inline_save(
     user: User = Depends(require_user),
 ):
     """Save an inline edit and return the updated full row."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    req = get_req_for_user(db, user, req_id, options=[])
     if not req:
         return HTMLResponse("Not found", status_code=404)
 
@@ -277,7 +277,7 @@ async def row_action(
     user: User = Depends(require_user),
 ):
     """Execute a row-level action and return updated table."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    req = get_req_for_user(db, user, req_id, options=[])
     if not req:
         return HTMLResponse("Not found", status_code=404)
 
@@ -364,7 +364,10 @@ async def bulk_action(
         ctx = _table_context(request, filters, db, user)
         return templates.TemplateResponse("requisitions2/_table.html", ctx)
 
-    reqs = db.query(Requisition).filter(Requisition.id.in_(id_list)).all()
+    reqs_q = db.query(Requisition).filter(Requisition.id.in_(id_list))
+    if user.role == "sales":
+        reqs_q = reqs_q.filter(Requisition.created_by == user.id)
+    reqs = reqs_q.all()
     count = 0
 
     for req in reqs:

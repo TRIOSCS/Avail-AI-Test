@@ -333,3 +333,22 @@ def test_admin_status_includes_internal_count(client, db_session):
     assert "effective_coverage" in data
     assert "high_confidence_tags" in data
     assert data["internal_part_count"] >= 1
+
+
+def test_tagging_admin_requires_admin(db_session, sales_user, monkeypatch):
+    """Non-admin authenticated users are denied tagging admin routes."""
+    from fastapi.testclient import TestClient
+
+    from app import dependencies
+    from app.database import get_db
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: sales_user)
+    app.dependency_overrides[get_db] = _override_db
+    with TestClient(app) as c:
+        resp = c.get("/api/admin/tagging/status")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
