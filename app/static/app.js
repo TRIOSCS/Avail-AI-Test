@@ -1235,15 +1235,17 @@ function applyRoleGating() {
         navProspecting.style.display = canProspect ? '' : 'none';
     }
 
-    // ── Dashboard: hide Command Center from buyers ──
+    // ── Dashboard: hide Command Center and Scorecard from all users ──
     const navDashboard = document.getElementById('navDashboard');
     if (navDashboard) {
-        navDashboard.style.display = role === 'buyer' ? 'none' : '';
+        navDashboard.style.display = 'none';
     }
     const ccGroup = document.querySelector('.sb-cc-group');
-    if (ccGroup) ccGroup.style.display = role === 'buyer' ? 'none' : '';
+    if (ccGroup) ccGroup.style.display = 'none';
+    const ccGradient = document.querySelector('.sb-top-gradient-cc');
+    if (ccGradient) ccGradient.style.display = 'none';
     const perfNav = document.getElementById('navScorecard');
-    if (perfNav) perfNav.style.display = '';
+    if (perfNav) perfNav.style.display = 'none';
 
     // ── Settings: admin only ──
     const navSettings = document.getElementById('navSettings');
