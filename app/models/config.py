@@ -47,7 +47,7 @@ class SystemConfig(Base):
 
     __tablename__ = "system_config"
     id = Column(Integer, primary_key=True)
-    key = Column(String(100), unique=True, nullable=False, index=True)
+    key = Column(String(100), unique=True, nullable=False)
     value = Column(Text, nullable=False)
     description = Column(String(500))
     updated_by = Column(String(255))

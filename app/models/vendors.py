@@ -23,7 +23,7 @@ from .base import Base
 class VendorCard(Base):
     __tablename__ = "vendor_cards"
     id = Column(Integer, primary_key=True)
-    normalized_name = Column(String(255), nullable=False, unique=True, index=True)
+    normalized_name = Column(String(255), nullable=False, unique=True)
     display_name = Column(String(255), nullable=False)
     domain = Column(String(255), index=True)
     domain_aliases = Column(JSON, default=list)

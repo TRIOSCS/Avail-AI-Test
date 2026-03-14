@@ -24,7 +24,7 @@ from .base import Base
 class MaterialCard(Base):
     __tablename__ = "material_cards"
     id = Column(Integer, primary_key=True)
-    normalized_mpn = Column(String(255), nullable=False, unique=True, index=True)
+    normalized_mpn = Column(String(255), nullable=False, unique=True)
     display_mpn = Column(String(255), nullable=False)
     manufacturer = Column(String(255))
     description = Column(String(1000))

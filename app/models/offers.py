@@ -187,7 +187,7 @@ class VendorResponse(Base):
     needs_action = Column(Boolean, default=False)
     action_hint = Column(String(255))
     status = Column(String(50), default="new")
-    message_id = Column(String(255), unique=True, index=True, nullable=True)
+    message_id = Column(String(255), unique=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched

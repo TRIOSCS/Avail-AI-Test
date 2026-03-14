@@ -202,14 +202,24 @@ CLAUDE.md has deploy rules but no pre-migration backup procedure. Add `pg_dump` 
 
 ## Low Priority / Tech Debt
 
-### 25. MVP Mode Flag
-`mvp_mode: bool = True` disables several features. Decide: flip to `False` or remove dead code.
+### 25. MVP Mode Flag — DEFERRED
+`mvp_mode: bool = True` disables several features (apollo_sync, enrichment, performance routers).
+**Decision**: Keep as-is. The flag is actively used with a design spec (`docs/superpowers/specs/2026-03-13-mvp-strip-down-design.md`). Set `MVP_MODE=false` in env when ready to enable enrichment features.
 
-### 26. Buy Plan V1 Deprecation
-`buy_plan_v1_enabled: bool = False` — if V1 is fully retired, remove its code paths.
+### 26. Buy Plan V1 Deprecation — DEFERRED
+`buy_plan_v1_enabled: bool = False` is defined but never checked. However, V1 `BuyPlan` model is still actively used by:
+- `vendor_scorecard.py` and `vendor_score.py` for PO conversion rate history
+- `buyplan_po.py` for PO verification on historical records
+- `inventory_jobs.py` for auto-completing stuck V1 plans
+**Decision**: Keep V1 code until all historical V1 plans reach terminal status. Migration 076 handles V1→V3 data migration. The V1 router already returns 410 Gone for mutations.
 
-### 27. Redundant `index=True` on Unique Columns
-5 models have both `unique=True` and `index=True` — the index is implicit with unique. Minor cleanup.
+### 27. Redundant `index=True` on Unique Columns — FIXED
+Removed redundant `index=True` from 5 columns that already have `unique=True` (SQLAlchemy auto-creates the index):
+- `system_config.key`
+- `intel_cache.cache_key`
+- `material_cards.normalized_mpn`
+- `offers.message_id` (InboundEmail)
+- `vendor_cards.normalized_name`
 
 ---
 

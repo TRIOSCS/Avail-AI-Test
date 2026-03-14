@@ -186,7 +186,7 @@ class IntelCache(Base):
 
     __tablename__ = "intel_cache"
     id = Column(Integer, primary_key=True)
-    cache_key = Column(String(500), nullable=False, unique=True, index=True)
+    cache_key = Column(String(500), nullable=False, unique=True)
     data = Column(JSON, nullable=False)
     ttl_days = Column(Integer, nullable=False, default=7)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
