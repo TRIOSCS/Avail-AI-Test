@@ -1,0 +1,194 @@
+title: SourcingLead
+type: object
+required:
+- lead_id
+- part_number_requested
+- vendor_name
+- vendor_name_normalized
+- primary_source_type
+- primary_source_name
+- confidence_score
+- confidence_band
+- reason_summary
+- buyer_status
+- created_at
+- updated_at
+properties:
+  lead_id:
+    type: string
+  part_number_requested:
+    type: string
+  part_number_matched:
+    type:
+    - string
+    - 'null'
+  match_type:
+    type: string
+    enum:
+    - exact
+    - normalized
+    - fuzzy
+    - cross_ref
+  vendor_name:
+    type: string
+  vendor_name_normalized:
+    type: string
+  canonical_vendor_id:
+    type:
+    - string
+    - 'null'
+  primary_source_type:
+    type: string
+    enum:
+    - api
+    - marketplace
+    - salesforce_history
+    - avail_history
+    - web_ai
+  primary_source_name:
+    type: string
+  source_reference:
+    type:
+    - string
+    - 'null'
+  source_first_seen_at:
+    type:
+    - string
+    - 'null'
+    format: date-time
+  source_last_seen_at:
+    type:
+    - string
+    - 'null'
+    format: date-time
+  contact_name:
+    type:
+    - string
+    - 'null'
+  contact_email:
+    type:
+    - string
+    - 'null'
+  contact_phone:
+    type:
+    - string
+    - 'null'
+  contact_url:
+    type:
+    - string
+    - 'null'
+  location:
+    type:
+    - string
+    - 'null'
+  notes_for_buyer:
+    type:
+    - string
+    - 'null'
+  suggested_next_action:
+    type:
+    - string
+    - 'null'
+  confidence_score:
+    type: number
+    minimum: 0
+    maximum: 100
+  confidence_band:
+    type: string
+    enum:
+    - high
+    - medium
+    - low
+  freshness_score:
+    type:
+    - number
+    - 'null'
+    minimum: 0
+    maximum: 100
+  source_reliability_score:
+    type:
+    - number
+    - 'null'
+    minimum: 0
+    maximum: 100
+  contactability_score:
+    type:
+    - number
+    - 'null'
+    minimum: 0
+    maximum: 100
+  historical_success_score:
+    type:
+    - number
+    - 'null'
+    minimum: 0
+    maximum: 100
+  reason_summary:
+    type: string
+  risk_flags:
+    type: array
+    items:
+      type: string
+  evidence_count:
+    type: integer
+    minimum: 0
+  corroborated:
+    type: boolean
+  vendor_safety_score:
+    type:
+    - number
+    - 'null'
+    minimum: 0
+    maximum: 100
+  vendor_safety_band:
+    type:
+    - string
+    - 'null'
+    enum:
+    - low_risk
+    - medium_risk
+    - high_risk
+    - unknown
+    - null
+  vendor_safety_summary:
+    type:
+    - string
+    - 'null'
+  vendor_safety_flags:
+    type: array
+    items:
+      type: string
+  vendor_safety_last_checked_at:
+    type:
+    - string
+    - 'null'
+    format: date-time
+  buyer_status:
+    type: string
+    enum:
+    - new
+    - contacted
+    - replied
+    - no_stock
+    - has_stock
+    - bad_lead
+    - do_not_contact
+  buyer_owner_user_id:
+    type:
+    - string
+    - 'null'
+  last_buyer_action_at:
+    type:
+    - string
+    - 'null'
+    format: date-time
+  buyer_feedback_summary:
+    type:
+    - string
+    - 'null'
+  created_at:
+    type: string
+    format: date-time
+  updated_at:
+    type: string
+    format: date-time

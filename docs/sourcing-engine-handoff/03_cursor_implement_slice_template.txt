@@ -1,0 +1,11 @@
+Implement only the approved sourcing-engine slice.
+
+Rules:
+- smallest possible diff
+- do not widen scope
+- preserve current working behavior unless the slice explicitly changes it
+- explain changes in plain English
+- run relevant tests/checks after editing
+- summarize files changed, why they changed, and what I should review next
+
+Then stop and wait for approval.

@@ -1,0 +1,22 @@
+Work only on the sourcing-engine buyer UI.
+
+Target screens:
+- Sourcing Results View
+- Lead Detail View
+- Buyer Follow-Up Queue
+- Safety Review Block
+
+Use the planning bundle as product source of truth.
+
+Rules:
+- do not redesign unrelated UI
+- prefer extending existing patterns
+- keep confidence and safety visually separate
+- preserve reason summary and source attribution
+- keep quick actions simple
+
+After editing:
+- summarize files changed
+- explain the UI flow in plain English
+- run relevant checks
+- stop and wait

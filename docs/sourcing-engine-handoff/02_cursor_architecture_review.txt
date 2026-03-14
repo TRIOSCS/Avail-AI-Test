@@ -1,0 +1,20 @@
+Use the planning files in this bundle as the target design.
+
+Do not edit code yet.
+
+Review the current sourcing-engine implementation against:
+- 01_master_planning_blueprint.md
+- schemas/lead.schema.yaml
+- schemas/evidence.schema.yaml
+- notes/01_scoring_and_ranking.md
+- notes/02_deduplication.md
+- notes/03_source_connector_guidance.md
+
+Output:
+1. What already matches the plan
+2. What is missing
+3. What is risky to change
+4. Recommended phased implementation plan in small slices
+5. Suggested order of work
+
+Then stop and wait.

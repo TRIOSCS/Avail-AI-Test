@@ -1,0 +1,28 @@
+You are helping me discover the sourcing engine in Avail.
+
+I am a beginner. Explain everything in plain English.
+
+Mission:
+Map the current sourcing engine implementation and identify what already exists versus what must be built.
+
+Rules:
+- Do not edit code yet
+- Work only on sourcing-engine-related files and direct dependencies
+- List exact files, functions, routers, services, models, schemas, jobs, and UI components
+- Identify what already supports:
+  - sourcing lead generation
+  - source attribution
+  - scoring/ranking
+  - deduplication
+  - buyer workflow
+  - feedback loop
+  - safety review
+- Identify risks, dead code, incomplete areas, and blockers for human testing
+
+Output:
+1. File map
+2. Current behavior map
+3. Existing gaps vs target design
+4. Recommended smallest first implementation slice
+
+Then stop and wait.

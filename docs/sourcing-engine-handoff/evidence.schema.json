@@ -1,0 +1,122 @@
+{
+  "title": "LeadEvidence",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "lead_id",
+    "signal_type",
+    "source_type",
+    "source_name",
+    "created_at"
+  ],
+  "properties": {
+    "evidence_id": {
+      "type": "string"
+    },
+    "lead_id": {
+      "type": "string"
+    },
+    "signal_type": {
+      "type": "string"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "api",
+        "marketplace",
+        "salesforce_history",
+        "avail_history",
+        "web_ai",
+        "safety_review",
+        "buyer_feedback"
+      ]
+    },
+    "source_name": {
+      "type": "string"
+    },
+    "source_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "part_number_observed": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vendor_name_observed": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "observed_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "observed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "freshness_age_days": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "weight": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "confidence_impact": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "explanation": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_reliability_band": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        null
+      ]
+    },
+    "verification_state": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "raw",
+        "inferred",
+        "buyer_confirmed",
+        "rejected",
+        null
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+Using the planning bundle and the actual changed code, create:
+1. a human testing checklist
+2. a click-by-click smoke test
+3. a list of likely bugs or regressions
+4. a list of ambiguous behaviors needing product decision
+
+Keep it plain English and tied to real code paths.

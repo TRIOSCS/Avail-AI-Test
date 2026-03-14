@@ -1,0 +1,11 @@
+Perform a sourcing-engine cleanup pass only after functional work is complete.
+
+Rules:
+- identify dead code first
+- confirm it is unused before removing it
+- do not delete code just because it looks old
+- preserve source attribution and buyer workflow behavior
+- run relevant checks after cleanup
+- summarize what was removed and why
+
+Then stop and wait.
