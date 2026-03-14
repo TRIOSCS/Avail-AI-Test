@@ -1,269 +1,364 @@
-# AvailAI Code Review — March 2026
+# AVAIL AI — Full Code Review
+
+**Date:** 2026-03-14
+**Scope:** All layers — models, services, routers, schemas, connectors, frontend, tests, security, deployment
+**Codebase:** 698 Python files, 12 JS files, 83 HTML templates, 76 Alembic migrations
+
+---
 
 ## Executive Summary
 
-AvailAI is a **well-structured, production-grade** electronic component sourcing platform. The codebase is large (~740 Python files, 40K lines of services, 81 ORM models, 60 Alembic migrations) and demonstrates solid architecture. The review below identifies areas for improvement ordered by priority.
+The AVAIL AI codebase is a substantial, feature-rich platform with solid fundamentals — Alembic-managed migrations, structured logging via Loguru, proper async patterns, and good test coverage (8,000+ tests). However, the review uncovered **12 Critical**, **31 High**, **53 Medium**, and **35 Low** issues across all layers. The most urgent issues are security-related: an agent API key that bypasses normal auth on all endpoints, missing auth on SSE/HTMX endpoints, XSS in templates, and several SQL LIKE injection vectors.
 
-**Overall Grade: B+** — Strong foundation with a few areas needing attention before scaling.
-
----
-
-## Critical Issues (Fix Soon)
-
-### 1. Agent API Key Timing Attack Vulnerability
-**File:** `app/dependencies.py:50-55`
-**Severity:** CRITICAL
-
-The agent API key comparison uses `==` (string equality), which is vulnerable to timing attacks:
-```python
-if agent_key and settings.agent_api_key and agent_key == settings.agent_api_key:
-```
-
-**Fix:** Use `secrets.compare_digest()` for constant-time comparison. Also add audit logging when the agent key is used.
-
-### 2. SQL Injection Risk in `vendor_analytics.py`
-**File:** `app/routers/vendor_analytics.py:185-238`
-**Severity:** HIGH
-
-The `mpn_filter` variable is inserted into an f-string SQL query via `sqltext(f"...")`. While the filter string itself uses parameterized `:mpn_pattern`, the f-string interpolation of `{mpn_filter}` means the query structure changes based on runtime input. Currently safe (hardcoded string), but fragile — a future developer could introduce injection.
-
-**Fix:** Refactor to always include the WHERE clause and use a parameter that's either `%` (match all) or the actual filter value, eliminating the f-string entirely.
-
-### 3. Silent FK Reassignment Failure in Vendor Merge
-**File:** `app/services/vendor_merge_service.py:86-94`
-**Severity:** HIGH
-
-FK reassignment failures during vendor merge are silently caught with `except Exception` and logged at `debug` level. If one FK table fails, related records become orphaned with no rollback.
-
-**Fix:** Wrap the entire merge in a single transaction. Raise on failure instead of silently continuing.
-
-### 4. Password Hashing Uses SHA-256
-**File:** `app/startup.py:63-80`
-**Severity:** MEDIUM
-
-Default user creation uses `hashlib.sha256` for password hashing. SHA-256 is not suitable for passwords — it's too fast and vulnerable to brute force.
-
-**Fix:** Switch to `bcrypt` or `argon2`. Only affects the `ENABLE_PASSWORD_LOGIN` code path, so limited blast radius.
-
-### 5. Broad Exception Catching in Services
-**Severity:** MEDIUM
-
-92 instances of `except Exception` across 30 service files. Key offenders:
-- `enrichment_orchestrator.py` (8), `buyplan_notifications.py` (6), `nc_worker/session_manager.py` (6)
-
-**Fix:** Replace with specific exception types. Where broad catch is intentional, ensure `logger.exception()` is used.
-
-### 6. Missing Input Validation on Query Parameters
-**File:** `app/routers/vendor_analytics.py:42-44`
-**Severity:** MEDIUM
-
-`int()` conversion on query params with no try/except — non-numeric input causes 500 instead of 400.
-
-**Fix:** Use Pydantic `Query()` params with type constraints.
-
-### 7. Token Refresh Blocks HTTP Requests
-**File:** `app/dependencies.py:130-166`
-**Severity:** MEDIUM
-
-`require_fresh_token` calls async token refresh inside the HTTP request handler, causing latency spikes when tokens need refresh.
-
-**Fix:** Consider background refresh via scheduler with a tighter buffer window.
-
-### 8. No Rate Limiting on Password Login
-**File:** `app/routers/auth.py:216`
-**Severity:** HIGH
-
-The password login endpoint has no brute-force protection. While `ENABLE_PASSWORD_LOGIN` is off by default, when enabled there's no slowapi decorator or lockout mechanism.
-
-**Fix:** Add `@limiter.limit("5/minute")` to the password login endpoint.
-
-### 9. Retry-After Header Not Capped
-**File:** `app/connectors/sources.py:153`
-**Severity:** MEDIUM
-
-`max(float(header), 1.0)` has no upper bound. A malicious or buggy API returning `Retry-After: 999999` would block the connector for 11+ days.
-
-**Fix:** Cap at 300 seconds: `min(max(float(header), 1.0), 300.0)`.
-
-### 10. XSS via `javascript:` URLs in HTML Sanitizer
-**File:** `app/static/app.js:458`
-**Severity:** MEDIUM
-
-The `sanitizeRichHtml` function whitelists `href` attributes on `<a>` tags but doesn't validate the URL scheme. `<a href="javascript:alert(1)">` bypasses CSP in some browsers.
-
-**Fix:** Validate that `href` starts with `http://`, `https://`, or `/`.
-
-### 11. API Keys Logged in URL Parameters
-**File:** `app/connectors/mouser.py:42`
-**Severity:** MEDIUM
-
-Mouser connector sends API key as a URL query parameter (`params={"apiKey": self.api_key}`), which appears in access logs, error traces, and Sentry events.
-
-**Fix:** Switch to header-based auth if supported, or mask keys in log output.
+| Severity | Count | Top Concern |
+|----------|-------|-------------|
+| Critical | 12 | Security bypasses, data loss risks, XSS |
+| High | 31 | Unbounded queries, missing validation, business logic in routers |
+| Medium | 53 | Broad exception handling, missing timestamps, inconsistencies |
+| Low | 35 | Naming conventions, hardcoded values, minor cleanup |
 
 ---
 
-## Architecture Strengths
+## CRITICAL Issues (Fix Immediately)
 
-1. **Clean layer separation** — Thin routers → services → models. No business logic in route handlers.
-2. **Alembic discipline** — 60 migrations, strict rules enforced in CLAUDE.md. No raw DDL in startup.
-3. **Auth middleware** — Well-designed dependency chain: `get_user` → `require_user` → `require_buyer/admin/sales`.
-4. **Agent API key auth** — Service-to-service auth via `x-agent-key` header is a good pattern.
-5. **UTC everywhere** — `UTCDateTime` type decorator + event listener ensures timezone consistency.
-6. **Database tuning** — Connection pool (20+40 overflow), statement timeout (30s), lock timeout (5s), `pool_pre_ping`.
-7. **Security headers** — CSRF, CSP, GZip, Sentry scrubbing of sensitive fields.
-8. **Rate limiting** — slowapi with configurable limits (120/min default, 20/min for search).
-9. **Comprehensive config** — 80+ settings with validators, CSV parsing, fail-fast on bad values.
-10. **Test suite** — 314 test files, 8,605 test functions using in-memory SQLite with auth overrides.
+### SEC-1: Agent API key bypasses all auth
+- **File:** `app/dependencies.py` (lines 52–55)
+- **Issue:** `require_user` accepts an `x-agent-key` header as an alternative to session auth. If the header matches `settings.agent_api_key`, the request is treated as `agent@availai.local` for ALL endpoints — including admin endpoints. If this key is weak or leaked, an attacker has full access.
+- **Fix:** Create a dedicated `require_agent` dependency for agent-only routes. Do not let the agent key satisfy `require_user` on normal user endpoints.
 
----
+### SEC-2: Missing auth on SSE stream endpoint
+- **File:** `app/routers/requisitions2.py` (lines 97–125)
+- **Issue:** `GET /requisitions2/stream` has no auth dependency. Anyone can subscribe to requisition table-refresh events and potentially see real-time data changes.
+- **Fix:** Add `user: User = Depends(require_user)`.
 
-## Data Model & Schema Issues
+### SEC-3: Missing role-based access on requisitions2 mutations
+- **File:** `app/routers/requisitions2.py` (lines 197, 209, 271, 348)
+- **Issue:** `inline_edit_cell`, `inline_save`, `row_action`, and `bulk_action` do not verify the user owns the requisition. A sales user could edit/archive/claim requisitions they don't own.
+- **Fix:** Add `get_req_for_user(db, user, req_id)` checks before mutations.
 
-### 12. Missing Index on `material_cards.deleted_at`
-**File:** `app/models/intelligence.py:49`
-**Severity:** HIGH
+### SEC-4: XSS in Jinja template via JavaScript context injection
+- **File:** `app/templates/partials/sourcing/results.html` (line 9)
+- **Issue:** `filter` from the query string is injected into a JS string without JS-safe escaping: `x-data="{ filter: '{{ filter or 'all' }}' }"`. A value like `filter=all';alert(1);//` breaks out of the string.
+- **Fix:** Use `{{ (filter or 'all') | tojson }}` to produce a JSON-safe string.
 
-Soft-delete queries (`WHERE deleted_at IS NULL`) run on every MaterialCard lookup without an index — full table scan.
+### SEC-5: CSRF token missing on direct fetch call
+- **File:** `app/static/app.js` (lines 576–581)
+- **Issue:** `logCallInitiated` uses raw `fetch()` instead of `apiFetch()`, so the CSRF header is not sent.
+- **Fix:** Use `apiFetch()` or manually include the CSRF header.
 
-**Fix:** Add migration with `Index("ix_material_cards_deleted_at", "deleted_at")`.
+### SEC-6: OneDrive path traversal
+- **File:** `app/routers/crm/offers.py` (lines 798–816)
+- **Issue:** The `path` parameter in `browse_onedrive` is user-controlled and passed directly to Graph API as `f"/me/drive/root:/{path}:/children"`. No validation for `..` or other traversal sequences.
+- **Fix:** Validate and sanitize `path` — reject `..`, leading slashes, and other unsafe segments.
 
-### 13. 101 Relationships Missing `back_populates`
-**Severity:** MEDIUM
+### SEC-7: Sensitive data in OAuth error logs
+- **File:** `app/routers/auth.py` (lines 117–119)
+- **Issue:** `logger.error(f"Azure token exchange returned {resp.status_code}: {resp.text[:500]}")` can log tokens or secrets from Azure's error responses.
+- **Fix:** Log only the status code and a generic message.
 
-Many relationships are one-way (no inverse). Worst offenders: `offers.py` (4 User FKs), `buy_plan.py` (6 User FKs), `strategic.py` (2 using deprecated `backref=`).
+### SEC-8: Default database password in deployment
+- **Files:** `scripts/deploy.sh` (line 155), `docker-compose.yml` (lines 23–24)
+- **Issue:** `POSTGRES_PASSWORD` defaults to `availai`. The deploy script does not set a strong password.
+- **Fix:** Require a strong `POSTGRES_PASSWORD` in deploy and fail if missing.
 
-**Fix:** Replace `backref=` with explicit `back_populates` on both sides. Prioritize models used in list endpoints.
+### DATA-1: Inbox poll rollback discards entire batch
+- **File:** `app/email_service.py` (lines 536–540)
+- **Issue:** In `poll_inbox()`, when saving a single `VendorResponse` fails, `db.rollback()` rolls back the entire transaction, discarding ALL previously added `VendorResponse` and `ProcessedMessage` rows in that batch.
+- **Fix:** Use `db.begin_nested()` (savepoint) per message so only the failing message is rolled back.
 
-### 14. Inconsistent Cascade Rules on BuyPlanLine
-**File:** `app/models/buy_plan.py:209-210`
-**Severity:** MEDIUM
+### DATA-2: Quote number race condition
+- **File:** `app/services/crm_service.py` (function `next_quote_number()`, lines 15–27)
+- **Issue:** Two concurrent requests can read the same `last` quote number and generate duplicates. No locking mechanism.
+- **Fix:** Use `SELECT ... FOR UPDATE`, an advisory lock, or a database sequence.
 
-`requirement_id` and `offer_id` use `ondelete="SET NULL"` — when a Requirement is deleted, orphaned BuyPlanLine rows remain with NULL FK. Should be CASCADE or handled by application cleanup.
+### MODEL-1: Partial index uses unbound Column
+- **Files:** `app/models/ics_search_queue.py` (lines 46, 52), `app/models/nc_search_queue.py` (lines 46, 52)
+- **Issue:** `postgresql_where=(Column("status") == "queued")` creates a new, unbound `Column` object, which can produce incorrect SQL for the partial index.
+- **Fix:** Reference the model's actual column: `postgresql_where=(status == "queued")`.
 
-### 15. Missing Unique Constraint on `site_contacts`
-**File:** `app/models/crm.py:149-188`
-**Severity:** MEDIUM
-
-No unique constraint on `(customer_site_id, email)` — duplicate contacts per site are allowed.
-
-### 16. Denormalized Count Columns Allow NULL
-**File:** `app/models/crm.py:54-55`
-**Severity:** LOW
-
-`site_count` and `open_req_count` have `default=0` and `server_default="0"` but are nullable. Add `nullable=False`.
-
----
-
-## Test & Schema Gaps
-
-### 17. No N+1 Query Tests
-**Severity:** MEDIUM
-
-Zero tests verify eager-loading behavior. List endpoints for Offers, Requisitions, and ActivityLog likely have N+1 patterns under load.
-
-**Fix:** Add pytest hook using `sqlalchemy.event` to assert max query count per endpoint.
-
-### 18. No Cascade Delete Tests
-**Severity:** MEDIUM
-
-No tests verify that deleting a Requisition properly cascades through Requirements → Sightings → Offers → Quotes.
-
-### 19. Schemas Missing `from_attributes=True`
-**Severity:** LOW
-
-Only 6 of 24 Pydantic schema files have `ConfigDict(from_attributes=True)`. ORM → Pydantic serialization breaks silently without it.
-
-### 20. No Alembic Downgrade Tests
-**Severity:** MEDIUM
-
-76 migrations have `downgrade()` functions but none are tested. Production rollbacks could fail silently.
+### MODEL-2: Orphaned SelfHealLog model breaks imports
+- **File:** `app/models/self_heal_log.py`
+- **Issue:** Contains only "REMOVED" text, but `scripts/ux_repair_engine.py` still imports `SelfHealLog`. Import will crash.
+- **Fix:** Either restore the model or update/remove the script.
 
 ---
 
-## Medium Priority Improvements
+## HIGH Issues (Fix Soon)
 
-### 21. Test Execution Verification
-314 test files with 8,605 test functions exist. Verify they pass:
-```bash
-pytest tests/ -x --timeout=60 -q
-```
+### Security
 
-### 22. Service File Count is High (106 files)
-Group into subdirectories by domain (sourcing, crm, rfq, enrichment, buyplan, intelligence). Some already exist (`ics_worker/`, `nc_worker/`).
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 1 | SEC-9 | `app/routers/tags.py:32` | `Tag.name.ilike(f"%{q}%")` — user input `q` not escaped with `escape_like()` |
+| 2 | SEC-10 | `app/services/strategic_vendor_service.py:274` | `ilike(f"%{search}%")` without `escape_like()` |
+| 3 | SEC-11 | `app/services/vendor_affinity_service.py:179` | `ilike(f"%{category}%")` without `escape_like()` (AI-derived input) |
+| 4 | SEC-12 | `app/services/response_analytics.py:81` | `ilike(f"%@{domain}")` without `escape_like()` |
+| 5 | SEC-13 | `app/routers/auth.py:271-312` | `/auth/status` exposes all users' M365 info to any authenticated user |
+| 6 | SEC-14 | `app/cache/intel_cache.py:54` | Logs full Redis URL which may include auth credentials |
+| 7 | SEC-15 | `app/routers/htmx_views.py:65-70` | `v2_page` uses `get_user` instead of `require_user` — auth not enforced by FastAPI |
 
-### 23. No CI/CD Pipeline
-No `.github/workflows/` found. Add GitHub Actions for pytest, ruff, and Alembic drift check.
+### Data Integrity
 
-### 24. Missing Backup/Restore Documentation
-CLAUDE.md has deploy rules but no pre-migration backup procedure. Add `pg_dump` step before migrations.
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 8 | DATA-3 | `app/email_service.py:387-396` | Unbounded query loads ALL contacts from last 180 days with no LIMIT |
+| 9 | DATA-4 | `app/services/ownership_service.py:47-54` | Unbounded query loads ALL owned companies with no LIMIT |
+| 10 | DATA-5 | `app/services/enrichment_orchestrator.py:325-343` | Contact enrichment not implemented — `_load_entity` only supports company/vendor |
+| 11 | DATA-6 | `app/services/enrichment_orchestrator.py:346-348` | `setattr(entity, field, value)` with field from Claude output — no allowlist |
+
+### Architecture
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 12 | ARCH-1 | `app/routers/rfq.py:279-756` | Large business logic blocks in router (activity grouping, RFQ prep, enrichment) |
+| 13 | ARCH-2 | Most routers | Direct `db.query()` calls in routers instead of services |
+| 14 | ARCH-3 | `app/routers/auth.py:144-312` | Auth logic and DB access in router — should be in `services/auth_service.py` |
+
+### Validation
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 15 | VAL-1 | Multiple routers | `body: dict` used instead of Pydantic schemas (rfq.py, core.py, requirements.py, prospect_suggested.py, knowledge.py, admin/system.py, admin/data_ops.py) |
+| 16 | VAL-2 | `app/schemas/crm.py:424` | `BuyPlanApprove.line_items: list[dict]` — untyped |
+| 17 | VAL-3 | `app/schemas/ai.py:235` | `ApplyFreeformRfqRequest.requirements: list[dict]` — allows arbitrary dicts |
+| 18 | VAL-4 | Multiple schemas | `extra="allow"` on many schemas weakens validation contracts |
+
+### Connectors
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 19 | CONN-1 | `app/connectors/sourcengine.py:33-38` | No handling for 429, 401, 403, 5xx, or JSON parse errors |
+| 20 | CONN-2 | `app/connectors/element14.py:54-58` | No 429, 401, 403, or 5xx handling; `r.json()` not wrapped in try/except |
+| 21 | CONN-3 | `app/connectors/ebay.py:24-41` | OAuth token never expires — cache reused indefinitely |
+| 22 | CONN-4 | `app/connectors/sources.py:437-439` | BrokerBin: no 401/403/429/5xx handling |
+
+### Frontend
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 23 | FE-1 | `app/static/app.js:92-114` | `renderResponsiveTable` can inject unescaped HTML via format functions |
+| 24 | FE-2 | `app/static/touch.js:127-139` | `prospectDrawer` missing from close map — handler call fails silently |
+
+### Models
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 25 | MODEL-3 | `app/models/config.py:65` | `GraphSubscription.user_id` FK missing `ondelete` |
+| 26 | MODEL-4 | `app/models/vendors.py:157` | `VendorReview.vendor_card_id` FK missing `ondelete` |
+| 27 | MODEL-5 | `app/models/auth.py:45` | `User` model missing `updated_at` column |
+
+### Tests
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 28 | TEST-1 | Multiple test files | Using `asyncio.get_event_loop().run_until_complete()` instead of `@pytest.mark.asyncio` |
+
+### Deployment
+
+| # | ID | File | Issue |
+|---|----|------|-------|
+| 29 | DEPLOY-1 | `scripts/deploy.sh:181-185` | Deploy script overwrites Caddyfile, dropping security headers |
+| 30 | DEPLOY-2 | `Dockerfile:54` | `--forwarded-allow-ips "*"` trusts ALL proxies for `X-Forwarded-*` headers |
+| 31 | DEPLOY-3 | `app/routers/auth.py:190-198` | Password login can be enabled in production with `ENABLE_PASSWORD_LOGIN=true` |
 
 ---
 
-## Low Priority / Tech Debt
+## MEDIUM Issues (Plan to Fix)
 
-### 25. MVP Mode Flag
-`mvp_mode: bool = True` disables several features. Decide: flip to `False` or remove dead code.
+### Models — Missing Timestamps
 
-### 26. Buy Plan V1 Deprecation
-`buy_plan_v1_enabled: bool = False` — if V1 is fully retired, remove its code paths.
+Many models are missing `created_at` and/or `updated_at` columns (project rules require both):
 
-### 27. Redundant `index=True` on Unique Columns
-5 models have both `unique=True` and `index=True` — the index is implicit with unique. Minor cleanup.
+| Model | File | Missing |
+|-------|------|---------|
+| ApiUsageLog | `models/config.py` | both |
+| GraphSubscription | `models/config.py` | `updated_at` |
+| DiscoveryBatch | `models/discovery_batch.py` | `updated_at` |
+| EmailIntelligence | `models/email_intelligence.py` | `updated_at` |
+| EnrichmentJob, EnrichmentQueue | `models/enrichment.py` | `updated_at` |
+| ErrorReport | `models/error_report.py` | `updated_at` |
+| IcsClassificationCache, IcsSearchLog | `models/ics_*.py` | both |
+| NcClassificationCache, NcSearchLog | `models/nc_*.py` | both |
+| VendorMetricsSnapshot | `models/performance.py` | `updated_at` |
+| QuoteLine, BuyPlan | `models/quotes.py` | both / `updated_at` |
+| VendorContact | `models/vendors.py` | both |
+| Tag, MaterialTag, EntityTag, TagThresholdConfig | `models/tags.py` | various |
+| ProcessedMessage | `models/pipeline.py` | uses composite PK without `id` |
+| SyncState, ColumnMappingCache, PendingBatch | `models/pipeline.py` | various |
+
+### Services — Error Handling
+
+| # | File | Issue |
+|---|------|-------|
+| 1 | `app/search_service.py:94-127` | `except Exception: pass` in Redis/cache operations hides all errors |
+| 2 | `app/email_service.py` (multiple) | 8+ `except Exception` blocks that log and continue |
+| 3 | `app/services/enrichment.py` (multiple) | Broad exception handling in batch operations |
+| 4 | `app/email_service.py:203-219` | Tag propagation failure is silent (logged at DEBUG) |
+| 5 | `app/search_service.py:1140-1151` | `asyncio.create_task` fire-and-forget — RuntimeError on no loop |
+| 6 | `app/services/enrichment.py:114-153` | Shared session across long async enrichment runs |
+| 7 | `app/services/ownership_service.py:116-127` | Redundant query in `check_and_claim_open_account` |
+
+### Routers — Architecture
+
+| # | File | Issue |
+|---|------|-------|
+| 8 | `app/routers/requisitions2.py:211-252` | `inline_save` accepts any string for `field` — no enum validation |
+| 9 | `app/routers/materials.py:313-415` | `quick_search`, `enrich_material`, `merge_material_cards` use raw JSON bodies |
+| 10 | `app/routers/requisitions/core.py:105-370` | `_build_requisition_list` is heavy logic in the router |
+| 11 | `app/routers/crm/companies.py:244-403` | Duplicate company normalization logic |
+| 12 | `app/routers/requisitions/core.py:510` | `mark_outcome` returns plain dict without explicit status code |
+
+### Schemas
+
+| # | File | Issue |
+|---|------|-------|
+| 13 | `app/schemas/emails.py:54-59` | `EmailReplyRequest` missing email format validation |
+| 14 | `app/schemas/ai.py:27-30` | `ProspectFinderRequest.entity_id` optional when `entity_type` implies required |
+| 15 | Various | Inconsistent naming (`RequisitionOut` vs `RequisitionListResponse`) |
+
+### Connectors
+
+| # | File | Issue |
+|---|------|-------|
+| 16 | `app/connectors/digikey.py:39-48` | No token refresh failure handling |
+| 17 | `app/connectors/sources.py:219-223` | Nexar: no token refresh failure handling |
+| 18 | `app/connectors/mouser.py:61` | `r.json()` called before `raise_for_status` |
+| 19 | `app/connectors/element14.py:81` | `prices[0].get("cost")` crashes if prices is None/empty |
+| 20 | `app/connectors/sources.py:281` | Nexar API key in URL params |
+
+### Frontend
+
+| # | File | Issue |
+|---|------|-------|
+| 21 | `app/static/app.js` (13 locations) | `console.warn`/`console.error` left in production code |
+| 22 | Multiple | Inconsistent error handling in API calls — some errors swallowed |
+| 23 | `app/static/touch.js:375-428` | Event listeners re-attached on dynamic elements without cleanup |
+| 24 | `app/static/htmx_app.js:24-26` | Alpine store mutated directly — may not trigger reactivity |
+
+### Deployment
+
+| # | File | Issue |
+|---|------|-------|
+| 25 | `app/main.py` | No `CORSMiddleware` configured |
+| 26 | `app/main.py:268-274` | Session cookie `max_age=86400` (24h) may be too long |
+| 27 | `requirements.txt:4` | `psycopg2-binary` not recommended for production |
+| 28 | `requirements.txt` | Transitive dependencies not pinned |
+| 29 | `alembic/versions/076_*` | Data migration downgrade is lossy |
+
+### Models
+
+| # | File | Issue |
+|---|------|-------|
+| 30 | `app/models/offers.py:74` | `Offer.updated_at` has no default or onupdate |
+| 31 | `app/models/trouble_ticket.py:59` | `TroubleTicket.updated_at` has no default |
+| 32 | `app/models/ics_search_queue.py:37` | `updated_at` missing `onupdate` |
+| 33 | `app/models/nc_search_queue.py:38` | `updated_at` missing `onupdate` |
+
+### Utilities
+
+| # | File | Issue |
+|---|------|-------|
+| 34 | `app/http_client.py:24-33` | Single 30s timeout — no separate connect vs read timeout |
+| 35 | `app/file_utils.py:40-51` | `openpyxl.load_workbook` on large files can use excessive memory |
+| 36 | `app/utils/graph_client.py:159-160` | 401 response body may contain tokens |
+| 37 | `app/utils/token_manager.py:104` | Token refresh error logs may contain sensitive data |
+| 38 | `app/cache/decorators.py:36-37` | `cached_endpoint` wrapper is sync — async endpoints may not be awaited |
+
+### Tests
+
+| # | File | Issue |
+|---|------|-------|
+| 39 | `tests/conftest.py:115-125` | `_reset_ai_gate_state` imports at runtime — fragile |
+| 40 | Multiple test files | Mixing `asyncio.run()` and `@pytest.mark.asyncio` patterns |
 
 ---
 
-## Recommended Next Steps (Priority Order)
+## LOW Issues (Address When Convenient)
 
-### Quick Wins (< 1 hour each)
-| # | Action | Effort | Impact |
-|---|--------|--------|--------|
-| 1 | `secrets.compare_digest()` for agent API key | 15 min | Fixes timing attack |
-| 2 | Rate limit password login endpoint | 15 min | Prevents brute force |
-| 3 | Cap Retry-After header at 300s | 15 min | Prevents connector lockup |
-| 4 | Validate `href` schemes in JS sanitizer | 30 min | Closes XSS vector |
-| 5 | Pydantic Query validation on raw int() params | 30 min | Prevents 500 errors |
+### Models
+1. `NotificationEngagement` model removed but table still exists (migration 062)
+2. Inconsistent `DateTime` usage — some use `DateTime(timezone=True)`, others plain `DateTime`
+3. `KnowledgeConfig`, `SyncState` missing timestamps
+4. `VerificationGroupMember` uses `added_at` instead of `created_at`
+5. `QuoteLine` uses `backref` instead of `back_populates`
 
-### High Priority (1-2 hours each)
-| # | Action | Effort | Impact |
-|---|--------|--------|--------|
-| 6 | Fix SQL f-string in `vendor_analytics.py` | 1 hour | Eliminates injection risk |
-| 7 | Wrap vendor merge in proper transaction | 1 hour | Prevents data orphaning |
-| 8 | Add index on `material_cards.deleted_at` | 30 min | Soft-delete performance |
-| 9 | Upgrade password hashing to bcrypt/argon2 | 1 hour | Security hardening |
-| 10 | Mask API keys in connector log output | 1 hour | Prevents credential leaks |
-| 11 | Add unique constraint on site_contacts email | 30 min | Data integrity |
+### Services
+6. Hardcoded values scattered (180-day cutoff, 4000 char truncation, 15-min cache TTL, semaphore 5)
+7. `_history_to_result` timezone handling mixes naive and aware datetimes
+8. No `print()` usage found (good)
+9. SQL injection risk is low — ORM parameterized queries used consistently
 
-### Medium Priority (2+ hours each)
-| # | Action | Effort | Impact |
-|---|--------|--------|--------|
-| 12 | Add GitHub Actions CI (pytest + ruff) | 2-3 hours | Prevents regressions |
-| 13 | Verify 8,605 tests pass end-to-end | 1 hour | Confidence baseline |
-| 14 | Add N+1 query tests to list endpoints | 2 hours | Performance safety |
-| 15 | Audit FK indexes across all 42 tables | 2 hours | Query performance |
-| 16 | Replace `backref=` with `back_populates` | 2 hours | ORM correctness |
-| 17 | Narrow `except Exception` in top 5 files | 2 hours | Debuggability |
-| 18 | Add backup/restore docs to CLAUDE.md | 30 min | Operational safety |
-| 19 | Organize services into subdirectories | 3-4 hours | Developer experience |
+### Routers
+10. Few endpoints use `response_model` for OpenAPI docs
+11. `call_initiated` swallows non-HTTPException errors
+12. `batch_assign` naming mismatch (`claimed_by_id` vs "assign owner")
+
+### Frontend
+13. Global variable pollution — many functions on `window` instead of a namespace
+14. Logout inline CSRF handling inconsistent with `apiFetch` pattern
+15. Missing ARIA attributes on some interactive elements
+16. Vendor URLs should validate no `javascript:` scheme
+
+### Connectors
+17. `sources.py:154` — `_parse_retry_after` returns default 5.0+random when header missing
+18. `email_mining.py:331-334` — `asyncio.get_event_loop()` usage in async context
+
+### Deployment
+19. CSP allows `unsafe-inline` for scripts
+20. `/health` endpoint exposes internal details
+21. `oemsecrets.py` logs `r.text[:200]` which could include API keys
+22. Caddy health check uses admin API
+23. `alembic/env.py` instantiates `Settings()` at import time
+
+### Tests
+24. `element14` test uses `type("FakeHTTP", ...)` instead of `MagicMock`
+25. `test_file_utils.py` corrupt file test assertion could be stronger
+26. `conftest.py` uses `nest_asyncio.apply()` which can mask loop issues
+
+---
+
+## Recommended Fix Order
+
+### Phase 1 — Security (Do Now)
+1. SEC-1: Restrict agent API key to agent-only routes
+2. SEC-2, SEC-3, SEC-15: Add auth to unprotected endpoints
+3. SEC-4: Fix XSS in Jinja template
+4. SEC-5: Fix CSRF on `logCallInitiated`
+5. SEC-6: Validate OneDrive path parameter
+6. SEC-7, SEC-14: Sanitize sensitive data in logs
+7. SEC-8: Require strong DB password in deploy
+8. SEC-9 through SEC-12: Add `escape_like()` on all LIKE queries with user input
+
+### Phase 2 — Data Integrity (This Sprint)
+1. DATA-1: Use savepoints in inbox poll
+2. DATA-2: Add locking for quote number generation
+3. DATA-3, DATA-4: Add LIMIT to unbounded queries
+4. MODEL-1: Fix partial index `postgresql_where`
+5. MODEL-2: Resolve orphaned SelfHealLog import
+
+### Phase 3 — Architecture (Next Sprint)
+1. ARCH-1, ARCH-2, ARCH-3: Move business logic and DB queries from routers to services
+2. VAL-1 through VAL-4: Replace `dict` bodies with Pydantic schemas
+3. CONN-1 through CONN-4: Add proper error handling to connectors
+
+### Phase 4 — Hardening (Ongoing)
+1. Add missing `created_at`/`updated_at` columns via migrations
+2. Add missing `ondelete` cascades to FKs
+3. Standardize exception handling patterns
+4. Add `response_model` to router endpoints
+5. Clean up frontend console statements
+6. Pin transitive dependencies
 
 ---
 
 ## What's Working Well
 
-- The Alembic migration discipline is exceptional for a project this size
-- Auth middleware is clean and well-documented
-- Config validation catches bad values at startup
-- Sentry integration with sensitive data scrubbing is production-ready
-- The connector pattern (parallel search via `asyncio.gather()`) is well-designed
-- Loguru usage is consistent (no `print()` calls found)
-- Test coverage is broad (314 files, 8,605 functions covering routers, services, connectors, schemas)
-- Test isolation is excellent: fresh event loop, auto-rollback, FK enforcement via PRAGMA
-- 20+ reusable fixtures for User roles (buyer, seller, admin, manager, trader)
-- Type adapters handle SQLite/PostgreSQL incompatibilities (ARRAY→JSON, TSVECTOR→TEXT)
-- Circuit breaker pattern in connectors prevents cascading failures
-- Per-connector concurrency limits prevent API hammering
-- OAuth state validation provides proper CSRF protection
-- Password login uses PBKDF2-HMAC-SHA256 with 200K iterations (auth.py, not startup.py)
-- Email mining has proper dedup via ProcessedMessage with savepoint protection
-- No `eval()`, `Function()`, or open redirects in frontend code
-- Delta query caching for incremental inbox sync (not full scans)
+- **Migration discipline:** 76 clean Alembic migrations with proper upgrade/downgrade
+- **Logging:** Consistent Loguru usage, no `print()` found in services
+- **Test coverage:** 8,000+ tests with good mocking patterns
+- **Scoring engine:** Pure logic, no I/O, well-structured
+- **Async patterns:** Proper `asyncio.gather()` for parallel connector searches
+- **Session management:** `get_db()` properly yields and closes sessions
+- **Startup safety:** No DDL in `startup.py` — only triggers, seeds, and backfills
+- **Vendor normalization:** Consistent `normalized_name` pattern for dedup
+- **Cache layer:** Redis with proper TTL and graceful fallback
