@@ -32,6 +32,7 @@ from app.models.sourcing import Requirement, Sighting
 from app.models.sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead
 from app.models.vendors import VendorCard
 from app.scoring import explain_lead
+from app.vendor_utils import normalize_vendor_name
 
 BUYER_STATUSES = {
     "new",
@@ -69,27 +70,22 @@ def normalize_mpn(mpn: str | None) -> str:
     )
 
 
-def normalize_vendor_name(name: str | None) -> str:
-    if not name:
-        return ""
-    return " ".join((name.lower().strip()).split())
-
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
     return max(minimum, min(maximum, value))
 
 
 def _confidence_band(score: float) -> str:
-    if score >= 80:
+    if score >= 75:
         return "high"
-    if score >= 60:
+    if score >= 50:
         return "medium"
-    if score >= 35:
-        return "low"
-    return "very_low"
+    return "low"
 
 
-def _safety_band(score: float) -> str:
+def _safety_band(score: float, has_vendor_data: bool = True) -> str:
+    if not has_vendor_data:
+        return "unknown"
     if score >= 75:
         return "low_risk"
     if score >= 50:
@@ -175,33 +171,93 @@ def _compute_confidence(
 
 
 def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float) -> tuple[float, list[str], str]:
+    """Compute vendor safety score, flags, and summary.
+
+    Uses VendorCard enrichment data to surface identity/trust signals per the
+    vendor safety model spec. Uses caution language — signals, not accusations.
+    """
     score = 50.0
     flags: list[str] = []
+
     if vendor_card:
-        score += 12
+        score += 10  # baseline bump for having internal profile
+
+        # Unified vendor score integration
         if getattr(vendor_card, "vendor_score", None) is not None:
             score += (float(vendor_card.vendor_score) - 50.0) * 0.25
+
+        # Blacklist / do-not-contact
         if getattr(vendor_card, "is_blacklisted", False):
             score -= 45
             flags.append("internal_do_not_contact_history")
-        if not getattr(vendor_card, "website", None):
-            score -= 8
+
+        # Business footprint signals
+        has_website = bool(getattr(vendor_card, "website", None))
+        has_domain = bool(getattr(vendor_card, "domain", None))
+        has_address = bool(getattr(vendor_card, "hq_city", None) or getattr(vendor_card, "hq_country", None))
+        has_legal = bool(getattr(vendor_card, "legal_name", None))
+
+        if not has_website and not has_domain:
+            score -= 10
+            flags.append("no_business_footprint")
+        elif not has_website:
+            score -= 5
             flags.append("limited_business_footprint")
+
+        if not has_address:
+            score -= 5
+            flags.append("unverifiable_address")
+
+        # Contact verification signals
+        has_emails = bool(getattr(vendor_card, "emails", None))
+        has_phones = bool(getattr(vendor_card, "phones", None))
+        if not has_emails and not has_phones:
+            score -= 8
+            flags.append("conflicting_contact_info")
+
+        # Engagement history signals
+        if getattr(vendor_card, "is_new_vendor", True) and not getattr(vendor_card, "sighting_count", 0):
+            score -= 5
+            flags.append("new_domain")
+
+        ghost_rate = getattr(vendor_card, "ghost_rate", None)
+        if ghost_rate is not None and ghost_rate > 0.5:
+            score -= 10
+            flags.append("repeated_bad_feedback")
+
+        cancel_rate = getattr(vendor_card, "cancellation_rate", None)
+        if cancel_rate is not None and cancel_rate > 0.2:
+            score -= 8
+            flags.append("high_cancellation_rate")
+
+        # Positive signals — boost score
+        if has_legal and has_address and has_website:
+            score += 8  # strong business footprint
+        if getattr(vendor_card, "relationship_months", None) and vendor_card.relationship_months >= 6:
+            score += 5  # established relationship
+        if getattr(vendor_card, "total_wins", 0) and vendor_card.total_wins >= 3:
+            score += 5  # proven success
     else:
         flags.append("no_internal_vendor_profile")
+        flags.append("marketplace_trust_unknown")
 
     if contactability < 40:
-        score -= 12
-        flags.append("limited_verified_contact_channels")
+        score -= 10
+        if "conflicting_contact_info" not in flags:
+            flags.append("limited_verified_contact_channels")
 
+    has_vendor_data = vendor_card is not None
     score = round(_clamp(score), 1)
-    band = _safety_band(score)
-    if band == "high_risk":
-        summary = "Caution advised: verify identity and stock before outreach."
+    band = _safety_band(score, has_vendor_data=has_vendor_data)
+
+    if band == "unknown":
+        summary = "Unknown vendor: no internal history available. Verify identity and stock before outreach."
+    elif band == "high_risk":
+        summary = "Caution advised: multiple risk signals detected. Verify identity, contact details, and stock before proceeding."
     elif band == "medium_risk":
-        summary = "Moderate caution: confirm business footprint and contact path."
+        summary = "Moderate caution: some signals are incomplete. Confirm business footprint and contact path before relying on inventory claims."
     else:
-        summary = "Lower risk from current data, but still verify stock in outreach."
+        summary = "Lower risk based on current data, but always verify stock and terms in outreach."
     return score, flags, summary
 
 
@@ -243,7 +299,7 @@ def _lead_key(requirement_id: int, vendor_normalized: str, matched_part: str) ->
 
 def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: Sighting) -> SourcingLead:
     vendor_name = (sighting.vendor_name or "").strip() or "Unknown Vendor"
-    vendor_normalized = (sighting.vendor_name_normalized or normalize_vendor_name(vendor_name) or "").strip()
+    vendor_normalized = (normalize_vendor_name(vendor_name) or sighting.vendor_name_normalized or "").strip()
     matched_part = (sighting.mpn_matched or sighting.mpn or requirement.primary_mpn or "").strip()
     requested_part = (requirement.primary_mpn or "").strip()
     if not matched_part:
@@ -309,7 +365,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.confidence_score = confidence_score
     lead.confidence_band = confidence_band
     lead.vendor_safety_score = safety_score
-    lead.vendor_safety_band = _safety_band(safety_score)
+    lead.vendor_safety_band = _safety_band(safety_score, has_vendor_data=vendor_card is not None)
     lead.vendor_safety_summary = safety_summary
     lead.vendor_safety_flags = safety_flags
     lead.vendor_safety_last_checked_at = _now_utc()
@@ -464,6 +520,32 @@ def get_requisition_leads(db: Session, requisition_id: int, statuses: list[str] 
     return query.order_by(SourcingLead.confidence_score.desc(), SourcingLead.updated_at.desc()).all()
 
 
+def _propagate_outcome_to_vendor(db: Session, lead: SourcingLead, status: str) -> None:
+    """Propagate buyer outcome to VendorCard to improve future lead ranking.
+
+    When a buyer confirms stock or flags a bad lead, the vendor's aggregate
+    score is adjusted so future leads from the same vendor reflect real-world
+    outcomes. Uses conservative increments to avoid runaway drift.
+    """
+    if not lead.vendor_card_id:
+        return
+    vendor_card = db.query(VendorCard).filter(VendorCard.id == lead.vendor_card_id).first()
+    if not vendor_card:
+        return
+
+    if status == "has_stock":
+        vendor_card.total_wins = (vendor_card.total_wins or 0) + 1
+        if vendor_card.vendor_score is not None:
+            vendor_card.vendor_score = min(100.0, vendor_card.vendor_score + 2.0)
+    elif status == "bad_lead":
+        if vendor_card.vendor_score is not None:
+            vendor_card.vendor_score = max(0.0, vendor_card.vendor_score - 3.0)
+    elif status == "do_not_contact":
+        vendor_card.is_blacklisted = True
+        if vendor_card.vendor_score is not None:
+            vendor_card.vendor_score = max(0.0, vendor_card.vendor_score - 10.0)
+
+
 def update_lead_status(
     db: Session,
     lead_id: int,
@@ -501,7 +583,11 @@ def update_lead_status(
 
     lead.confidence_band = _confidence_band(float(lead.confidence_score or 0.0))
     if lead.vendor_safety_score is not None:
-        lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score))
+        has_vendor_data = lead.vendor_card_id is not None
+        lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score), has_vendor_data=has_vendor_data)
+
+    # Propagate buyer outcome to VendorCard for feedback loop
+    _propagate_outcome_to_vendor(db, lead, status)
 
     event = LeadFeedbackEvent(
         lead_id=lead.id,

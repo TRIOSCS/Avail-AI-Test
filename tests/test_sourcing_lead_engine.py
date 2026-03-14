@@ -202,6 +202,9 @@ def test_status_mapping_includes_no_stock_and_dnc(db_session):
 
 
 def test_requirement_sightings_endpoint_returns_lead_cards(client, db_session, test_user):
+    from app.models import Sighting
+    from app.services.sourcing_leads import sync_leads_for_sightings
+
     req = Requisition(
         name="Lead API Req",
         customer_name="Customer",
@@ -235,39 +238,39 @@ def test_requirement_sightings_endpoint_returns_lead_cards(client, db_session, t
     )
     db_session.flush()
 
-    from app.models import Sighting
+    sightings = [
+        Sighting(
+            requirement_id=requirement.id,
+            vendor_name=vendor_name,
+            vendor_name_normalized=vendor_norm,
+            mpn_matched="LM358N",
+            normalized_mpn="lm358n",
+            source_type="brokerbin",
+            qty_available=500,
+            unit_price=0.22,
+            confidence=0.8,
+            score=80.0,
+            created_at=datetime.now(timezone.utc),
+        ),
+        Sighting(
+            requirement_id=requirement.id,
+            vendor_name=vendor_name,
+            vendor_name_normalized=vendor_norm,
+            mpn_matched="LM358N",
+            normalized_mpn="lm358n",
+            source_type="ai_live_web",
+            qty_available=450,
+            unit_price=0.24,
+            confidence=0.5,
+            score=45.0,
+            created_at=datetime.now(timezone.utc),
+        ),
+    ]
+    db_session.add_all(sightings)
+    db_session.flush()
 
-    db_session.add_all(
-        [
-            Sighting(
-                requirement_id=requirement.id,
-                vendor_name=vendor_name,
-                vendor_name_normalized=vendor_norm,
-                mpn_matched="LM358N",
-                normalized_mpn="lm358n",
-                source_type="brokerbin",
-                qty_available=500,
-                unit_price=0.22,
-                confidence=0.8,
-                score=80.0,
-                created_at=datetime.now(timezone.utc),
-            ),
-            Sighting(
-                requirement_id=requirement.id,
-                vendor_name=vendor_name,
-                vendor_name_normalized=vendor_norm,
-                mpn_matched="LM358N",
-                normalized_mpn="lm358n",
-                source_type="ai_live_web",
-                qty_available=450,
-                unit_price=0.24,
-                confidence=0.5,
-                score=45.0,
-                created_at=datetime.now(timezone.utc),
-            ),
-        ]
-    )
-    db_session.commit()
+    # Create persisted leads from sightings (this is what search_service does at runtime)
+    sync_leads_for_sightings(db_session, requirement, sightings)
 
     resp = client.get(f"/api/requirements/{requirement.id}/sightings")
     assert resp.status_code == 200

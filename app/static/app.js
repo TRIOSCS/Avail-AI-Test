@@ -7687,8 +7687,9 @@ function _ddSafetyBadge(s) {
         low_risk: { label: 'LOW RISK', bg: '#dcfce7', color: '#166534' },
         medium_risk: { label: 'MED RISK', bg: '#fef3c7', color: '#92400e' },
         high_risk: { label: 'HIGH RISK', bg: '#fee2e2', color: '#991b1b' },
+        unknown: { label: 'UNKNOWN', bg: '#f1f5f9', color: '#475569' },
     };
-    const c = cfg[band] || cfg.medium_risk;
+    const c = cfg[band] || cfg.unknown;
     const tip = s.vendor_safety_summary || 'Vendor safety review signal';
     const scoreText = score != null ? ` ${Math.round(score)}` : '';
     return ` <span style="font-size:9px;padding:1px 5px;border-radius:999px;background:${c.bg};color:${c.color};font-weight:700" title="${escAttr(tip)}">${c.label}${scoreText}</span>`;

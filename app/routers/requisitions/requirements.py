@@ -40,7 +40,7 @@ from ...schemas.requisitions import (
     SearchOptions,
     SightingUnavailableIn,
 )
-from ...schemas.sourcing_leads import LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
+from ...schemas.sourcing_leads import LeadDetailOut, LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
 from ...services.sourcing_leads import (
     append_lead_feedback,
     attach_lead_metadata_to_results,
@@ -119,31 +119,90 @@ def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> No
         group["buyer_outcomes"] = outcome_counts
 
 
-def _attach_lead_cards(requirements: list[Requirement], results: dict, db: Session) -> None:
-    """Attach one-lead-per-vendor-per-part cards to each requirement result group."""
-    from ...services.sourcing_lead_engine import build_requirement_lead_cards
+def _attach_lead_data(requirements: list[Requirement], results: dict, db: Session) -> None:
+    """Annotate sighting rows with persisted lead metadata and build lead cards/summary.
 
+    Uses canonical SourcingLead records (written during search by sync_leads_for_sightings)
+    as the single source of truth for lead confidence, safety, and buyer status.
+
+    Called by: search endpoints in this router.
+    Depends on: app.services.sourcing_leads.attach_lead_metadata_to_results
+    """
+    req_ids = [r.id for r in requirements if r.id]
+    if not req_ids:
+        return
+
+    # Step 1: annotate individual sighting rows with lead_id, buyer_status, scores
+    sightings_by_req: dict[int, list[dict]] = {}
     for req_item in requirements:
         group = results.get(str(req_item.id))
         if not isinstance(group, dict):
             continue
         sightings = group.get("sightings") or []
-        if not isinstance(sightings, list):
-            group["lead_cards"] = []
+        if isinstance(sightings, list):
+            sightings_by_req[req_item.id] = sightings
+    if sightings_by_req:
+        attach_lead_metadata_to_results(db, sightings_by_req)
+
+    # Step 2: build lead_cards and lead_summary from persisted SourcingLead rows
+    leads = (
+        db.query(SourcingLead)
+        .filter(SourcingLead.requirement_id.in_(req_ids))
+        .order_by(SourcingLead.confidence_score.desc(), SourcingLead.updated_at.desc())
+        .all()
+    )
+    leads_by_req: dict[int, list[SourcingLead]] = {}
+    for lead in leads:
+        leads_by_req.setdefault(lead.requirement_id, []).append(lead)
+
+    for req_item in requirements:
+        group = results.get(str(req_item.id))
+        if not isinstance(group, dict):
             continue
-        try:
-            lead_cards = build_requirement_lead_cards(req_item, sightings, db)
-        except Exception:
-            logger.exception("Lead-card projection failed for requirement {}", req_item.id)
-            lead_cards = []
+        req_leads = leads_by_req.get(req_item.id, [])
+        lead_cards = []
+        for lead in req_leads:
+            lead_cards.append({
+                "lead_id": lead.id,
+                "lead_public_id": lead.lead_id,
+                "vendor_name": lead.vendor_name,
+                "vendor_name_normalized": lead.vendor_name_normalized,
+                "vendor_card_id": lead.vendor_card_id,
+                "part_requested": lead.part_number_requested,
+                "part_matched": lead.part_number_matched,
+                "match_type": lead.match_type,
+                "source_attribution": [lead.primary_source_type],
+                "lead_confidence_pct": int(lead.confidence_score or 0),
+                "lead_confidence_band": lead.confidence_band,
+                "vendor_safety_pct": int(lead.vendor_safety_score or 0),
+                "vendor_safety_band": lead.vendor_safety_band,
+                "reason_summary": lead.reason_summary,
+                "risk_flags": lead.risk_flags or [],
+                "safety_summary": lead.vendor_safety_summary or "",
+                "contact": {
+                    "name": lead.contact_name,
+                    "emails": [lead.contact_email] if lead.contact_email else [],
+                    "phones": [lead.contact_phone] if lead.contact_phone else [],
+                    "url": lead.contact_url,
+                },
+                "suggested_next_action": lead.suggested_next_action,
+                "buyer_status": lead.buyer_status,
+                "evidence_count": lead.evidence_count,
+                "corroborated": lead.corroborated,
+                "timestamps": {
+                    "first_seen_at": lead.source_first_seen_at.isoformat() if lead.source_first_seen_at else None,
+                    "last_seen_at": lead.source_last_seen_at.isoformat() if lead.source_last_seen_at else None,
+                    "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+                },
+            })
         group["lead_cards"] = lead_cards
         group["lead_summary"] = {
             "total_leads": len(lead_cards),
             "high_confidence": sum(
-                1 for lead in lead_cards if (lead.get("lead_confidence_pct") or 0) >= 75
+                1 for lc in lead_cards if (lc.get("lead_confidence_pct") or 0) >= 75
             ),
             "high_safety": sum(
-                1 for lead in lead_cards if (lead.get("vendor_safety_pct") or 0) >= 75
+                1 for lc in lead_cards if (lc.get("vendor_safety_pct") or 0) >= 75
             ),
         }
 
@@ -737,9 +796,8 @@ async def search_all(
     background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
 
     _enrich_with_vendor_cards(results, db)
-    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
-    _attach_lead_cards(reqs_to_search, results, db)
+    _attach_lead_data(reqs_to_search, results, db)
 
     results["source_stats"] = list(merged_source_stats.values())
     return results
@@ -767,9 +825,8 @@ async def search_one(
     source_stats = search_result["source_stats"]
     results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
     _enrich_with_vendor_cards(results, db)
-    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
-    _attach_lead_cards([r], results, db)
+    _attach_lead_data([r], results, db)
 
     background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
 
@@ -923,9 +980,8 @@ async def get_saved_sightings(
             "historical_offers": hist_offers,
         }
     _enrich_with_vendor_cards(results, db)
-    _attach_lead_metadata(results, db)
     _annotate_buyer_outcomes(req, results, db)
-    _attach_lead_cards(req.requirements, results, db)
+    _attach_lead_data(req.requirements, results, db)
     return results
 
 
@@ -942,6 +998,29 @@ async def list_requisition_leads(
         raise HTTPException(404, "Requisition not found")
     status_list = [s.strip().lower() for s in (statuses or "").split(",") if s.strip()] if statuses else None
     return get_requisition_leads(db, req_id, status_list)
+
+
+@router.get("/api/leads/{lead_id}", response_model=LeadDetailOut)
+async def get_lead_detail(
+    lead_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get full lead detail with evidence and feedback history."""
+    lead = (
+        db.query(SourcingLead)
+        .options(
+            joinedload(SourcingLead.evidence),
+            joinedload(SourcingLead.feedback_events),
+        )
+        .filter(SourcingLead.id == lead_id)
+        .first()
+    )
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    if not get_req_for_user(db, user, lead.requisition_id):
+        raise HTTPException(403, "Not authorized for this lead")
+    return lead
 
 
 @router.patch("/api/leads/{lead_id}/status")
@@ -1011,6 +1090,22 @@ async def add_lead_feedback(
     if not updated:
         raise HTTPException(404, "Lead not found")
     return {"ok": True, "lead_id": updated.id, "status": updated.buyer_status}
+
+
+@router.get("/api/leads/queue", response_model=list[LeadOut])
+async def leads_queue(
+    status: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition buyer follow-up queue. Filterable by buyer_status."""
+    q = db.query(SourcingLead).join(
+        Requisition, SourcingLead.requisition_id == Requisition.id
+    ).filter(Requisition.created_by == user.id)
+    if status and status != "all":
+        q = q.filter(SourcingLead.buyer_status == status)
+    q = q.order_by(SourcingLead.updated_at.desc())
+    return q.limit(200).all()
 
 
 # ── Mark sighting as unavailable ─────────────────────────────────────────
@@ -1195,7 +1290,7 @@ async def list_requirement_sightings(
         }
     }
     _enrich_with_vendor_cards(payload, db)
-    _attach_lead_cards([req_item], payload, db)
+    _attach_lead_data([req_item], payload, db)
     return payload[str(requirement_id)]
 
 
