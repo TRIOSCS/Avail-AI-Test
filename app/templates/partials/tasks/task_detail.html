@@ -1,0 +1,240 @@
+{#
+  task_detail.html — Task detail panel showing description, metadata, and completion form.
+  Receives: task (RequisitionTask ORM object with relationships loaded), users (list).
+  Called by: views.py task_detail_view endpoint.
+  Depends on: Alpine.js for tab interactions, HTMX for status/reassign updates.
+#}
+<div class="task-detail-panel" x-data="{ activeTab: 'details' }">
+
+    {# Header with back button #}
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <button class="btn btn-xs btn-ghost" onclick="closeTaskDetail()">Back</button>
+        <h3 style="margin:0;">{{ task.title }}</h3>
+        {% set status_bg = '#dcfce7' if task.status == 'done' else ('#dbeafe' if task.status == 'in_progress' else '#f1f5f9') %}
+        {% set status_fg = '#166534' if task.status == 'done' else ('#1d4ed8' if task.status == 'in_progress' else '#475569') %}
+        <span class="badge" style="background:{{ status_bg }};color:{{ status_fg }};">
+            {{ task.status.replace('_', ' ')|upper }}
+        </span>
+    </div>
+
+    {# Summary cards #}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div class="card" style="padding:12px;">
+            <div style="font-size:0.85em;color:#64748b;">Requisition</div>
+            <div style="font-weight:600;">
+                {% if task.requisition %}
+                    {{ task.requisition.name or ('Req #' ~ task.requisition_id) }}
+                {% else %}
+                    --
+                {% endif %}
+            </div>
+            <div style="margin-top:4px;">
+                <span class="badge" style="background:#eff6ff;color:#1d4ed8;font-size:0.8em;">
+                    {{ task.task_type }}
+                </span>
+                <span style="font-size:0.85em;color:#64748b;margin-left:4px;">
+                    {{ task.source }}
+                </span>
+            </div>
+        </div>
+        <div class="card" style="padding:12px;">
+            <div style="font-size:0.85em;color:#64748b;">Priority</div>
+            <div style="font-weight:600;">
+                {% if task.priority == 3 %}
+                <span style="color:#991b1b;">High</span>
+                {% elif task.priority == 2 %}
+                <span style="color:#92400e;">Medium</span>
+                {% else %}
+                <span style="color:#64748b;">Low</span>
+                {% endif %}
+                {% if task.ai_priority_score is not none %}
+                    <span style="margin-left:6px;font-size:0.85em;color:#64748b;">
+                        AI: {{ (task.ai_priority_score * 100)|round|int }}%
+                    </span>
+                {% endif %}
+            </div>
+            <div style="font-size:0.85em;color:#64748b;margin-top:4px;">
+                {% if task.due_at %}
+                    Due: {{ task.due_at.strftime('%b %d, %Y') }}
+                    {% if task.ai_risk_flag and 'Overdue' in task.ai_risk_flag %}
+                        <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:0.75em;margin-left:2px;">OVERDUE</span>
+                    {% endif %}
+                {% else %}
+                    No due date
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# Risk flag banner #}
+    {% if task.ai_risk_flag %}
+    <div style="background:#fef3c7;border:1px solid #fde68a;border-radius:6px;padding:10px;margin-bottom:16px;font-size:0.9em;color:#92400e;">
+        {{ task.ai_risk_flag }}
+    </div>
+    {% endif %}
+
+    {# Tab navigation #}
+    <div style="display:flex;gap:2px;border-bottom:2px solid #e2e8f0;margin-bottom:12px;">
+        {% for tab_id, tab_label in [('details', 'Details'), ('activity', 'Activity')] %}
+        <button class="btn btn-xs"
+                :class="{ 'btn-active': activeTab === '{{ tab_id }}' }"
+                @click="activeTab = '{{ tab_id }}'"
+                style="border-radius:6px 6px 0 0;border:1px solid #e2e8f0;border-bottom:none;padding:6px 14px;">
+            {{ tab_label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    {# Details tab #}
+    <div x-show="activeTab === 'details'">
+        <div class="card" style="padding:12px;">
+            <table style="font-size:0.9em;width:100%;">
+                {% if task.description %}
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;vertical-align:top;">Description</td>
+                    <td>{{ task.description }}</td>
+                </tr>
+                {% endif %}
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;">Assigned to</td>
+                    <td>{{ task.assignee.name if task.assignee else 'Unassigned' }}</td>
+                </tr>
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;">Created by</td>
+                    <td>{{ task.creator.name if task.creator else '--' }}</td>
+                </tr>
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;">Created</td>
+                    <td>{{ task.created_at.strftime('%Y-%m-%d %H:%M') if task.created_at else '--' }}</td>
+                </tr>
+                {% if task.source_ref %}
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;">Source ref</td>
+                    <td style="font-size:0.85em;color:#64748b;">{{ task.source_ref }}</td>
+                </tr>
+                {% endif %}
+                {% if task.completed_at %}
+                <tr>
+                    <td style="color:#64748b;padding:4px 8px 4px 0;">Completed</td>
+                    <td>{{ task.completed_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                </tr>
+                {% endif %}
+            </table>
+        </div>
+
+        {# Reassign #}
+        {% if task.status != 'done' %}
+        <div style="margin-top:12px;">
+            <div style="font-size:0.85em;color:#64748b;margin-bottom:4px;">Reassign</div>
+            <select class="btn btn-xs" style="min-width:160px;"
+                    onchange="reassignTask({{ task.id }}, {{ task.requisition_id }}, this.value)">
+                <option value="">Select user...</option>
+                {% for u in users %}
+                <option value="{{ u.id }}" {{ 'selected' if task.assigned_to_id == u.id else '' }}>
+                    {{ u.name or u.email }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+    </div>
+
+    {# Activity tab #}
+    <div x-show="activeTab === 'activity'">
+        {% if task.completion_note %}
+        <div style="border-left:2px solid #16a34a;padding:8px 0 8px 12px;margin-left:8px;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="badge" style="background:#dcfce7;color:#166534;">COMPLETED</span>
+                {% if task.completed_at %}
+                <span style="color:#94a3b8;font-size:0.85em;">
+                    {{ task.completed_at.strftime('%Y-%m-%d %H:%M') }}
+                </span>
+                {% endif %}
+            </div>
+            <div style="margin-top:4px;color:#475569;">{{ task.completion_note }}</div>
+        </div>
+        {% else %}
+        <div style="padding:16px;color:#64748b;text-align:center;">No activity yet.</div>
+        {% endif %}
+    </div>
+
+    {# Complete form — only when not done #}
+    {% if task.status != 'done' %}
+    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
+        <div style="font-size:0.85em;color:#64748b;margin-bottom:6px;">Complete this task</div>
+        <div x-data="{ note: '' }">
+            <textarea x-model="note" rows="2"
+                      style="width:100%;border:1px solid #e2e8f0;border-radius:4px;padding:6px;font-size:0.9em;"
+                      placeholder="How was this resolved?"></textarea>
+            <button class="btn btn-xs btn-primary" style="margin-top:6px;"
+                    @click="
+                        if (!note.trim()) { alert('Please add a completion note.'); return; }
+                        fetch('/api/tasks/{{ task.id }}/complete', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({completion_note: note})
+                        }).then(resp => {
+                            if (!resp.ok) throw new Error('Complete failed');
+                            return resp.json();
+                        }).then(() => {
+                            htmx.ajax('GET', window.location.href, '#main-content');
+                        }).catch(() => alert('Unable to complete task.'));
+                    ">
+                Mark Complete
+            </button>
+        </div>
+    </div>
+    {% endif %}
+
+    {# Status change row #}
+    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:0.85em;color:#64748b;">Status:</span>
+        <select class="btn btn-xs" style="min-width:140px;"
+                onchange="updateTaskStatusFromDetail({{ task.id }}, this.value)">
+            {% for sval, slabel in [('todo', 'To Do'), ('in_progress', 'In Progress'), ('done', 'Done')] %}
+            <option value="{{ sval }}" {{ 'selected' if task.status == sval else '' }}>{{ slabel }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<script>
+function updateTaskStatusFromDetail(taskId, status) {
+    if (!taskId || !status) return;
+    fetch(`/api/tasks/${taskId}/status`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ status })
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error("Status update failed");
+        return resp.json();
+    })
+    .then(() => {
+        htmx.ajax("GET", `/views/tasks/${taskId}`, "#task-detail-container");
+    })
+    .catch(() => alert("Unable to update task status."));
+}
+
+function reassignTask(taskId, reqId, userId) {
+    if (!taskId || !userId) return;
+    fetch(`/api/requisitions/${reqId}/tasks/${taskId}`, {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ assigned_to_id: parseInt(userId) })
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error("Reassign failed");
+        return resp.json();
+    })
+    .then(() => {
+        htmx.ajax("GET", `/views/tasks/${taskId}`, "#task-detail-container");
+    })
+    .catch(() => alert("Unable to reassign task."));
+}
+
+function closeTaskDetail() {
+    const container = document.getElementById("task-detail-container");
+    if (container) container.innerHTML = "";
+}
+</script>
