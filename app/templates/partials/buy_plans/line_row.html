@@ -1,0 +1,31 @@
+{#
+  line_row.html — Single line item row for a buy plan detail view.
+  Receives: line (BuyPlanLine), bp_id (int).
+  Called by: detail.html loop.
+  Depends on: HTMX for inline PO updates.
+#}
+<tr id="bp-line-{{ line.id }}">
+    <td>{{ line.requirement.primary_mpn if line.requirement else '-' }}</td>
+    <td>{{ line.offer.vendor_name if line.offer else '-' }}</td>
+    <td>{{ line.quantity }}</td>
+    <td>${{ '%.4f' | format(line.unit_cost or 0) }}</td>
+    <td>${{ '%.4f' | format(line.unit_sell or 0) }}</td>
+    <td><span class="badge badge-{{ line.status }}">{{ line.status }}</span></td>
+    <td>{{ line.buyer.name if line.buyer else '-' }}</td>
+    <td>
+        <input type="text" name="po_number" value="{{ line.po_number or '' }}"
+               placeholder="PO #"
+               hx-put="/api/buy-plans/{{ bp_id }}/lines/{{ line.id }}"
+               hx-trigger="change"
+               hx-target="#bp-line-{{ line.id }}"
+               hx-swap="outerHTML">
+    </td>
+    <td>
+        <input type="checkbox" name="po_confirmed"
+               {{ 'checked' if line.po_confirmed_at else '' }}
+               hx-put="/api/buy-plans/{{ bp_id }}/lines/{{ line.id }}"
+               hx-trigger="change"
+               hx-target="#bp-line-{{ line.id }}"
+               hx-swap="outerHTML">
+    </td>
+</tr>

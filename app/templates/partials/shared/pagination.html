@@ -1,0 +1,10 @@
+{# HTMX pagination — receives page, total_pages, target_id, url as template vars. #}
+<nav class="pagination" aria-label="Pagination">
+    {% if page > 1 %}
+    <button hx-get="{{ url }}?page={{ page - 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML">Prev</button>
+    {% endif %}
+    <span>Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <button hx-get="{{ url }}?page={{ page + 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML">Next</button>
+    {% endif %}
+</nav>

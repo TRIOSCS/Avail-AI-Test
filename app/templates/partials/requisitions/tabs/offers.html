@@ -1,0 +1,46 @@
+{#
+  offers.html — Offers tab for requisition detail view.
+  Receives: offers (list of Offer objects), req_id (int).
+  Called by: views.py requisition_tab endpoint (tab_name='offers').
+  Depends on: HTMX (accept/reject actions).
+#}
+<div class="tab-panel" id="offers-panel">
+    <div class="tab-toolbar">
+        <h3>Offers ({{ offers|length }})</h3>
+    </div>
+
+    {% if offers %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Vendor</th>
+                <th>MPN</th>
+                <th>Qty</th>
+                <th>Unit Price</th>
+                <th>Lead Time</th>
+                <th>Condition</th>
+                <th>Status</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for offer in offers %}
+            <tr id="offer-row-{{ offer.id }}">
+                <td>{{ offer.vendor_name }}</td>
+                <td>{{ offer.mpn }}</td>
+                <td>{{ offer.qty_available or '-' }}</td>
+                <td>{{ '${:.4f}'.format(offer.unit_price|float) if offer.unit_price else '-' }}</td>
+                <td>{{ offer.lead_time or '-' }}</td>
+                <td>{{ offer.condition or '-' }}</td>
+                <td><span class="badge badge-{{ offer.status }}">{{ offer.status }}</span></td>
+                <td>{{ offer.created_at.strftime('%b %d') if offer.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        No offers received yet. Send RFQs to start collecting vendor offers.
+    </div>
+    {% endif %}
+</div>

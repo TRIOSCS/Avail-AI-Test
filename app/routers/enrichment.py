@@ -9,6 +9,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from ..config import settings
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import (
@@ -306,9 +307,59 @@ def api_cancel_job(
 
 # ── On-demand enrichment ─────────────────────────────────────────────
 
+VALID_ENRICH_ENTITY_TYPES = ("company", "vendor", "contact")
+
 
 class EnrichRequest(BaseModel):
     force: bool = False
+
+
+@router.post("/api/enrich/{entity_type}/{entity_id}")
+async def api_enrich_on_demand(
+    entity_type: str,
+    entity_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """On-demand enrichment via orchestrator — fires all sources in parallel,
+    merges with Claude, applies high-confidence fields.
+
+    Returns JSON with applied/rejected/sources_used.
+    """
+    from ..services.enrichment_orchestrator import enrich_on_demand
+
+    if not settings.on_demand_enrichment_enabled:
+        raise HTTPException(503, "Feature disabled")
+
+    if entity_type not in VALID_ENRICH_ENTITY_TYPES:
+        raise HTTPException(
+            400,
+            f"Invalid entity_type '{entity_type}'. Must be one of: {', '.join(VALID_ENRICH_ENTITY_TYPES)}",
+        )
+
+    # Verify entity exists before calling orchestrator
+    entity = _load_enrich_entity(entity_type, entity_id, db)
+    if entity is None:
+        raise HTTPException(404, f"{entity_type.title()} #{entity_id} not found")
+
+    logger.info("On-demand enrichment requested: {} #{} by {}", entity_type, entity_id, user.email)
+    result = await enrich_on_demand(entity_type, entity_id, db)
+
+    if result.get("error"):
+        raise HTTPException(422, result["error"])
+
+    return result
+
+
+def _load_enrich_entity(entity_type: str, entity_id: int, db: Session):
+    """Load entity by type and ID for existence check."""
+    if entity_type == "company":
+        return db.get(Company, entity_id)
+    elif entity_type == "vendor":
+        return db.get(VendorCard, entity_id)
+    elif entity_type == "contact":
+        return db.get(VendorContact, entity_id)
+    return None
 
 
 @router.post("/api/enrichment/vendor/{vendor_id}")

@@ -329,3 +329,12 @@ class VerificationGroupMemberResponse(BaseModel):
     user_email: str | None = None
     is_active: bool = True
     added_at: str | None = None
+
+
+class BuyPlanV3TokenApproval(BaseModel):
+    sales_order_number: str
+    notes: str | None = None
+
+
+class BuyPlanV3TokenReject(BaseModel):
+    reason: str = ""

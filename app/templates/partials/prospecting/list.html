@@ -1,0 +1,104 @@
+{#
+  list.html — Prospect pool list page with HTMX search, filters, pagination.
+  Receives: prospects (list), page, total_pages, q, industry, revenue, region, source,
+            industries (list), revenues (list), regions (list), sources (list).
+  Called by: views.py prospecting_page endpoint.
+  Depends on: prospect_row.html, pagination.html, HTMX, Alpine.js.
+#}
+{% extends "base.html" %}
+
+{% block title %}Prospects — AvailAI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Prospect Pool</h1>
+</div>
+
+{# Search + filter toolbar #}
+<div class="toolbar" x-data="{ industry: '{{ industry }}', revenue: '{{ revenue }}', region: '{{ region }}', source: '{{ source }}' }">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="Search prospects..."
+           hx-get="/views/prospecting/rows"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#prospect-table-body"
+           hx-include="[name='industry_filter'],[name='revenue_filter'],[name='region_filter'],[name='source_filter']">
+
+    <select name="industry_filter" x-model="industry"
+            hx-get="/views/prospecting/rows"
+            hx-trigger="change"
+            hx-target="#prospect-table-body"
+            hx-include="[name='q'],[name='revenue_filter'],[name='region_filter'],[name='source_filter']">
+        <option value="">All Industries</option>
+        {% for ind in industries %}
+        <option value="{{ ind }}" {% if industry == ind %}selected{% endif %}>{{ ind }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="revenue_filter" x-model="revenue"
+            hx-get="/views/prospecting/rows"
+            hx-trigger="change"
+            hx-target="#prospect-table-body"
+            hx-include="[name='q'],[name='industry_filter'],[name='region_filter'],[name='source_filter']">
+        <option value="">All Revenue Ranges</option>
+        {% for rev in revenues %}
+        <option value="{{ rev }}" {% if revenue == rev %}selected{% endif %}>{{ rev }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="region_filter" x-model="region"
+            hx-get="/views/prospecting/rows"
+            hx-trigger="change"
+            hx-target="#prospect-table-body"
+            hx-include="[name='q'],[name='industry_filter'],[name='revenue_filter'],[name='source_filter']">
+        <option value="">All Regions</option>
+        {% for reg in regions %}
+        <option value="{{ reg }}" {% if region == reg %}selected{% endif %}>{{ reg }}</option>
+        {% endfor %}
+    </select>
+
+    <select name="source_filter" x-model="source"
+            hx-get="/views/prospecting/rows"
+            hx-trigger="change"
+            hx-target="#prospect-table-body"
+            hx-include="[name='q'],[name='industry_filter'],[name='revenue_filter'],[name='region_filter']">
+        <option value="">All Sources</option>
+        {% for src in sources %}
+        <option value="{{ src }}" {% if source == src %}selected{% endif %}>{{ src }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+{# Prospect table #}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Industry</th>
+            <th>Region</th>
+            <th>Fit Score</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody id="prospect-table-body">
+        {% if prospects %}
+            {% for prospect in prospects %}
+                {% include "partials/prospecting/prospect_row.html" %}
+            {% endfor %}
+        {% else %}
+            <tr><td colspan="6">
+                {% include "partials/shared/empty_state.html" with context %}
+            </td></tr>
+        {% endif %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+    {% with url="/views/prospecting/rows", target_id="prospect-table-body" %}
+        {% include "partials/shared/pagination.html" %}
+    {% endwith %}
+{% endif %}
+
+{# Detail drawer — filled via HTMX when a row is clicked #}
+<div id="prospect-detail-drawer"></div>
+{% endblock %}

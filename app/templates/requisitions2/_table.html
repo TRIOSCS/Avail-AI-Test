@@ -1,0 +1,67 @@
+<table class="rq2-table">
+  <thead>
+    <tr>
+      <th style="width:32px">
+        <input type="checkbox"
+               x-on:change="toggleAll($event.target.checked, {{ requisitions | map(attribute='id') | list | tojson }})">
+      </th>
+      {% set columns = [
+        ('name', 'Name'),
+        ('status', 'Status'),
+        ('customer_name', 'Customer'),
+      ] %}
+      {% for col_key, col_label in columns %}
+      <th>
+        <a hx-get="/requisitions2/table?sort={{ col_key }}&order={{ 'asc' if filters.sort.value == col_key and filters.order.value == 'desc' else 'desc' }}"
+           hx-target="#rq2-table"
+           hx-include="#rq2-filters"
+           hx-push-url="/requisitions2">
+          {{ col_label }}
+          {% if filters.sort.value == col_key %}
+            {{ '▲' if filters.order.value == 'asc' else '▼' }}
+          {% endif %}
+        </a>
+      </th>
+      {% endfor %}
+      <th>Parts</th>
+      <th>Offers</th>
+      <th>Owner</th>
+      <th>Urgency</th>
+      <th>
+        <a hx-get="/requisitions2/table?sort=created_at&order={{ 'asc' if filters.sort.value == 'created_at' and filters.order.value == 'desc' else 'desc' }}"
+           hx-target="#rq2-table"
+           hx-include="#rq2-filters"
+           hx-push-url="/requisitions2">
+          Created
+          {% if filters.sort.value == 'created_at' %}
+            {{ '▲' if filters.order.value == 'asc' else '▼' }}
+          {% endif %}
+        </a>
+      </th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody id="rq2-rows">
+    {% include "requisitions2/_table_rows.html" %}
+  </tbody>
+</table>
+
+{% if pagination.total_pages > 1 %}
+<nav class="rq2-pagination">
+  {% if pagination.page > 1 %}
+  <a hx-get="/requisitions2/table?page={{ pagination.page - 1 }}"
+     hx-target="#rq2-table"
+     hx-include="#rq2-filters"
+     hx-push-url="/requisitions2"
+     preload>← Prev</a>
+  {% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.total_pages }} ({{ pagination.total }} total)</span>
+  {% if pagination.page < pagination.total_pages %}
+  <a hx-get="/requisitions2/table?page={{ pagination.page + 1 }}"
+     hx-target="#rq2-table"
+     hx-include="#rq2-filters"
+     hx-push-url="/requisitions2"
+     preload>Next →</a>
+  {% endif %}
+</nav>
+{% endif %}

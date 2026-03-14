@@ -866,3 +866,167 @@ class TestNotifyV3Completed:
                 await notify_v3_completed(plan, db_session)
 
         mock_email.assert_not_awaited()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# log_buyplan_activity
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestLogBuyplanActivity:
+    def test_creates_activity_record(self, db_session):
+        from app.services.buyplan_v3_notifications import log_buyplan_activity
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id, status="approved")
+
+        log_buyplan_activity(db_session, user.id, plan, "buyplan_approved", "Manager approved")
+        db_session.commit()
+
+        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
+        assert len(activities) == 1
+        act = activities[0]
+        assert act.user_id == user.id
+        assert act.channel == "system"
+        assert act.requisition_id == plan.requisition_id
+        assert f"Buy plan V3 #{plan.id}: Manager approved" == act.subject
+        assert f"v3_plan_id={plan.id}" in act.notes
+        assert "status=approved" in act.notes
+
+    def test_no_detail(self, db_session):
+        from app.services.buyplan_v3_notifications import log_buyplan_activity
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id)
+
+        log_buyplan_activity(db_session, user.id, plan, "buyplan_submitted")
+        db_session.commit()
+
+        act = db_session.query(ActivityLog).filter_by(activity_type="buyplan_submitted").first()
+        assert act is not None
+        assert act.subject == f"Buy plan V3 #{plan.id}"
+
+    def test_different_activity_types(self, db_session):
+        from app.services.buyplan_v3_notifications import log_buyplan_activity
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id)
+
+        log_buyplan_activity(db_session, user.id, plan, "buyplan_rejected", "Price too high")
+        db_session.commit()
+
+        act = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").first()
+        assert act is not None
+        assert "Price too high" in act.subject
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# notify_v3_stock_sale_approved
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNotifyV3StockSaleApproved:
+    @pytest.mark.asyncio
+    async def test_sends_stock_sale_emails(self, db_session):
+        from app.services.buyplan_v3_notifications import notify_v3_stock_sale_approved
+
+        submitter = _make_user(db_session)
+        admin = _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
+        admin.access_token = "fake-token"
+        db_session.commit()
+
+        plan = _make_plan(db_session, submitter.id, approved_by_id=admin.id)
+        _add_line(db_session, plan, quantity=50, unit_cost=3.00)
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock()
+
+        with patch("app.services.buyplan_v3_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com", "accounting@trioscs.com"]
+            mock_settings.app_url = "https://avail.test"
+            with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+                with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                    with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
+                        await notify_v3_stock_sale_approved(plan, db_session)
+
+        # Should send to both logistics and accounting
+        assert mock_gc.post_json.await_count == 2
+        subjects = [call[0][1]["message"]["subject"] for call in mock_gc.post_json.call_args_list]
+        assert all(f"Stock Sale Approved" in s for s in subjects)
+
+    @pytest.mark.asyncio
+    async def test_creates_submitter_activity(self, db_session):
+        from app.services.buyplan_v3_notifications import notify_v3_stock_sale_approved
+
+        submitter = _make_user(db_session)
+        plan = _make_plan(db_session, submitter.id)
+
+        with patch("app.services.buyplan_v3_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = []
+            mock_settings.stock_sale_notify_emails = []
+            mock_settings.app_url = "https://avail.test"
+            with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
+                await notify_v3_stock_sale_approved(plan, db_session)
+
+        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
+        assert len(activities) == 1
+        assert "Stock sale V3" in activities[0].subject
+        assert "no PO required" in activities[0].subject
+
+    @pytest.mark.asyncio
+    async def test_no_submitter(self, db_session):
+        from app.services.buyplan_v3_notifications import notify_v3_stock_sale_approved
+
+        user = _make_user(db_session)
+        plan = _make_plan(db_session, user.id, submitted_by_id=None)
+
+        with patch("app.services.buyplan_v3_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = []
+            mock_settings.stock_sale_notify_emails = []
+            mock_settings.app_url = "https://avail.test"
+            with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
+                await notify_v3_stock_sale_approved(plan, db_session)
+
+        # No in-app activity when no submitter
+        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
+        assert len(activities) == 0
+
+    @pytest.mark.asyncio
+    async def test_teams_channel_posted(self, db_session):
+        from app.services.buyplan_v3_notifications import notify_v3_stock_sale_approved
+
+        submitter = _make_user(db_session)
+        plan = _make_plan(db_session, submitter.id)
+
+        with patch("app.services.buyplan_v3_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = []
+            mock_settings.stock_sale_notify_emails = []
+            mock_settings.app_url = "https://avail.test"
+            with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
+                await notify_v3_stock_sale_approved(plan, db_session)
+
+        mock_teams.assert_awaited_once()
+        msg = mock_teams.call_args[0][0]
+        assert "Stock Sale Approved" in msg
+        assert "no po required" in msg.lower()
+
+    @pytest.mark.asyncio
+    async def test_no_admin_with_token(self, db_session):
+        from app.services.buyplan_v3_notifications import notify_v3_stock_sale_approved
+
+        submitter = _make_user(db_session)
+        admin = _make_user(db_session, "admin@trioscs.com", "Admin", "admin")
+        # admin has no access_token — email sending should be skipped
+        plan = _make_plan(db_session, submitter.id)
+
+        with patch("app.services.buyplan_v3_notifications.settings") as mock_settings:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com"]
+            mock_settings.app_url = "https://avail.test"
+            with patch("app.services.buyplan_v3_notifications._teams_channel", new_callable=AsyncMock):
+                await notify_v3_stock_sale_approved(plan, db_session)
+
+        # Should still create in-app notification even without email sending
+        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
+        assert len(activities) == 1

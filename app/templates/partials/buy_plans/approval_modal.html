@@ -1,0 +1,24 @@
+{#
+  approval_modal.html — Alpine confirmation modal for approve/reject/halt actions.
+  Receives: bp_id (int), action (str: approve/reject/halt), action_label (str).
+  Called by: detail.html workflow buttons.
+  Depends on: Alpine.js for x-data state, HTMX for form submission.
+#}
+<div x-data="{ reason: '' }">
+    <h3>{{ action_label }} Buy Plan</h3>
+    <p>Are you sure you want to {{ action }} this buy plan?</p>
+    <div class="form-group">
+        <label for="reason-input">Reason (optional)</label>
+        <textarea id="reason-input" x-model="reason" placeholder="Reason (optional)" rows="3"></textarea>
+    </div>
+    <div class="modal-actions">
+        <button class="btn btn-primary"
+                hx-post="/api/buy-plans/{{ bp_id }}/{{ action }}"
+                hx-target="#main-content"
+                hx-vals='js:{"reason": reason}'
+                @htmx:after-request="$dispatch('close-modal')">
+            {{ action_label }}
+        </button>
+        <button class="btn btn-secondary" @click="$dispatch('close-modal')">Cancel</button>
+    </div>
+</div>

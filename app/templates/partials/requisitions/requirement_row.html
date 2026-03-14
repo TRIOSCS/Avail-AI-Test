@@ -1,0 +1,39 @@
+{#
+  requirement_row.html — Single requirement row partial for the parts table.
+  Receives: row (Requirement object), req_id (parent requisition ID).
+  Called by: tabs/parts.html loop, POST create (beforeend swap), PUT edit (outerHTML swap).
+  Depends on: HTMX (inline edit on dblclick, delete).
+#}
+<tr id="req-row-{{ row.id }}">
+    <td>{{ loop.index if loop is defined else '' }}</td>
+    <td class="editable-cell"
+        hx-get="/views/requisitions/{{ req_id }}/requirements/{{ row.id }}/edit"
+        hx-trigger="dblclick"
+        hx-target="this"
+        hx-swap="innerHTML">
+        {{ row.primary_mpn or '-' }}
+    </td>
+    <td>{{ row.target_qty or 0 }}</td>
+    <td>{{ '${:.4f}'.format(row.target_price|float) if row.target_price else '-' }}</td>
+    <td>
+        <span class="badge badge-{{ row.sourcing_status or 'open' }}">
+            {{ row.sourcing_status or 'open' }}
+        </span>
+    </td>
+    <td>{{ row.brand or '-' }}</td>
+    <td>{{ row.condition or '-' }}</td>
+    <td class="row-actions">
+        <button class="btn btn-xs btn-primary"
+                hx-get="/views/sourcing/{{ row.id }}/results"
+                hx-target="#sourcing-panel">
+            Source
+        </button>
+        <button class="btn btn-xs btn-danger"
+                hx-delete="/api/requisitions/{{ req_id }}/requirements/{{ row.id }}"
+                hx-target="#req-row-{{ row.id }}"
+                hx-swap="delete"
+                hx-confirm="Delete this part?">
+            X
+        </button>
+    </td>
+</tr>

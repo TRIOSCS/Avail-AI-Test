@@ -618,6 +618,7 @@ from .routers.proactive import router as proactive_router
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
 from .routers.requisitions import router as reqs_router
+from .routers.requisitions2 import router as rq2_router
 from .routers.rfq import router as rfq_router
 from .routers.sources import router as sources_router
 from .routers.strategic import router as strategic_router
@@ -653,6 +654,7 @@ app.include_router(proactive_router)
 app.include_router(prospect_pool_router)
 app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
+app.include_router(rq2_router)
 app.include_router(rfq_router)
 app.include_router(sources_router)
 app.include_router(strategic_router)
@@ -665,6 +667,12 @@ app.include_router(vendor_analytics_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
+
+# HTMX view router — always registered (HTMX is the default frontend).
+# The old SPA at "/" (index.html) still works as a fallback when USE_HTMX=false.
+from app.routers.views import router as views_router
+
+app.include_router(views_router)
 
 # Full-version routers (disabled in MVP mode)
 if not settings.mvp_mode:

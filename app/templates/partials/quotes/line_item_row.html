@@ -1,0 +1,39 @@
+{# line_item_row.html — Single quote line item row with inline editing.
+   Called by: detail.html (loop), PUT /api/quotes/{id}/lines/{line_id} response
+   Depends on: line object (QuoteLine), quote_id variable #}
+
+<tr id="line-{{ line.id }}">
+  <td>{{ line.mpn }}</td>
+  <td>
+    <input type="number" name="qty" value="{{ line.qty or '' }}"
+           hx-put="/api/quotes/{{ quote_id }}/lines/{{ line.id }}"
+           hx-trigger="change"
+           hx-target="#line-{{ line.id }}"
+           hx-swap="outerHTML"
+           style="width:80px;">
+  </td>
+  <td>
+    <input type="number" name="cost_price" value="{{ line.cost_price or '' }}" step="0.01"
+           hx-put="/api/quotes/{{ quote_id }}/lines/{{ line.id }}"
+           hx-trigger="change"
+           hx-target="#line-{{ line.id }}"
+           hx-swap="outerHTML"
+           style="width:100px;">
+  </td>
+  <td>
+    <input type="number" name="sell_price" value="{{ line.sell_price or '' }}" step="0.01"
+           hx-put="/api/quotes/{{ quote_id }}/lines/{{ line.id }}"
+           hx-trigger="change"
+           hx-target="#line-{{ line.id }}"
+           hx-swap="outerHTML"
+           style="width:100px;">
+  </td>
+  <td>${{ '%.2f' | format((line.qty or 0) * (line.sell_price or 0)) }}</td>
+  <td>
+    <button hx-delete="/api/quotes/{{ quote_id }}/lines/{{ line.id }}"
+            hx-target="#line-{{ line.id }}"
+            hx-swap="delete"
+            hx-confirm="Remove this line?"
+            class="btn-icon" title="Remove line">&times;</button>
+  </td>
+</tr>

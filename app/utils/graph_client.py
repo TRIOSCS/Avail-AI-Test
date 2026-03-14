@@ -125,7 +125,17 @@ class GraphClient:
         json_data: dict | None = None,
         timeout: int = 30,
     ) -> dict:
-        """Execute HTTP request with exponential backoff on 429 / 5xx."""
+        """Execute HTTP request with retry logic.
+
+        Retry strategy:
+        - 429 (rate limit): always retry, honor Retry-After header (use max of
+          backoff and Retry-After so we never wait less than the server asks).
+        - 503 (service unavailable): retry with backoff, honor Retry-After if present.
+        - Other 5xx: retry with exponential backoff.
+        - 401 (auth expired): never retry — token must be refreshed by caller.
+        - Other 4xx (400, 403, 404): never retry.
+        - 410 (delta token expired): raise GraphSyncStateExpired immediately.
+        """
         last_error: Exception | None = None
 
         for attempt in range(MAX_RETRIES + 1):
@@ -143,29 +153,47 @@ class GraphClient:
                 if resp.status_code == 204:
                     return {}  # No content
 
-                # Throttled — respect Retry-After
-                if resp.status_code == 429:
-                    wait = int(resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1)))
-                    logger.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
-                    await asyncio.sleep(wait)
-                    continue
-
-                # Server error — exponential backoff
-                if resp.status_code >= 500:
-                    wait = BACKOFF_BASE ** (attempt + 1)
-                    logger.warning(f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})")
-                    await asyncio.sleep(wait)
-                    continue
+                # 401 Unauthorized — don't retry, token needs refresh
+                if resp.status_code == 401:
+                    logger.warning("Graph 401 Unauthorized — not retrying (token expired)")
+                    return {"error": 401, "detail": resp.text[:300]}
 
                 # 410 Gone — delta token expired, caller must discard and re-sync
                 if resp.status_code == 410:
                     logger.warning("Graph 410 SyncStateNotFound — delta token expired")
                     raise GraphSyncStateExpired(resp.text[:300])
 
-                # Client error (400, 401, 403, 404) — don't retry
+                # Throttled — respect Retry-After, use max of backoff and header
+                if resp.status_code == 429:
+                    backoff_wait = BACKOFF_BASE ** (attempt + 1)
+                    retry_after = _parse_retry_after(resp)
+                    wait = max(backoff_wait, retry_after) if retry_after else backoff_wait
+                    logger.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
+                    await asyncio.sleep(wait)
+                    continue
+
+                # 503 Service Unavailable — retry with Retry-After if present
+                if resp.status_code == 503:
+                    backoff_wait = BACKOFF_BASE ** (attempt + 1)
+                    retry_after = _parse_retry_after(resp)
+                    wait = max(backoff_wait, retry_after) if retry_after else backoff_wait
+                    logger.warning(f"Graph 503 — retry in {wait}s (attempt {attempt + 1})")
+                    await asyncio.sleep(wait)
+                    continue
+
+                # Other server errors — exponential backoff
+                if resp.status_code >= 500:
+                    wait = BACKOFF_BASE ** (attempt + 1)
+                    logger.warning(f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})")
+                    await asyncio.sleep(wait)
+                    continue
+
+                # Other client errors (400, 403, 404) — don't retry
                 logger.error(f"Graph {resp.status_code}: {resp.text[:300]}")
                 return {"error": resp.status_code, "detail": resp.text[:300]}
 
+            except GraphSyncStateExpired:
+                raise
             except Exception as e:
                 last_error = e
                 wait = BACKOFF_BASE ** (attempt + 1)
@@ -177,3 +205,17 @@ class GraphClient:
         if last_error:
             raise last_error
         return {"error": "max_retries", "detail": "All retries exhausted"}
+
+
+def _parse_retry_after(resp) -> int | None:
+    """Parse the Retry-After header value as an integer (seconds).
+
+    Returns None if the header is absent or unparseable.
+    """
+    raw = resp.headers.get("Retry-After")
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (ValueError, TypeError):
+        return None

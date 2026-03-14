@@ -1,0 +1,83 @@
+{#
+  list.html — Companies list page with HTMX search, owner filter, pagination, bulk select.
+  Receives: companies (list), page, total_pages, q, owner, owners (list of owner names).
+  Called by: views.py companies_page endpoint.
+  Depends on: company_row.html, pagination.html, HTMX, Alpine.js.
+#}
+{% extends "base.html" %}
+
+{% block title %}Companies — AvailAI{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Companies</h1>
+    <button class="btn btn-primary"
+            @click="$dispatch('open-modal')"
+            hx-get="/views/companies/create-form"
+            hx-target="#modal-content">
+        New Company
+    </button>
+</div>
+
+{# Search + owner filter toolbar #}
+<div class="toolbar" x-data="{ owner: '{{ owner }}' }">
+    <input type="search" name="q" value="{{ q }}"
+           placeholder="Search companies..."
+           hx-get="/views/companies/rows"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#company-table-body"
+           hx-include="[name='owner_filter']">
+
+    <select name="owner_filter" x-model="owner"
+            hx-get="/views/companies/rows"
+            hx-trigger="change"
+            hx-target="#company-table-body"
+            hx-include="[name='q']">
+        <option value="">All Owners</option>
+        {% for o in owners %}
+        <option value="{{ o }}" {% if owner == o %}selected{% endif %}>{{ o }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+{# Sortable table with bulk select #}
+<div x-data="{ selected: [] }">
+    <table class="data-table responsive-table">
+        <thead>
+            <tr>
+                <th class="col-check">
+                    <input type="checkbox" @click="selected = $event.target.checked ? [...document.querySelectorAll('[name=company_check]')].map(e => e.value) : []">
+                </th>
+                <th hx-get="/views/companies/rows?sort=name&dir={% if sort == 'name' and dir == 'asc' %}desc{% else %}asc{% endif %}"
+                    hx-target="#company-table-body"
+                    class="sortable{% if sort == 'name' %} sorted-{{ dir }}{% endif %}">
+                    Name
+                </th>
+                <th>Owner</th>
+                <th>Sites</th>
+                <th>Open Reqs</th>
+            </tr>
+        </thead>
+        <tbody id="company-table-body">
+            {% if companies %}
+                {% for company in companies %}
+                    {% include "partials/companies/company_row.html" %}
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="5">
+                    {% include "partials/shared/empty_state.html" with context %}
+                </td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+    {% with url="/views/companies/rows", target_id="company-table-body" %}
+        {% include "partials/shared/pagination.html" %}
+    {% endwith %}
+{% endif %}
+
+{# Detail drawer — filled via HTMX when a row is clicked #}
+<div id="detail-drawer"></div>
+{% endblock %}

@@ -1,0 +1,36 @@
+{#
+  sighting_row.html — Single sighting row for material card history.
+  Receives: sighting (Sighting model object).
+  Called by: material_card.html (loop over sightings).
+  Depends on: Sighting model fields (vendor_name, unit_price, qty_available, source_type, created_at).
+#}
+<tr class="sighting-row">
+    <td>{{ sighting.vendor_name or "Unknown" }}</td>
+    <td>{{ sighting.mpn_matched or "" }}</td>
+    <td>
+        {% if sighting.unit_price is not none %}
+            ${{ "%.4f" % sighting.unit_price }}
+        {% else %}
+            <span class="text-muted">--</span>
+        {% endif %}
+    </td>
+    <td>
+        {% if sighting.qty_available is not none %}
+            {{ "{:,}".format(sighting.qty_available) }}
+        {% else %}
+            <span class="text-muted">--</span>
+        {% endif %}
+    </td>
+    <td>
+        <span class="source-badge source-{{ sighting.source_type or 'unknown' }}">
+            {{ sighting.source_type or "unknown" }}
+        </span>
+    </td>
+    <td class="text-muted">
+        {% if sighting.created_at %}
+            {{ sighting.created_at.strftime('%Y-%m-%d') }}
+        {% else %}
+            --
+        {% endif %}
+    </td>
+</tr>
