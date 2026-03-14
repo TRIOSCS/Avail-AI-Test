@@ -248,21 +248,13 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
         delta = datetime.now(timezone.utc) - last_activity_row.replace(tzinfo=timezone.utc)
         hours_since = delta.total_seconds() / 3600
 
-    # Determine part-level workflow step for the stepper
-    # Steps: sourcing -> offer -> select -> quote -> buy_plan -> po
-    from ...models import RequisitionTask
-
-    # Check quote status at req level
-    quote_status = getattr(req, "quote_status", None) or ""
-
     results = []
     for r in req.requirements:
         oc = offer_counts.get(r.id, 0)
         sc = offer_selected_counts.get(r.id, 0)
-        # Determine step
-        if quote_status in ("sent", "revised", "won"):
-            step = "quoted"
-        elif sc > 0:
+        # Determine part-level workflow step: sourcing → offers → selected → quoted → ...
+        # quote_status lives on Quote rows, not on Requisition, so we check sc/oc only here.
+        if sc > 0:
             step = "selected"
         elif oc > 0:
             step = "offers"
@@ -1243,7 +1235,6 @@ async def list_requirement_offers(
             "moq": o.moq,
             "warranty": o.warranty,
             "country_of_origin": o.country_of_origin,
-            "firmware": o.firmware,
             "hardware_code": o.hardware_code,
             "valid_until": o.valid_until.isoformat() if o.valid_until else None,
             "source": o.source,
