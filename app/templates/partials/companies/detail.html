@@ -1,0 +1,52 @@
+{#
+  detail.html — Company detail drawer with tabbed content area.
+  Receives: company (ORM object), user.
+  Called by: views.py company_detail endpoint.
+  Depends on: Alpine.js (tab switching, close), HTMX (tab lazy-loading, enrich).
+#}
+<div class="drawer" x-data="{ tab: 'overview' }" @close-drawer.window="$el.innerHTML = ''">
+    <div class="drawer-header">
+        <h2>{{ company.name }}</h2>
+        <div class="drawer-meta">
+            {% if company.account_type %}
+            <span class="badge">{{ company.account_type }}</span>
+            {% endif %}
+            {% if company.industry %}
+            <span class="meta-item">{{ company.industry }}</span>
+            {% endif %}
+        </div>
+        <div class="drawer-actions">
+            <button class="btn btn-sm"
+                    hx-post="/api/enrich/company/{{ company.id }}"
+                    hx-target="#enrich-results"
+                    hx-indicator="#enrich-spinner">
+                Enrich
+            </button>
+            <span id="enrich-spinner" class="htmx-indicator">Loading...</span>
+            <button class="btn btn-sm" @click="$dispatch('close-drawer')">Close</button>
+        </div>
+    </div>
+
+    <div id="enrich-results"></div>
+
+    {# Tab bar #}
+    <nav class="tab-bar">
+        {% for tab_key, tab_label in [('overview', 'Overview'), ('sites', 'Sites'), ('contacts', 'Contacts'), ('activity', 'Activity'), ('pipeline', 'Pipeline')] %}
+        <button class="tab-btn"
+                :class="{ 'active': tab === '{{ tab_key }}' }"
+                @click="tab = '{{ tab_key }}'"
+                hx-get="/views/companies/{{ company.id }}/tab/{{ tab_key }}"
+                hx-target="#company-tab-content"
+                hx-swap="innerHTML">
+            {{ tab_label }}
+        </button>
+        {% endfor %}
+    </nav>
+
+    {# Tab content — loads overview on open #}
+    <div id="company-tab-content"
+         hx-get="/views/companies/{{ company.id }}/tab/overview"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+</div>

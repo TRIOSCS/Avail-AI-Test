@@ -1,0 +1,14 @@
+{# quote_row.html — Single quote table row, clickable to open detail.
+   Called by: list.html (loop), GET /views/quotes/rows (views.py)
+   Depends on: quote object with id, quote_number, customer_name, line_count, total, status, created_at #}
+
+<tr id="quote-{{ quote.id }}" class="clickable-row"
+    hx-get="/views/quotes/{{ quote.id }}" hx-target="#main-content" hx-push-url="true"
+    style="cursor:pointer;">
+  <td data-label="Quote #">{{ quote.quote_number }}</td>
+  <td data-label="Customer">{{ quote.customer_name }}</td>
+  <td data-label="Lines">{{ quote.line_count }} lines</td>
+  <td data-label="Total">${{ '%.2f' | format(quote.total or 0) }}</td>
+  <td data-label="Status"><span class="badge badge-{{ quote.status }}">{{ quote.status }}</span></td>
+  <td data-label="Date">{{ quote.created_at.strftime('%b %d') if quote.created_at else '' }}</td>
+</tr>

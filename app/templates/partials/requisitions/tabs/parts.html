@@ -1,0 +1,58 @@
+{#
+  parts.html — Requirements/parts tab for requisition detail view.
+  Receives: requirements (list of Requirement objects), req_id (int).
+  Called by: views.py requisition_tab endpoint (tab_name='parts').
+  Depends on: requirement_row.html partial, HTMX (add row, inline edit).
+#}
+<div class="tab-panel" id="parts-panel">
+    <div class="tab-toolbar">
+        <h3>Parts ({{ requirements|length }})</h3>
+    </div>
+
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>MPN</th>
+                <th>Qty</th>
+                <th>Target Price</th>
+                <th>Status</th>
+                <th>Brand</th>
+                <th>Condition</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="parts-table-body">
+            {% for row in requirements %}
+                {% include "partials/requisitions/requirement_row.html" %}
+            {% else %}
+                <tr id="parts-empty-row">
+                    <td colspan="8" class="empty-state">
+                        No parts added yet. Add your first part below.
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {# Add part form #}
+    <form class="add-row-form"
+          hx-post="/api/requisitions/{{ req_id }}/requirements"
+          hx-target="#parts-table-body"
+          hx-swap="beforeend"
+          hx-on::after-request="if(event.detail.successful) this.reset()"
+          x-data="{ mpn: '', qty: '' }">
+        <input type="text" name="primary_mpn" placeholder="Part number (MPN)"
+               x-model="mpn" required>
+        <input type="number" name="target_qty" placeholder="Qty" min="1"
+               x-model="qty">
+        <input type="text" name="brand" placeholder="Brand (optional)">
+        <button type="submit" class="btn btn-sm btn-primary"
+                :disabled="!mpn.trim()">
+            Add Part
+        </button>
+    </form>
+
+    {# Sourcing results panel — populated when Source button is clicked #}
+    <div id="sourcing-panel"></div>
+</div>

@@ -1,0 +1,73 @@
+{#
+  result_row.html — Single sourcing result row with source badge, confidence ring, and actions.
+  Receives: result (dict from search_service with keys: vendor_name, mpn, qty_available,
+            unit_price, source_badge, confidence_pct, confidence_color, source_type,
+            is_authorized, manufacturer, currency).
+  Called by: results.html (loop over results list).
+  Depends on: Alpine.js for action interactions, HTMX for server actions.
+#}
+<tr class="result-row" x-data="{ expanded: false }">
+    {# Source badge #}
+    <td>
+        <span class="source-badge source-{{ result.source_type or 'unknown' }}"
+              title="{{ result.source_type or 'unknown' }}">
+            {{ result.source_badge or result.source_type or "Unknown" }}
+        </span>
+        {% if result.is_authorized %}
+            <span class="badge badge-auth" title="Authorized distributor">Auth</span>
+        {% endif %}
+    </td>
+
+    {# Confidence ring #}
+    <td>
+        <div class="confidence-ring confidence-{{ result.confidence_color or 'red' }}"
+             title="{{ result.confidence_pct or 0 }}% confidence">
+            <span class="confidence-value">{{ result.confidence_pct or 0 }}%</span>
+        </div>
+    </td>
+
+    {# Vendor #}
+    <td>{{ result.vendor_name or "Unknown" }}</td>
+
+    {# MPN #}
+    <td>
+        <span class="mpn-text">{{ result.mpn or result.mpn_matched or "" }}</span>
+        {% if result.manufacturer %}
+            <br><small class="text-muted">{{ result.manufacturer }}</small>
+        {% endif %}
+    </td>
+
+    {# Quantity #}
+    <td>
+        {% if result.qty_available is not none %}
+            {{ "{:,}".format(result.qty_available) }}
+        {% else %}
+            <span class="text-muted">--</span>
+        {% endif %}
+    </td>
+
+    {# Price #}
+    <td>
+        {% if result.unit_price is not none %}
+            ${{ "%.4f" % result.unit_price }}
+            {% if result.currency and result.currency != "USD" %}
+                <small class="text-muted">({{ result.currency }})</small>
+            {% endif %}
+        {% else %}
+            <span class="text-muted">RFQ</span>
+        {% endif %}
+    </td>
+
+    {# Actions #}
+    <td class="actions-cell">
+        {% if result.material_card_id %}
+        <button class="btn btn-xs btn-ghost"
+                hx-get="/views/materials/{{ result.material_card_id }}"
+                hx-target="#modal-content"
+                hx-swap="innerHTML"
+                title="View material card">
+            Card
+        </button>
+        {% endif %}
+    </td>
+</tr>

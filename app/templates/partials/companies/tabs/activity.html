@@ -1,0 +1,31 @@
+{#
+  tabs/activity.html — Activity timeline for a company.
+  Receives: activities (list of ActivityLog objects), company_id.
+  Called by: views.py company_tab endpoint (tab_name='activity').
+  Depends on: HTMX (pagination).
+#}
+<div class="tab-panel">
+    <h3>Activity</h3>
+
+    {% if activities %}
+    <div class="activity-timeline">
+        {% for a in activities %}
+        <div class="activity-item">
+            <span class="activity-type badge">{{ a.activity_type }}</span>
+            <span class="activity-channel">{{ a.channel or '' }}</span>
+            {% if a.subject %}
+            <span class="activity-subject">{{ a.subject }}</span>
+            {% endif %}
+            {% if a.contact_name %}
+            <span class="activity-contact">{{ a.contact_name }}</span>
+            {% endif %}
+            <time class="activity-time">{{ a.created_at.strftime('%b %d, %Y %H:%M') if a.created_at else '' }}</time>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <p>No activity recorded.</p>
+    </div>
+    {% endif %}
+</div>

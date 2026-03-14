@@ -1,0 +1,188 @@
+{#
+  detail.html — Buy plan detail page with workflow action bar and line items.
+  Receives: bp (BuyPlanV3), user, lines (list of BuyPlanLine).
+  Called by: views.py buy_plan_detail endpoint.
+  Depends on: line_row.html, approval_modal.html, HTMX, Alpine.js.
+#}
+{% extends "base.html" %}
+
+{% block title %}Buy Plan #{{ bp.id }} — AvailAI{% endblock %}
+
+{% block content %}
+<div id="bp-detail-{{ bp.id }}">
+    {# Header #}
+    <div class="page-header">
+        <div>
+            <a href="/views/buy-plans" hx-get="/views/buy-plans" hx-target="#main-content"
+               hx-push-url="true" class="back-link">&larr; Buy Plans</a>
+            <h1>Buy Plan #{{ bp.id }}</h1>
+        </div>
+        <span class="badge badge-{{ bp.status }}">{{ bp.status }}</span>
+    </div>
+
+    {# Summary info #}
+    <div class="detail-summary">
+        <div class="summary-item">
+            <span class="label">Customer</span>
+            <span>{{ bp.requisition.customer_name if bp.requisition else '-' }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Quote</span>
+            <span>{{ bp.quote.quote_number if bp.quote else '-' }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Total Cost</span>
+            <span>${{ '%.2f' | format(bp.total_cost or 0) }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Total Revenue</span>
+            <span>${{ '%.2f' | format(bp.total_revenue or 0) }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">Margin</span>
+            <span>{{ '%.1f' | format(bp.total_margin_pct or 0) }}%</span>
+        </div>
+        <div class="summary-item">
+            <span class="label">SO Status</span>
+            <span class="badge badge-{{ bp.so_status }}">{{ bp.so_status }}</span>
+        </div>
+        {% if bp.sales_order_number %}
+        <div class="summary-item">
+            <span class="label">Sales Order</span>
+            <span>{{ bp.sales_order_number }}</span>
+        </div>
+        {% endif %}
+        {% if bp.customer_po_number %}
+        <div class="summary-item">
+            <span class="label">Customer PO</span>
+            <span>{{ bp.customer_po_number }}</span>
+        </div>
+        {% endif %}
+    </div>
+
+    {# AI Summary / Flags #}
+    {% if bp.ai_summary %}
+    <div class="ai-summary">
+        <h3>AI Summary</h3>
+        <p>{{ bp.ai_summary }}</p>
+    </div>
+    {% endif %}
+
+    {% if bp.ai_flags %}
+    <div class="ai-flags">
+        {% for flag in bp.ai_flags %}
+        <div class="flag flag-{{ flag.severity or 'info' }}">{{ flag.message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Workflow action bar — context-sensitive based on status #}
+    <div class="action-bar" x-data="{ showModal: false, modalAction: '', modalLabel: '' }">
+        {% if bp.status == 'draft' %}
+            <button class="btn btn-primary"
+                    hx-post="/api/buy-plans/{{ bp.id }}/submit"
+                    hx-target="#main-content">
+                Submit for Approval
+            </button>
+        {% elif bp.status == 'pending' %}
+            <button class="btn btn-success"
+                    @click="modalAction='approve'; modalLabel='Approve'; showModal=true">
+                Approve
+            </button>
+            <button class="btn btn-danger"
+                    @click="modalAction='reject'; modalLabel='Reject'; showModal=true">
+                Reject
+            </button>
+        {% elif bp.status == 'active' %}
+            <button class="btn btn-warning"
+                    @click="modalAction='halt'; modalLabel='Halt'; showModal=true">
+                Halt
+            </button>
+            <button class="btn btn-success"
+                    hx-post="/api/buy-plans/{{ bp.id }}/complete"
+                    hx-target="#main-content">
+                Mark Complete
+            </button>
+        {% endif %}
+
+        {% if bp.status not in ('completed', 'cancelled') %}
+            <button class="btn btn-secondary"
+                    hx-post="/api/buy-plans/{{ bp.id }}/cancel"
+                    hx-target="#main-content"
+                    hx-confirm="Cancel this buy plan?">
+                Cancel
+            </button>
+        {% endif %}
+
+        {# Modal overlay #}
+        <div class="modal-overlay" x-show="showModal" x-cloak
+             @close-modal.window="showModal=false"
+             @keydown.escape.window="showModal=false">
+            <div class="modal-content" @click.outside="showModal=false">
+                <div x-data="{ reason: '' }">
+                    <h3 x-text="modalLabel + ' Buy Plan'"></h3>
+                    <p>Are you sure you want to <span x-text="modalAction"></span> this buy plan?</p>
+                    <div class="form-group">
+                        <label>Reason (optional)</label>
+                        <textarea x-model="reason" placeholder="Reason (optional)" rows="3"></textarea>
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-primary"
+                                :hx-post="'/api/buy-plans/{{ bp.id }}/' + modalAction"
+                                hx-target="#main-content"
+                                :hx-vals="JSON.stringify({reason: reason})"
+                                @htmx:after-request="$dispatch('close-modal')">
+                            <span x-text="modalLabel"></span>
+                        </button>
+                        <button class="btn btn-secondary" @click="showModal=false">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# Line items table #}
+    <div class="section">
+        <h2>Line Items ({{ lines | length }})</h2>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>MPN</th>
+                    <th>Vendor</th>
+                    <th>Qty</th>
+                    <th>Unit Cost</th>
+                    <th>Unit Sell</th>
+                    <th>Status</th>
+                    <th>Buyer</th>
+                    <th>PO #</th>
+                    <th>PO Confirmed</th>
+                </tr>
+            </thead>
+            <tbody id="bp-lines-body">
+                {% for line in lines %}
+                    {% with bp_id=bp.id %}
+                        {% include "partials/buy_plans/line_row.html" %}
+                    {% endwith %}
+                {% endfor %}
+                {% if not lines %}
+                <tr><td colspan="9">No line items.</td></tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+
+    {# Approval / notes section #}
+    {% if bp.approval_notes %}
+    <div class="section">
+        <h3>Approval Notes</h3>
+        <p>{{ bp.approval_notes }}</p>
+    </div>
+    {% endif %}
+    {% if bp.salesperson_notes %}
+    <div class="section">
+        <h3>Salesperson Notes</h3>
+        <p>{{ bp.salesperson_notes }}</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

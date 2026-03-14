@@ -23,6 +23,8 @@ Called by: frontend (Phases 6-8)
 Depends on: services/buy_plan_v3_service.py, schemas/buy_plan.py
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
@@ -33,6 +35,7 @@ from ...dependencies import require_buyer, require_user
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import (
     BuyPlanLine,
+    BuyPlanStatus,
     BuyPlanV3,
     VerificationGroupMember,
 )
@@ -40,6 +43,8 @@ from ...schemas.buy_plan import (
     BuyPlanLineIssue,
     BuyPlanV3Approval,
     BuyPlanV3Submit,
+    BuyPlanV3TokenApproval,
+    BuyPlanV3TokenReject,
     POConfirmation,
     POVerificationRequest,
     SOVerificationRequest,
@@ -255,6 +260,70 @@ async def update_verification_group(
             member.is_active = False
             db.commit()
         return {"ok": True, "action": "removed", "user_id": body.user_id}
+
+
+# ── Token-based Approval (public, no auth) ──────────────────────────
+
+
+def _token_expired(expires_at) -> bool:
+    """Timezone-safe token expiration check (SQLite returns naive datetimes)."""
+    now = datetime.now(timezone.utc)
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at is not None and expires_at < now
+
+
+@router.get("/api/buy-plans-v3/token/{token}")
+async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
+    """Public endpoint — no auth required. Get plan details by approval token."""
+    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    return _plan_to_dict(plan)
+
+
+@router.put("/api/buy-plans-v3/token/{token}/approve")
+async def approve_by_token(token: str, body: BuyPlanV3TokenApproval, db: Session = Depends(get_db)):
+    """Public token-based approval. Sets SO number and activates plan."""
+    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    if plan.status != BuyPlanStatus.pending.value:
+        raise HTTPException(400, f"Cannot approve plan in '{plan.status}' status")
+    plan.status = BuyPlanStatus.active.value
+    plan.sales_order_number = body.sales_order_number
+    plan.approval_notes = body.notes
+    plan.approved_at = datetime.now(timezone.utc)
+    plan.approval_token = None  # Invalidate token after use
+    # Stock sale fast-track: if is_stock_sale, auto-complete
+    if plan.is_stock_sale:
+        plan.status = BuyPlanStatus.completed.value
+        plan.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(plan)
+    return _plan_to_dict(plan)
+
+
+@router.put("/api/buy-plans-v3/token/{token}/reject")
+async def reject_by_token(token: str, body: BuyPlanV3TokenReject, db: Session = Depends(get_db)):
+    """Public token-based rejection. Resets plan to draft."""
+    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    if plan.status != BuyPlanStatus.pending.value:
+        raise HTTPException(400, f"Cannot reject plan in '{plan.status}' status")
+    plan.status = BuyPlanStatus.draft.value
+    plan.cancellation_reason = body.reason
+    plan.approval_token = None  # Invalidate token
+    db.commit()
+    db.refresh(plan)
+    return _plan_to_dict(plan)
 
 
 # ── Intelligence ─────────────────────────────────────────────────────
@@ -645,6 +714,24 @@ async def flag_issue_v3(
 
     db.commit()
     return {"ok": True, "line_id": line.id, "status": line.status, "issue_type": line.issue_type}
+
+
+# ── PO Verification Scanning ─────────────────────────────────────────
+
+
+@router.get("/api/buy-plans-v3/{plan_id}/verify-po")
+async def verify_po_scan_v3(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Scan buyer's Outlook for PO emails matching each line."""
+    plan = db.query(BuyPlanV3).filter(BuyPlanV3.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    from ...services.buy_plan_v3_service import verify_po_sent_v3
+    results = await verify_po_sent_v3(plan, db)
+    return {"plan_id": plan.id, "verifications": results}
 
 
 # ── Offer Comparison ─────────────────────────────────────────────────

@@ -1326,6 +1326,17 @@ async def create_requirement_task(
     title = (body.get("title") or "").strip()
     if not title:
         raise HTTPException(422, "Task title is required")
+    from datetime import datetime as _dt
+
+    assigned_to_id = body.get("assigned_to_id")
+    due_at_raw = body.get("due_at")
+    due_at = None
+    if due_at_raw:
+        try:
+            due_at = _dt.fromisoformat(due_at_raw)
+        except (ValueError, TypeError):
+            pass
+
     task = RequisitionTask(
         requisition_id=req.requisition_id,
         title=title,
@@ -1334,6 +1345,8 @@ async def create_requirement_task(
         source="manual",
         source_ref=f"requirement:{requirement_id}",
         created_by=user.id,
+        assigned_to_id=assigned_to_id,
+        due_at=due_at,
     )
     db.add(task)
     db.commit()

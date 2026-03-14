@@ -3959,7 +3959,7 @@ async function checkTokenApproval() {
     const token = location.hash.replace('#approve-token/', '');
     if (!token) return false;
     try {
-        const bp = await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token));
+        const bp = await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token));
         showView('view-buyplans');
         const el = document.getElementById('buyPlansList');
         const statusLabel = bp.status === 'pending_approval' ? 'Pending Approval' : bp.status;
@@ -4007,7 +4007,7 @@ async function tokenApprovePlan(token) {
     if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
     const notes = document.getElementById('tokenManagerNotes')?.value?.trim() || '';
     try {
-        await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/approve', {
+        await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token) + '/approve', {
             method: 'PUT', body: { sales_order_number: soNumber, manager_notes: notes }
         });
         _showTokenResult('approved', 'Buy plan approved — buyers have been notified.');
@@ -4017,7 +4017,7 @@ async function tokenApprovePlan(token) {
 async function tokenRejectPlan(token) {
     promptInput('Reject', 'Rejection reason', async function(reason) {
         try {
-            await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
+            await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token) + '/reject', {
                 method: 'PUT', body: { reason }
             });
             _showTokenResult('rejected', 'Buy plan has been rejected.');

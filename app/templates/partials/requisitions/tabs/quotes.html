@@ -1,0 +1,44 @@
+{#
+  quotes.html — Quotes tab for requisition detail view.
+  Receives: quotes (list of Quote objects), req_id (int).
+  Called by: views.py requisition_tab endpoint (tab_name='quotes').
+  Depends on: HTMX (click to open quote detail).
+#}
+<div class="tab-panel" id="quotes-panel">
+    <div class="tab-toolbar">
+        <h3>Quotes ({{ quotes|length }})</h3>
+    </div>
+
+    {% if quotes %}
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Quote #</th>
+                <th>Rev</th>
+                <th>Subtotal</th>
+                <th>Margin</th>
+                <th>Status</th>
+                <th>Sent</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for quote in quotes %}
+            <tr id="quote-row-{{ quote.id }}" class="clickable-row">
+                <td>{{ quote.quote_number }}</td>
+                <td>{{ quote.revision }}</td>
+                <td>{{ '${:,.2f}'.format(quote.subtotal|float) if quote.subtotal else '-' }}</td>
+                <td>{{ '{:.1f}%'.format(quote.total_margin_pct|float) if quote.total_margin_pct else '-' }}</td>
+                <td><span class="badge badge-{{ quote.status }}">{{ quote.status }}</span></td>
+                <td>{{ quote.sent_at.strftime('%b %d') if quote.sent_at else '-' }}</td>
+                <td>{{ quote.created_at.strftime('%b %d') if quote.created_at else '' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        No quotes created yet. Select offers and build a quote.
+    </div>
+    {% endif %}
+</div>

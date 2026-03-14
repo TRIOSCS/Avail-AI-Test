@@ -153,6 +153,10 @@ class BuyPlanV3(Base):
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)
 
+    # ── Token-based approval
+    approval_token = Column(String(100), unique=True)
+    token_expires_at = Column(DateTime)
+
     # ── Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -183,6 +187,7 @@ class BuyPlanV3(Base):
         Index("ix_bpv3_requisition", "requisition_id"),
         Index("ix_bpv3_submitted_by", "submitted_by_id"),
         Index("ix_bpv3_status_created", "status", "created_at"),
+        Index("ix_bpv3_token", "approval_token"),
     )
 
 

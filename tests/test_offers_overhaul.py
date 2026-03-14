@@ -285,16 +285,10 @@ class TestQuotedOfferBadge:
 
 
 class TestBuyPlanQuoteLineItems:
-    """Buy plan preserves user edits from quote line_items."""
+    """V1 buy plan submission is deprecated and always returns 410."""
 
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-    def test_buy_plan_uses_quote_lead_time(self, client, test_requisition, test_offer, db_session, test_user):
-        """submit_buy_plan reads lead_time from quote, not original offer."""
+    def test_buy_plan_submit_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
+        """V1 submit_buy_plan always returns 410."""
         from app.models import Company, CustomerSite
 
         co = Company(name="BP Test Co", is_active=True, created_at=datetime.now(timezone.utc))
@@ -304,7 +298,6 @@ class TestBuyPlanQuoteLineItems:
         db_session.add(site)
         db_session.flush()
 
-        # Create a quote with edited lead_time
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=site.id,
@@ -317,8 +310,8 @@ class TestBuyPlanQuoteLineItems:
                     "vendor_name": "Arrow Electronics",
                     "qty": 1000,
                     "cost_price": 0.50,
-                    "lead_time": "2-3 weeks (includes transit)",  # User edited
-                    "condition": "New Surplus",  # User edited
+                    "lead_time": "2-3 weeks (includes transit)",
+                    "condition": "New Surplus",
                 }
             ],
             subtotal=1000.00,
@@ -330,7 +323,6 @@ class TestBuyPlanQuoteLineItems:
         db_session.add(q)
         db_session.commit()
 
-        # Submit buy plan
         resp = client.post(
             f"/api/quotes/{q.id}/buy-plan",
             json={
@@ -338,22 +330,10 @@ class TestBuyPlanQuoteLineItems:
                 "salesperson_notes": "Rush order",
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["ok"] is True
+        assert resp.status_code == 410
 
-        # Verify the buy plan used quote's lead_time, not original offer's
-        from app.models import BuyPlan
-
-        bp = db_session.query(BuyPlan).filter(BuyPlan.quote_id == q.id).first()
-        assert bp is not None
-        li = bp.line_items[0]
-        assert li["lead_time"] == "2-3 weeks (includes transit)"
-        assert li["condition"] == "New Surplus"
-        assert li["entered_by_name"] == "Test Buyer"
-
-    def test_buy_plan_fallback_to_offer_values(self, client, test_requisition, test_offer, db_session, test_user):
-        """When quote line_items don't have the offer, fallback to offer values."""
+    def test_buy_plan_fallback_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
+        """V1 submit_buy_plan always returns 410 regardless of quote line_items."""
         from app.models import Company, CustomerSite
 
         co = Company(name="BP Fallback Co", is_active=True, created_at=datetime.now(timezone.utc))
@@ -368,7 +348,7 @@ class TestBuyPlanQuoteLineItems:
             customer_site_id=site.id,
             quote_number="Q-2026-0101",
             status="sent",
-            line_items=[],  # No line items matching offer
+            line_items=[],
             subtotal=1000.00,
             total_cost=500.00,
             total_margin_pct=50.00,
@@ -382,15 +362,7 @@ class TestBuyPlanQuoteLineItems:
             f"/api/quotes/{q.id}/buy-plan",
             json={"offer_ids": [test_offer.id], "salesperson_notes": ""},
         )
-        assert resp.status_code == 200
-        from app.models import BuyPlan
-
-        bp = db_session.query(BuyPlan).filter(BuyPlan.quote_id == q.id).first()
-        assert bp is not None
-        li = bp.line_items[0]
-        # Falls back to original offer values
-        assert li["mpn"] == "LM317T"
-        assert li["vendor_name"] == "Arrow Electronics"
+        assert resp.status_code == 410
 
 
 # ── Auto-Parse Email Offers ──────────────────────────────────────────

@@ -60,6 +60,124 @@ def clear_cache() -> None:
     _thread_cache.clear()
 
 
+# ── Thread Grouping by Headers ────────────────────────────────────────────
+
+
+def group_by_thread(messages: list[dict]) -> list[dict]:
+    """Group emails into threads using In-Reply-To and References headers.
+
+    Each message is expected to have Graph API internetMessageHeaders with
+    'internetMessageId', 'In-Reply-To', and 'References' headers.
+
+    Algorithm:
+    1. Build a mapping of internetMessageId -> message
+    2. For each message, find its parent via In-Reply-To header
+    3. For messages sharing References, group them as siblings
+    4. Return a list of thread dicts, each with a thread_id, messages list,
+       and message_count.
+
+    Called by: routers/emails.py, services/email_threads.py
+    Depends on: nothing (pure function)
+    """
+    if not messages:
+        return []
+
+    # Extract headers into a usable format
+    parsed: list[dict] = []
+    for msg in messages:
+        headers = {}
+        for h in msg.get("internetMessageHeaders", []):
+            headers[h.get("name", "").lower()] = h.get("value", "")
+
+        msg_id = headers.get("message-id", "").strip("<>").strip()
+        in_reply_to = headers.get("in-reply-to", "").strip("<>").strip()
+        references_raw = headers.get("references", "")
+        ref_ids = [r.strip("<>").strip() for r in references_raw.split() if r.strip()]
+
+        parsed.append({
+            "message": msg,
+            "message_id": msg_id,
+            "in_reply_to": in_reply_to,
+            "references": ref_ids,
+        })
+
+    # Union-Find to group messages into threads
+    parent_map: dict[str, str] = {}  # message_id -> root thread_id
+
+    def find_root(mid: str) -> str:
+        while parent_map.get(mid, mid) != mid:
+            parent_map[mid] = parent_map.get(parent_map[mid], parent_map[mid])
+            mid = parent_map[mid]
+        return mid
+
+    def union(a: str, b: str) -> None:
+        ra, rb = find_root(a), find_root(b)
+        if ra != rb:
+            parent_map[rb] = ra
+
+    # Initialize each message as its own root
+    for p in parsed:
+        if p["message_id"]:
+            parent_map.setdefault(p["message_id"], p["message_id"])
+
+    # Link via In-Reply-To
+    for p in parsed:
+        if p["message_id"] and p["in_reply_to"]:
+            parent_map.setdefault(p["in_reply_to"], p["in_reply_to"])
+            union(p["in_reply_to"], p["message_id"])
+
+    # Link via shared References
+    for p in parsed:
+        refs = p["references"]
+        if len(refs) >= 2:
+            for r in refs:
+                parent_map.setdefault(r, r)
+            for i in range(1, len(refs)):
+                union(refs[0], refs[i])
+        # Also link message to its references
+        if p["message_id"] and refs:
+            for r in refs:
+                parent_map.setdefault(r, r)
+                union(r, p["message_id"])
+
+    # Group messages by thread root
+    thread_groups: dict[str, list[dict]] = {}
+    for p in parsed:
+        mid = p["message_id"]
+        if mid:
+            root = find_root(mid)
+        elif p["in_reply_to"]:
+            parent_map.setdefault(p["in_reply_to"], p["in_reply_to"])
+            root = find_root(p["in_reply_to"])
+        else:
+            # No message ID or in-reply-to — standalone message
+            root = f"_standalone_{id(p)}"
+
+        thread_groups.setdefault(root, []).append(p["message"])
+
+    # Build thread result list
+    threads = []
+    for thread_id, msgs in thread_groups.items():
+        threads.append({
+            "thread_id": thread_id,
+            "messages": [
+                {
+                    "id": m.get("id", ""),
+                    "subject": m.get("subject", ""),
+                    "from": m.get("from", {}).get("emailAddress", {}).get("address", ""),
+                    "date": m.get("receivedDateTime") or m.get("sentDateTime"),
+                    "direction": _extract_direction(
+                        m.get("from", {}).get("emailAddress", {}).get("address", "")
+                    ),
+                }
+                for m in msgs
+            ],
+            "message_count": len(msgs),
+        })
+
+    return threads
+
+
 def _is_trioscs_domain(email: str) -> bool:
     """Check if an email address belongs to a TRIOSCS domain."""
     if not email or "@" not in email:

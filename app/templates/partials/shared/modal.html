@@ -1,0 +1,13 @@
+{# Reusable modal — Alpine controls open/close, HTMX loads body content. Included in base.html. #}
+<div x-data="{ open: false }" x-show="open" x-transition
+     @open-modal.window="open = true" @close-modal.window="open = false"
+     @keydown.escape.window="open = false"
+     class="modal-overlay" style="display: none;">
+    <div class="modal-backdrop" @click.self="open = false">
+        <div class="modal-box">
+            <div id="modal-content" hx-target="this">
+                {% block modal_body %}{% endblock %}
+            </div>
+        </div>
+    </div>
+</div>

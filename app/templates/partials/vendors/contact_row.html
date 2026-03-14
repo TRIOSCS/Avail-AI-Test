@@ -1,0 +1,32 @@
+{#
+  contact_row.html — Single contact row with inline status edit and delete.
+  Receives: contact (VendorContact ORM object).
+  Called by: tabs/contacts.html loop.
+  Depends on: HTMX (inline status edit, delete, edit modal).
+#}
+<tr id="contact-{{ contact.id }}">
+    <td>{{ contact.full_name or '-' }}</td>
+    <td>{{ contact.email or '-' }}</td>
+    <td>{{ contact.phone or '-' }}</td>
+    <td>{{ contact.title or '-' }}</td>
+    <td>
+        <select hx-put="/api/vendor-contacts/{{ contact.id }}"
+                hx-target="#contact-{{ contact.id }}"
+                hx-swap="outerHTML"
+                name="status">
+            <option value="active" {% if contact.is_verified %}selected{% endif %}>Active</option>
+            <option value="inactive" {% if not contact.is_verified %}selected{% endif %}>Inactive</option>
+        </select>
+    </td>
+    <td>
+        <button class="btn btn-sm"
+                hx-get="/views/vendors/contacts/{{ contact.id }}/edit"
+                hx-target="#modal-content"
+                @click="$dispatch('open-modal')">Edit</button>
+        <button class="btn btn-sm btn-danger"
+                hx-delete="/api/vendor-contacts/{{ contact.id }}"
+                hx-target="#contact-{{ contact.id }}"
+                hx-swap="delete"
+                hx-confirm="Delete contact?">X</button>
+    </td>
+</tr>
