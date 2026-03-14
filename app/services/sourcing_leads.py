@@ -80,16 +80,16 @@ def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
 
 
 def _confidence_band(score: float) -> str:
-    if score >= 80:
+    if score >= 75:
         return "high"
-    if score >= 60:
+    if score >= 50:
         return "medium"
-    if score >= 35:
-        return "low"
-    return "very_low"
+    return "low"
 
 
-def _safety_band(score: float) -> str:
+def _safety_band(score: float, has_vendor_data: bool = True) -> str:
+    if not has_vendor_data:
+        return "unknown"
     if score >= 75:
         return "low_risk"
     if score >= 50:
@@ -194,9 +194,12 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
         score -= 12
         flags.append("limited_verified_contact_channels")
 
+    has_vendor_data = vendor_card is not None
     score = round(_clamp(score), 1)
-    band = _safety_band(score)
-    if band == "high_risk":
+    band = _safety_band(score, has_vendor_data=has_vendor_data)
+    if band == "unknown":
+        summary = "Unknown vendor: no internal history available. Verify identity and stock before outreach."
+    elif band == "high_risk":
         summary = "Caution advised: verify identity and stock before outreach."
     elif band == "medium_risk":
         summary = "Moderate caution: confirm business footprint and contact path."
@@ -309,7 +312,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.confidence_score = confidence_score
     lead.confidence_band = confidence_band
     lead.vendor_safety_score = safety_score
-    lead.vendor_safety_band = _safety_band(safety_score)
+    lead.vendor_safety_band = _safety_band(safety_score, has_vendor_data=vendor_card is not None)
     lead.vendor_safety_summary = safety_summary
     lead.vendor_safety_flags = safety_flags
     lead.vendor_safety_last_checked_at = _now_utc()
@@ -501,7 +504,8 @@ def update_lead_status(
 
     lead.confidence_band = _confidence_band(float(lead.confidence_score or 0.0))
     if lead.vendor_safety_score is not None:
-        lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score))
+        has_vendor_data = lead.vendor_card_id is not None
+        lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score), has_vendor_data=has_vendor_data)
 
     event = LeadFeedbackEvent(
         lead_id=lead.id,

@@ -35,8 +35,8 @@
             </span>
         {% endif %}
         {% if result.vendor_safety_band %}
-            {% set safety_bg = "#dcfce7" if result.vendor_safety_band == "low_risk" else ("#fef3c7" if result.vendor_safety_band == "medium_risk" else "#fee2e2") %}
-            {% set safety_fg = "#166534" if result.vendor_safety_band == "low_risk" else ("#92400e" if result.vendor_safety_band == "medium_risk" else "#991b1b") %}
+            {% set safety_bg = "#dcfce7" if result.vendor_safety_band == "low_risk" else ("#fef3c7" if result.vendor_safety_band == "medium_risk" else ("#fee2e2" if result.vendor_safety_band == "high_risk" else "#f1f5f9")) %}
+            {% set safety_fg = "#166534" if result.vendor_safety_band == "low_risk" else ("#92400e" if result.vendor_safety_band == "medium_risk" else ("#991b1b" if result.vendor_safety_band == "high_risk" else "#475569")) %}
             <span class="badge"
                   style="margin-left:6px;background:{{ safety_bg }};color:{{ safety_fg }};"
                   title="{{ result.vendor_safety_summary or 'Vendor safety signal' }}">

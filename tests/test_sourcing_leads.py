@@ -90,3 +90,61 @@ def test_lead_endpoints_return_status_and_feedback(client, db_session, test_requ
     payload = sightings_resp.json().get(str(requirement.id), {})
     rows = payload.get("sightings", [])
     assert any(row.get("lead_id") == lead.id for row in rows)
+
+
+def test_lead_detail_endpoint_returns_evidence_and_feedback(client, db_session, test_requisition):
+    """GET /api/leads/{id} returns full lead detail with evidence and feedback."""
+    requirement = test_requisition.requirements[0]
+    s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Detail Test Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s1])
+    lead = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).first()
+    assert lead is not None
+
+    # Add a status change to create a feedback event
+    client.patch(f"/api/leads/{lead.id}/status", json={"status": "contacted", "note": "Called vendor"})
+
+    resp = client.get(f"/api/leads/{lead.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Core fields
+    assert data["vendor_name"] == "Detail Test Vendor"
+    assert data["confidence_band"] in ("high", "medium", "low")
+    assert data["buyer_status"] == "contacted"
+
+    # Safety fields
+    assert "vendor_safety_band" in data
+    assert "vendor_safety_flags" in data
+
+    # Contact fields
+    assert "contact_email" in data
+
+    # Evidence
+    assert len(data["evidence"]) >= 1
+    ev = data["evidence"][0]
+    assert ev["source_type"] == "digikey"
+
+    # Feedback history
+    assert len(data["feedback_events"]) >= 1
+    assert data["feedback_events"][0]["status"] == "contacted"
+
+
+def test_resync_preserves_buyer_status(db_session, test_requisition):
+    """Re-syncing sightings must not overwrite a manually set buyer status."""
+    requirement = test_requisition.requirements[0]
+    s1 = _make_sighting(db_session, requirement.id, source_type="digikey")
+    sync_leads_for_sightings(db_session, requirement, [s1])
+
+    lead = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).first()
+    assert lead is not None
+    assert lead.buyer_status == "new"
+
+    update_lead_status(db_session, lead.id, "contacted", note="Called vendor")
+    db_session.refresh(lead)
+    assert lead.buyer_status == "contacted"
+
+    # Re-sync with a new sighting from a different source — status must stay "contacted"
+    s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin")
+    sync_leads_for_sightings(db_session, requirement, [s2])
+    db_session.refresh(lead)
+    assert lead.buyer_status == "contacted", "Re-sync should not overwrite manual buyer status"
