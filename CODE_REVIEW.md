@@ -69,6 +69,38 @@ Default user creation uses `hashlib.sha256` for password hashing. SHA-256 is not
 
 **Fix:** Consider background refresh via scheduler with a tighter buffer window.
 
+### 8. No Rate Limiting on Password Login
+**File:** `app/routers/auth.py:216`
+**Severity:** HIGH
+
+The password login endpoint has no brute-force protection. While `ENABLE_PASSWORD_LOGIN` is off by default, when enabled there's no slowapi decorator or lockout mechanism.
+
+**Fix:** Add `@limiter.limit("5/minute")` to the password login endpoint.
+
+### 9. Retry-After Header Not Capped
+**File:** `app/connectors/sources.py:153`
+**Severity:** MEDIUM
+
+`max(float(header), 1.0)` has no upper bound. A malicious or buggy API returning `Retry-After: 999999` would block the connector for 11+ days.
+
+**Fix:** Cap at 300 seconds: `min(max(float(header), 1.0), 300.0)`.
+
+### 10. XSS via `javascript:` URLs in HTML Sanitizer
+**File:** `app/static/app.js:458`
+**Severity:** MEDIUM
+
+The `sanitizeRichHtml` function whitelists `href` attributes on `<a>` tags but doesn't validate the URL scheme. `<a href="javascript:alert(1)">` bypasses CSP in some browsers.
+
+**Fix:** Validate that `href` starts with `http://`, `https://`, or `/`.
+
+### 11. API Keys Logged in URL Parameters
+**File:** `app/connectors/mouser.py:42`
+**Severity:** MEDIUM
+
+Mouser connector sends API key as a URL query parameter (`params={"apiKey": self.api_key}`), which appears in access logs, error traces, and Sentry events.
+
+**Fix:** Switch to header-based auth if supported, or mask keys in log output.
+
 ---
 
 ## Architecture Strengths
@@ -156,15 +188,19 @@ The frontend (`app.js`, `crm.js`, plus 82 HTMX templates) is growing. The recent
 | # | Action | Effort | Impact |
 |---|--------|--------|--------|
 | 1 | Use `secrets.compare_digest()` for agent API key | 15 min | Fixes timing attack |
-| 2 | Fix SQL f-string pattern in `vendor_analytics.py` | 1 hour | Eliminates injection risk |
-| 3 | Wrap vendor merge in proper transaction | 1 hour | Prevents data orphaning |
-| 4 | Upgrade password hashing to bcrypt/argon2 | 1 hour | Security hardening |
-| 5 | Add GitHub Actions CI (pytest + ruff) | 2-3 hours | Prevents regressions |
-| 6 | Verify full test suite passes | 1 hour | Confidence baseline |
-| 7 | Add Pydantic Query validation on raw int() params | 1 hour | Prevents 500 errors |
-| 8 | Audit and add missing DB indexes | 2 hours | Performance |
-| 9 | Narrow `except Exception` catches in top 5 files | 2 hours | Debuggability |
-| 10 | Organize services into subdirectories | 3-4 hours | Developer experience |
+| 2 | Add rate limiting to password login endpoint | 15 min | Prevents brute force |
+| 3 | Fix SQL f-string pattern in `vendor_analytics.py` | 1 hour | Eliminates injection risk |
+| 4 | Cap Retry-After header at 300s in `sources.py` | 15 min | Prevents connector lockup |
+| 5 | Validate `href` schemes in JS HTML sanitizer | 30 min | Closes XSS vector |
+| 6 | Wrap vendor merge in proper transaction | 1 hour | Prevents data orphaning |
+| 7 | Upgrade password hashing to bcrypt/argon2 | 1 hour | Security hardening |
+| 8 | Add GitHub Actions CI (pytest + ruff) | 2-3 hours | Prevents regressions |
+| 9 | Verify full test suite passes | 1 hour | Confidence baseline |
+| 10 | Add Pydantic Query validation on raw int() params | 1 hour | Prevents 500 errors |
+| 11 | Mask API keys in connector log output | 1 hour | Prevents credential leaks |
+| 12 | Audit and add missing DB indexes | 2 hours | Performance |
+| 13 | Narrow `except Exception` catches in top 5 files | 2 hours | Debuggability |
+| 14 | Organize services into subdirectories | 3-4 hours | Developer experience |
 
 ---
 
@@ -177,3 +213,10 @@ The frontend (`app.js`, `crm.js`, plus 82 HTMX templates) is growing. The recent
 - The connector pattern (parallel search via `asyncio.gather()`) is well-designed
 - Loguru usage is consistent (no `print()` calls found)
 - Test coverage is broad (301 files covering routers, services, connectors, schemas)
+- Circuit breaker pattern in connectors prevents cascading failures
+- Per-connector concurrency limits prevent API hammering
+- OAuth state validation provides proper CSRF protection
+- Password login uses PBKDF2-HMAC-SHA256 with 200K iterations (auth.py, not startup.py)
+- Email mining has proper dedup via ProcessedMessage with savepoint protection
+- No `eval()`, `Function()`, or open redirects in frontend code
+- Delta query caching for incremental inbox sync (not full scans)
