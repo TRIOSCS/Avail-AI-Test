@@ -5,8 +5,8 @@ Single source of truth for vendor scoring. Replaces engagement_scorer logic.
 Score is based on how far a vendor's offers advance through the pipeline:
   - Offer entered: 1 pt
   - Used in sent/won/lost Quote: 3 pts
-  - Awarded in BuyPlan (non-cancelled): 5 pts
-  - PO Confirmed (po_entered/po_confirmed/complete): 8 pts
+  - Awarded in BuyPlan (pending/active/completed): 5 pts
+  - PO Confirmed (completed plans): 8 pts
 
 Only the highest stage reached per offer counts. The advancement score is
 blended 80/20 with buyer review ratings to produce the final vendor_score.
@@ -25,16 +25,10 @@ ADVANCEMENT_WEIGHT = 0.80
 REVIEW_WEIGHT = 0.20
 MAX_STAGE_POINTS = 8
 
-# BuyPlan statuses that count as PO confirmed
-PO_CONFIRMED_STATUSES = {"po_entered", "po_confirmed", "complete"}
-# BuyPlan statuses that count as awarded (any non-cancelled)
-AWARDED_STATUSES = {
-    "pending_approval",
-    "approved",
-    "po_entered",
-    "po_confirmed",
-    "complete",
-}
+# BuyPlan statuses that count as PO confirmed (V4: completed plans)
+PO_CONFIRMED_STATUSES = {"completed"}
+# BuyPlan statuses that count as awarded (any non-cancelled V4 status)
+AWARDED_STATUSES = {"pending", "active", "completed"}
 # Quote statuses that count as "used in quote"
 QUOTE_USED_STATUSES = {"sent", "won", "lost"}
 
@@ -123,7 +117,8 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     Preloads quote/buyplan offer-id sets for efficiency.
     Returns: {"updated": int, "skipped": int}
     """
-    from app.models import BuyPlan, Offer, Quote, VendorCard, VendorReview
+    from app.models import Offer, Quote, VendorCard, VendorReview
+    from app.models.buy_plan import BuyPlan, BuyPlanLine
     from app.vendor_utils import normalize_vendor_name
 
     now = datetime.now(timezone.utc)
@@ -155,19 +150,21 @@ async def compute_all_vendor_scores(db: Session) -> dict:
                 if oid:
                     quote_offer_id_set.add(oid)
 
-    # ── Preload buyplan line_items ──
-    buyplans = db.query(BuyPlan.line_items, BuyPlan.status).filter(BuyPlan.status != "cancelled").limit(10000).all()
+    # ── Preload buyplan lines (relational) ──
+    bp_lines = (
+        db.query(BuyPlanLine.offer_id, BuyPlan.status)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlan.status != "cancelled", BuyPlanLine.offer_id.isnot(None))
+        .limit(50000)
+        .all()
+    )
     awarded_offer_id_set: set[int] = set()
     po_confirmed_offer_id_set: set[int] = set()
-    for line_items, bp_status in buyplans:
-        if line_items:
-            for li in line_items:
-                oid = li.get("offer_id")
-                if oid:
-                    if bp_status in AWARDED_STATUSES:
-                        awarded_offer_id_set.add(oid)
-                    if bp_status in PO_CONFIRMED_STATUSES:
-                        po_confirmed_offer_id_set.add(oid)
+    for oid, bp_status in bp_lines:
+        if bp_status in AWARDED_STATUSES:
+            awarded_offer_id_set.add(oid)
+        if bp_status in PO_CONFIRMED_STATUSES:
+            po_confirmed_offer_id_set.add(oid)
 
     # ── Preload review averages ──
     review_rows = (
@@ -250,17 +247,20 @@ def _get_quote_offer_ids(db: Session, offer_ids: set[int]) -> set[int]:
 
 
 def _get_buyplan_offer_ids(db: Session, offer_ids: set[int], statuses: set[str]) -> set[int]:
-    """Get offer_ids that appear in BuyPlan line_items with given statuses."""
-    from app.models import BuyPlan
+    """Get offer_ids that appear in BuyPlanLine rows with given plan statuses."""
+    from app.models.buy_plan import BuyPlan, BuyPlanLine
 
-    plans = db.query(BuyPlan.line_items).filter(BuyPlan.status.in_(statuses)).limit(10000).all()
+    rows = (
+        db.query(BuyPlanLine.offer_id)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlan.status.in_(statuses), BuyPlanLine.offer_id.isnot(None))
+        .limit(50000)
+        .all()
+    )
     found: set[int] = set()
-    for (line_items,) in plans:
-        if line_items:
-            for li in line_items:
-                oid = li.get("offer_id")
-                if oid and oid in offer_ids:
-                    found.add(oid)
+    for (oid,) in rows:
+        if oid in offer_ids:
+            found.add(oid)
     return found
 
 

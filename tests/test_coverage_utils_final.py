@@ -4,8 +4,6 @@ test_coverage_utils_final.py — Targeted tests to cover remaining uncovered lin
 Covers:
   - attachment_parser: cache write failure, CSV >10000 rows, empty CSV,
     Excel parse, unsupported file type
-  - buyplan_service: stock sale email exception (inner _send_stock_email),
-    buyer not found continue in verify_po_sent
   - ownership_service: send_digest no token path (line 539)
   - vendor_score: flush exception (lines 249-250)
   - ai_part_normalizer: confidence parse exception (lines 158-159)
@@ -17,7 +15,6 @@ Covers:
   - schemas/vendors: VendorContactUpdate empty email (line 123)
 """
 
-import secrets
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,7 +22,6 @@ import pytest
 
 from app.models import (
     ActivityLog,
-    BuyPlan,
     Company,
     CustomerSite,
     Offer,
@@ -37,81 +33,6 @@ from app.models import (
 # ═══════════════════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════════
-
-
-def _make_plan(db, user, **kw):
-    """Create a BuyPlan with all required FK relationships."""
-    req_id = kw.get("requisition_id")
-    if not req_id:
-        req = Requisition(
-            name="REQ-CVG-AUTO",
-            customer_name="Test",
-            status="open",
-            created_by=user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(req)
-        db.flush()
-        req_id = req.id
-
-    quote_id = kw.get("quote_id")
-    if not quote_id:
-        site = db.query(CustomerSite).first()
-        if not site:
-            co = Company(name="CvgTestCo", created_at=datetime.now(timezone.utc))
-            db.add(co)
-            db.flush()
-            site = CustomerSite(company_id=co.id, site_name="HQ")
-            db.add(site)
-            db.flush()
-        q = Quote(
-            requisition_id=req_id,
-            customer_site_id=site.id,
-            quote_number=f"Q-CVG-{secrets.token_hex(4)}",
-            status="sent",
-            line_items=[],
-            subtotal=0,
-            total_cost=0,
-            total_margin_pct=0,
-            created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(q)
-        db.flush()
-        quote_id = q.id
-
-    plan = BuyPlan(
-        status=kw.get("status", "pending_approval"),
-        requisition_id=req_id,
-        quote_id=quote_id,
-        line_items=kw.get(
-            "line_items",
-            [
-                {
-                    "offer_id": 1,
-                    "mpn": "LM317T",
-                    "vendor_name": "Arrow",
-                    "qty": 1000,
-                    "plan_qty": 1000,
-                    "cost_price": 0.50,
-                    "lead_time": "2 weeks",
-                    "entered_by_id": None,
-                }
-            ],
-        ),
-        approval_token=secrets.token_urlsafe(32),
-        submitted_by_id=kw.get("submitted_by_id", user.id),
-        approved_by_id=kw.get("approved_by_id", user.id),
-        salesperson_notes=kw.get("salesperson_notes"),
-        manager_notes=kw.get("manager_notes"),
-        rejection_reason=kw.get("rejection_reason"),
-        is_stock_sale=kw.get("is_stock_sale", False),
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(plan)
-    db.commit()
-    db.refresh(plan)
-    return plan
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -218,86 +139,6 @@ async def test_parse_attachment_excel_no_headers():
     ):
         result = await parse_attachment(b"fake", "empty.xlsx")
     assert result == []
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  5. buyplan_service — stock sale email exception (lines 496-497)
-#     Must hit the inner _send_stock_email except block
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_stock_sale_email_inner_exception(db_session, test_user):
-    """Lines 496-497: _send_stock_email inner function catches the exception."""
-    from app.services.buyplan_service import notify_stock_sale_approved
-
-    # The admin user needs an access_token so the sender is found
-    test_user.access_token = "fake-token"
-    db_session.commit()
-
-    plan = _make_plan(
-        db_session,
-        test_user,
-        status="approved",
-        approved_by_id=test_user.id,
-        is_stock_sale=True,
-    )
-
-    # Mock GraphClient so that post_json raises inside _send_stock_email
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(side_effect=Exception("Graph API timeout"))
-
-    with (
-        patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ),
-        patch(
-            "app.utils.graph_client.GraphClient",
-            return_value=gc_mock,
-        ),
-        patch("app.services.buyplan_notifications.settings") as ms,
-    ):
-        ms.admin_emails = [test_user.email]
-        ms.stock_sale_notify_emails = ["stock@test.com", "warehouse@test.com"]
-        ms.app_url = "http://test"
-
-        await notify_stock_sale_approved(plan, db_session)
-
-    # The exception was caught — verify the function completed successfully
-    # by checking that the activity log was still created
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-    assert len(logs) >= 1
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  6. buyplan_service — buyer not found continue (line 722)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.asyncio
-async def test_verify_po_buyer_not_found(db_session, test_user):
-    """Line 722: when buyer for entered_by_id is not found, skip the item."""
-    from app.services.buyplan_service import verify_po_sent
-
-    plan = _make_plan(
-        db_session,
-        test_user,
-        line_items=[
-            {
-                "mpn": "LM317T",
-                "vendor_name": "Arrow",
-                "po_number": "PO-GHOST",
-                "entered_by_id": 99999,  # Non-existent user ID
-            }
-        ],
-    )
-
-    results = await verify_po_sent(plan, db_session)
-    # The item should be skipped (buyer not found), so no result for that PO
-    assert isinstance(results, dict)
-    assert "PO-GHOST" not in results
 
 
 # ═══════════════════════════════════════════════════════════════════════

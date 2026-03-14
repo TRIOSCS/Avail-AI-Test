@@ -754,7 +754,7 @@ Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 # ── Workflow: PO Verification Scanning ─────────────────────────────
 
 
-async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> list[dict]:
+async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
     """Scan buyer's Outlook sent folder for PO emails matching each line.
 
     For each line with a po_number, searches Graph API for emails containing
@@ -810,3 +810,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> list[dict]:
 
     db.commit()
     return results
+
+
+# Backward-compat alias during migration
+verify_po_sent_v3 = verify_po_sent

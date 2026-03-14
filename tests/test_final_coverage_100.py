@@ -17,7 +17,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models import (
     ActivityLog,
     ApiSource,
-    BuyPlan,
     Company,
     CustomerSite,
     GraphSubscription,
@@ -36,372 +35,6 @@ from app.models import (
     VendorReview,
 )
 
-# =========================================================================
-# 1. buyplan_service.py -- lines 43-44, 181-182, 267, 319-320, 395-396,
-#    496-497, 564-565, 718, 722
-# =========================================================================
-
-
-def _make_plan(db, user, **kw):
-    # BuyPlan requires a valid requisition and quote (NOT NULL FKs)
-    req_id = kw.get("requisition_id")
-    if not req_id:
-        req = Requisition(
-            name="REQ-BP-AUTO",
-            customer_name="Test",
-            status="open",
-            created_by=user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(req)
-        db.flush()
-        req_id = req.id
-
-    quote_id = kw.get("quote_id")
-    if not quote_id:
-        site = db.query(CustomerSite).first()
-        if not site:
-            co = Company(name="BPTestCo", created_at=datetime.now(timezone.utc))
-            db.add(co)
-            db.flush()
-            site = CustomerSite(company_id=co.id, site_name="HQ")
-            db.add(site)
-            db.flush()
-        q = Quote(
-            requisition_id=req_id,
-            customer_site_id=site.id,
-            quote_number=f"Q-BP-{secrets.token_hex(4)}",
-            status="sent",
-            line_items=[],
-            subtotal=0,
-            total_cost=0,
-            total_margin_pct=0,
-            created_by_id=user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db.add(q)
-        db.flush()
-        quote_id = q.id
-
-    plan = BuyPlan(
-        status=kw.get("status", "pending_approval"),
-        requisition_id=req_id,
-        quote_id=quote_id,
-        line_items=kw.get(
-            "line_items",
-            [
-                {
-                    "offer_id": 1,
-                    "mpn": "LM317T",
-                    "vendor_name": "Arrow",
-                    "qty": 1000,
-                    "plan_qty": 1000,
-                    "cost_price": 0.50,
-                    "lead_time": "2 weeks",
-                    "entered_by_id": None,
-                }
-            ],
-        ),
-        approval_token=secrets.token_urlsafe(32),
-        submitted_by_id=kw.get("submitted_by_id", user.id),
-        salesperson_notes=kw.get("salesperson_notes", None),
-        manager_notes=kw.get("manager_notes", None),
-        rejection_reason=kw.get("rejection_reason", None),
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(plan)
-    db.commit()
-    db.refresh(plan)
-    return plan
-
-
-@pytest.mark.asyncio
-async def test_run_buyplan_bg_success_path(db_session, test_user):
-    """buyplan_service lines 43-44: _run() finds plan and calls coro_factory."""
-    from app.services.buyplan_service import run_buyplan_bg
-
-    plan = _make_plan(db_session, test_user)
-
-    factory_called = asyncio.Event()
-
-    async def _factory(p, d, **kw):
-        factory_called.set()
-
-    with patch("app.database.SessionLocal", return_value=db_session):
-        run_buyplan_bg(_factory, plan.id)
-        await asyncio.sleep(0.15)
-
-    assert factory_called.is_set()
-
-
-@pytest.mark.asyncio
-async def test_notify_submitted_email_failure(db_session, test_user):
-    """buyplan_service lines 181-182: except when admin email send fails."""
-    from app.services.buyplan_service import notify_buyplan_submitted
-
-    admin = User(
-        email="admin-bp@test.com",
-        name="Admin",
-        role="admin",
-        azure_id="adm-bp-001",
-        m365_connected=True,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(admin)
-    db_session.commit()
-    plan = _make_plan(db_session, test_user)
-
-    gc_mock = MagicMock()
-    gc_mock.post = AsyncMock(side_effect=Exception("SMTP down"))
-
-    with (
-        patch("app.services.buyplan_notifications.settings") as ms,
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        ms.admin_emails = [admin.email]
-        await notify_buyplan_submitted(plan, db_session)
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_pending").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_notify_approved_salesperson_notes(db_session, test_user):
-    """buyplan_service line 267: salesperson_notes in approved email."""
-    from app.services.buyplan_service import notify_buyplan_approved
-
-    # Create offer so the function can find a buyer via entered_by_id
-    req = Requisition(
-        name="REQ-APPNOTE",
-        customer_name="Test",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-    offer = Offer(
-        requisition_id=req.id,
-        vendor_name="Arrow",
-        mpn="LM317T",
-        qty_available=100,
-        unit_price=0.50,
-        entered_by_id=test_user.id,
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer)
-    db_session.flush()
-
-    plan = _make_plan(
-        db_session,
-        test_user,
-        status="approved",
-        requisition_id=req.id,
-        salesperson_notes="Urgent delivery needed",
-        line_items=[{"offer_id": offer.id, "mpn": "LM317T", "vendor_name": "Arrow", "entered_by_id": test_user.id}],
-    )
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(return_value=MagicMock(status_code=202))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        await notify_buyplan_approved(plan, db_session)
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_notify_approved_email_failure(db_session, test_user):
-    """buyplan_service lines 319-320: except when buyer approved email fails."""
-    from app.services.buyplan_service import notify_buyplan_approved
-
-    req = Requisition(
-        name="REQ-APPFAIL",
-        customer_name="Test",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-    offer = Offer(
-        requisition_id=req.id,
-        vendor_name="Arrow",
-        mpn="LM317T",
-        qty_available=100,
-        unit_price=0.50,
-        entered_by_id=test_user.id,
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer)
-    db_session.flush()
-
-    plan = _make_plan(
-        db_session,
-        test_user,
-        status="approved",
-        requisition_id=req.id,
-        line_items=[{"offer_id": offer.id, "mpn": "LM317T", "vendor_name": "Arrow", "entered_by_id": test_user.id}],
-    )
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(side_effect=Exception("Network error"))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        await notify_buyplan_approved(plan, db_session)
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_notify_rejected_email_failure(db_session, test_user):
-    """buyplan_service lines 395-396: except when rejection email fails."""
-    from app.services.buyplan_service import notify_buyplan_rejected
-
-    plan = _make_plan(db_session, test_user, status="rejected", rejection_reason="Too expensive")
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(side_effect=Exception("Auth expired"))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        await notify_buyplan_rejected(plan, db_session)
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_notify_stock_sale_email_failure(db_session, test_user):
-    """buyplan_service lines 496-497: except when stock sale email fails."""
-    from app.services.buyplan_service import notify_stock_sale_approved
-
-    plan = _make_plan(db_session, test_user, status="approved")
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(side_effect=Exception("Timeout"))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-        patch("app.services.buyplan_notifications.settings") as ms,
-    ):
-        ms.stock_sale_notify_emails = ["stock@test.com"]
-        ms.teams_webhook_url = ""
-        ms.app_url = "http://test"
-        await notify_stock_sale_approved(plan, db_session)
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_notify_completed_email_failure(db_session, test_user):
-    """buyplan_service lines 564-565: except when completion email fails."""
-    from app.services.buyplan_service import notify_buyplan_completed
-
-    plan = _make_plan(db_session, test_user, status="complete")
-    gc_mock = MagicMock()
-    gc_mock.post_json = AsyncMock(side_effect=Exception("Connection reset"))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        await notify_buyplan_completed(plan, db_session, completer_name="Admin")
-
-    logs = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
-    assert len(logs) >= 1
-
-
-@pytest.mark.asyncio
-async def test_verify_po_offer_fallback_and_no_entered_by(db_session, test_user):
-    """buyplan_service lines 718 + 722: offer lookup for entered_by_id and continue when None."""
-    from app.services.buyplan_service import verify_po_sent
-
-    req = Requisition(
-        name="REQ-PO-001",
-        customer_name="Acme",
-        status="open",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    offer = Offer(
-        requisition_id=req.id,
-        vendor_name="Arrow",
-        mpn="LM317T",
-        qty_available=100,
-        unit_price=0.50,
-        entered_by_id=test_user.id,
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer)
-    db_session.flush()
-
-    offer_none = Offer(
-        requisition_id=req.id,
-        vendor_name="Mouser",
-        mpn="LM317T",
-        qty_available=50,
-        unit_price=0.60,
-        entered_by_id=None,
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer_none)
-    db_session.flush()
-
-    plan = _make_plan(
-        db_session,
-        test_user,
-        line_items=[
-            {
-                "offer_id": offer.id,
-                "mpn": "LM317T",
-                "vendor_name": "Arrow",
-                "po_number": "PO-001",
-                "entered_by_id": None,
-            },
-            {
-                "offer_id": offer_none.id,
-                "mpn": "LM317T",
-                "vendor_name": "Mouser",
-                "po_number": "PO-002",
-                "entered_by_id": None,
-            },
-        ],
-    )
-    db_session.commit()
-
-    gc_mock = MagicMock()
-    gc_mock.get = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: {"value": [{"subject": "PO-001"}]}))
-
-    with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-        patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-    ):
-        results = await verify_po_sent(plan, db_session)
-
-    assert isinstance(results, dict)
-
-
-# =========================================================================
-# 2. attachment_parser.py -- lines 52, 139, 232-233, 275, 282, 285,
-#    375, 379-380, 383
-# =========================================================================
 
 
 def test_match_headers_empty_skipped():
@@ -763,13 +396,37 @@ def test_get_quote_offer_ids(db_session, test_user, test_requisition, test_compa
 
 def test_get_buyplan_offer_ids(db_session, test_user):
     """vendor_score lines 295-299."""
+    from app.models.buy_plan import BuyPlan, BuyPlanLine
     from app.services.vendor_score import AWARDED_STATUSES, _get_buyplan_offer_ids
 
-    plan = _make_plan(db_session, test_user, status="approved", line_items=[{"offer_id": 42, "mpn": "X"}])
+    req = Requisition(name="REQ-BPOID", customer_name="T", status="open",
+                      created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add(req)
+    db_session.flush()
+    site = db_session.query(CustomerSite).first()
+    if not site:
+        co = Company(name="BPOIDCo", created_at=datetime.now(timezone.utc))
+        db_session.add(co); db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site); db_session.flush()
+    q = Quote(requisition_id=req.id, customer_site_id=site.id, quote_number="Q-BPOID",
+              status="sent", line_items=[], subtotal=0, total_cost=0, total_margin_pct=0,
+              created_by_id=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add(q); db_session.flush()
+    offer = Offer(requisition_id=req.id, vendor_name="Arrow", mpn="BPOID-1",
+                  qty_available=100, unit_price=0.50, entered_by_id=test_user.id,
+                  status="active", created_at=datetime.now(timezone.utc))
+    db_session.add(offer); db_session.flush()
+    plan = BuyPlan(status="active", requisition_id=req.id, quote_id=q.id,
+                   submitted_by_id=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add(plan); db_session.flush()
+    line = BuyPlanLine(buy_plan_id=plan.id, offer_id=offer.id, quantity=100,
+                       created_at=datetime.now(timezone.utc))
+    db_session.add(line); db_session.commit()
 
-    found = _get_buyplan_offer_ids(db_session, {42, 99}, AWARDED_STATUSES)
-    assert 42 in found
-    assert 99 not in found
+    found = _get_buyplan_offer_ids(db_session, {offer.id, 99999}, AWARDED_STATUSES)
+    assert offer.id in found
+    assert 99999 not in found
 
 
 @pytest.mark.asyncio
@@ -803,14 +460,25 @@ async def test_po_confirmed_scoring(db_session, test_user, test_vendor_card):
         )
     db_session.flush()
 
+    from app.models.buy_plan import BuyPlan, BuyPlanLine
+
     first_offer = db_session.query(Offer).filter_by(requisition_id=req.id).first()
-    plan = _make_plan(
-        db_session,
-        test_user,
-        status="po_confirmed",
-        requisition_id=req.id,
-        line_items=[{"offer_id": first_offer.id, "mpn": "P-0"}],
-    )
+    site = db_session.query(CustomerSite).first()
+    if not site:
+        co = Company(name="SCCo", created_at=datetime.now(timezone.utc))
+        db_session.add(co); db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site); db_session.flush()
+    q = Quote(requisition_id=req.id, customer_site_id=site.id, quote_number="Q-SC",
+              status="sent", line_items=[], subtotal=0, total_cost=0, total_margin_pct=0,
+              created_by_id=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add(q); db_session.flush()
+    plan = BuyPlan(status="completed", requisition_id=req.id, quote_id=q.id,
+                   submitted_by_id=test_user.id, created_at=datetime.now(timezone.utc))
+    db_session.add(plan); db_session.flush()
+    line = BuyPlanLine(buy_plan_id=plan.id, offer_id=first_offer.id, quantity=100,
+                       created_at=datetime.now(timezone.utc))
+    db_session.add(line); db_session.commit()
 
     result = await compute_all_vendor_scores(db_session)
     assert "updated" in result

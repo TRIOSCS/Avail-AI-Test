@@ -729,8 +729,8 @@ async def verify_po_scan_v3(
     plan = db.query(BuyPlan).filter(BuyPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(404, "Plan not found")
-    from ...services.buy_plan_v3_service import verify_po_sent_v3
-    results = await verify_po_sent_v3(plan, db)
+    from ...services.buy_plan_v3_service import verify_po_sent
+    results = await verify_po_sent(plan, db)
     return {"plan_id": plan.id, "verifications": results}
 
 

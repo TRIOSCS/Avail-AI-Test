@@ -1,4 +1,4 @@
-"""Buy Plan V3 Service Layer — re-export façade.
+"""Buy Plan Service Layer — re-export façade.
 
 Split into domain modules:
   - buyplan_scoring: offer scoring, lead time parsing, buyer assignment, routing maps
@@ -59,6 +59,7 @@ from app.services.buyplan_workflow import (  # noqa: F401
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
-    verify_po_sent_v3,
+    verify_po_sent,
+    verify_po_sent_v3,  # backward-compat alias
     verify_so,
 )
