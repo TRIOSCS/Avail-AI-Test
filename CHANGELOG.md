@@ -2,6 +2,13 @@
 
 All notable changes to the project are logged here.
 
+## 2026-03-14 — Full code review
+
+### Documentation
+- **CODE_REVIEW_2026-03-14.md:** Full code review document added under `docs/`. Covers security, architecture, DB/migrations, CI, and prioritized recommendations. Verdict: production-ready with incremental improvement roadmap.
+
+---
+
 ## 2026-03-13 — Frontend XSS hardening (innerHTML sanitization)
 
 ### Security
