@@ -11,7 +11,7 @@ Business Rules:
 - Manager approval supports line-level vendor overrides
 - Offer comparison shows all feasible offers per requirement
 
-Called by: routers/crm/buy_plans_v3.py, routers/htmx_views.py
+Called by: routers/crm/buy_plans.py, routers/htmx_views.py
 Depends on: pydantic, models/buy_plan.py (enum values)
 """
 
@@ -338,12 +338,3 @@ class BuyPlanTokenApproval(BaseModel):
 
 class BuyPlanTokenReject(BaseModel):
     reason: str = ""
-
-
-# Backward-compat aliases for V3 names
-BuyPlanV3Submit = BuyPlanSubmit
-BuyPlanV3Approval = BuyPlanApproval
-BuyPlanV3Response = BuyPlanResponse
-BuyPlanV3ListItem = BuyPlanListItem
-BuyPlanV3TokenApproval = BuyPlanTokenApproval
-BuyPlanV3TokenReject = BuyPlanTokenReject

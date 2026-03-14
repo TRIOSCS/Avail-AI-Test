@@ -607,10 +607,10 @@ async def buy_plan_submit_partial(
 ):
     """Submit a draft buy plan with SO# — returns refreshed detail partial."""
     from ..services.buyplan_workflow import submit_buy_plan
-    from ..services.buyplan_v3_notifications import (
-        notify_v3_approved,
-        notify_v3_submitted,
-        run_v3_notify_bg,
+    from ..services.buyplan_notifications import (
+        notify_approved,
+        notify_submitted,
+        run_notify_bg,
     )
 
     form = await request.form()
@@ -626,9 +626,9 @@ async def buy_plan_submit_partial(
         )
         db.commit()
         if plan.auto_approved:
-            run_v3_notify_bg(notify_v3_approved, plan.id)
+            run_notify_bg(notify_approved, plan.id)
         else:
-            run_v3_notify_bg(notify_v3_submitted, plan.id)
+            run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -644,10 +644,10 @@ async def buy_plan_approve_partial(
 ):
     """Manager approves or rejects a pending buy plan — returns refreshed detail."""
     from ..services.buyplan_workflow import approve_buy_plan
-    from ..services.buyplan_v3_notifications import (
-        notify_v3_approved,
-        notify_v3_rejected,
-        run_v3_notify_bg,
+    from ..services.buyplan_notifications import (
+        notify_approved,
+        notify_rejected,
+        run_notify_bg,
     )
 
     form = await request.form()
@@ -660,9 +660,9 @@ async def buy_plan_approve_partial(
         plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
         db.commit()
         if action == "approve":
-            run_v3_notify_bg(notify_v3_approved, plan.id)
+            run_notify_bg(notify_approved, plan.id)
         else:
-            run_v3_notify_bg(notify_v3_rejected, plan.id)
+            run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -678,10 +678,10 @@ async def buy_plan_verify_so_partial(
 ):
     """Ops verifies SO — returns refreshed detail."""
     from ..services.buyplan_workflow import verify_so
-    from ..services.buyplan_v3_notifications import (
-        notify_v3_so_rejected,
-        notify_v3_so_verified,
-        run_v3_notify_bg,
+    from ..services.buyplan_notifications import (
+        notify_so_rejected,
+        notify_so_verified,
+        run_notify_bg,
     )
 
     form = await request.form()
@@ -694,9 +694,9 @@ async def buy_plan_verify_so_partial(
         )
         db.commit()
         if action == "approve":
-            run_v3_notify_bg(notify_v3_so_verified, plan.id)
+            run_notify_bg(notify_so_verified, plan.id)
         else:
-            run_v3_notify_bg(notify_v3_so_rejected, plan.id, action=action)
+            run_notify_bg(notify_so_rejected, plan.id, action=action)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -714,7 +714,7 @@ async def buy_plan_confirm_po_partial(
     """Buyer confirms PO — returns refreshed detail."""
     from datetime import datetime
     from ..services.buyplan_workflow import confirm_po
-    from ..services.buyplan_v3_notifications import notify_v3_po_confirmed, run_v3_notify_bg
+    from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
 
     form = await request.form()
     po_number = form.get("po_number", "").strip()
@@ -735,7 +735,7 @@ async def buy_plan_confirm_po_partial(
     try:
         confirm_po(plan_id, line_id, po_number, ship_date, user, db)
         db.commit()
-        run_v3_notify_bg(notify_v3_po_confirmed, plan_id, line_id=line_id)
+        run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -752,7 +752,7 @@ async def buy_plan_verify_po_partial(
 ):
     """Ops verifies PO — returns refreshed detail."""
     from ..services.buyplan_workflow import check_completion, verify_po
-    from ..services.buyplan_v3_notifications import notify_v3_completed, run_v3_notify_bg
+    from ..services.buyplan_notifications import notify_completed, run_notify_bg
 
     form = await request.form()
     action = form.get("action", "approve")
@@ -763,7 +763,7 @@ async def buy_plan_verify_po_partial(
         updated = check_completion(plan_id, db)
         if updated and updated.status == "completed":
             db.commit()
-            run_v3_notify_bg(notify_v3_completed, plan_id)
+            run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 

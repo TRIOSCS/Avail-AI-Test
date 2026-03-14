@@ -4,7 +4,7 @@ Provides reusable Teams integration functions so buy plan services (V1 and V3)
 and any future notification code can post to Teams without duplicating the
 webhook / Graph API chat logic.
 
-Called by: buyplan_service.py, buyplan_v3_notifications.py
+Called by: buyplan_service.py, buyplan_notifications.py
 Depends on: app.http_client, app.services.credential_service, app.utils.graph_client
 """
 

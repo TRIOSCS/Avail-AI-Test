@@ -24,6 +24,7 @@ from app.models import (
     VendorCard,
     VendorReview,
 )
+from app.models.buy_plan import BuyPlanLine
 from app.services.vendor_score import (
     _calc_stage_points,
     _get_buyplan_offer_ids,
@@ -381,15 +382,30 @@ def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
 
 
 def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
-    """Create a BuyPlan with line_items referencing offer_ids."""
+    """Create a BuyPlan with BuyPlanLine rows referencing offer_ids."""
+    v4_status = {"approved": "active", "po_confirmed": "active",
+                 "po_entered": "active", "complete": "completed"}.get(status, status)
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,
-        status=status,
-        line_items=[{"offer_id": oid} for oid in offer_ids],
+        status=v4_status,
         created_at=datetime.now(timezone.utc),
     )
     db.add(bp)
+    db.flush()
+    for oid in offer_ids:
+        line_status = "awaiting_po"
+        if status == "po_confirmed":
+            line_status = "verified"
+        elif status == "po_entered":
+            line_status = "pending_verify"
+        line = BuyPlanLine(
+            buy_plan_id=bp.id,
+            offer_id=oid,
+            quantity=1,
+            status=line_status,
+        )
+        db.add(line)
     db.flush()
     return bp
 

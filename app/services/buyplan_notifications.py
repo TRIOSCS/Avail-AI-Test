@@ -1,30 +1,36 @@
-"""Buy Plan V1 — Email and in-app notifications for buy plan lifecycle.
+"""
+buyplan_notifications.py — Buy Plan notification service.
 
-Handles: submit, approve, reject, stock sale, complete, cancel notifications.
-All notifications go through email (Graph API) and in-app (ActivityLog).
+Handles notifications for all buy plan state transitions:
+- Submit  → email + Teams + in-app to managers
+- Approve → email + Teams + in-app to buyers + salesperson
+- Reject  → email + in-app to salesperson
+- SO Verified → in-app to buyers
+- SO Rejected/Halted → email + in-app to salesperson
+- PO Confirmed → in-app to ops
+- Issue Flagged → in-app + Teams to manager
+- Completed → email + Teams + in-app to salesperson
+- Resubmit → email + in-app to managers
 
-Called by: routers/crm/buy_plans.py (via buyplan_service façade)
-Depends on: utils/graph_client, models, config, scheduler
+Called by: routers/crm/buy_plans.py
+Depends on: models, config, utils/graph_client, teams_notifications (post_teams_channel, send_teams_dm)
 """
 
 import asyncio
-import html
+import html as html_mod
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import ActivityLog, BuyPlan, Offer, User
+from ..models import ActivityLog, User
+from ..models.buy_plan import BuyPlan
 
-# ── Background Task Helper ─────────────────────────────────────────────
+# ── Background runner ────────────────────────────────────────────────
 
 
-def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
-    """Fire-and-forget a buyplan coroutine in a dedicated DB session.
-
-    Replaces the repeated inline async-def + create_task pattern throughout
-    crm.py.  ``coro_factory`` is an async callable ``(plan, db, **kw)``.
-    """
+def run_notify_bg(coro_factory, plan_id: int, **kwargs):
+    """Fire-and-forget a notification coroutine with its own DB session."""
 
     async def _run():
         from ..database import SessionLocal
@@ -35,18 +41,115 @@ def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
-            logger.exception(
-                "Background %s failed for plan %s",
-                coro_factory.__name__,
-                plan_id,
-            )
+            logger.exception("Background %s failed for buy plan %s", coro_factory.__name__, plan_id)
         finally:
             bg_db.close()
 
     asyncio.create_task(_run())
 
 
-# ── Audit Trail ─────────────────────────────────────────────────────────
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _plan_context(plan: BuyPlan, db: Session) -> dict:
+    """Extract common context fields from a buy plan."""
+    from ..models import Quote
+
+    submitter = db.get(User, plan.submitted_by_id) if plan.submitted_by_id else None
+    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
+    customer_name = ""
+    quote_number = ""
+    if quote:
+        quote_number = quote.quote_number or ""
+        if quote.customer_site and hasattr(quote.customer_site, "company") and quote.customer_site.company:
+            customer_name = quote.customer_site.company.name
+        elif quote.customer_site:
+            customer_name = quote.customer_site.site_name or ""
+    return {
+        "submitter": submitter,
+        "submitter_name": submitter.name or submitter.email if submitter else "Unknown",
+        "customer_name": customer_name,
+        "quote_number": quote_number,
+    }
+
+
+def _lines_html(plan: BuyPlan) -> tuple[str, float]:
+    """Build HTML table rows for plan lines. Returns (rows_html, total_cost)."""
+    rows = ""
+    total = 0.0
+    for line in plan.lines or []:
+        cost = float(line.unit_cost or 0) * (line.quantity or 0)
+        total += cost
+        offer = line.offer
+        mpn = offer.mpn if offer else "—"
+        vendor = offer.vendor_name if offer else "—"
+        lead = offer.lead_time if offer else "—"
+        rows += (
+            f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(mpn))}</td>'
+            f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(vendor))}</td>'
+            f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{line.quantity:,}</td>'
+            f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(line.unit_cost or 0):.4f}</td>'
+            f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>'
+            f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(lead or ""))}</td></tr>'
+        )
+    return rows, total
+
+
+def _wrap_email(title: str, body_inner: str) -> str:
+    """Wrap content in the standard AVAIL email template."""
+    return (
+        f'<div style="font-family:Arial,sans-serif;max-width:700px">'
+        f'<h2 style="color:#2563eb">{html_mod.escape(title)}</h2>'
+        f"{body_inner}"
+        f'<p style="color:#6b7280;font-size:12px;margin-top:20px">'
+        f"This is an automated alert from AVAIL.</p></div>"
+    )
+
+
+async def _send_email(user: User, subject: str, html_body: str, db: Session):
+    """Send an email to a single user via Graph API."""
+    from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
+
+    try:
+        token = await get_valid_token(user, db)
+        if not token:
+            return
+        gc = GraphClient(token)
+        await gc.post_json(
+            "/me/sendMail",
+            {
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "HTML", "content": html_body},
+                    "toRecipients": [{"emailAddress": {"address": user.email}}],
+                },
+                "saveToSentItems": "false",
+            },
+        )
+        logger.info("buy plan email sent to %s", user.email)
+    except Exception as e:
+        logger.error("Failed to send buy plan email to %s: %s", user.email, e)
+
+
+# ── Reuse V1 Teams helpers ───────────────────────────────────────────
+
+
+async def _teams_channel(message: str):
+    """Post to Teams channel (delegates to shared teams_notifications module)."""
+    from app.services.teams_notifications import post_teams_channel
+
+    await post_teams_channel(message)
+
+
+async def _teams_dm(user: User, message: str, db: Session):
+    """Send Teams DM (delegates to shared teams_notifications module)."""
+    from app.services.teams_notifications import send_teams_dm
+
+    await send_teams_dm(user, message, db)
+
+
+# ── Audit Trail ─────────────────────────────────────────────────────
 
 
 def log_buyplan_activity(
@@ -56,381 +159,339 @@ def log_buyplan_activity(
     activity_type: str,
     detail: str = "",
 ):
-    """Create an ActivityLog entry for a buy plan state change."""
+    """Create an ActivityLog entry for a buy plan state change.
+
+    Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores
+    plan linkage in notes this version uses the plan id directly in subject and notes fields.
+    """
     db.add(
         ActivityLog(
             user_id=user_id,
             activity_type=activity_type,
             channel="system",
             requisition_id=plan.requisition_id,
-            # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-            subject=f"Buy plan #{plan.id}: {detail}" if detail else f"Buy plan #{plan.id}",
+            subject=f"Buy Plan #{plan.id}: {detail}" if detail else f"Buy Plan #{plan.id}",
             notes=f"plan_id={plan.id} status={plan.status}",
         )
     )
 
 
+# ── Notification Functions ───────────────────────────────────────────
 
 
-# ── Email Notifications ──────────────────────────────────────────────────
+async def notify_submitted(plan: BuyPlan, db: Session):
+    """Notify managers that a buy plan needs approval."""
+    ctx = _plan_context(plan, db)
+    rows, total = _lines_html(plan)
 
-
-async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
-    """Notify admins that a buy plan needs approval."""
-    from ..models import Quote
-    from ..scheduler import get_valid_token
-
-    submitter = db.get(User, plan.submitted_by_id)
-    submitter_name = submitter.name or submitter.email if submitter else "Unknown"
-
-    # Deal context
-    customer_name = ""
-    quote_number = ""
-    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
-    if quote and quote.customer_site and quote.customer_site.company:
-        customer_name = f"{quote.customer_site.company.name} — {quote.customer_site.site_name}"
-        quote_number = quote.quote_number or ""
-
-    # Build line items table
-    rows = ""
-    total_cost = 0
-    for item in plan.line_items or []:
-        plan_qty = item.get("plan_qty") or item.get("qty") or 0
-        cost = plan_qty * (item.get("cost_price") or 0)
-        total_cost += cost
-        rows += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
-        </tr>"""
-
-    sp_notes_html = ""
+    notes_html = ""
     if plan.salesperson_notes:
-        sp_notes_html = f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:12px 0"><strong>Salesperson Notes:</strong> {html.escape(str(plan.salesperson_notes))}</p>'
+        notes_html = f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:12px 0"><strong>Sales Notes:</strong> {html_mod.escape(str(plan.salesperson_notes))}</p>'
 
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:700px">
-        <h2 style="color:#2563eb">Buy Plan Approval Required</h2>
-        <p><strong>{html.escape(str(submitter_name))}</strong> has submitted a buy plan for approval.</p>
-        <p>Customer: <strong>{html.escape(str(customer_name))}</strong></p>
-        <p>Requisition: <strong>#{plan.requisition_id}</strong> | Quote: <strong>{html.escape(str(quote_number))}</strong></p>
-        {sp_notes_html}
-        <table style="border-collapse:collapse;width:100%;margin:16px 0">
-            <thead><tr style="background:#f3f4f6">
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
-            </tr></thead>
-            <tbody>{rows}</tbody>
-            <tfoot><tr style="background:#f3f4f6;font-weight:bold">
-                <td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>
-                <td style="padding:8px 10px;border:1px solid #e5e7eb">${total_cost:,.2f}</td>
-                <td style="padding:8px 10px;border:1px solid #e5e7eb"></td>
-            </tr></tfoot>
-        </table>
-        <p style="margin-top:20px">
-            <a href="{settings.app_url}/#buyplan/{plan.id}"
-               style="background:#2563eb;color:white;padding:10px 24px;text-decoration:none;border-radius:5px;margin-right:8px">
-                Review & Approve
-            </a>
-            <a href="{settings.app_url}/#approve-token/{plan.approval_token}"
-               style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
-                Quick Approve
-            </a>
-        </p>
-        <p style="color:#6b7280;font-size:12px;margin-top:20px">
-            This is an automated alert from AVAIL. Log in to review, edit, or reject.
-        </p>
-    </div>
-    """
+    body = (
+        f"<p><strong>{html_mod.escape(ctx['submitter_name'])}</strong> submitted a buy plan.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
+        f"Quote: <strong>{html_mod.escape(ctx['quote_number'])}</strong> | "
+        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
+        f"{notes_html}"
+        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
+        f'<thead><tr style="background:#f3f4f6">'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
+        f"</tr></thead><tbody>{rows}</tbody>"
+        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
+        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+    )
+    html_body = _wrap_email("Buy Plan — Approval Required", body)
 
-    # Send email to all admins in parallel
-    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    # Email to managers/admins
+    managers = db.query(User).filter(User.role.in_(["manager", "admin"])).all()
+    if not managers:
+        managers = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
 
-    async def _send_admin_email(admin):
-        try:
-            token = await get_valid_token(admin, db)
-            if not token:
-                return
-            from ..utils.graph_client import GraphClient
+    await asyncio.gather(
+        *[_send_email(m, f"[AVAIL] Buy Plan Approval — {ctx['customer_name']}", html_body, db) for m in managers]
+    )
 
-            gc = GraphClient(token)
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": f"[AVAIL] Buy Plan Approval Required — #{plan.requisition_id}",
-                        "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [{"emailAddress": {"address": admin.email}}],
-                    },
-                    "saveToSentItems": "false",
-                },
-            )
-            logger.info(f"Buy plan email sent to admin {admin.email}")
-        except Exception as e:
-            logger.error(f"Failed to send buy plan email to {admin.email}: {e}")
-
-    await asyncio.gather(*[_send_admin_email(a) for a in admin_users])
-
-    # In-app notification
-    for admin in admin_users:
+    # In-app
+    for m in managers:
         db.add(
             ActivityLog(
-                user_id=admin.id,
+                user_id=m.id,
                 activity_type="buyplan_pending",
                 channel="system",
-                # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-                subject=f"Buy plan #{plan.id} awaiting approval — {submitter_name}",
+                requisition_id=plan.requisition_id,
+                subject=f"Buy Plan #{plan.id} needs approval — {ctx['submitter_name']}",
             )
         )
     db.commit()
 
-    logger.debug("Teams notification skipped (removed)")
+    # Teams
+    await _teams_channel(
+        f"**Buy Plan #{plan.id} — Approval Required**\n\n"
+        f"Submitted by: {ctx['submitter_name']}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'}\n"
+        f"Total: ${total:,.2f} | {len(plan.lines or [])} lines"
+    )
 
 
-async def notify_buyplan_approved(plan: BuyPlan, db: Session):
-    """Notify buyers that their offers need to be purchased."""
-    from ..models import Quote
-    from ..scheduler import get_valid_token
+async def notify_approved(plan: BuyPlan, db: Session):
+    """Notify buyers and salesperson that the plan was approved."""
+    ctx = _plan_context(plan, db)
+    rows, total = _lines_html(plan)
 
-    approver = db.get(User, plan.approved_by_id)
-    approver_name = approver.name or approver.email if approver else "Manager"
+    # Collect unique buyers
+    buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
+    buyers = [db.get(User, bid) for bid in buyer_ids]
+    buyers = [b for b in buyers if b]
 
-    # Deal context
-    customer_name = ""
-    quote_number = ""
-    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
-    if quote and quote.customer_site and quote.customer_site.company:
-        customer_name = f"{quote.customer_site.company.name} — {quote.customer_site.site_name}"
-        quote_number = quote.quote_number or ""
-
-    so_number = plan.sales_order_number or "N/A"
-
-    # Identify unique buyers from the line items
-    buyer_ids = set()
-    for item in plan.line_items or []:
-        entered_by = item.get("entered_by_id")
-        if entered_by:
-            buyer_ids.add(entered_by)
-    if not buyer_ids:
-        offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
-        if offer_ids:
-            offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
-            buyer_ids = {o.entered_by_id for o in offers if o.entered_by_id}
-
-    buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
-
-    async def _notify_buyer(buyer):
-        buyer_items = [i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id]
-        if not buyer_items:
-            buyer_items = plan.line_items or []
-
-        rows = ""
-        for item in buyer_items:
-            plan_qty = item.get("plan_qty") or item.get("qty") or 0
-            rows += f"""<tr>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
-            </tr>"""
-
-        notes_html = ""
-        if plan.salesperson_notes:
-            notes_html += f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:8px 0"><strong>Salesperson Notes:</strong> {html.escape(str(plan.salesperson_notes))}</p>'
-        if plan.manager_notes:
-            notes_html += f'<p style="background:#f0fdf4;padding:10px;border-left:3px solid #16a34a;margin:8px 0"><strong>Manager Notes:</strong> {html.escape(str(plan.manager_notes))}</p>'
-
-        html_body = f"""
-        <div style="font-family:Arial,sans-serif;max-width:700px">
-            <h2 style="color:#16a34a">Buy Plan Approved — PO Required</h2>
-            <p>Approved by <strong>{html.escape(str(approver_name))}</strong>. Please create POs in Acctivate and enter the PO numbers in AVAIL.</p>
-            <div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">
-                <p style="margin:0"><strong>Customer:</strong> {html.escape(str(customer_name))}</p>
-                <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html.escape(str(so_number))}</p>
-                <p style="margin:4px 0 0"><strong>Quote:</strong> {html.escape(str(quote_number))}</p>
-            </div>
-            {notes_html}
-            <table style="border-collapse:collapse;width:100%;margin:16px 0">
-                <thead><tr style="background:#f3f4f6">
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
-                </tr></thead>
-                <tbody>{rows}</tbody>
-            </table>
-            <p style="margin-top:20px">
-                <a href="{settings.app_url}/#buyplan/{plan.id}"
-                   style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
-                    Enter PO Numbers
-                </a>
-            </p>
-        </div>
-        """
-
-        try:
-            token = await get_valid_token(buyer, db)
-            if not token:
-                return
-            from ..utils.graph_client import GraphClient
-
-            gc = GraphClient(token)
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": f"[AVAIL] Buy Plan Approved — PO Required for #{plan.requisition_id}",
-                        "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [{"emailAddress": {"address": buyer.email}}],
-                    },
-                    "saveToSentItems": "false",
-                },
+    # Email each buyer with their assigned lines
+    for buyer in buyers:
+        my_lines = [ln for ln in (plan.lines or []) if ln.buyer_id == buyer.id]
+        buyer_rows = ""
+        for ln in my_lines:
+            offer = ln.offer
+            mpn = offer.mpn if offer else "—"
+            vendor = offer.vendor_name if offer else "—"
+            buyer_rows += (
+                f'<tr><td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(mpn))}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{html_mod.escape(str(vendor))}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">{ln.quantity:,}</td>'
+                f'<td style="padding:6px 10px;border:1px solid #e5e7eb">${float(ln.unit_cost or 0):.4f}</td></tr>'
             )
-            logger.info(f"Buy plan approved email sent to buyer {buyer.email}")
-        except Exception as e:
-            logger.error(f"Failed to send approved email to {buyer.email}: {e}")
-
-        # In-app notification
+        body = (
+            f"<p>Buy plan #{plan.id} has been approved. Please create POs for your assigned lines:</p>"
+            f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
+            f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
+            f'<thead><tr style="background:#f3f4f6">'
+            f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
+            f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
+            f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
+            f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+            f"</tr></thead><tbody>{buyer_rows}</tbody></table>"
+        )
+        html_body = _wrap_email("Buy Plan Approved — POs Required", body)
+        await _send_email(buyer, f"[AVAIL] POs Required — {ctx['customer_name']}", html_body, db)
         db.add(
             ActivityLog(
                 user_id=buyer.id,
                 activity_type="buyplan_approved",
                 channel="system",
-                # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-                subject=f"Buy plan #{plan.id} approved — create POs",
+                requisition_id=plan.requisition_id,
+                subject=f"Buy plan #{plan.id} approved — create POs ({len(my_lines)} lines)",
             )
         )
 
-    await asyncio.gather(*[_notify_buyer(b) for b in buyers])
+    # Notify salesperson
+    if ctx["submitter"]:
+        db.add(
+            ActivityLog(
+                user_id=ctx["submitter"].id,
+                activity_type="buyplan_approved",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"Your buy plan #{plan.id} was approved",
+            )
+        )
+
     db.commit()
 
-    logger.debug("Teams notification skipped (removed)")
+    await _teams_channel(
+        f"**Buy Plan #{plan.id} — Approved**\n\n"
+        f"Customer: {ctx['customer_name']} | ${total:,.2f}\n"
+        f"Buyers notified: {', '.join(b.name or b.email for b in buyers)}"
+    )
+    await asyncio.gather(
+        *[
+            _teams_dm(
+                b,
+                f"Buy Plan #{plan.id} approved — {len([ln for ln in plan.lines if ln.buyer_id == b.id])} POs needed",
+                db,
+            )
+            for b in buyers
+        ]
+    )
 
 
-async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
-    """Notify the salesperson that their buy plan was rejected."""
-    from ..scheduler import get_valid_token
-
-    submitter = db.get(User, plan.submitted_by_id)
-    if not submitter:
+async def notify_rejected(plan: BuyPlan, db: Session):
+    """Notify salesperson that the plan was rejected."""
+    ctx = _plan_context(plan, db)
+    if not ctx["submitter"]:
         return
 
-    rejector = db.get(User, plan.approved_by_id)
-    rejector_name = rejector.name or rejector.email if rejector else "Manager"
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+    approver_name = approver.name or approver.email if approver else "Manager"
 
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px">
-        <h2 style="color:#dc2626">Buy Plan Rejected</h2>
-        <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong> was rejected by <strong>{html.escape(str(rejector_name))}</strong>.</p>
-        {f"<p><strong>Reason:</strong> {html.escape(str(plan.rejection_reason))}</p>" if plan.rejection_reason else ""}
-        <p style="margin-top:20px">
-            <a href="{settings.app_url}/#buyplan/{plan.id}"
-               style="background:#2563eb;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
-                View Details
-            </a>
-        </p>
-    </div>
-    """
+    body = (
+        f"<p>Your buy plan #{plan.id} was rejected by <strong>{html_mod.escape(approver_name)}</strong>.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong></p>"
+    )
+    if plan.approval_notes:
+        body += f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0"><strong>Reason:</strong> {html_mod.escape(str(plan.approval_notes))}</p>'
 
-    try:
-        token = await get_valid_token(submitter, db)
-        if token:
-            from ..utils.graph_client import GraphClient
-
-            gc = GraphClient(token)
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": f"[AVAIL] Buy Plan Rejected — #{plan.requisition_id}",
-                        "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [{"emailAddress": {"address": submitter.email}}],
-                    },
-                    "saveToSentItems": "false",
-                },
-            )
-    except Exception as e:
-        logger.error(f"Failed to send rejection email to {submitter.email}: {e}")
+    html_body = _wrap_email("Buy Plan Rejected", body)
+    await _send_email(ctx["submitter"], f"[AVAIL] Buy Plan Rejected — {ctx['customer_name']}", html_body, db)
 
     db.add(
         ActivityLog(
-            user_id=submitter.id,
+            user_id=ctx["submitter"].id,
             activity_type="buyplan_rejected",
             channel="system",
-            # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-            subject=f"Buy plan #{plan.id} rejected — {plan.rejection_reason or 'no reason given'}",
+            requisition_id=plan.requisition_id,
+            subject=f"Buy plan #{plan.id} rejected — {approver_name}",
         )
     )
     db.commit()
 
-    logger.debug("Teams notification skipped (removed)")
+    await _teams_dm(
+        ctx["submitter"], f"Buy Plan #{plan.id} was rejected: {plan.approval_notes or 'No reason given'}", db
+    )
+
+
+async def notify_so_verified(plan: BuyPlan, db: Session):
+    """Notify buyers that SO has been verified — they can proceed."""
+    buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
+    for bid in buyer_ids:
+        db.add(
+            ActivityLog(
+                user_id=bid,
+                activity_type="buyplan_approved",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"SO# {plan.sales_order_number} verified — proceed with POs (plan #{plan.id})",
+            )
+        )
+    db.commit()
+
+
+async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
+    """Notify salesperson that SO was rejected or halted."""
+    ctx = _plan_context(plan, db)
+    if not ctx["submitter"]:
+        return
+
+    label = "halted" if action == "halt" else "rejected"
+    body = (
+        f"<p>SO verification for buy plan #{plan.id} was <strong>{label}</strong>.</p>"
+        f"<p>SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
+    )
+    if plan.so_rejection_note:
+        body += f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0"><strong>Reason:</strong> {html_mod.escape(str(plan.so_rejection_note))}</p>'
+
+    html_body = _wrap_email(f"SO Verification {label.title()}", body)
+    await _send_email(ctx["submitter"], f"[AVAIL] SO {label.title()} — Plan #{plan.id}", html_body, db)
+
+    db.add(
+        ActivityLog(
+            user_id=ctx["submitter"].id,
+            activity_type="buyplan_rejected",
+            channel="system",
+            requisition_id=plan.requisition_id,
+            subject=f"SO# {plan.sales_order_number} {label} — plan #{plan.id}",
+        )
+    )
+    db.commit()
+
+
+async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
+    """Notify ops verification group that a PO was confirmed and needs verification."""
+    from ..models.buy_plan import BuyPlanLine, VerificationGroupMember
+
+    line = db.get(BuyPlanLine, line_id)
+    mpn = line.offer.mpn if line and line.offer else "—"
+    po_num = line.po_number or "—"
+
+    ops_members = db.query(VerificationGroupMember).filter(VerificationGroupMember.is_active.is_(True)).all()
+    for m in ops_members:
+        db.add(
+            ActivityLog(
+                user_id=m.user_id,
+                activity_type="buyplan_pending",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"PO {po_num} needs verification — {mpn} (plan #{plan.id})",
+            )
+        )
+    db.commit()
+
+
+async def notify_completed(plan: BuyPlan, db: Session):
+    """Notify salesperson that the plan is complete."""
+    ctx = _plan_context(plan, db)
+    if not ctx["submitter"]:
+        return
+
+    _, total = _lines_html(plan)
+    body = (
+        f"<p>Buy plan #{plan.id} is now <strong>complete</strong>.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
+        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong> | "
+        f"Total: <strong>${total:,.2f}</strong></p>"
+    )
+    html_body = _wrap_email("Buy Plan Completed", body)
+    await _send_email(ctx["submitter"], f"[AVAIL] Buy Plan Complete — {ctx['customer_name']}", html_body, db)
+
+    db.add(
+        ActivityLog(
+            user_id=ctx["submitter"].id,
+            activity_type="buyplan_completed",
+            channel="system",
+            requisition_id=plan.requisition_id,
+            subject=f"Buy plan #{plan.id} completed — {ctx['customer_name']}",
+        )
+    )
+    db.commit()
+
+    await _teams_channel(
+        f"**Buy Plan #{plan.id} — Completed**\n\n"
+        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'} | ${total:,.2f}"
+    )
 
 
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
-    """Notify logistics/accounting that a stock sale was approved (no PO required)."""
+    """Notify logistics/accounting that a stock sale was approved (no PO required).
+
+    Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete,
+    sends an email to the stock_sale_notify_emails list and creates an in-app
+    notification for the submitter. Also posts to the Teams channel.
+    """
     from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
+
+    ctx = _plan_context(plan, db)
+    rows, total = _lines_html(plan)
 
     approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
     approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
 
-    submitter = db.get(User, plan.submitted_by_id)
-    submitter_name = submitter.name or submitter.email if submitter else "Unknown"
-
-    # Build line items table
-    rows = ""
-    total_cost = 0
-    for item in plan.line_items or []:
-        plan_qty = item.get("plan_qty") or item.get("qty") or 0
-        cost = plan_qty * (item.get("cost_price") or 0)
-        total_cost += cost
-        rows += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
-        </tr>"""
-
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:700px">
-        <h2 style="color:#7c3aed">Stock Sale Approved — No PO Required</h2>
-        <p>Approved by <strong>{html.escape(str(approver_name))}</strong>.</p>
-        <p>This is an internal stock sale — no purchase orders are needed.</p>
-        <div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">
-            <p style="margin:0"><strong>Submitted by:</strong> {html.escape(str(submitter_name))}</p>
-            <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html.escape(str(plan.sales_order_number or "N/A"))}</p>
-        </div>
-        <table style="border-collapse:collapse;width:100%;margin:16px 0">
-            <thead><tr style="background:#f3f4f6">
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>
-            </tr></thead>
-            <tbody>{rows}</tbody>
-            <tfoot><tr style="background:#f3f4f6;font-weight:bold">
-                <td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>
-                <td style="padding:8px 10px;border:1px solid #e5e7eb">${total_cost:,.2f}</td>
-            </tr></tfoot>
-        </table>
-        <p style="margin-top:20px">
-            <a href="{settings.app_url}/#buyplan/{plan.id}"
-               style="background:#7c3aed;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
-                View in AVAIL
-            </a>
-        </p>
-    </div>
-    """
+    body = (
+        f"<p>Approved by <strong>{html_mod.escape(str(approver_name))}</strong>.</p>"
+        f"<p>This is an internal stock sale — no purchase orders are needed.</p>"
+        f'<div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">'
+        f'<p style="margin:0"><strong>Submitted by:</strong> {html_mod.escape(ctx["submitter_name"])}</p>'
+        f'<p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html_mod.escape(str(plan.sales_order_number or "N/A"))}</p>'
+        f"</div>"
+        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
+        f'<thead><tr style="background:#f3f4f6">'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
+        f"</tr></thead><tbody>{rows}</tbody>"
+        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
+        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+    )
+    html_body = _wrap_email("Stock Sale Approved — No PO Required", body)
 
     # Send to stock_sale_notify_emails using an admin user's token
     admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
@@ -438,8 +499,6 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     if sender:
         token = await get_valid_token(sender, db)
         if token:
-            from ..utils.graph_client import GraphClient
-
             gc = GraphClient(token)
 
             async def _send_stock_email(email_addr):
@@ -448,115 +507,36 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                         "/me/sendMail",
                         {
                             "message": {
-                                "subject": f"[AVAIL] Stock Sale Approved — #{plan.requisition_id}",
+                                "subject": f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
                                 "body": {"contentType": "HTML", "content": html_body},
                                 "toRecipients": [{"emailAddress": {"address": email_addr}}],
                             },
                             "saveToSentItems": "false",
                         },
                     )
-                    logger.info(f"Stock sale email sent to {email_addr}")
+                    logger.info("stock sale email sent to %s", email_addr)
                 except Exception as e:
-                    logger.error(f"Failed to send stock sale email to {email_addr}: {e}")
+                    logger.error("Failed to send stock sale email to %s: %s", email_addr, e)
 
             await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
 
     # In-app notification to submitter
-    if submitter:
+    if ctx["submitter"]:
         db.add(
             ActivityLog(
-                user_id=submitter.id,
+                user_id=ctx["submitter"].id,
                 activity_type="buyplan_completed",
                 channel="system",
-                # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
+                requisition_id=plan.requisition_id,
                 subject=f"Stock sale #{plan.id} approved and completed — no PO required",
             )
         )
     db.commit()
 
-    logger.debug("Teams notification skipped (removed)")
-
-
-async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: str):
-    """Notify the original submitter that their buy plan is complete."""
-    from ..scheduler import get_valid_token
-
-    submitter = db.get(User, plan.submitted_by_id)
-    if not submitter:
-        return
-
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:600px">
-        <h2 style="color:#16a34a">Buy Plan Complete</h2>
-        <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong>
-           has been marked complete by <strong>{html.escape(str(completer_name))}</strong>.</p>
-        <p>Sales Order: <strong>{html.escape(str(plan.sales_order_number or "N/A"))}</strong></p>
-        <p style="margin-top:20px">
-            <a href="{settings.app_url}/#buyplan/{plan.id}"
-               style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
-                View Details
-            </a>
-        </p>
-    </div>
-    """
-
-    try:
-        token = await get_valid_token(submitter, db)
-        if token:
-            from ..utils.graph_client import GraphClient
-
-            gc = GraphClient(token)
-            await gc.post_json(
-                "/me/sendMail",
-                {
-                    "message": {
-                        "subject": f"[AVAIL] Buy Plan Complete — #{plan.requisition_id}",
-                        "body": {"contentType": "HTML", "content": html_body},
-                        "toRecipients": [{"emailAddress": {"address": submitter.email}}],
-                    },
-                    "saveToSentItems": "false",
-                },
-            )
-    except Exception as e:
-        logger.error(f"Failed to send completion email to {submitter.email}: {e}")
-
-    db.add(
-        ActivityLog(
-            user_id=submitter.id,
-            activity_type="buyplan_completed",
-            channel="system",
-            # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-            subject=f"Buy plan #{plan.id} completed",
-        )
+    # Teams channel post
+    await _teams_channel(
+        f"**Buy Plan #{plan.id} — Stock Sale Approved**\n\n"
+        f"Approved by: {approver_name}\n"
+        f"Submitted by: {ctx['submitter_name']}\n"
+        f"Total: ${total:,.2f} | Type: Stock Sale (no PO required)"
     )
-    db.commit()
-
-    logger.debug("Teams notification skipped (removed)")
-
-
-async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
-    """Notify relevant parties about cancellation."""
-    canceller = db.get(User, plan.cancelled_by_id)
-    canceller_name = canceller.name or canceller.email if canceller else "Unknown"
-
-    # If the canceller is the submitter, notify admins. Otherwise notify submitter.
-    if plan.cancelled_by_id == plan.submitted_by_id:
-        targets = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    else:
-        submitter = db.get(User, plan.submitted_by_id)
-        targets = [submitter] if submitter else []
-
-    reason_text = f" — {plan.cancellation_reason}" if plan.cancellation_reason else ""
-    for target in targets:
-        db.add(
-            ActivityLog(
-                user_id=target.id,
-                activity_type="buyplan_cancelled",
-                channel="system",
-                # buy_plan_id FK targets buy_plans_v3; V1 plans use notes for linkage
-                subject=f"Buy plan #{plan.id} cancelled by {canceller_name}{reason_text}",
-            )
-        )
-    db.commit()
-
-    logger.debug("Teams notification skipped (removed)")

@@ -25,6 +25,7 @@ from app.models import (
     Requisition,
     User,
 )
+from app.models.buy_plan import BuyPlanLine
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot, StockListHash
 from app.services.multiplier_score_service import (
     BONUS_1ST,
@@ -117,14 +118,29 @@ def _make_quote(
 
 
 def _make_buyplan(db, req_id, quote_id, user_id, offers=None, status="approved"):
+    v4_status = {"approved": "active", "po_confirmed": "active",
+                 "po_entered": "active", "complete": "completed"}.get(status, status)
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,
-        line_items=[{"offer_id": o.id} for o in (offers or [])],
-        status=status,
+        status=v4_status,
         submitted_by_id=user_id,
     )
     db.add(bp)
+    db.flush()
+    for o in (offers or []):
+        line_status = "awaiting_po"
+        if status == "po_confirmed":
+            line_status = "verified"
+        elif status == "po_entered":
+            line_status = "pending_verify"
+        line = BuyPlanLine(
+            buy_plan_id=bp.id,
+            offer_id=o.id,
+            quantity=1,
+            status=line_status,
+        )
+        db.add(line)
     db.flush()
     return bp
 
@@ -215,9 +231,9 @@ class TestBuyerMultiplierNonStacking:
         q = db_session.query(Quote).first()
         bp = _make_buyplan(db_session, req.id, q.id, buyer.id, offers=bp_offers, status="approved")
 
-        # 3 of the BP offers reach PO confirmed
+        # 3 of the BP offers reach PO confirmed (V4: completed status)
         po_offers = bp_offers[:3]
-        bp2 = _make_buyplan(db_session, req.id, q.id, buyer.id, offers=po_offers, status="po_confirmed")
+        bp2 = _make_buyplan(db_session, req.id, q.id, buyer.id, offers=po_offers, status="complete")
         db_session.commit()
 
         result = compute_buyer_multiplier(db_session, buyer.id, MONTH)

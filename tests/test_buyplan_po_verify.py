@@ -1,11 +1,11 @@
 """
-test_buyplan_v3_po_verify.py — Tests for PO verification scanning (Phase 2 Task 2).
+test_buyplan_v3_po_verify.py — Tests for PO verification scanning.
 
-Tests verify_po_sent_v3() which scans buyer Outlook sent folders for PO emails.
+Tests verify_po_sent() which scans buyer Outlook sent folders for PO emails.
 Mocks Graph API interactions to test verification logic in isolation.
 
 Called by: pytest
-Depends on: app.services.buyplan_workflow.verify_po_sent_v3, conftest fixtures
+Depends on: app.services.buyplan_workflow.verify_po_sent, conftest fixtures
 """
 
 import asyncio
@@ -20,17 +20,17 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
 )
-from app.services.buyplan_workflow import verify_po_sent_v3
+from app.services.buyplan_workflow import verify_po_sent
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition) -> BuyPlanV3:
-    """Create a BuyPlanV3 with no lines (caller adds lines)."""
-    plan = BuyPlanV3(
+def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition) -> BuyPlan:
+    """Create a BuyPlan with no lines (caller adds lines)."""
+    plan = BuyPlan(
         quote_id=quote.id,
         requisition_id=requisition.id,
         status=BuyPlanStatus.active.value,
@@ -43,7 +43,7 @@ def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition)
 
 def _make_line(
     db: Session,
-    plan: BuyPlanV3,
+    plan: BuyPlan,
     buyer: User | None = None,
     po_number: str | None = None,
     status: str = BuyPlanLineStatus.pending_verify.value,
@@ -79,7 +79,7 @@ async def test_po_found(db_session, test_user, test_quote, test_requisition):
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
-        results = await verify_po_sent_v3(plan, db_session)
+        results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1
     assert results[0]["found"] is True
@@ -106,7 +106,7 @@ async def test_po_not_found(db_session, test_user, test_quote, test_requisition)
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
-        results = await verify_po_sent_v3(plan, db_session)
+        results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1
     assert results[0]["found"] is False
@@ -130,7 +130,7 @@ async def test_graph_error(db_session, test_user, test_quote, test_requisition):
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
-        results = await verify_po_sent_v3(plan, db_session)
+        results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1
     assert results[0]["found"] is False
@@ -154,7 +154,7 @@ async def test_all_verified_auto_completes(db_session, test_user, test_quote, te
         patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
-        results = await verify_po_sent_v3(plan, db_session)
+        results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 2
     assert all(r["found"] for r in results)
@@ -171,7 +171,7 @@ async def test_no_buyer_skips(db_session, test_user, test_quote, test_requisitio
     db_session.commit()
     db_session.refresh(plan)
 
-    results = await verify_po_sent_v3(plan, db_session)
+    results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1
     assert results[0]["skipped"] is True
@@ -188,7 +188,7 @@ async def test_no_token_skips(db_session, test_user, test_quote, test_requisitio
     db_session.refresh(plan)
 
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None):
-        results = await verify_po_sent_v3(plan, db_session)
+        results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1
     assert results[0]["skipped"] is True

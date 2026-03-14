@@ -9,7 +9,7 @@ from .auth import User  # noqa: F401
 from .base import Base  # noqa: F401
 
 # Buy Plans (unified V4 — structured lines, dual approval tracks)
-from .buy_plan import BuyPlan, BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
+from .buy_plan import BuyPlan, BuyPlanLine, VerificationGroupMember  # noqa: F401
 
 # System Config
 from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401

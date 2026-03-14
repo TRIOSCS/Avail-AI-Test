@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from ..models import (
     BuyerLeaderboardSnapshot,
     BuyPlan,
+    BuyPlanLine,
     Offer,
     Quote,
     StockListHash,
@@ -55,16 +56,19 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
             if oid:
                 quoted_offer_ids.add(oid)
 
-    # Buy plans: line_items JSON contains offer_id
+    # Buy plans: get offer_ids from BuyPlanLine rows
     buyplan_offer_ids = set()
     po_confirmed_offer_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                buyplan_offer_ids.add(oid)
-                if bp_status in ("po_confirmed", "complete"):
-                    po_confirmed_offer_ids.add(oid)
+    for bp_status, offer_id in (
+        db.query(BuyPlan.status, BuyPlanLine.offer_id)
+        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlanLine.offer_id.isnot(None))
+        .limit(10000)
+        .all()
+    ):
+        buyplan_offer_ids.add(offer_id)
+        if bp_status in ("completed",):
+            po_confirmed_offer_ids.add(offer_id)
 
     # Batch-fetch all offers and stock counts to avoid N+1 per buyer
     buyer_ids = [b.id for b in buyers]

@@ -553,41 +553,6 @@ class CustomerImportRow(BaseModel):
         return v
 
 
-# ── Buy Plans ───────────────────────────────────────────────────────
-
-
-class BuyPlanSubmit(BaseModel):
-    offer_ids: list[int]
-    salesperson_notes: str = ""
-    plan_qtys: dict[str, int] = {}
-
-
-class BuyPlanApprove(BaseModel):
-    sales_order_number: str
-    line_items: list[dict] | None = None
-    manager_notes: str | None = None
-
-
-class BuyPlanReject(BaseModel):
-    reason: str = ""
-
-
-class BuyPlanPOEntry(BaseModel):
-    line_index: int
-    po_number: str
-
-
-class BuyPlanPOBulk(BaseModel):
-    entries: list[BuyPlanPOEntry]
-
-
-class BuyPlanCancel(BaseModel):
-    reason: str = ""
-
-
-class BuyPlanResubmit(BaseModel):
-    salesperson_notes: str = ""
-
 
 # ── Misc Request Bodies ─────────────────────────────────────────────
 

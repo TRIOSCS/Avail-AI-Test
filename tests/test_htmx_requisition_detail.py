@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import ActivityLog, BuyPlan, Offer, Quote, Requirement, Requisition, RequisitionTask
+from app.models import ActivityLog, Offer, Quote, Requirement, Requisition, RequisitionTask
 
 
 @pytest.fixture()

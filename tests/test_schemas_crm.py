@@ -181,13 +181,6 @@ class TestAddContactToSite:
 # ── Additional coverage for missing lines ───────────────────────────
 
 from app.schemas.crm import (
-    BuyPlanApprove,
-    BuyPlanCancel,
-    BuyPlanPOBulk,
-    BuyPlanPOEntry,
-    BuyPlanReject,
-    BuyPlanResubmit,
-    BuyPlanSubmit,
     CustomerImportRow,
     OfferUpdate,
     OneDriveAttach,
@@ -459,40 +452,6 @@ class TestCustomerImportRow:
         with pytest.raises(ValidationError):
             CustomerImportRow(company_name="   ")
 
-
-# ── BuyPlan schemas ────────────────────────────────────────────────
-
-
-class TestBuyPlanSchemas:
-    def test_submit(self) -> None:
-        b = BuyPlanSubmit(offer_ids=[1, 2])
-        assert b.offer_ids == [1, 2]
-        assert b.salesperson_notes == ""
-
-    def test_approve(self) -> None:
-        a = BuyPlanApprove(sales_order_number="SO-001")
-        assert a.sales_order_number == "SO-001"
-        assert a.line_items is None
-
-    def test_reject(self) -> None:
-        r = BuyPlanReject()
-        assert r.reason == ""
-
-    def test_po_entry(self) -> None:
-        e = BuyPlanPOEntry(line_index=0, po_number="PO-001")
-        assert e.po_number == "PO-001"
-
-    def test_po_bulk(self) -> None:
-        b = BuyPlanPOBulk(entries=[BuyPlanPOEntry(line_index=0, po_number="PO-1")])
-        assert len(b.entries) == 1
-
-    def test_cancel(self) -> None:
-        c = BuyPlanCancel()
-        assert c.reason == ""
-
-    def test_resubmit(self) -> None:
-        r = BuyPlanResubmit()
-        assert r.salesperson_notes == ""
 
 
 # ── Misc schemas ───────────────────────────────────────────────────

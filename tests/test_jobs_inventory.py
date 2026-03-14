@@ -8,6 +8,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,19 +46,27 @@ def _clear_scheduler_jobs():
 def test_po_verification_verifies_po_entered_plans(
     scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
 ):
-    """PO verification scans buy plans in po_entered status."""
+    """PO verification scans active buy plans with pending_verify lines."""
+    from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus
+
     plan = BuyPlan(
         requisition_id=test_requisition.id,
         quote_id=test_quote.id,
-        status="po_entered",
-        line_items=[],
+        status="active",
         submitted_by_id=test_user.id,
     )
     scheduler_db.add(plan)
+    scheduler_db.flush()
+    line = BuyPlanLine(
+        buy_plan_id=plan.id,
+        quantity=10,
+        status=BuyPlanLineStatus.pending_verify.value,
+    )
+    scheduler_db.add(line)
     scheduler_db.commit()
 
     with patch(
-        "app.services.buyplan_service.verify_po_sent",
+        "app.services.buyplan_workflow.verify_po_sent",
         new_callable=AsyncMock,
     ) as mock_verify:
         from app.jobs.inventory_jobs import _job_po_verification
@@ -71,7 +80,7 @@ def test_po_verification_verifies_po_entered_plans(
 def test_po_verification_skips_when_no_plans(scheduler_db):
     """No verification calls when there are no po_entered plans."""
     with patch(
-        "app.services.buyplan_service.verify_po_sent",
+        "app.services.buyplan_workflow.verify_po_sent",
         new_callable=AsyncMock,
     ) as mock_verify:
         from app.jobs.inventory_jobs import _job_po_verification
@@ -84,18 +93,26 @@ def test_po_verification_handles_per_plan_error(
     scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
 ):
     """Errors during per-plan verification do not crash the job."""
+    from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus
+
     plan = BuyPlan(
         requisition_id=test_requisition.id,
         quote_id=test_quote.id,
-        status="po_entered",
-        line_items=[],
+        status="active",
         submitted_by_id=test_user.id,
     )
     scheduler_db.add(plan)
+    scheduler_db.flush()
+    line = BuyPlanLine(
+        buy_plan_id=plan.id,
+        quantity=10,
+        status=BuyPlanLineStatus.pending_verify.value,
+    )
+    scheduler_db.add(line)
     scheduler_db.commit()
 
     with patch(
-        "app.services.buyplan_service.verify_po_sent",
+        "app.services.buyplan_workflow.verify_po_sent",
         new_callable=AsyncMock,
         side_effect=Exception("Verification failed"),
     ):
@@ -115,54 +132,63 @@ def test_po_verification_outer_exception(scheduler_db):
 # ── _job_stock_autocomplete() ─────────────────────────────────────────
 
 
-def test_stock_autocomplete_delegates(scheduler_db):
-    """Stock auto-complete delegates to auto_complete_stock_sales."""
-    with patch("app.services.buyplan_service.auto_complete_stock_sales") as mock_complete:
-        mock_complete.return_value = 5
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
+def test_stock_autocomplete_completes_stuck_plans(
+    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
+):
+    """Stock auto-complete marks stuck stock sale plans as completed."""
+    plan = BuyPlan(
+        requisition_id=test_requisition.id,
+        quote_id=test_quote.id,
+        status="active",
+        is_stock_sale=True,
+        submitted_by_id=test_user.id,
+        approved_at=datetime.now(timezone.utc) - timedelta(hours=2),
+    )
+    scheduler_db.add(plan)
+    scheduler_db.commit()
 
-        asyncio.run(_job_stock_autocomplete())
-        mock_complete.assert_called_once_with(scheduler_db)
+    from app.jobs.inventory_jobs import _job_stock_autocomplete
+
+    asyncio.run(_job_stock_autocomplete())
+    scheduler_db.refresh(plan)
+    assert plan.status == "completed"
 
 
 def test_stock_autocomplete_handles_zero(scheduler_db):
     """Job runs cleanly when no plans to complete."""
-    with patch("app.services.buyplan_service.auto_complete_stock_sales") as mock_complete:
-        mock_complete.return_value = 0
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
+    from app.jobs.inventory_jobs import _job_stock_autocomplete
 
-        asyncio.run(_job_stock_autocomplete())
-        mock_complete.assert_called_once()
+    asyncio.run(_job_stock_autocomplete())
 
 
 def test_stock_autocomplete_error_handling(scheduler_db):
     """Stock auto-complete handles errors gracefully."""
-    with patch(
-        "app.services.buyplan_service.auto_complete_stock_sales",
-        side_effect=Exception("DB error"),
-    ):
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
         from app.jobs.inventory_jobs import _job_stock_autocomplete
 
         asyncio.run(_job_stock_autocomplete())
 
 
-def test_stock_autocomplete_timeout(scheduler_db):
-    """Stock auto-complete handles timeout gracefully."""
+def test_stock_autocomplete_skips_recent_plans(
+    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
+):
+    """Stock auto-complete skips plans approved less than 1 hour ago."""
+    plan = BuyPlan(
+        requisition_id=test_requisition.id,
+        quote_id=test_quote.id,
+        status="active",
+        is_stock_sale=True,
+        submitted_by_id=test_user.id,
+        approved_at=datetime.now(timezone.utc) - timedelta(minutes=30),
+    )
+    scheduler_db.add(plan)
+    scheduler_db.commit()
 
-    async def _mock_wait_for(coro, timeout=None):
-        try:
-            coro.close()
-        except Exception:
-            pass
-        raise asyncio.TimeoutError()
+    from app.jobs.inventory_jobs import _job_stock_autocomplete
 
-    with (
-        patch("app.services.buyplan_service.auto_complete_stock_sales") as mock_complete,
-        patch("asyncio.wait_for", side_effect=_mock_wait_for),
-    ):
-        from app.jobs.inventory_jobs import _job_stock_autocomplete
-
-        asyncio.run(_job_stock_autocomplete())
+    asyncio.run(_job_stock_autocomplete())
+    scheduler_db.refresh(plan)
+    assert plan.status == "active"  # not yet completed
 
 
 # ── _parse_stock_file() ──────────────────────────────────────────────

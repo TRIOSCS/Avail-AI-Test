@@ -5,7 +5,7 @@ Phase 3: Offer scoring, auto-split, buyer assignment, AI flags, summary.
 Phase 4: Submit, approve, verify SO/PO, flag issues, completion, resubmit.
 
 Called by: pytest
-Depends on: conftest.py fixtures, app.services.buy_plan_v3_service
+Depends on: conftest.py fixtures, app.services.buy_plan_service
 """
 
 from datetime import datetime, timedelta, timezone
@@ -20,11 +20,11 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )
-from app.services.buy_plan_v3_service import (
+from app.services.buy_plan_service import (
     _apply_line_edits,
     _apply_line_overrides,
     _check_better_offer,
@@ -308,7 +308,7 @@ class TestBuyerAssignment:
         db_session.flush()
 
         # Give buyer1 some existing workload
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_requisition.id,
         )
@@ -476,7 +476,7 @@ class TestAIFlags:
             vendor_name="Flag Test",
             created_at=datetime.now(timezone.utc) - timedelta(days=offer_age_days),
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -534,7 +534,7 @@ class TestAIFlags:
             entered_by_id=test_user.id,
             vendor_name="Partial",
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -572,7 +572,7 @@ class TestAISummary:
             entered_by_id=test_user.id,
             vendor_name="Summary Vendor",
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -594,7 +594,7 @@ class TestAISummary:
         assert "33.3%" in summary
 
     def test_empty_plan_summary(self, db_session: Session, test_quote: Quote):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -621,7 +621,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0, margin_pct=
         entered_by_id=test_user.id,
         vendor_name="Arrow",
     )
-    plan = BuyPlanV3(
+    plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=test_quote.requisition_id,
         status=BuyPlanStatus.draft.value,
@@ -765,7 +765,7 @@ class TestSubmitBuyPlan:
             entered_by_id=test_user.id,
             vendor_name="Trio",
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.draft.value,
@@ -1368,7 +1368,7 @@ def _make_ops_member_v2(db, user):
 
 
 class TestBuyPlanCoverageGaps:
-    """Cover specific uncovered lines in buy_plan_v3_service."""
+    """Cover specific uncovered lines in buy_plan_service."""
 
     def test_verify_so_plan_not_found(self, db_session, test_user):
         """Line 752: verify_so raises when plan not found."""
@@ -1502,7 +1502,7 @@ class TestDetectFavoritism:
 
         # Create 3 plans with all lines assigned to the same buyer
         for i in range(3):
-            plan = BuyPlanV3(
+            plan = BuyPlan(
                 quote_id=test_quote.id,
                 requisition_id=test_quote.requisition_id,
                 submitted_by_id=test_user.id,
@@ -1530,7 +1530,7 @@ class TestDetectFavoritism:
         """Line 1169: returns [] when total_lines is 0."""
         # Create 3 plans with no lines
         for i in range(3):
-            plan = BuyPlanV3(
+            plan = BuyPlan(
                 quote_id=test_quote.id,
                 requisition_id=test_quote.requisition_id,
                 submitted_by_id=test_user.id,
@@ -1550,7 +1550,7 @@ class TestCaseReport:
     def test_case_report_with_timeline(self, db_session, test_quote, test_user):
         """Lines 1249-1290: generate_case_report with full timeline."""
         now = datetime.now(timezone.utc)
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             submitted_by_id=test_user.id,
@@ -1617,7 +1617,7 @@ class TestIsStockSale:
         db_session.add(offer)
         db_session.flush()
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_quote.requisition_id,
             quote_id=test_quote.id,
             submitted_by_id=test_user.id,
@@ -1644,7 +1644,7 @@ class TestIsStockSale:
 
     def test_stock_sale_no_offer_id(self, db_session, test_user, test_quote):
         """Line 1122: line without offer_id returns False."""
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_quote.requisition_id,
             quote_id=test_quote.id,
             submitted_by_id=test_user.id,
@@ -1671,7 +1671,7 @@ class TestIsStockSale:
 
 
 class TestCoverageGaps2:
-    """Cover remaining uncovered lines in buy_plan_v3_service (round 2)."""
+    """Cover remaining uncovered lines in buy_plan_service (round 2)."""
 
     # ── score_offer edge cases (lines 100, 106, 115-122, 137) ──
 
@@ -2185,7 +2185,7 @@ class TestCoverageGaps2:
 
     def test_stock_sale_no_lines(self, db_session, test_quote, test_user):
         """Line 1119: _is_stock_sale returns False when plan has no lines."""
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_quote.requisition_id,
             quote_id=test_quote.id,
             submitted_by_id=test_user.id,
@@ -2214,7 +2214,7 @@ class TestCoverageGaps2:
         db_session.flush()
         offer_id = offer.id
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_quote.requisition_id,
             quote_id=test_quote.id,
             submitted_by_id=test_user.id,
@@ -2263,6 +2263,9 @@ class TestCoverageGaps2:
 
     def test_country_to_region_empty(self):
         """Line 59: _country_to_region returns None for empty string."""
+        from app.services.buy_plan_service import _country_to_region
+
+
         assert _country_to_region("") is None
         assert _country_to_region(None) is None
 

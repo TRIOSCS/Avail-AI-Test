@@ -96,4 +96,4 @@ class QuoteLine(Base):
 
 # V1 BuyPlan model removed. All buy plan functionality now in models/buy_plan.py (BuyPlan).
 # The old `buy_plans` table still exists in the DB but is no longer mapped by SQLAlchemy.
-# Migration 076 already moved all V1 data to buy_plans_v3 + buy_plan_lines.
+# Migration 076 already moved all V1 data to buy_plans + buy_plan_lines.

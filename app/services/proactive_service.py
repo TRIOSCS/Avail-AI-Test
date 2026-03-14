@@ -623,38 +623,30 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     db.add(quote)
     db.flush()
 
-    # Create buy plan
-    bp_line_items = []
-    for item in po.line_items or []:
-        orig_offer = db.get(Offer, item.get("offer_id"))
-        bp_line_items.append(
-            {
-                "offer_id": item.get("offer_id"),
-                "mpn": item["mpn"],
-                "vendor_name": item.get("vendor_name", ""),
-                "manufacturer": item.get("manufacturer", ""),
-                "qty": item.get("qty", 0),
-                "cost_price": float(item.get("unit_price") or 0),
-                "lead_time": item.get("lead_time"),
-                "condition": item.get("condition"),
-                "entered_by_id": orig_offer.entered_by_id if orig_offer else None,
-                "po_number": None,
-                "po_sent_at": None,
-                "po_recipient": None,
-                "po_verified": False,
-            }
-        )
+    # Create buy plan with relational lines
+    from app.models.buy_plan import BuyPlanLine, BuyPlanStatus
 
     buy_plan = BuyPlan(
         requisition_id=req.id,
         quote_id=quote.id,
-        status="pending_approval",
-        line_items=bp_line_items,
+        status=BuyPlanStatus.pending.value,
         submitted_by_id=user.id,
+        submitted_at=datetime.now(timezone.utc),
         approval_token=secrets.token_urlsafe(32),
         token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
     db.add(buy_plan)
+    db.flush()
+
+    for item in po.line_items or []:
+        line = BuyPlanLine(
+            buy_plan_id=buy_plan.id,
+            offer_id=item.get("offer_id"),
+            quantity=item.get("qty", 0),
+            unit_cost=float(item.get("unit_price") or 0),
+            unit_sell=float(item.get("sell_price") or 0),
+        )
+        db.add(line)
 
     # Update proactive offer status
     po.status = "converted"
