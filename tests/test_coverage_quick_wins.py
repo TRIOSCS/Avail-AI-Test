@@ -131,8 +131,9 @@ class TestAdminVendorMergeFKException:
                 json={"keep_id": v1.id, "remove_id": v2.id},
             )
 
-        assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        # FK reassignment failure now raises ValueError (transaction safety fix)
+        # instead of silently continuing. The router returns 400.
+        assert resp.status_code == 400
 
 
 # ═══════════════════════════════════════════════════════════════════════

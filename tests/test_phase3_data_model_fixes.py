@@ -46,12 +46,21 @@ class TestCompanyCountColumnsNotNull:
 
 
 class TestSiteContactUniqueConstraint:
-    """Verify site_contacts model has unique constraint on (customer_site_id, email)."""
+    """Verify site_contacts unique constraint is in migration (PostgreSQL-only)."""
 
-    def test_unique_index_defined_in_model(self):
-        """Check the model's __table_args__ includes the unique index."""
-        indexes = {idx.name for idx in SiteContact.__table__.indexes}
-        assert "uq_site_contacts_site_email" in indexes
+    def test_unique_index_in_migration(self):
+        """Check migration 077 creates the partial unique index."""
+        import os
+
+        migration_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "alembic",
+            "versions",
+            "077_add_indexes_and_constraints.py",
+        )
+        with open(migration_path) as f:
+            content = f.read()
+        assert "uq_site_contacts_site_email" in content
 
 
 class TestMigration077Exists:
