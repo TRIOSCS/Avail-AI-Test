@@ -1,0 +1,116 @@
+{# Quote detail partial — shows quote header, line items, and margin summary.
+   Loaded via HTMX into #main-content. #}
+
+<div class="max-w-5xl mx-auto">
+  <nav class="mb-4">
+    <a hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/quotes"
+       class="text-sm text-blue-600 hover:text-blue-500 cursor-pointer">&larr; Back to Quotes</a>
+  </nav>
+
+  {# Header #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">{{ quote.quote_number }}</h1>
+        <p class="text-sm text-gray-500 mt-1">
+          Rev {{ quote.revision }}
+          {% if quote.requisition %} &middot; {{ quote.requisition.name }}{% endif %}
+          {% if quote.created_by %} &middot; by {{ quote.created_by.name }}{% endif %}
+        </p>
+      </div>
+      {% set st_colors = {"draft": "bg-gray-100 text-gray-800", "sent": "bg-blue-100 text-blue-800", "won": "bg-green-100 text-green-800", "lost": "bg-red-100 text-red-800"} %}
+      <span class="px-3 py-1 text-sm font-medium rounded-full {{ st_colors.get(quote.status, 'bg-gray-100 text-gray-800') }}">
+        {{ quote.status|capitalize }}
+      </span>
+    </div>
+
+    <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div>
+        <p class="text-xs text-gray-500">Customer</p>
+        <p class="font-medium text-gray-900">
+          {{ quote.customer_site.company.name if quote.customer_site and quote.customer_site.company else "—" }}
+        </p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-500">Payment Terms</p>
+        <p class="font-medium text-gray-900">{{ quote.payment_terms or "—" }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-500">Shipping Terms</p>
+        <p class="font-medium text-gray-900">{{ quote.shipping_terms or "—" }}</p>
+      </div>
+      <div>
+        <p class="text-xs text-gray-500">Valid For</p>
+        <p class="font-medium text-gray-900">{{ quote.validity_days or 7 }} days</p>
+      </div>
+    </div>
+  </div>
+
+  {# Financials #}
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Subtotal</p>
+      <p class="text-xl font-bold text-gray-900">{{ "${:,.2f}".format(quote.subtotal) if quote.subtotal else "—" }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Total Cost</p>
+      <p class="text-xl font-bold text-gray-900">{{ "${:,.2f}".format(quote.total_cost) if quote.total_cost else "—" }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Margin</p>
+      <p class="text-xl font-bold {{ 'text-green-600' if quote.total_margin_pct and quote.total_margin_pct > 0 else 'text-red-600' }}">
+        {{ "%.1f%%"|format(quote.total_margin_pct) if quote.total_margin_pct else "—" }}
+      </p>
+    </div>
+  </div>
+
+  {# Line items #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <h2 class="text-sm font-semibold text-gray-700">Line Items ({{ line_items|length }})</h2>
+    </div>
+    {% if line_items %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Manufacturer</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sell</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for li in line_items %}
+          <tr>
+            <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900">{{ li.get("mpn", li.get("MPN", "—")) }}</td>
+            <td class="px-4 py-2 text-sm text-gray-600">{{ li.get("manufacturer", li.get("brand", "—")) }}</td>
+            <td class="px-4 py-2 text-sm text-right text-gray-600">{{ "{:,}".format(li.get("qty", 0)) }}</td>
+            <td class="px-4 py-2 text-sm text-right text-gray-600">
+              {% if li.get("cost_price") %}${{ "%.4f"|format(li.cost_price) }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2 text-sm text-right font-medium text-gray-900">
+              {% if li.get("sell_price") %}${{ "%.4f"|format(li.sell_price) }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-2 text-sm text-right {{ 'text-green-700' if li.get('margin_pct', 0) > 0 else 'text-red-600' }}">
+              {% if li.get("margin_pct") is not none %}{{ "%.1f%%"|format(li.margin_pct) }}{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-6 text-center text-sm text-gray-500">No line items</div>
+    {% endif %}
+  </div>
+
+  {% if quote.notes %}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+    <h2 class="text-sm font-semibold text-gray-700 mb-2">Notes</h2>
+    <p class="text-sm text-gray-600 whitespace-pre-wrap">{{ quote.notes }}</p>
+  </div>
+  {% endif %}
+</div>

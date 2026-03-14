@@ -292,6 +292,12 @@ if not os.environ.get("TESTING"):
             re.compile(r"/metrics"),
             re.compile(r"/api/buy-plans/token/.*"),  # external approval links
             re.compile(r"/v2/.*"),  # HTMX views use session auth, not CSRF tokens
+            re.compile(r"/requisitions.*"),  # HTMX root-level routes
+            re.compile(r"/search.*"),
+            re.compile(r"/vendors.*"),
+            re.compile(r"/companies.*"),
+            re.compile(r"/offers.*"),
+            re.compile(r"/quotes.*"),
         ],
     )
 

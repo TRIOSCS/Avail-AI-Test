@@ -1,0 +1,57 @@
+{# RFQ panel partial — shows RFQ contacts (sent emails) and their status.
+   Embedded in requisition detail view, loaded via HTMX. #}
+
+<div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden mb-6">
+  <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+    <h2 class="text-sm font-semibold text-gray-700">RFQ Activity ({{ contacts|length }})</h2>
+  </div>
+
+  {% if contacts %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Parts</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sent</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% for c in contacts %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ c.vendor_name }}</td>
+          <td class="px-4 py-2 text-sm text-gray-600">{{ c.vendor_contact or "—" }}</td>
+          <td class="px-4 py-2">
+            {% set type_colors = {"email": "bg-blue-100 text-blue-700", "phone": "bg-green-100 text-green-700"} %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(c.contact_type, 'bg-gray-100 text-gray-700') }}">
+              {{ c.contact_type|capitalize }}
+            </span>
+          </td>
+          <td class="px-4 py-2">
+            {% set st_colors = {"sent": "bg-blue-100 text-blue-700", "replied": "bg-green-100 text-green-700", "parsed": "bg-purple-100 text-purple-700", "failed": "bg-red-100 text-red-700"} %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-700') }}">
+              {{ c.status|capitalize }}
+            </span>
+          </td>
+          <td class="px-4 py-2 text-sm text-gray-600">
+            {% if c.parts_included %}
+              {{ c.parts_included|length }} part{{ "s" if c.parts_included|length != 1 }}
+            {% else %}
+              All
+            {% endif %}
+          </td>
+          <td class="px-4 py-2 text-sm text-gray-500">{{ c.created_at.strftime('%b %d, %H:%M') if c.created_at else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="p-6 text-center">
+    <p class="text-sm text-gray-500">No RFQs sent yet</p>
+  </div>
+  {% endif %}
+</div>

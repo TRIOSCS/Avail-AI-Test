@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import Company, CustomerSite, Requirement, Requisition, Sighting, User, VendorCard
+from app.models import Company, Contact, CustomerSite, Offer, Quote, Requirement, Requisition, Sighting, User, VendorCard
 from app.models.vendors import VendorContact
 
 
@@ -290,3 +290,135 @@ class TestDashboardPartial:
         # Should show non-zero counts
         assert "Active Vendors" in resp.text
         assert "Companies" in resp.text
+
+
+# ── Root-level routes (Phase 4) ─────────────────────────────────────────
+
+
+class TestRootLevelRoutes:
+    """Test that / now serves the HTMX frontend."""
+
+    def test_root_serves_htmx(self, client: TestClient):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "AvailAI" in resp.text
+        assert "htmx" in resp.text.lower() or "hx-get" in resp.text
+
+    def test_root_requisitions(self, client: TestClient):
+        resp = client.get("/requisitions")
+        assert resp.status_code == 200
+        assert "AvailAI" in resp.text
+
+    def test_root_search(self, client: TestClient):
+        resp = client.get("/search")
+        assert resp.status_code == 200
+
+    def test_root_vendors(self, client: TestClient):
+        resp = client.get("/vendors")
+        assert resp.status_code == 200
+
+    def test_root_companies(self, client: TestClient):
+        resp = client.get("/companies")
+        assert resp.status_code == 200
+
+    def test_root_offers(self, client: TestClient):
+        resp = client.get("/offers")
+        assert resp.status_code == 200
+
+    def test_root_quotes(self, client: TestClient):
+        resp = client.get("/quotes")
+        assert resp.status_code == 200
+
+    def test_legacy_spa(self, client: TestClient):
+        resp = client.get("/legacy")
+        assert resp.status_code == 200
+
+
+# ── RFQ panel ───────────────────────────────────────────────────────────
+
+
+class TestRfqPanel:
+    """Test RFQ activity panel in requisition detail."""
+
+    def test_rfq_panel_empty(self, client: TestClient, test_requisition: Requisition):
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/rfq")
+        assert resp.status_code == 200
+        assert "No RFQs sent yet" in resp.text
+
+    def test_rfq_panel_with_contacts(self, client: TestClient, test_requisition: Requisition, test_user, db_session):
+        contact = Contact(
+            requisition_id=test_requisition.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Arrow Electronics",
+            vendor_contact="sales@arrow.com",
+            status="sent",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/rfq")
+        assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+        assert "Sent" in resp.text
+
+
+# ── Offer partials ──────────────────────────────────────────────────────
+
+
+class TestOfferPartials:
+    """Test offer list partial."""
+
+    def test_list_empty(self, client: TestClient):
+        resp = client.get("/v2/partials/offers")
+        assert resp.status_code == 200
+        assert "No offers found" in resp.text
+
+    def test_list_with_data(self, client: TestClient, test_requisition: Requisition, db_session):
+        offer = Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="Arrow Electronics",
+            mpn="LM317T",
+            qty_available=5000,
+            unit_price=0.45,
+            status="active",
+            source="manual",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/offers")
+        assert resp.status_code == 200
+        assert "LM317T" in resp.text
+        assert "Arrow Electronics" in resp.text
+
+    def test_list_filter_by_status(self, client: TestClient, test_requisition: Requisition, db_session):
+        offer = Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="Mouser",
+            mpn="NE555P",
+            status="active",
+            source="manual",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/offers?status=active")
+        assert resp.status_code == 200
+        assert "NE555P" in resp.text
+
+
+# ── Quote partials ──────────────────────────────────────────────────────
+
+
+class TestQuotePartials:
+    """Test quote list and detail partials."""
+
+    def test_list_empty(self, client: TestClient):
+        resp = client.get("/v2/partials/quotes")
+        assert resp.status_code == 200
+        assert "No quotes found" in resp.text
+
+    def test_detail_not_found(self, client: TestClient):
+        resp = client.get("/v2/partials/quotes/99999")
+        assert resp.status_code == 404

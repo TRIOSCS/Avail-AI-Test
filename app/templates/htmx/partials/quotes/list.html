@@ -1,0 +1,77 @@
+{# Quotes list partial — shows all quotes across requisitions.
+   Loaded via HTMX into #main-content. #}
+
+<div class="max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Quotes</h1>
+    <span class="text-sm text-gray-500">{{ total }} quote{{ "s" if total != 1 }}</span>
+  </div>
+
+  {# Filter bar #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
+    <form hx-get="/v2/partials/quotes" hx-target="#main-content" class="flex flex-wrap gap-3 items-end">
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Status</label>
+        <select name="status" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm">
+          <option value="" {% if not status %}selected{% endif %}>All</option>
+          <option value="draft" {% if status == "draft" %}selected{% endif %}>Draft</option>
+          <option value="sent" {% if status == "sent" %}selected{% endif %}>Sent</option>
+          <option value="won" {% if status == "won" %}selected{% endif %}>Won</option>
+          <option value="lost" {% if status == "lost" %}selected{% endif %}>Lost</option>
+        </select>
+      </div>
+      <button type="submit" class="px-3 py-1.5 bg-gray-800 text-white text-sm rounded-lg hover:bg-gray-700">Filter</button>
+    </form>
+  </div>
+
+  {% if quotes %}
+  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quote #</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Requisition</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Subtotal</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for q in quotes %}
+          <tr class="hover:bg-gray-50 cursor-pointer"
+              hx-get="/v2/partials/quotes/{{ q.id }}"
+              hx-target="#main-content"
+              hx-push-url="/quotes/{{ q.id }}">
+            <td class="px-4 py-3 text-sm font-medium text-blue-600">{{ q.quote_number }}</td>
+            <td class="px-4 py-3 text-sm text-gray-700">{{ q.requisition.name if q.requisition else "—" }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">
+              {{ q.customer_site.company.name if q.customer_site and q.customer_site.company else "—" }}
+            </td>
+            <td class="px-4 py-3 text-sm text-right font-medium text-gray-900">
+              {% if q.subtotal %}${{ "{:,.2f}".format(q.subtotal) }}{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3 text-sm text-right {{ 'text-green-700' if q.total_margin_pct and q.total_margin_pct > 0 else 'text-gray-400' }}">
+              {% if q.total_margin_pct %}{{ "%.1f"|format(q.total_margin_pct) }}%{% else %}—{% endif %}
+            </td>
+            <td class="px-4 py-3">
+              {% set st_colors = {"draft": "bg-gray-100 text-gray-700", "sent": "bg-blue-100 text-blue-700", "won": "bg-green-100 text-green-700", "lost": "bg-red-100 text-red-700"} %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(q.status, 'bg-gray-100 text-gray-700') }}">
+                {{ q.status|capitalize }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ q.created_at.strftime('%b %d, %Y') if q.created_at else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
+    <p class="text-sm text-gray-500">No quotes found</p>
+  </div>
+  {% endif %}
+</div>

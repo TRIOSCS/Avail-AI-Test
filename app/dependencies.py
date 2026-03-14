@@ -42,6 +42,11 @@ def get_user(request: Request, db: Session) -> User | None:
         return None
 
 
+def get_optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """Dependency: returns current user or None. Overridable in tests."""
+    return get_user(request, db)
+
+
 def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: raises 401 if no authenticated user, 403 if deactivated."""
     user = get_user(request, db)

@@ -240,7 +240,7 @@ def client(db_session: Session, test_user: User) -> TestClient:
     skip M365 auth entirely.
     """
     from app.database import get_db
-    from app.dependencies import require_buyer, require_fresh_token, require_sales, require_user
+    from app.dependencies import get_optional_user, require_buyer, require_fresh_token, require_sales, require_user
     from app.main import app
 
     def _override_db():
@@ -257,6 +257,7 @@ def client(db_session: Session, test_user: User) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
+    app.dependency_overrides[get_optional_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_buyer
     app.dependency_overrides[require_sales] = _override_user
     app.dependency_overrides[require_fresh_token] = _override_fresh_token

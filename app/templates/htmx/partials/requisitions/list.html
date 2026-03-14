@@ -98,7 +98,7 @@
           <tr class="hover:bg-gray-50 cursor-pointer"
               hx-get="/v2/partials/requisitions/{{ req.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/requisitions/{{ req.id }}">
+              hx-push-url="/requisitions/{{ req.id }}">
             <td class="px-4 py-3 text-sm font-medium text-blue-600">{{ req.name }}</td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ req.customer_name or "—" }}</td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ req.req_count }}</td>

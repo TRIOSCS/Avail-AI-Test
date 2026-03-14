@@ -25,7 +25,7 @@
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4 hover:shadow-md transition-shadow cursor-pointer"
          hx-get="/v2/partials/vendors/{{ v.id }}"
          hx-target="#main-content"
-         hx-push-url="/v2/vendors/{{ v.id }}">
+         hx-push-url="/vendors/{{ v.id }}">
       <div class="flex items-start justify-between">
         <div class="min-w-0 flex-1">
           <h3 class="text-sm font-semibold text-gray-900 truncate">{{ v.display_name }}</h3>

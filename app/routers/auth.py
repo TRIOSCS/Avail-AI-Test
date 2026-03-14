@@ -44,7 +44,7 @@ AZURE_AUTH = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oaut
 SCOPES = GRAPH_SCOPES
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/legacy", response_class=HTMLResponse)
 async def index(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
     is_admin = user.role == "admin" if user else False

@@ -19,10 +19,13 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
-from ..dependencies import get_user, require_user
+from ..dependencies import get_optional_user, get_user, require_user
 from ..models import (
     Company,
+    Contact,
     CustomerSite,
+    Offer,
+    Quote,
     Requirement,
     Requisition,
     Sighting,
@@ -55,6 +58,17 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 # ── Full page entry points ──────────────────────────────────────────────
 
 
+@router.get("/", response_class=HTMLResponse)
+@router.get("/requisitions", response_class=HTMLResponse)
+@router.get("/requisitions/{req_id:int}", response_class=HTMLResponse)
+@router.get("/search", response_class=HTMLResponse)
+@router.get("/vendors", response_class=HTMLResponse)
+@router.get("/vendors/{vendor_id:int}", response_class=HTMLResponse)
+@router.get("/companies", response_class=HTMLResponse)
+@router.get("/companies/{company_id:int}", response_class=HTMLResponse)
+@router.get("/offers", response_class=HTMLResponse)
+@router.get("/quotes", response_class=HTMLResponse)
+@router.get("/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -63,38 +77,40 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
 @router.get("/v2/companies", response_class=HTMLResponse)
 @router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
-async def v2_page(request: Request, db: Session = Depends(get_db)):
+@router.get("/v2/offers", response_class=HTMLResponse)
+@router.get("/v2/quotes", response_class=HTMLResponse)
+@router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
+async def v2_page(request: Request, db: Session = Depends(get_db), user: User | None = Depends(get_optional_user)):
     """Full page load — serves base.html with initial content via HTMX."""
-    user = get_user(request, db)
     if not user:
         return templates.TemplateResponse("htmx/login.html", {"request": request})
 
-    # Determine which view to load based on URL path
+    # Normalize path — strip /v2 prefix if present for uniform handling
     path = request.url.path
-    if "/vendors" in path:
-        current_view = "vendors"
-    elif "/companies" in path:
-        current_view = "companies"
-    elif "/search" in path:
-        current_view = "search"
-    else:
-        current_view = "requisitions"
+    normalized = path.replace("/v2", "", 1) if path.startswith("/v2") else path
+
+    view_map = {
+        "/vendors": "vendors",
+        "/companies": "companies",
+        "/search": "search",
+        "/offers": "offers",
+        "/quotes": "quotes",
+    }
+    current_view = "requisitions"
+    for segment, view in view_map.items():
+        if segment in normalized:
+            current_view = view
+            break
 
     # Determine the correct partial URL for initial content load
     partial_url = f"/v2/partials/{current_view}"
     # Pass path params for detail views
-    if current_view == "requisitions" and "/requisitions/" in path:
-        parts = path.split("/requisitions/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/requisitions/{parts[1]}"
-    elif current_view == "vendors" and "/vendors/" in path:
-        parts = path.split("/vendors/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/vendors/{parts[1]}"
-    elif current_view == "companies" and "/companies/" in path:
-        parts = path.split("/companies/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/companies/{parts[1]}"
+    detail_views = ["requisitions", "vendors", "companies", "quotes"]
+    for dv in detail_views:
+        if current_view == dv and f"/{dv}/" in normalized:
+            parts = normalized.split(f"/{dv}/")
+            if len(parts) > 1 and parts[1].isdigit():
+                partial_url = f"/v2/partials/{dv}/{parts[1]}"
 
     ctx = _base_ctx(request, user, current_view)
     ctx["partial_url"] = partial_url
@@ -162,8 +178,16 @@ async def requisition_detail_partial(
     for r in requirements:
         r.sighting_count = len(r.sightings) if r.sightings else 0
 
+    # Load offers for this requisition
+    offers = (
+        db.query(Offer)
+        .filter(Offer.requisition_id == req_id)
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"req": req, "requirements": requirements})
+    ctx.update({"req": req, "requirements": requirements, "offers": offers})
     return templates.TemplateResponse("htmx/partials/requisitions/detail.html", ctx)
 
 
@@ -468,3 +492,113 @@ async def dashboard_partial(
     ctx = _base_ctx(request, user, "dashboard")
     ctx["stats"] = {"open_reqs": open_reqs, "vendor_count": vendor_count, "company_count": company_count}
     return templates.TemplateResponse("htmx/partials/dashboard.html", ctx)
+
+
+# ── RFQ panel (embedded in requisition detail) ──────────────────────────
+
+
+@router.get("/v2/partials/requisitions/{req_id}/rfq", response_class=HTMLResponse)
+async def rfq_panel_partial(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return RFQ activity panel for a requisition."""
+    contacts = (
+        db.query(Contact)
+        .filter(Contact.requisition_id == req_id)
+        .order_by(Contact.created_at.desc())
+        .all()
+    )
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["contacts"] = contacts
+    return templates.TemplateResponse("htmx/partials/requisitions/rfq_panel.html", ctx)
+
+
+# ── Offer partials ──────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/offers", response_class=HTMLResponse)
+async def offers_list_partial(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return offers list as HTML partial."""
+    query = db.query(Offer).options(joinedload(Offer.requisition))
+
+    if q.strip():
+        safe = escape_like(q.strip())
+        query = query.filter(
+            Offer.mpn.ilike(f"%{safe}%")
+            | Offer.vendor_name.ilike(f"%{safe}%")
+        )
+    if status:
+        query = query.filter(Offer.status == status)
+
+    total = query.count()
+    offers = query.order_by(Offer.created_at.desc()).offset(offset).limit(limit).all()
+
+    ctx = _base_ctx(request, user, "offers")
+    ctx.update({"offers": offers, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
+    return templates.TemplateResponse("htmx/partials/offers/list.html", ctx)
+
+
+# ── Quote partials ──────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/quotes", response_class=HTMLResponse)
+async def quotes_list_partial(
+    request: Request,
+    status: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return quotes list as HTML partial."""
+    query = db.query(Quote).options(
+        joinedload(Quote.requisition),
+        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+        joinedload(Quote.created_by),
+    )
+    if status:
+        query = query.filter(Quote.status == status)
+
+    total = query.count()
+    quotes = query.order_by(Quote.created_at.desc()).limit(100).all()
+
+    ctx = _base_ctx(request, user, "quotes")
+    ctx.update({"quotes": quotes, "status": status, "total": total})
+    return templates.TemplateResponse("htmx/partials/quotes/list.html", ctx)
+
+
+@router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
+async def quote_detail_partial(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return quote detail as HTML partial."""
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.requisition),
+            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(Quote.created_by),
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+
+    line_items = quote.line_items or []
+
+    ctx = _base_ctx(request, user, "quotes")
+    ctx.update({"quote": quote, "line_items": line_items})
+    return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
