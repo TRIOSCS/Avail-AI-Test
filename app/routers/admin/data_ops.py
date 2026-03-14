@@ -429,10 +429,10 @@ def api_get_teams_config(
     from ...config import settings
 
     config = {
-        "team_id": settings.teams_team_id,
-        "channel_id": settings.teams_channel_id,
+        "team_id": getattr(settings, "teams_team_id", ""),
+        "channel_id": getattr(settings, "teams_channel_id", ""),
         "channel_name": "",
-        "hot_threshold": settings.teams_hot_threshold,
+        "hot_threshold": getattr(settings, "teams_hot_threshold", 10000),
         "enabled": False,
     }
 
@@ -558,34 +558,8 @@ async def api_test_teams_post(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Send a test Adaptive Card to the configured Teams channel."""
-    from ...scheduler import get_valid_token
-    from ...services.teams import _get_teams_config, _make_card, post_to_channel
-
-    channel_id, team_id, enabled = _get_teams_config()
-    if not channel_id or not team_id:
-        raise HTTPException(400, "Teams channel not configured. Save a channel first.")
-
-    token = await get_valid_token(user, db)
-    if not token:
-        raise HTTPException(400, "No valid Microsoft 365 token.")
-
-    card = _make_card(
-        title="AVAIL TEST",
-        subtitle="Teams integration is working correctly.",
-        facts=[
-            {"title": "Sent By", "value": user.name or user.email},
-            {"title": "Status", "value": "Connection verified"},
-        ],
-        action_url="",
-        action_title="Open AVAIL",
-        accent_color="accent",
-    )
-
-    ok = await post_to_channel(team_id, channel_id, card, token, event_type="test", entity_name="test")
-    if not ok:
-        raise HTTPException(502, "Failed to post to Teams channel. Check permissions.")
-    return {"status": "sent", "message": "Test card posted to Teams channel."}
+    """Send a test Adaptive Card to the configured Teams channel (removed)."""
+    raise HTTPException(410, "Teams integration has been removed.")
 
 
 @router.get("/api/admin/teams/notifications")
@@ -595,10 +569,8 @@ def api_get_teams_notifications(
     limit: int = 50,
     user: User = Depends(require_admin),
 ):
-    """Get recent Teams notification log entries for troubleshooting."""
-    from ...services.teams import get_notification_log
-
-    return {"notifications": get_notification_log(limit=min(limit, 200))}
+    """Get recent Teams notification log entries (removed)."""
+    return {"notifications": []}
 
 
 @router.post("/api/admin/teams/channel-routing")
@@ -615,18 +587,8 @@ def api_set_teams_channel_routing(
     Valid keys: teams_channel_hot, teams_channel_quotes, teams_channel_inventory,
                 teams_channel_ownership, teams_channel_buyplan, teams_channel_ops
     """
-    from ...services.teams import EVENT_CHANNEL_MAP
-
-    valid_prefixes = sorted(set(EVENT_CHANNEL_MAP.values()))
-    valid_keys = valid_prefixes + [f"{p}_team" for p in valid_prefixes]
-    saved = 0
-    for key, value in body.items():
-        if key in valid_keys and isinstance(value, str):
-            _upsert_config(db, key, value, user.email)
-            saved += 1
-    db.commit()
-    logger.info(f"Teams channel routing updated by {user.email}: {saved} keys")
-    return {"status": "saved", "keys_updated": saved}
+    logger.debug("Teams channel routing update skipped (removed)")
+    return {"status": "saved", "keys_updated": 0}
 
 
 @router.get("/api/admin/teams/channel-routing")
@@ -637,16 +599,8 @@ def api_get_teams_channel_routing(
     db: Session = Depends(get_db),
 ):
     """Get per-event-type channel routing configuration."""
-    from ...services.teams import EVENT_CHANNEL_MAP
-
-    prefixes = sorted(set(EVENT_CHANNEL_MAP.values()))
-    routing_keys = []
-    for p in prefixes:
-        routing_keys.extend([p, f"{p}_team"])
-    routing = {}
-    for row in db.query(SystemConfig).filter(SystemConfig.key.in_(routing_keys)).all():
-        routing[row.key] = row.value
-    return {"routing": routing}
+    logger.debug("Teams channel routing retrieval skipped (removed)")
+    return {"routing": {}}
 
 
 # -- Mass Account Transfer (admin only) ------------------------------------

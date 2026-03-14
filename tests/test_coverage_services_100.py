@@ -157,30 +157,7 @@ def _make_sqlite_engine():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 1. prospect_discovery_apollo.py — line 35 (_get_api_key)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestProspectDiscoveryApolloApiKey:
-    def test_get_api_key_returns_setting(self):
-        """_get_api_key returns the apollo_api_key setting value."""
-        from app.services.prospect_discovery_apollo import _get_api_key
-
-        with patch("app.services.prospect_discovery_apollo.settings") as mock_settings:
-            mock_settings.apollo_api_key = "test-key-123"
-            assert _get_api_key() == "test-key-123"
-
-    def test_get_api_key_returns_empty_when_missing(self):
-        """_get_api_key returns '' when setting is not present."""
-        from app.services.prospect_discovery_apollo import _get_api_key
-
-        with patch("app.services.prospect_discovery_apollo.settings") as mock_settings:
-            del mock_settings.apollo_api_key
-            assert _get_api_key() == ""
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 2. buyplan_v3_notifications.py — lines 66-67
+# 1. buyplan_v3_notifications.py — lines 66-67
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -303,47 +280,7 @@ class TestOwnershipNaiveDatetimes:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 5. deep_enrichment_service.py — lines 537-538
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestDeepEnrichCompanyCustomerEnrichError:
-    @pytest.mark.asyncio
-    async def test_customer_enrichment_exception_handled(self, db_session):
-        """Exception in customer enrichment waterfall is caught and logged."""
-        from app.services.deep_enrichment_service import deep_enrich_company
-
-        co = _make_company(db_session, "Customer Co", domain="customer.com")
-        co.account_type = "Customer"
-        co.deep_enrichment_at = None
-        db_session.commit()
-
-        mock_settings = MagicMock()
-        mock_settings.customer_enrichment_enabled = True
-        mock_settings.deep_enrichment_stale_days = 30
-        mock_settings.deep_enrichment_clearbit_key = ""
-        mock_settings.explorium_api_key = ""
-        mock_settings.apollo_api_key = ""
-        mock_settings.gradient_api_key = ""
-        mock_settings.anthropic_api_key = ""
-        mock_settings.lusha_api_key = ""
-        mock_settings.hunter_api_key = ""
-
-        with (
-            patch("app.config.settings", mock_settings),
-            patch(
-                "app.services.customer_enrichment_service.enrich_customer_account",
-                new_callable=AsyncMock,
-                side_effect=Exception("API timeout"),
-            ),
-        ):
-            result = await deep_enrich_company(co.id, db_session, force=True)
-
-        assert result is not None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# 6. mailbox_intelligence.py — lines 95-96
+# 5. mailbox_intelligence.py — lines 95-96
 # ═══════════════════════════════════════════════════════════════════════
 
 
@@ -1196,7 +1133,7 @@ class TestCustomerEnrichmentBatchGaps:
         from app.services.customer_enrichment_batch import run_email_reverification
 
         result = await run_email_reverification(db_session, max_contacts=10)
-        assert result["status"] == "no_contacts_to_reverify"
+        assert result["status"] == "no_provider"
 
     @pytest.mark.asyncio
     async def test_email_reverification_credit_exhausted(self, db_session):

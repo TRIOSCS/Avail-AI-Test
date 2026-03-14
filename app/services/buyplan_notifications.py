@@ -1,10 +1,10 @@
-"""Buy Plan V1 — Email, Teams, and in-app notifications for buy plan lifecycle.
+"""Buy Plan V1 — Email and in-app notifications for buy plan lifecycle.
 
 Handles: submit, approve, reject, stock sale, complete, cancel notifications.
-All notifications go through email (Graph API), Teams (webhook/DM), and in-app (ActivityLog).
+All notifications go through email (Graph API) and in-app (ActivityLog).
 
 Called by: routers/crm/buy_plans.py (via buyplan_service façade)
-Depends on: utils/graph_client, teams_notifications, models, config, scheduler
+Depends on: utils/graph_client, models, config, scheduler
 """
 
 import asyncio
@@ -70,48 +70,6 @@ def log_buyplan_activity(
     )
 
 
-# ── Teams Integration (unified Graph API Adaptive Cards) ─────────────────
-
-
-async def _post_teams_card(
-    plan: "BuyPlan", event: str, subtitle: str, facts: list[dict], admin_mentions: list[tuple[str, str]] | None = None
-):
-    """Post a buy plan event as an Adaptive Card via Graph API.
-
-    Replaces the old webhook-based plain text posts with rich Adaptive Cards.
-    """
-    from app.services.teams import send_buyplan_approval_card, send_buyplan_card
-
-    if event == "buyplan_submitted":
-        total_cost = sum(
-            (i.get("plan_qty") or i.get("qty") or 0) * (i.get("cost_price") or 0) for i in (plan.line_items or [])
-        )
-        await send_buyplan_approval_card(
-            plan_id=plan.id,
-            submitter_name=subtitle,
-            total_cost=total_cost,
-            line_count=len(plan.line_items or []),
-            requisition_id=plan.requisition_id,
-            admin_emails=admin_mentions,
-        )
-    else:
-        await send_buyplan_card(
-            plan_id=plan.id,
-            event=event,
-            subtitle=subtitle,
-            facts=facts,
-            mention_emails=admin_mentions,
-        )
-
-
-async def _send_teams_dm(user: User, message: str, db: Session = None):
-    """Send a direct Teams message to a user via Graph API.
-
-    Delegates to shared teams_notifications module.
-    """
-    from app.services.teams_notifications import send_teams_dm
-
-    await send_teams_dm(user, message, db)
 
 
 # ── Email Notifications ──────────────────────────────────────────────────
@@ -233,15 +191,7 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
         )
     db.commit()
 
-    # Teams notification — Adaptive Card with Approve/Reject buttons
-    admin_mentions = [(a.email, a.name or a.email) for a in admin_users]
-    await _post_teams_card(plan, "buyplan_submitted", submitter_name, [], admin_mentions)
-    await asyncio.gather(
-        *[
-            _send_teams_dm(admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db)
-            for admin in admin_users
-        ]
-    )
+    logger.debug("Teams notification skipped (removed)")
 
 
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
@@ -360,27 +310,10 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
             )
         )
 
-        # Teams DM
-        await _send_teams_dm(
-            buyer,
-            f"Buy Plan #{plan.id} has been approved. Please create POs for {len(buyer_items)} item(s) in Acctivate.",
-            db,
-        )
-
     await asyncio.gather(*[_notify_buyer(b) for b in buyers])
     db.commit()
 
-    # Teams channel post — Adaptive Card
-    await _post_teams_card(
-        plan,
-        "buyplan_approved",
-        f"Approved by {approver_name}",
-        [
-            {"title": "Approver", "value": approver_name},
-            {"title": "Buyers Notified", "value": ", ".join(b.name or b.email for b in buyers)},
-            {"title": "SO#", "value": so_number},
-        ],
-    )
+    logger.debug("Teams notification skipped (removed)")
 
 
 async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
@@ -439,11 +372,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     )
     db.commit()
 
-    await _send_teams_dm(
-        submitter,
-        f"Buy Plan #{plan.id} was rejected: {plan.rejection_reason or 'no reason given'}",
-        db,
-    )
+    logger.debug("Teams notification skipped (removed)")
 
 
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
@@ -545,18 +474,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
         )
     db.commit()
 
-    # Teams channel post — Adaptive Card
-    await _post_teams_card(
-        plan,
-        "buyplan_completed",
-        f"Stock sale approved by {approver_name}",
-        [
-            {"title": "Approver", "value": approver_name},
-            {"title": "Submitter", "value": submitter_name},
-            {"title": "Total", "value": f"${total_cost:,.2f}"},
-            {"title": "Type", "value": "Stock Sale (no PO required)"},
-        ],
-    )
+    logger.debug("Teams notification skipped (removed)")
 
 
 async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: str):
@@ -613,15 +531,7 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
     )
     db.commit()
 
-    await _post_teams_card(
-        plan,
-        "buyplan_completed",
-        f"Completed by {completer_name}",
-        [
-            {"title": "Completed By", "value": completer_name},
-            {"title": "Requisition", "value": f"#{plan.requisition_id}"},
-        ],
-    )
+    logger.debug("Teams notification skipped (removed)")
 
 
 async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
@@ -649,12 +559,4 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
         )
     db.commit()
 
-    await _post_teams_card(
-        plan,
-        "buyplan_cancelled",
-        f"Cancelled by {canceller_name}",
-        [
-            {"title": "Cancelled By", "value": canceller_name},
-            {"title": "Reason", "value": plan.cancellation_reason or "No reason given"},
-        ],
-    )
+    logger.debug("Teams notification skipped (removed)")

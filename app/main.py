@@ -593,18 +593,16 @@ def _seed_api_sources():
 # _seed_api_sources() is called from lifespan after startup migrations
 
 # ── Router Registration ──────────────────────────────────────────────────
-# Imports grouped by domain, then registered. MVP-gated routers at the end.
+# Imports grouped by domain, then registered.
 
 from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
-from .routers.apollo_sync import router as apollo_sync_router
 from .routers.auth import router as auth_router
 from .routers.command_center import router as command_center_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.emails import router as emails_router
-from .routers.enrichment import router as enrichment_router
 from .routers.error_reports import router as error_reports_router
 from .routers.ics_admin import router as ics_admin_router
 from .routers.knowledge import insights_router as knowledge_insights_router
@@ -613,7 +611,6 @@ from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
 from .routers.materials import router as materials_router
 from .routers.nc_admin import router as nc_admin_router
 from .routers.outreach import router as outreach_router
-from .routers.performance import router as performance_router
 from .routers.proactive import router as proactive_router
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
@@ -625,7 +622,6 @@ from .routers.tagging_admin import router as tagging_admin_router
 from .routers.tags import router as tags_router
 from .routers.task import my_tasks_router
 from .routers.task import router as task_router
-from .routers.teams_actions import router as teams_actions_router
 from .routers.v13_features import router as v13_router
 from .routers.vendor_analytics import router as vendor_analytics_router
 from .routers.vendor_contacts import router as vendor_contacts_router
@@ -665,10 +661,3 @@ app.include_router(vendor_analytics_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
-
-# Full-version routers (disabled in MVP mode)
-if not settings.mvp_mode:
-    app.include_router(apollo_sync_router)
-    app.include_router(enrichment_router)
-    app.include_router(performance_router)
-    app.include_router(teams_actions_router)

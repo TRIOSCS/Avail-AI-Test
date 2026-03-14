@@ -515,15 +515,11 @@ class TestJobErrorHandling:
 
     @pytest.mark.asyncio
     async def test_contacts_handles_service_error(self):
+        """When run_contact_enrichment_batch is missing/fails, job returns error."""
         with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = True
             mock_s.prospecting_min_fit_for_contacts = 60
-            with patch(
-                "app.services.prospect_contacts.run_contact_enrichment_batch",
-                new_callable=AsyncMock,
-                side_effect=Exception("API down"),
-            ):
-                result = await job_find_contacts()
+            result = await job_find_contacts()
         assert "error" in result
 
     @pytest.mark.asyncio
@@ -673,21 +669,16 @@ class TestEnrichPoolJob:
 
 
 class TestFindContactsJob:
-    """Happy-path for job_find_contacts."""
+    """Tests for job_find_contacts after enrichment removal."""
 
     @pytest.mark.asyncio
-    async def test_contacts_happy_path(self):
-        mock_result = {"prospects_processed": 5, "total_verified": 12}
-
-        with patch(
-            "app.services.prospect_contacts.run_contact_enrichment_batch",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+    async def test_contacts_returns_error_when_batch_missing(self):
+        """run_contact_enrichment_batch was removed; job should return error."""
+        with patch("app.services.prospect_scheduler.settings") as mock_s:
+            mock_s.prospecting_enabled = True
+            mock_s.prospecting_min_fit_for_contacts = 60
             result = await job_find_contacts()
-
-        assert result["prospects_processed"] == 5
-        assert result["total_verified"] == 12
+        assert "error" in result
 
 
 # ── Coverage Gap Tests ──────────────────────────────────────────────

@@ -246,20 +246,16 @@ class TestCompetitiveQuoteExistingNotification:
         db_session.commit()
 
         # Now add a much cheaper offer (>20% below best) to trigger the update branch
-        with patch(
-            "app.services.teams.send_competitive_quote_alert",
-            new_callable=AsyncMock,
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/offers",
-                json={
-                    "vendor_name": "Cheap Vendor",
-                    "mpn": "LM317T",
-                    "qty_available": 1000,
-                    "unit_price": 2.0,
-                    "requirement_id": req_item.id,
-                },
-            )
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/offers",
+            json={
+                "vendor_name": "Cheap Vendor",
+                "mpn": "LM317T",
+                "qty_available": 1000,
+                "unit_price": 2.0,
+                "requirement_id": req_item.id,
+            },
+        )
         assert resp.status_code == 200
 
         # Verify the existing notification was updated

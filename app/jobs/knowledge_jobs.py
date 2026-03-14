@@ -158,72 +158,13 @@ async def _job_refresh_insights():
 
 
 async def _job_deliver_question_batches():
-    """Deliver batched question cards to buyers whose digest hour matches now.
-
-    Runs every hour. For each user with TeamsAlertConfig, checks if current UTC hour
-    matches their knowledge_digest_hour or knowledge_digest_hour + 6. If so, sends batch.
-    """
-    from app.database import SessionLocal
-    from app.models.teams_alert_config import TeamsAlertConfig
-    from app.services.teams_qa_service import deliver_question_batch
-
-    db = SessionLocal()
-    try:
-        current_hour = datetime.now(timezone.utc).hour
-        configs = db.query(TeamsAlertConfig).filter(TeamsAlertConfig.alerts_enabled.is_(True)).all()
-
-        delivered_total = 0
-        for config in configs:
-            digest_hour = config.knowledge_digest_hour or 14
-            if current_hour not in (digest_hour % 24, (digest_hour + 6) % 24):
-                continue
-            try:
-                count = await deliver_question_batch(db, config.user_id)
-                delivered_total += count
-            except Exception as e:
-                logger.warning("Batch delivery failed for user {}: {}", config.user_id, e)
-
-        if delivered_total:
-            logger.info("Delivered {} questions across batch runs", delivered_total)
-    except Exception as e:
-        logger.error("deliver_question_batches job failed: {}", e)
-    finally:
-        db.close()
+    """Deliver batched question cards to buyers (Teams removed — no-op)."""
+    logger.debug("Teams question batch delivery skipped (removed)")
 
 
 async def _job_send_knowledge_digests():
-    """Send daily knowledge digests to users whose digest hour matches now.
-
-    Runs every hour. Only sends at the user's configured knowledge_digest_hour.
-    """
-    from app.database import SessionLocal
-    from app.models.teams_alert_config import TeamsAlertConfig
-    from app.services.teams_qa_service import deliver_knowledge_digest
-
-    db = SessionLocal()
-    try:
-        current_hour = datetime.now(timezone.utc).hour
-        configs = db.query(TeamsAlertConfig).filter(TeamsAlertConfig.alerts_enabled.is_(True)).all()
-
-        sent_count = 0
-        for config in configs:
-            digest_hour = config.knowledge_digest_hour or 14
-            if current_hour != digest_hour % 24:
-                continue
-            try:
-                sent = await deliver_knowledge_digest(db, config.user_id)
-                if sent:
-                    sent_count += 1
-            except Exception as e:
-                logger.warning("Digest delivery failed for user {}: {}", config.user_id, e)
-
-        if sent_count:
-            logger.info("Sent {} knowledge digests", sent_count)
-
-    except Exception as e:
-        logger.error("send_knowledge_digests job failed: {}", e)
-    finally:
-        db.close()
+    """Send daily knowledge digests (Teams removed — no-op)."""
+    logger.debug("Teams knowledge digest delivery skipped (removed)")
 
 
 async def _job_expire_stale():

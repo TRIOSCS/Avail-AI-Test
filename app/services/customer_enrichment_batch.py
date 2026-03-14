@@ -4,7 +4,7 @@ Runs as a scheduled job to enrich customer accounts that are stale or missing
 contacts. Prioritizes assigned accounts over unassigned.
 
 Called by: scheduler.py (quarterly sweep), enrichment router (manual trigger).
-Depends on: customer_enrichment_service.py, credit_manager.py.
+Depends on: customer_enrichment_service.py, credit_manager.py, credit_manager.py.
 """
 
 import asyncio
@@ -56,7 +56,7 @@ async def run_customer_enrichment_batch(
 
     for gap in gaps:
         # Stop early if all credit budgets are exhausted
-        if not any(can_use_credits(db, p) for p in ["apollo", "hunter_verify", "lusha_phone", "lusha_discovery"]):
+        if not any(can_use_credits(db, p) for p in ["explorium"]):
             logger.info("All credit budgets exhausted — stopping batch early at %d/%d", processed, len(gaps))
             break
 
@@ -100,53 +100,8 @@ async def run_customer_enrichment_batch(
 async def run_email_reverification(db: Session, max_contacts: int = 200) -> dict:
     """Re-verify emails for contacts that were verified more than 90 days ago.
 
-    Runs as a quarterly maintenance job.
+    Previously used Hunter for email verification (now removed).
+    Returns a stub result until a new verification provider is configured.
     """
-    from ..connectors.hunter_client import verify_email
-    from ..models.crm import SiteContact
-    from .credit_manager import record_credit_usage
-
-    cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)  # Only re-verify contacts verified before this
-    from datetime import timedelta
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-
-    contacts = (
-        db.query(SiteContact)
-        .filter(
-            SiteContact.email_verified == True,  # noqa: E712
-            SiteContact.email_verified_at.isnot(None),
-            SiteContact.email_verified_at < cutoff,
-            SiteContact.is_active == True,  # noqa: E712
-        )
-        .limit(max_contacts)
-        .all()
-    )
-
-    if not contacts:
-        return {"status": "no_contacts_to_reverify", "processed": 0}
-
-    processed = 0
-    invalidated = 0
-    for contact in contacts:
-        if not can_use_credits(db, "hunter_verify", 1):
-            break
-
-        result = await verify_email(contact.email)
-        record_credit_usage(db, "hunter_verify", 1)
-        processed += 1
-
-        if result:
-            status = result.get("status", "unknown")
-            contact.email_verification_status = status
-            contact.email_verified_at = datetime.now(timezone.utc)
-            if status == "invalid":
-                contact.email_verified = False
-                contact.needs_refresh = True
-                invalidated += 1
-
-        await asyncio.sleep(0.2)
-
-    db.flush()
-    logger.info("Email re-verification: %d processed, %d invalidated", processed, invalidated)
-    return {"status": "completed", "processed": processed, "invalidated": invalidated}
+    logger.info("Email re-verification skipped — Hunter connector removed, no provider configured")
+    return {"status": "no_provider", "processed": 0, "invalidated": 0}

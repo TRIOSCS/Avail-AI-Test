@@ -31,11 +31,6 @@ def register_email_jobs(scheduler, settings):
     elif settings.activity_tracking_enabled:
         logger.info("Ownership sweep disabled (OWNERSHIP_SWEEP_ENABLED=false) — activity tracking still active")
 
-    if settings.deep_email_mining_enabled:
-        scheduler.add_job(
-            _job_deep_email_mining, IntervalTrigger(hours=4), id="deep_email_mining", name="Deep email mining"
-        )
-
     if settings.contact_scoring_enabled:
         scheduler.add_job(
             _job_contact_scoring,
@@ -149,88 +144,6 @@ async def _job_site_ownership_sweep():
         db.rollback()
     finally:
         db.close()
-
-
-@_traced_job
-async def _job_deep_email_mining():
-    """Deep email mining scan for all connected users."""
-    from ..database import SessionLocal
-    from ..models import User
-
-    selector_db = SessionLocal()
-    users_to_scan: list[int] = []
-    try:
-        now = datetime.now(timezone.utc)
-        users = selector_db.query(User).filter(User.refresh_token.isnot(None)).all()
-
-        for user in users:
-            if not user.access_token or not user.m365_connected:
-                continue
-            if user.last_deep_email_scan:
-                last_scan = _utc(user.last_deep_email_scan)
-                if now - last_scan < timedelta(hours=4):
-                    continue
-            users_to_scan.append(user.id)
-    except Exception as e:
-        logger.error(f"Deep email mining error: {e}")
-        return
-    finally:
-        selector_db.close()
-
-    sem = asyncio.Semaphore(3)
-
-    async def _safe_deep_scan(user_id: int):
-        async with sem:
-            from ..connectors.email_mining import EmailMiner
-            from ..services.deep_enrichment_service import link_contact_to_entities
-            from ..utils.token_manager import get_valid_token
-
-            scan_db = SessionLocal()
-            try:
-                user = scan_db.get(User, user_id)
-                if not user:
-                    return
-                token = await get_valid_token(user, scan_db)
-                if not token:
-                    return
-                miner = EmailMiner(token, db=scan_db, user_id=user.id)
-                scan_result = await asyncio.wait_for(
-                    miner.deep_scan_inbox(lookback_days=30, max_messages=500),
-                    timeout=120,
-                )
-                for _domain, domain_data in scan_result.get("per_domain", {}).items():
-                    for email_addr in domain_data.get("emails", [])[:10]:
-                        try:
-                            link_contact_to_entities(
-                                scan_db,
-                                email_addr,
-                                {
-                                    "full_name": domain_data.get("sender_names", [""])[0]
-                                    if domain_data.get("sender_names")
-                                    else None,
-                                    "confidence": 0.6,
-                                },
-                            )
-                        except Exception:
-                            pass
-
-                user.last_deep_email_scan = datetime.now(timezone.utc)
-                scan_db.commit()
-                logger.info(
-                    f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
-                    f"{scan_result.get('contacts_found', 0)} contacts"
-                )
-            except asyncio.TimeoutError:
-                logger.warning(f"Deep email scan TIMEOUT for user {user_id}")
-                scan_db.rollback()
-            except Exception as e:
-                logger.error(f"Deep email scan error for user {user_id}: {e}")
-                scan_db.rollback()
-            finally:
-                scan_db.close()
-
-    if users_to_scan:
-        await asyncio.gather(*[_safe_deep_scan(uid) for uid in users_to_scan])
 
 
 @_traced_job

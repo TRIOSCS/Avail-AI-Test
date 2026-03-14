@@ -12,12 +12,10 @@ Covers:
 8. requisitions.py:72 — parse_substitutes non-list/non-str input
 9. search_service.py:293-298 — search cache HIT
 10. customer_analysis_service.py:73-74,76 — duplicate sighting & parts_list >= 200
-11. deep_enrichment_service.py:233-234,236,240,246,271 — _apply_contact_creation edges
-12. deep_enrichment_service.py:618,620 — contact confidence by source
-13. ownership_service.py:378 — days_inactive=999 when no created_at
-14. ownership_service.py:517 — status="red" in get_my_sites
-15. ownership_service.py:557 — days_inactive=999 in get_sites_at_risk
-16. vite.py:76-77,85-86 — vite_app_url/vite_crm_url fallback
+11. ownership_service.py:378 — days_inactive=999 when no created_at
+12. ownership_service.py:517 — status="red" in get_my_sites
+13. ownership_service.py:557 — days_inactive=999 in get_sites_at_risk
+14. vite.py:76-77,85-86 — vite_app_url/vite_crm_url fallback
 
 Called by: pytest
 Depends on: conftest.py fixtures
@@ -141,15 +139,8 @@ class TestAdminVendorMergeFKException:
 
 
 class TestBuyPlanMissingOffer:
-    @pytest.fixture(autouse=True)
-    def _enable_v1(self, monkeypatch):
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-    def test_submit_buy_plan_skips_missing_offer(self, client, db_session, test_user):
-        """Buy plan submission skips offer IDs not found in DB (line 154)."""
-        # Create a quote
+    def test_submit_buy_plan_returns_410(self, client, db_session, test_user):
+        """V1 buy plan submission always returns 410 (V1 permanently disabled)."""
         co = Company(name="BPlan Corp", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.flush()
@@ -181,7 +172,6 @@ class TestBuyPlanMissingOffer:
         db_session.add(q)
         db_session.flush()
 
-        # Create one real offer
         o = Offer(
             requisition_id=req.id,
             vendor_name="Test Vendor",
@@ -195,18 +185,15 @@ class TestBuyPlanMissingOffer:
         db_session.add(o)
         db_session.commit()
 
-        # Submit buy plan with one valid offer and one non-existent offer ID
         resp = client.post(
             f"/api/quotes/{q.id}/buy-plan",
             json={
-                "offer_ids": [o.id, 99999],  # 99999 doesn't exist — should be skipped
+                "offer_ids": [o.id, 99999],
                 "salesperson_notes": "Test notes",
                 "plan_qtys": {},
             },
         )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "pending_approval"
+        assert resp.status_code == 410
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -448,119 +435,6 @@ class TestCustomerAnalysisDuplicateAndLimit:
         call_args = mock_claude.call_args
         prompt = call_args[0][0] if call_args[0] else call_args[1].get("prompt", "")
         # The sightings loop should have hit the 200 limit (line 75-76: break)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  11. deep_enrichment_service.py — _apply_contact_creation edges
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestApplyContactCreation:
-    def test_invalid_json_string_returns_early(self, db_session):
-        """Invalid JSON string triggers except and returns (lines 233-234)."""
-        from app.services.deep_enrichment_service import _apply_contact_creation
-
-        _apply_contact_creation(db_session, "vendor_card", 1, "not-valid-json{{{")
-        # Should not raise; returns early
-
-    def test_non_dict_value_returns_early(self, db_session):
-        """Non-dict value returns early (line 236)."""
-        from app.services.deep_enrichment_service import _apply_contact_creation
-
-        _apply_contact_creation(db_session, "vendor_card", 1, 42)
-        # Should not raise; returns early
-
-    def test_no_email_returns_early(self, db_session):
-        """Dict without email returns early (line 240)."""
-        from app.services.deep_enrichment_service import _apply_contact_creation
-
-        _apply_contact_creation(db_session, "vendor_card", 1, {"full_name": "No Email"})
-        # Should not raise; returns early
-
-    def test_vendor_card_not_found_returns_early(self, db_session):
-        """Non-existent vendor_card returns early (line 246)."""
-        from app.services.deep_enrichment_service import _apply_contact_creation
-
-        _apply_contact_creation(
-            db_session,
-            "vendor_card",
-            99999,
-            {"email": "test@example.com", "full_name": "Test"},
-        )
-        # Should not raise; returns early
-
-    def test_company_no_site_returns_early(self, db_session):
-        """Company with no site returns early (line 271)."""
-        from app.services.deep_enrichment_service import _apply_contact_creation
-
-        co = Company(name="No Site Co", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.commit()
-
-        _apply_contact_creation(
-            db_session,
-            "company",
-            co.id,
-            {"email": "test@nosite.com", "full_name": "No Site Person"},
-        )
-        # Should not raise; returns early because no site
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  12. deep_enrichment_service.py:618,620 — contact confidence by source
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestDeepEnrichCompanyContactConfidence:
-    @pytest.mark.asyncio
-    async def test_company_enrichment_contact_sources(self, db_session):
-        """Contact discovery routes with source-based confidence (lines 617-620)."""
-        from app.services.deep_enrichment_service import deep_enrich_company
-
-        co = Company(
-            name="Enrich Source Corp",
-            website="https://enrichsource.com",
-            is_active=True,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(co)
-        db_session.flush()
-
-        site = CustomerSite(
-            company_id=co.id,
-            site_name="Enrich HQ",
-            is_active=True,
-        )
-        db_session.add(site)
-        db_session.commit()
-
-        contacts_with_sources = [
-            {"email": "apollo@enrichsource.com", "full_name": "Apollo User", "source": "apollo"},
-            {"email": "hunter@enrichsource.com", "full_name": "Hunter User", "source": "hunter"},
-            {"email": "unknown@enrichsource.com", "full_name": "Unknown User", "source": "unknown"},
-        ]
-
-        # Lazy imports require patching at the source module, not the importing module
-        with patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock, return_value=None):
-            with patch("app.connectors.clearbit_client.enrich_company", new_callable=AsyncMock, return_value=None):
-                with patch(
-                    "app.enrichment_service.find_suggested_contacts",
-                    new_callable=AsyncMock,
-                    return_value=contacts_with_sources,
-                ):
-                    with patch("app.services.deep_enrichment_service.route_enrichment") as mock_route:
-                        result = await deep_enrich_company(co.id, db_session, force=True)
-
-                        # Verify route_enrichment was called with different confidence values
-                        confidences = []
-                        for c in mock_route.call_args_list:
-                            conf = c.kwargs.get("confidence")
-                            if conf is not None:
-                                confidences.append(conf)
-                        # Should have calls with 0.85 (apollo), 0.8 (hunter), 0.7 (unknown)
-                        assert 0.85 in confidences  # apollo source
-                        assert 0.8 in confidences  # hunter source
-                        assert 0.7 in confidences  # unknown source
 
 
 # ═══════════════════════════════════════════════════════════════════════

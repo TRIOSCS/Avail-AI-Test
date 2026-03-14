@@ -47,8 +47,6 @@ def _mock_settings(**overrides):
         ownership_sweep_enabled=False,
         proactive_matching_enabled=False,
         proactive_scan_interval_hours=4,
-        deep_email_mining_enabled=False,
-        deep_enrichment_enabled=False,
         po_verify_interval_min=30,
         buyplan_auto_complete_hour=18,
         buyplan_auto_complete_tz="America/New_York",
@@ -119,8 +117,6 @@ def test_configure_scheduler_conditional_flags_on():
             contacts_sync_enabled=True,
             activity_tracking_enabled=True,
             proactive_matching_enabled=True,
-            deep_email_mining_enabled=True,
-            deep_enrichment_enabled=True,
         ),
     ):
         configure_scheduler()
@@ -128,7 +124,6 @@ def test_configure_scheduler_conditional_flags_on():
     job_ids = {j.id for j in scheduler.get_jobs()}
     assert "contacts_sync" in job_ids
     assert "proactive_matching" in job_ids
-    assert "deep_email_mining" in job_ids
 
 
 def test_configure_scheduler_activity_tracking_jobs():

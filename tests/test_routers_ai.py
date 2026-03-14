@@ -202,100 +202,6 @@ def test_find_contacts_ai_disabled(ai_client):
     assert "not enabled" in resp.json()["error"].lower()
 
 
-def test_find_contacts_vendor_entity(ai_client, db_session):
-    """Find contacts for a vendor entity via Apollo mock."""
-    from app.models import VendorCard
-
-    card = VendorCard(
-        normalized_name="acme supply",
-        display_name="Acme Supply",
-        domain="acmesupply.com",
-    )
-    db_session.add(card)
-    db_session.commit()
-    db_session.refresh(card)
-
-    apollo_results = [
-        {
-            "full_name": "Alice Smith",
-            "title": "Sales Manager",
-            "email": "alice@acmesupply.com",
-            "email_status": "valid",
-            "phone": "+1-555-1234",
-            "linkedin_url": "https://linkedin.com/in/alice",
-            "source": "apollo",
-            "confidence": "high",
-        },
-    ]
-
-    mock_search = AsyncMock(return_value=apollo_results)
-    mock_web = AsyncMock(return_value=[])
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.connectors.apollo_client.search_contacts", mock_search),
-        patch("app.services.ai_service.enrich_contacts_websearch", mock_web),
-    ):
-        resp = ai_client.post(
-            "/api/ai/find-contacts",
-            json={
-                "entity_type": "vendor",
-                "entity_id": card.id,
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["contacts"][0]["full_name"] == "Alice Smith"
-    assert len(data["saved_ids"]) == 1
-
-
-def test_find_contacts_company_entity(ai_client, db_session):
-    """Find contacts for a company site entity."""
-    from app.models import Company, CustomerSite
-
-    co = Company(name="Beta Corp", domain="betacorp.com", is_active=True)
-    db_session.add(co)
-    db_session.flush()
-
-    site = CustomerSite(company_id=co.id, site_name="Beta HQ")
-    db_session.add(site)
-    db_session.commit()
-    db_session.refresh(site)
-
-    apollo_results = [
-        {
-            "full_name": "Bob Jones",
-            "title": "Procurement Lead",
-            "email": "bob@betacorp.com",
-            "source": "apollo",
-            "confidence": "medium",
-        },
-    ]
-
-    mock_search = AsyncMock(return_value=apollo_results)
-    mock_web = AsyncMock(return_value=[])
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.connectors.apollo_client.search_contacts", mock_search),
-        patch("app.services.ai_service.enrich_contacts_websearch", mock_web),
-    ):
-        resp = ai_client.post(
-            "/api/ai/find-contacts",
-            json={
-                "entity_type": "company",
-                "entity_id": site.id,
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 1
-    assert data["contacts"][0]["full_name"] == "Bob Jones"
-
-
 def test_find_contacts_no_entity(ai_client):
     """POST /api/ai/find-contacts with no entity_id returns 400."""
     with patch("app.routers.ai._ai_enabled", return_value=True):
@@ -1025,58 +931,6 @@ def test_normalize_parts_success(ai_client):
     assert data["count"] == 1
 
 
-def test_enrich_person_ai_disabled(ai_client):
-    """POST /api/ai/enrich-person with AI off returns 403."""
-    with patch("app.routers.ai._ai_enabled", return_value=False):
-        resp = ai_client.post(
-            "/api/ai/enrich-person",
-            json={
-                "email": "test@example.com",
-            },
-        )
-    assert resp.status_code == 403
-
-
-def test_enrich_person_success(ai_client):
-    """POST /api/ai/enrich-person returns enriched person data."""
-    person_data = {
-        "full_name": "John Doe",
-        "title": "VP Sales",
-        "email": "john@acme.com",
-        "linkedin_url": "https://linkedin.com/in/johndoe",
-    }
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.connectors.apollo_client.enrich_person", new_callable=AsyncMock, return_value=person_data),
-    ):
-        resp = ai_client.post(
-            "/api/ai/enrich-person",
-            json={
-                "email": "john@acme.com",
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["full_name"] == "John Doe"
-
-
-def test_enrich_person_no_match(ai_client):
-    """POST /api/ai/enrich-person returns 404 when no match found."""
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.connectors.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None),
-    ):
-        resp = ai_client.post(
-            "/api/ai/enrich-person",
-            json={
-                "email": "nobody@nowhere.com",
-            },
-        )
-
-    assert resp.status_code == 404
-
 
 def test_save_parsed_offers_with_mpn_matching(ai_client, db_session, ai_test_user):
     """Save parsed offers matches MPNs to existing requirements."""
@@ -1128,44 +982,6 @@ def test_save_parsed_offers_with_mpn_matching(ai_client, db_session, ai_test_use
         .first()
     )
     assert offer.requirement_id == r.id
-
-
-def test_find_contacts_websearch_fallback(ai_client, db_session):
-    """When Apollo returns fewer than 3 results, web search is invoked."""
-    from app.models import VendorCard
-
-    card = VendorCard(
-        normalized_name="fallback supply",
-        display_name="Fallback Supply",
-        domain="fallback.com",
-    )
-    db_session.add(card)
-    db_session.commit()
-    db_session.refresh(card)
-
-    apollo_results = [
-        {"full_name": "One Person", "email": "one@fallback.com", "source": "apollo", "confidence": "high"},
-    ]
-    web_results = [
-        {"full_name": "Web Person", "email": "web@fallback.com", "source": "web_search", "confidence": "medium"},
-    ]
-
-    with (
-        patch("app.routers.ai._ai_enabled", return_value=True),
-        patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock, return_value=apollo_results),
-        patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock, return_value=web_results),
-    ):
-        resp = ai_client.post(
-            "/api/ai/find-contacts",
-            json={
-                "entity_type": "vendor",
-                "entity_id": card.id,
-            },
-        )
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 2  # Apollo + web search combined
 
 
 # ---------------------------------------------------------------------------

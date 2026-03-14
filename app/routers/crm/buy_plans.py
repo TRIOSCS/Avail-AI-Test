@@ -1,7 +1,7 @@
 """buy_plans.py — V1 Buy Plan CRUD (legacy, deprecated in favor of V3).
 
 V1 buy plans use JSON line_items and do not enforce structured state machines.
-Disabled by default via buy_plan_v1_enabled feature flag.
+Permanently disabled — use V3 buy plan endpoints instead.
 
 Called by: routers/crm/__init__.py
 Depends on: models, schemas, config
@@ -40,9 +40,8 @@ router = APIRouter()
 
 
 def _require_v1_enabled():
-    """Dependency that blocks V1 buy plan mutations when disabled."""
-    if not settings.buy_plan_v1_enabled:
-        raise HTTPException(410, "V1 buy plans are disabled. Use /api/v3/buy-plans endpoints.")
+    """V1 buy plans are permanently disabled — use V3 endpoints."""
+    raise HTTPException(410, "V1 buy plans are disabled. Use /api/v3/buy-plans endpoints.")
 
 
 # ── Buy Plans ────────────────────────────────────────────────────────────
@@ -176,8 +175,7 @@ async def create_buy_plan_draft(
     db: Session = Depends(get_db),
 ):
     """Create a buy plan in Draft. Sales can later use 'Ready to send' (PUT submit) to move to Pending."""
-    if not settings.buy_plan_v1_enabled:
-        raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
+    raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -262,8 +260,7 @@ async def submit_buy_plan(
     db: Session = Depends(get_db),
 ):
     """Submit a buy plan when marking a quote as Won (creates plan in Pending in one step)."""
-    if not settings.buy_plan_v1_enabled:
-        raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
+    raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")

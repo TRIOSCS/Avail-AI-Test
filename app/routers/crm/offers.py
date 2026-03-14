@@ -435,7 +435,7 @@ async def create_offer(
 
         asyncio.create_task(_background_enrich_vendor(*_enrich_new_card))
 
-    # Teams: competitive quote alert if >20% below current best price
+    # Competitive quote alert: in-app notification if >20% below current best price
     try:
         if offer.unit_price and offer.unit_price > 0 and offer.requirement_id:
             from sqlalchemy import func
@@ -451,18 +451,6 @@ async def create_offer(
             )
             if best_price and float(offer.unit_price) < float(best_price) * 0.8:
                 pct = round((1 - float(offer.unit_price) / float(best_price)) * 100)
-                from ...services.teams import send_competitive_quote_alert
-
-                asyncio.create_task(
-                    send_competitive_quote_alert(
-                        offer_id=offer.id,
-                        mpn=offer.mpn,
-                        vendor_name=offer.vendor_name,
-                        offer_price=float(offer.unit_price),
-                        best_price=float(best_price),
-                        requisition_id=req_id,
-                    )
-                )
                 # Deduplicated in-app notification for requisition owner
                 if req.created_by:
                     existing_notif = (

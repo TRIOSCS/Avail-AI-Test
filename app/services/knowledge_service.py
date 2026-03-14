@@ -143,12 +143,6 @@ def post_question(
     requirement_id: int | None = None,
 ) -> KnowledgeEntry:
     """Post a Q&A question and notify assigned buyers."""
-    # Check daily question cap
-    from app.services.teams_qa_service import check_question_quota
-
-    quota = check_question_quota(db, user_id)
-    if not quota["allowed"]:
-        raise ValueError("Daily question limit reached ({}/{})".format(quota["used"], quota["limit"]))
 
     entry = create_entry(
         db,

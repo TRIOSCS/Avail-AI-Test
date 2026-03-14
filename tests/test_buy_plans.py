@@ -28,14 +28,6 @@ from app.main import app
 from app.models import BuyPlan, Offer, User
 
 
-@pytest.fixture(autouse=True)
-def _enable_v1(monkeypatch):
-    """Re-enable V1 buy plans for legacy test coverage in this module."""
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "buy_plan_v1_enabled", True)
-
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -152,58 +144,31 @@ def mock_background_tasks(monkeypatch):
 
 
 class TestSubmitBuyPlan:
-    def test_submit_success(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Sales user can submit a buy plan for a sent quote."""
+    """V1 buy plan submission is permanently disabled — all POSTs return 410."""
+
+    def test_submit_returns_410(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan always returns 410 (V1 disabled)."""
         r = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is True
-        assert data["status"] == "pending_approval"
-        assert data["buy_plan_id"] is not None
+        assert r.status_code == 410
 
-    def test_submit_missing_offers(self, sales_client, test_quote):
-        """Submit with no offers → 400."""
+    def test_submit_missing_offers_returns_410(self, sales_client, test_quote):
+        """Even with empty offers, V1 endpoint returns 410."""
         r = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": []},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
-    def test_submit_nonexistent_quote(self, sales_client):
-        """Submit against a nonexistent quote → 404."""
+    def test_submit_nonexistent_quote_returns_410(self, sales_client):
+        """V1 submit against nonexistent quote still returns 410."""
         r = sales_client.post(
             "/api/quotes/99999/buy-plan",
             json={"offer_ids": [1]},
         )
-        assert r.status_code == 404
-
-    def test_submit_with_notes_and_qtys(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Submit with salesperson notes and custom quantities."""
-        r = sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={
-                "offer_ids": [test_offer.id],
-                "salesperson_notes": "Rush order for ACME",
-                "plan_qtys": {str(test_offer.id): 500},
-            },
-        )
-        assert r.status_code == 200
-        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
-        assert plan.salesperson_notes == "Rush order for ACME"
-        assert plan.line_items[0]["plan_qty"] == 500
-
-    def test_submit_marks_quote_won(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Submitting a buy plan marks the quote as won."""
-        sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={"offer_ids": [test_offer.id]},
-        )
-        db_session.refresh(test_quote)
-        assert test_quote.status == "won"
-        assert test_quote.result == "won"
+        assert r.status_code == 410
 
 
 # ── 2. List (GET /api/buy-plans) ────────────────────────────────────
@@ -412,6 +377,8 @@ class TestGetBuyPlan:
 
 
 class TestApproveBuyPlan:
+    """V1 approve endpoint is permanently disabled — all PUTs return 410."""
+
     def test_manager_approves(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
             db_session,
@@ -423,8 +390,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-001"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "approved"
+        assert r.status_code == 410
 
     def test_admin_approves(self, db_session, admin_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -437,7 +403,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-002"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_buyer_forbidden(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -450,7 +416,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-003"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_sales_forbidden(self, db_session, sales_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -463,7 +429,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-004"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_missing_so_number(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -476,7 +442,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={},
         )
-        assert r.status_code == 422  # Pydantic validates sales_order_number is required
+        assert r.status_code == 410
 
     def test_wrong_status(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -490,7 +456,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-005"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_approve_with_notes(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -503,15 +469,15 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-006", "manager_notes": "Looks good"},
         )
-        assert r.status_code == 200
-        db_session.refresh(plan)
-        assert plan.manager_notes == "Looks good"
+        assert r.status_code == 410
 
 
 # ── 5. Reject (PUT /api/buy-plans/{id}/reject) — Bug 4 regression ───
 
 
 class TestRejectBuyPlan:
+    """V1 reject endpoint is permanently disabled — all PUTs return 410."""
+
     def test_manager_rejects(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
             db_session,
@@ -523,8 +489,7 @@ class TestRejectBuyPlan:
             f"/api/buy-plans/{plan.id}/reject",
             json={"reason": "Price too high"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "rejected"
+        assert r.status_code == 410
 
     def test_admin_rejects(self, db_session, admin_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -537,7 +502,7 @@ class TestRejectBuyPlan:
             f"/api/buy-plans/{plan.id}/reject",
             json={"reason": "Wrong vendor"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_buyer_forbidden(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -550,7 +515,7 @@ class TestRejectBuyPlan:
             f"/api/buy-plans/{plan.id}/reject",
             json={"reason": "test"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_wrong_status(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -564,26 +529,23 @@ class TestRejectBuyPlan:
             f"/api/buy-plans/{plan.id}/reject",
             json={"reason": "test"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_dict_shows_rejected_by(
         self, db_session, manager_client, manager_user, test_requisition, test_quote, sales_user
     ):
-        """Bug 4 regression: rejected_by shows who rejected."""
+        """V1 reject returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
         )
-        manager_client.put(
+        r = manager_client.put(
             f"/api/buy-plans/{plan.id}/reject",
             json={"reason": "Bad pricing"},
         )
-        r = manager_client.get(f"/api/buy-plans/{plan.id}")
-        data = r.json()
-        assert data["rejected_by"] == manager_user.name
-        assert data["rejected_by_id"] == manager_user.id
+        assert r.status_code == 410
 
 
 # ── 6. Token-Based (GET/PUT /api/buy-plans/token/{t}/...) ───────────
@@ -616,8 +578,7 @@ class TestTokenBased:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={"sales_order_number": "SO-TOKEN-1"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "approved"
+        assert r.status_code == 410
 
     def test_approve_token_missing_so(self, db_session, noauth_client, test_requisition, test_quote, test_user):
         plan = _create_buy_plan(
@@ -630,7 +591,7 @@ class TestTokenBased:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={},
         )
-        assert r.status_code == 422  # Pydantic validates sales_order_number is required
+        assert r.status_code == 410
 
     def test_reject_by_token(self, db_session, noauth_client, test_requisition, test_quote, test_user):
         plan = _create_buy_plan(
@@ -643,8 +604,7 @@ class TestTokenBased:
             f"/api/buy-plans/token/{plan.approval_token}/reject",
             json={"reason": "Token-based rejection"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "rejected"
+        assert r.status_code == 410
 
     def test_wrong_status_token(self, db_session, noauth_client, test_requisition, test_quote, test_user):
         plan = _create_buy_plan(
@@ -658,13 +618,15 @@ class TestTokenBased:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 7. Single PO Entry (PUT /api/buy-plans/{id}/po) ─────────────────
 
 
 class TestSinglePO:
+    """V1 PO entry endpoint is permanently disabled — all PUTs return 410."""
+
     def test_po_entry_success(self, db_session, buyer_client, test_user, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
             db_session,
@@ -677,8 +639,7 @@ class TestSinglePO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0, "po_number": "PO-001"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "po_entered"
+        assert r.status_code == 410
 
     def test_po_wrong_status(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -692,7 +653,7 @@ class TestSinglePO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0, "po_number": "PO-002"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_po_missing_fields(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -706,7 +667,7 @@ class TestSinglePO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0},
         )
-        assert r.status_code == 422  # Pydantic validates po_number is required
+        assert r.status_code == 410
 
     def test_po_invalid_line_index(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -720,7 +681,7 @@ class TestSinglePO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 99, "po_number": "PO-003"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 8. Bulk PO (PUT /api/buy-plans/{id}/po-bulk) ────────────────────
@@ -739,11 +700,10 @@ class TestBulkPO:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-BULK-1"}]},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "po_entered"
+        assert r.status_code == 410
 
     def test_bulk_edit_resets_verification(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
-        """Editing an existing PO resets verification flags."""
+        """V1 bulk PO edit returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -769,13 +729,10 @@ class TestBulkPO:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-NEW"}]},
         )
-        assert r.status_code == 200
-        db_session.refresh(plan)
-        assert plan.line_items[0]["po_number"] == "PO-NEW"
-        assert plan.line_items[0]["po_verified"] is False
+        assert r.status_code == 410
 
     def test_bulk_clear(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
-        """Clearing PO reverts status to approved."""
+        """V1 bulk PO clear returns 410; no status change."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -801,8 +758,7 @@ class TestBulkPO:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": ""}]},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "approved"
+        assert r.status_code == 410
 
     def test_bulk_wrong_status(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -816,7 +772,7 @@ class TestBulkPO:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-Y"}]},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_bulk_empty_entries(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -830,7 +786,7 @@ class TestBulkPO:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": []},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 9. Verify PO (GET /api/buy-plans/{id}/verify-po) ────────────────
@@ -871,8 +827,7 @@ class TestCompleteBuyPlan:
             status="po_confirmed",
         )
         r = admin_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 200
-        assert r.json()["status"] == "complete"
+        assert r.status_code == 410
 
     def test_manager_completes(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -883,10 +838,10 @@ class TestCompleteBuyPlan:
             status="po_confirmed",
         )
         r = manager_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_buyer_allowed_from_po_confirmed(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
-        """Buyers can complete from po_confirmed status."""
+        """V1 complete endpoint returns 410 regardless of status."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -895,10 +850,10 @@ class TestCompleteBuyPlan:
             status="po_confirmed",
         )
         r = buyer_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_buyer_forbidden_from_approved(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
-        """Buyers cannot complete from approved status (only po_entered/po_confirmed)."""
+        """V1 complete endpoint returns 410 before any role/status check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -907,7 +862,7 @@ class TestCompleteBuyPlan:
             status="approved",
         )
         r = buyer_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_wrong_status(self, db_session, admin_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -918,13 +873,15 @@ class TestCompleteBuyPlan:
             status="pending_approval",
         )
         r = admin_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 11. Cancel (PUT /api/buy-plans/{id}/cancel) ─────────────────────
 
 
 class TestCancelBuyPlan:
+    """V1 cancel endpoint is permanently disabled — all PUTs return 410."""
+
     def test_pending_by_submitter(self, db_session, sales_client, sales_user, test_requisition, test_quote):
         plan = _create_buy_plan(
             db_session,
@@ -936,8 +893,7 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "Changed mind"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "cancelled"
+        assert r.status_code == 410
 
     def test_pending_by_manager(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -950,10 +906,10 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "Budget cut"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_pending_by_other_forbidden(self, db_session, trader_client, test_requisition, test_quote, sales_user):
-        """Non-submitter, non-admin can't cancel another user's pending plan."""
+        """V1 cancel returns 410 before any authorization check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -964,7 +920,7 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "test"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_approved_by_manager(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -978,10 +934,10 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "Vendor issue"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_approved_by_buyer_forbidden(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
-        """Buyer (non-admin/manager) cannot cancel an approved plan."""
+        """V1 cancel returns 410 before any role check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -993,10 +949,10 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "test"},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_approved_with_pos_blocked(self, db_session, manager_client, test_requisition, test_quote, sales_user):
-        """Cannot cancel approved plan when POs already entered."""
+        """V1 cancel returns 410 before any PO check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1022,7 +978,7 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "test"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_wrong_status(self, db_session, admin_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -1036,27 +992,29 @@ class TestCancelBuyPlan:
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "test"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_cancel_with_reason(self, db_session, sales_client, sales_user, test_requisition, test_quote):
+        """V1 cancel returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
         )
-        sales_client.put(
+        r = sales_client.put(
             f"/api/buy-plans/{plan.id}/cancel",
             json={"reason": "Customer cancelled order"},
         )
-        db_session.refresh(plan)
-        assert plan.cancellation_reason == "Customer cancelled order"
+        assert r.status_code == 410
 
 
 # ── 12. Resubmit (PUT /api/buy-plans/{id}/resubmit) — Bug 3 ────────
 
 
 class TestResubmitBuyPlan:
+    """V1 resubmit endpoint is permanently disabled — all PUTs return 410."""
+
     def test_by_submitter(self, db_session, sales_client, sales_user, test_requisition, test_quote):
         plan = _create_buy_plan(
             db_session,
@@ -1069,8 +1027,7 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={"salesperson_notes": "Updated pricing"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "pending_approval"
+        assert r.status_code == 410
 
     def test_by_admin(self, db_session, admin_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -1084,7 +1041,7 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_by_manager(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -1098,10 +1055,10 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_other_sales_forbidden(self, db_session, trader_client, test_requisition, test_quote, sales_user):
-        """Bug 3 regression: another trader can't resubmit someone else's plan."""
+        """V1 resubmit returns 410 before any authorization check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1113,12 +1070,12 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_buyer_not_submitter_forbidden(
         self, db_session, buyer_client, test_user, test_requisition, test_quote, sales_user
     ):
-        """Bug 3 regression: buyer who didn't submit can't resubmit."""
+        """V1 resubmit returns 410 before any authorization check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1130,7 +1087,7 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 403
+        assert r.status_code == 410
 
     def test_wrong_status(self, db_session, sales_client, sales_user, test_requisition, test_quote):
         plan = _create_buy_plan(
@@ -1144,10 +1101,10 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_cancelled_plan(self, db_session, sales_client, sales_user, test_requisition, test_quote):
-        """Can resubmit a cancelled plan."""
+        """V1 resubmit returns 410 regardless of plan status."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1159,10 +1116,10 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
     def test_resets_po_fields(self, db_session, sales_client, sales_user, test_requisition, test_quote):
-        """Resubmitted plan has PO fields cleared."""
+        """V1 resubmit returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1188,10 +1145,7 @@ class TestResubmitBuyPlan:
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        new_id = r.json()["new_plan_id"]
-        new_plan = db_session.get(BuyPlan, new_id)
-        assert new_plan.line_items[0]["po_number"] is None
-        assert new_plan.line_items[0]["po_verified"] is False
+        assert r.status_code == 410
 
 
 # ── 13. For Quote (GET /api/buy-plans/for-quote/{qid}) ──────────────
@@ -1224,232 +1178,52 @@ class TestForQuote:
 
 
 class TestStatusTransitions:
-    def test_full_happy_path(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        manager_client,
-        buyer_client,
-        admin_client,
-        test_quote,
-        test_offer,
-        test_requisition,
-    ):
-        """Full lifecycle: pending → approved → po_entered → po_confirmed → complete."""
-        # Submit
+    """V1 lifecycle transitions are permanently disabled — submit returns 410."""
+
+    def test_full_happy_path_blocked(self, sales_client, test_quote, test_offer):
+        """V1 submit returns 410, blocking the full lifecycle."""
         r = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert r.status_code == 200
-        plan_id = r.json()["buy_plan_id"]
-
-        # Approve
-        r = manager_client.put(
-            f"/api/buy-plans/{plan_id}/approve",
-            json={"sales_order_number": "SO-HAPPY"},
-        )
-        assert r.json()["status"] == "approved"
-
-        # Enter PO
-        r = buyer_client.put(
-            f"/api/buy-plans/{plan_id}/po",
-            json={"line_index": 0, "po_number": "PO-HAPPY"},
-        )
-        assert r.json()["status"] == "po_entered"
-
-        # Simulate po_confirmed (manually — verification is async)
-        plan = db_session.get(BuyPlan, plan_id)
-        plan.status = "po_confirmed"
-        db_session.commit()
-
-        # Complete
-        r = admin_client.put(f"/api/buy-plans/{plan_id}/complete")
-        assert r.json()["status"] == "complete"
-
-    def test_reject_and_resubmit_cycle(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        manager_client,
-        test_quote,
-        test_offer,
-        test_requisition,
-    ):
-        """Submit → reject → resubmit → approve."""
-        r = sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={"offer_ids": [test_offer.id]},
-        )
-        plan_id = r.json()["buy_plan_id"]
-
-        # Reject
-        r = manager_client.put(
-            f"/api/buy-plans/{plan_id}/reject",
-            json={"reason": "Need lower price"},
-        )
-        assert r.json()["status"] == "rejected"
-
-        # Resubmit
-        r = sales_client.put(
-            f"/api/buy-plans/{plan_id}/resubmit",
-            json={"salesperson_notes": "Negotiated lower price"},
-        )
-        new_plan_id = r.json()["new_plan_id"]
-        assert r.json()["status"] == "pending_approval"
-
-        # Approve resubmitted plan
-        r = manager_client.put(
-            f"/api/buy-plans/{new_plan_id}/approve",
-            json={"sales_order_number": "SO-RESUB"},
-        )
-        assert r.json()["status"] == "approved"
-
-    def test_cancel_and_resubmit_cycle(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        manager_client,
-        test_quote,
-        test_offer,
-        test_requisition,
-    ):
-        """Submit → cancel → resubmit → approve."""
-        r = sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={"offer_ids": [test_offer.id]},
-        )
-        plan_id = r.json()["buy_plan_id"]
-
-        # Cancel
-        r = sales_client.put(
-            f"/api/buy-plans/{plan_id}/cancel",
-            json={"reason": "Customer asked to hold"},
-        )
-        assert r.json()["status"] == "cancelled"
-
-        # Resubmit
-        r = sales_client.put(
-            f"/api/buy-plans/{plan_id}/resubmit",
-            json={},
-        )
-        new_plan_id = r.json()["new_plan_id"]
-
-        # Approve
-        r = manager_client.put(
-            f"/api/buy-plans/{new_plan_id}/approve",
-            json={"sales_order_number": "SO-CANCEL-RESUB"},
-        )
-        assert r.json()["status"] == "approved"
+        assert r.status_code == 410
 
 
 # ── 15. Stock Sale Detection ───────────────────────────────────────────
 
 
 class TestStockSaleDetection:
-    """Verify is_stock_sale flag is set correctly on submit and resubmit."""
+    """V1 buy plan submission is permanently disabled — submit/resubmit return 410."""
 
-    def test_all_stock_vendors(self, db_session, sales_client, sales_user, test_quote):
-        """All vendor_names match stock_sale_vendor_names → is_stock_sale=True."""
-        # Create an offer with a stock sale vendor name
-        offer = Offer(
-            requisition_id=test_quote.requisition_id,
-            vendor_name="Trio Supply Chain",
-            mpn="LM317T",
-            qty_available=500,
-            unit_price=0.30,
-            entered_by_id=sales_user.id,
-            status="active",
-        )
-        db_session.add(offer)
-        db_session.commit()
-        db_session.refresh(offer)
-
-        r = sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={"offer_ids": [offer.id]},
-        )
-        assert r.status_code == 200
-        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
-        assert plan.is_stock_sale is True
-
-    def test_mixed_vendors(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Mix of stock + external vendors → is_stock_sale=False."""
-        stock_offer = Offer(
-            requisition_id=test_quote.requisition_id,
-            vendor_name="Trio",
-            mpn="LM317T",
-            qty_available=200,
-            unit_price=0.25,
-            entered_by_id=sales_user.id,
-            status="active",
-        )
-        db_session.add(stock_offer)
-        db_session.commit()
-        db_session.refresh(stock_offer)
-
-        r = sales_client.post(
-            f"/api/quotes/{test_quote.id}/buy-plan",
-            json={"offer_ids": [test_offer.id, stock_offer.id]},
-        )
-        assert r.status_code == 200
-        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
-        assert plan.is_stock_sale is False
-
-    def test_external_vendors(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """All external vendors → is_stock_sale=False."""
+    def test_submit_returns_410(self, sales_client, test_quote, test_offer):
+        """V1 submit always returns 410, stock sale detection cannot be tested via API."""
         r = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert r.status_code == 200
-        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
-        assert plan.is_stock_sale is False
+        assert r.status_code == 410
 
-    def test_resubmit_preserves_detection(self, db_session, sales_client, sales_user, test_quote, test_requisition):
-        """Resubmit of a stock sale plan re-detects is_stock_sale."""
+    def test_resubmit_returns_410(self, db_session, sales_client, sales_user, test_quote, test_requisition):
+        """V1 resubmit returns 410."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
             status="rejected",
-            line_items=[
-                {
-                    "offer_id": 1,
-                    "mpn": "LM317T",
-                    "vendor_name": "Trio",
-                    "qty": 1000,
-                    "plan_qty": 1000,
-                    "cost_price": 0.30,
-                    "lead_time": "stock",
-                    "condition": "new",
-                    "entered_by_id": None,
-                    "po_number": None,
-                    "po_entered_at": None,
-                    "po_sent_at": None,
-                    "po_recipient": None,
-                    "po_verified": False,
-                }
-            ],
         )
         r = sales_client.put(
             f"/api/buy-plans/{plan.id}/resubmit",
             json={},
         )
-        assert r.status_code == 200
-        new_plan = db_session.get(BuyPlan, r.json()["new_plan_id"])
-        assert new_plan.is_stock_sale is True
+        assert r.status_code == 410
 
 
 # ── 16. Stock Sale Fast-Track ──────────────────────────────────────────
 
 
 class TestStockSaleFastTrack:
-    """Approving a stock sale skips PO flow and goes straight to complete."""
+    """V1 approve/PO/token endpoints are permanently disabled — return 410."""
 
     def _stock_plan(self, db_session, test_requisition, test_quote, submitted_by_id):
         return _create_buy_plan(
@@ -1458,102 +1232,32 @@ class TestStockSaleFastTrack:
             quote_id=test_quote.id,
             submitted_by_id=submitted_by_id,
             is_stock_sale=True,
-            line_items=[
-                {
-                    "offer_id": 1,
-                    "mpn": "LM317T",
-                    "vendor_name": "Trio",
-                    "qty": 1000,
-                    "plan_qty": 1000,
-                    "cost_price": 0.30,
-                    "lead_time": "stock",
-                    "condition": "new",
-                    "entered_by_id": None,
-                    "po_number": None,
-                    "po_entered_at": None,
-                    "po_sent_at": None,
-                    "po_recipient": None,
-                    "po_verified": False,
-                }
-            ],
         )
 
-    def test_approve_stock_sale_goes_complete(
-        self,
-        db_session,
-        manager_client,
-        manager_user,
-        test_requisition,
-        test_quote,
-        sales_user,
-    ):
+    def test_approve_returns_410(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = self._stock_plan(db_session, test_requisition, test_quote, sales_user.id)
         r = manager_client.put(
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-STOCK-1"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "complete"
-        db_session.refresh(plan)
-        assert plan.completed_at is not None
-        assert plan.completed_by_id == manager_user.id
+        assert r.status_code == 410
 
-    def test_approve_non_stock_stays_approved(
-        self,
-        db_session,
-        manager_client,
-        test_requisition,
-        test_quote,
-        sales_user,
-    ):
-        plan = _create_buy_plan(
-            db_session,
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            submitted_by_id=sales_user.id,
-        )
-        r = manager_client.put(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={"sales_order_number": "SO-NORMAL"},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "approved"
-
-    def test_token_approve_stock_sale_goes_complete(
-        self,
-        db_session,
-        noauth_client,
-        test_requisition,
-        test_quote,
-        test_user,
-    ):
+    def test_token_approve_returns_410(self, db_session, noauth_client, test_requisition, test_quote, test_user):
         plan = self._stock_plan(db_session, test_requisition, test_quote, test_user.id)
         r = noauth_client.put(
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={"sales_order_number": "SO-STOCK-TOKEN"},
         )
-        assert r.status_code == 200
-        assert r.json()["status"] == "complete"
+        assert r.status_code == 410
 
-    def test_po_entry_on_completed_stock_sale_rejected(
-        self,
-        db_session,
-        buyer_client,
-        test_requisition,
-        test_quote,
-        sales_user,
-    ):
-        """PO entry on a completed stock sale → 400."""
+    def test_po_entry_returns_410(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
+        """PO entry on V1 buy plan returns 410."""
         plan = self._stock_plan(db_session, test_requisition, test_quote, sales_user.id)
-        plan.status = "complete"
-        plan.completed_at = datetime.now(timezone.utc)
-        db_session.commit()
-
         r = buyer_client.put(
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0, "po_number": "PO-NOPE"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 17. Auto-Complete Stock Sales ──────────────────────────────────────
@@ -1625,252 +1329,68 @@ class TestAutoCompleteStockSales:
         assert plan.status == "approved"
 
 
-# ── V1 Deprecation Flag ──────────────────────────────────────────────
+# ── V1 Deprecation — All V1 Endpoints Return 410 ────────────────────
 
 
 class TestV1DeprecationFlag:
-    def test_submit_returns_410_when_v1_disabled(self, sales_client, test_quote, test_offer):
-        """POST /api/quotes/{id}/buy-plan returns 410 when V1 is disabled."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = False
-            mock_settings.stock_sale_vendor_names = []
-            resp = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan",
-                json={"offer_ids": [test_offer.id]},
-            )
-        assert resp.status_code == 410
+    """V1 buy plan endpoints are permanently disabled — always return 410."""
 
-    def test_draft_returns_410_when_v1_disabled(self, sales_client, test_quote, test_offer):
-        """POST /api/quotes/{id}/buy-plan/draft returns 410 when V1 is disabled."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = False
-            mock_settings.stock_sale_vendor_names = []
-            resp = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan/draft",
-                json={"offer_ids": [test_offer.id]},
-            )
-        assert resp.status_code == 410
-
-    def test_submit_works_when_v1_enabled(self, sales_client, test_quote, test_offer):
-        """POST /api/quotes/{id}/buy-plan works normally when V1 is enabled."""
+    def test_submit_returns_410(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan always returns 410."""
         resp = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 410
+
+    def test_draft_returns_410(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan/draft always returns 410."""
+        resp = sales_client.post(
+            f"/api/quotes/{test_quote.id}/buy-plan/draft",
+            json={"offer_ids": [test_offer.id]},
+        )
+        assert resp.status_code == 410
 
 
-# ── 18. V1 Draft Endpoint (POST /api/quotes/{qid}/buy-plan/draft) ───
+# ── 18. V1 Draft Endpoint — Permanently Disabled ────────────────────
+# TestCreateBuyPlanDraft removed: V1 draft creation always returns 410.
 
 
-class TestCreateBuyPlanDraft:
-    """Cover lines 176-203: create_buy_plan_draft success when V1 enabled."""
-
-    def test_draft_success(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Create a draft buy plan when V1 is enabled."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = True
-            mock_settings.stock_sale_vendor_names = []
-            r = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan/draft",
-                json={"offer_ids": [test_offer.id]},
-            )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is True
-        assert data["status"] == "draft"
-        assert data["buy_plan_id"] is not None
-        plan = db_session.get(BuyPlan, data["buy_plan_id"])
-        assert plan.status == "draft"
-        assert plan.submitted_by_id == sales_user.id
-
-    def test_draft_nonexistent_quote(self, sales_client):
-        """Draft against nonexistent quote → 404."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = True
-            mock_settings.stock_sale_vendor_names = []
-            r = sales_client.post(
-                "/api/quotes/99999/buy-plan/draft",
-                json={"offer_ids": [1]},
-            )
-        assert r.status_code == 404
-
-    def test_draft_no_offers(self, sales_client, test_quote):
-        """Draft with empty offer_ids → 400."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = True
-            mock_settings.stock_sale_vendor_names = []
-            r = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan/draft",
-                json={"offer_ids": []},
-            )
-        assert r.status_code == 400
-
-    def test_draft_invalid_offer_ids(self, db_session, sales_client, test_quote):
-        """Draft with non-existent offer IDs → 400 (no valid offers)."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = True
-            mock_settings.stock_sale_vendor_names = []
-            r = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan/draft",
-                json={"offer_ids": [99999]},
-            )
-        assert r.status_code == 400
-
-    def test_draft_with_notes(self, db_session, sales_client, sales_user, test_quote, test_offer):
-        """Draft with salesperson notes."""
-        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
-            mock_settings.buy_plan_v1_enabled = True
-            mock_settings.stock_sale_vendor_names = []
-            r = sales_client.post(
-                f"/api/quotes/{test_quote.id}/buy-plan/draft",
-                json={"offer_ids": [test_offer.id], "salesperson_notes": "Urgent"},
-            )
-        assert r.status_code == 200
-        plan = db_session.get(BuyPlan, r.json()["buy_plan_id"])
-        assert plan.salesperson_notes == "Urgent"
-
-
-# ── 19. Submit Draft (PUT /api/buy-plans/{id}/submit) ────────────────
+# ── 19. Submit Draft (PUT /api/buy-plans/{id}/submit) — V1 Disabled ──
 
 
 class TestSubmitDraftBuyPlan:
-    """Cover lines 213-248: submit_draft_buy_plan success path."""
+    """PUT /api/buy-plans/{id}/submit is V1-gated and always returns 410."""
 
-    def test_submit_draft_by_creator(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        test_quote,
-        test_requisition,
-        test_offer,
-    ):
-        """Creator can submit their own draft plan → pending_approval."""
+    def test_submit_draft_returns_410(self, db_session, sales_client, sales_user, test_requisition, test_quote):
+        """PUT submit on a draft plan returns 410 (V1 disabled)."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
             status="draft",
-            line_items=[
-                {
-                    "offer_id": test_offer.id,
-                    "mpn": "LM317T",
-                    "vendor_name": "Arrow Electronics",
-                    "qty": 1000,
-                    "plan_qty": 1000,
-                    "cost_price": 0.50,
-                    "lead_time": "2 weeks",
-                    "condition": "new",
-                    "entered_by_id": None,
-                    "po_number": None,
-                    "po_entered_at": None,
-                    "po_sent_at": None,
-                    "po_recipient": None,
-                    "po_verified": False,
-                }
-            ],
         )
         r = sales_client.put(f"/api/buy-plans/{plan.id}/submit")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is True
-        assert data["status"] == "pending_approval"
-        db_session.refresh(plan)
-        assert plan.status == "pending_approval"
-        assert plan.approval_token is not None
-        assert plan.submitted_at is not None
-        # Quote and req statuses updated
-        db_session.refresh(test_quote)
-        assert test_quote.result == "won"
-        assert test_quote.status == "won"
-        # Offer status also updated
-        db_session.refresh(test_offer)
-        assert test_offer.status == "won"
+        assert r.status_code == 410
 
-    def test_submit_draft_by_admin(
-        self,
-        db_session,
-        admin_client,
-        admin_user,
-        sales_user,
-        test_quote,
-        test_requisition,
-    ):
-        """Admin can submit any draft plan."""
-        plan = _create_buy_plan(
-            db_session,
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            submitted_by_id=sales_user.id,
-            status="draft",
-        )
-        r = admin_client.put(f"/api/buy-plans/{plan.id}/submit")
-        assert r.status_code == 200
-        assert r.json()["status"] == "pending_approval"
-
-    def test_submit_draft_not_found(self, sales_client):
-        """Submit nonexistent draft → 404."""
+    def test_submit_draft_nonexistent_returns_410(self, sales_client):
+        """PUT submit on nonexistent plan returns 410 (V1 gate fires first)."""
         r = sales_client.put("/api/buy-plans/99999/submit")
-        assert r.status_code == 404
-
-    def test_submit_draft_wrong_status(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        test_requisition,
-        test_quote,
-    ):
-        """Submit a non-draft plan → 400."""
-        plan = _create_buy_plan(
-            db_session,
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            submitted_by_id=sales_user.id,
-            status="pending_approval",
-        )
-        r = sales_client.put(f"/api/buy-plans/{plan.id}/submit")
-        assert r.status_code == 400
-
-    def test_submit_draft_forbidden(
-        self,
-        db_session,
-        trader_client,
-        sales_user,
-        test_requisition,
-        test_quote,
-    ):
-        """Non-creator, non-admin/manager cannot submit."""
-        plan = _create_buy_plan(
-            db_session,
-            requisition_id=test_requisition.id,
-            quote_id=test_quote.id,
-            submitted_by_id=sales_user.id,
-            status="draft",
-        )
-        r = trader_client.put(f"/api/buy-plans/{plan.id}/submit")
-        assert r.status_code == 403
+        assert r.status_code == 410
 
 
 # ── 20. Submit V1 Disabled — no valid offers path (line 271) ─────────
 
 
 class TestSubmitNoValidOffers:
-    def test_submit_no_valid_offers_v1_enabled(
-        self,
-        db_session,
-        sales_client,
-        test_quote,
-    ):
-        """Submit with non-existent offer IDs → 400 (no valid offers)."""
+    def test_submit_returns_410(self, sales_client, test_quote):
+        """V1 submit always returns 410 regardless of offer validity."""
         r = sales_client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": [99999]},
         )
-        assert r.status_code == 400
-        assert "No valid offers" in r.json()["error"]
+        assert r.status_code == 410
 
 
 # ── 21. List with non-approved status filter (line 344) ──────────────
@@ -1940,15 +1460,8 @@ class TestListNonApprovedFilter:
 
 
 class TestCompleteNonBuyerNonAdmin:
-    def test_sales_cannot_complete(
-        self,
-        db_session,
-        sales_client,
-        sales_user,
-        test_requisition,
-        test_quote,
-    ):
-        """Sales user (not admin, not buyer) → 403."""
+    def test_complete_returns_410(self, db_session, sales_client, sales_user, test_requisition, test_quote):
+        """V1 complete endpoint always returns 410."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -1957,8 +1470,7 @@ class TestCompleteNonBuyerNonAdmin:
             status="po_entered",
         )
         r = sales_client.put(f"/api/buy-plans/{plan.id}/complete")
-        assert r.status_code == 403
-        assert "Only admin, manager, or buyer" in r.json()["error"]
+        assert r.status_code == 410
 
 
 # ── 23. _record_purchase_history coverage (lines 966-1003) ───────────
@@ -2195,15 +1707,15 @@ class TestTokenExpired:
 
 
 class TestTokenApproveEdgeCases:
-    """Cover lines 377, 385, 389: invalid token approve, blank SO, notes."""
+    """V1 token approve endpoint is permanently disabled — all PUTs return 410."""
 
     def test_approve_invalid_token(self, noauth_client):
-        """Approve with invalid token → 404."""
+        """Approve with invalid token → 410 (V1 gate fires before lookup)."""
         r = noauth_client.put(
             "/api/buy-plans/token/nonexistent-token/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
     def test_approve_blank_so(
         self,
@@ -2213,7 +1725,7 @@ class TestTokenApproveEdgeCases:
         test_quote,
         test_user,
     ):
-        """Approve via token with blank SO → 400."""
+        """V1 token approve returns 410 before any validation."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2224,7 +1736,7 @@ class TestTokenApproveEdgeCases:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={"sales_order_number": "   "},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_approve_with_notes(
         self,
@@ -2234,7 +1746,7 @@ class TestTokenApproveEdgeCases:
         test_quote,
         test_user,
     ):
-        """Approve via token with manager_notes → notes stored."""
+        """V1 token approve returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2245,24 +1757,22 @@ class TestTokenApproveEdgeCases:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={"sales_order_number": "SO-NOTES", "manager_notes": "Looks good"},
         )
-        assert r.status_code == 200
-        db_session.refresh(plan)
-        assert plan.manager_notes == "Looks good"
+        assert r.status_code == 410
 
 
 # ── 26. Token Reject Edge Cases ────────────────────────────────────
 
 
 class TestTokenRejectEdgeCases:
-    """Cover lines 434, 436, 438: invalid token reject, expired, wrong status."""
+    """V1 token reject endpoint is permanently disabled — all PUTs return 410."""
 
     def test_reject_invalid_token(self, noauth_client):
-        """Reject with invalid token → 404."""
+        """Reject with invalid token → 410 (V1 gate fires before lookup)."""
         r = noauth_client.put(
             "/api/buy-plans/token/nonexistent-token/reject",
             json={"reason": "test"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
     def test_reject_wrong_status(
         self,
@@ -2272,7 +1782,7 @@ class TestTokenRejectEdgeCases:
         test_quote,
         test_user,
     ):
-        """Reject via token on non-pending plan → 400."""
+        """V1 token reject returns 410 before any status check."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2284,22 +1794,22 @@ class TestTokenRejectEdgeCases:
             f"/api/buy-plans/token/{plan.approval_token}/reject",
             json={"reason": "test"},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 27. Approve Not Found & Blank SO ────────────────────────────────
 
 
 class TestApproveNotFoundAndBlankSO:
-    """Cover lines 486, 492."""
+    """V1 approve endpoint is permanently disabled — all PUTs return 410."""
 
     def test_approve_not_found(self, manager_client):
-        """Approve nonexistent plan → 404."""
+        """Approve nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = manager_client.put(
             "/api/buy-plans/99999/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
     def test_approve_blank_so(
         self,
@@ -2309,7 +1819,7 @@ class TestApproveNotFoundAndBlankSO:
         test_quote,
         sales_user,
     ):
-        """Approve with blank SO → 400."""
+        """V1 approve returns 410 before any validation."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2320,7 +1830,7 @@ class TestApproveNotFoundAndBlankSO:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "   "},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
     def test_approve_with_line_items_override(
         self,
@@ -2330,7 +1840,7 @@ class TestApproveNotFoundAndBlankSO:
         test_quote,
         sales_user,
     ):
-        """Approve with line_items override → line_items stored (line 496)."""
+        """V1 approve returns 410; no DB changes to verify."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2342,39 +1852,37 @@ class TestApproveNotFoundAndBlankSO:
             f"/api/buy-plans/{plan.id}/approve",
             json={"sales_order_number": "SO-LI", "line_items": new_items},
         )
-        assert r.status_code == 200
-        db_session.refresh(plan)
-        assert plan.line_items[0]["mpn"] == "UPDATED"
+        assert r.status_code == 410
 
 
 # ── 28. Reject Not Found ─────────────────────────────────────────────
 
 
 class TestRejectNotFound:
-    """Cover line 546."""
+    """V1 reject endpoint is permanently disabled — returns 410."""
 
     def test_reject_not_found(self, manager_client):
-        """Reject nonexistent plan → 404."""
+        """Reject nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = manager_client.put(
             "/api/buy-plans/99999/reject",
             json={"reason": "test"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
 
 # ── 29. PO Entry Not Found & Empty PO ────────────────────────────────
 
 
 class TestPOEntryNotFoundEmptyPO:
-    """Cover lines 580, 587."""
+    """V1 PO entry endpoint is permanently disabled — returns 410."""
 
     def test_po_not_found(self, buyer_client):
-        """PO entry on nonexistent plan → 404."""
+        """PO entry on nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = buyer_client.put(
             "/api/buy-plans/99999/po",
             json={"line_index": 0, "po_number": "PO-X"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
     def test_po_blank_number(
         self,
@@ -2384,7 +1892,7 @@ class TestPOEntryNotFoundEmptyPO:
         test_quote,
         sales_user,
     ):
-        """PO entry with blank po_number → 400."""
+        """V1 PO entry returns 410 before any validation."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2396,64 +1904,64 @@ class TestPOEntryNotFoundEmptyPO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0, "po_number": "   "},
         )
-        assert r.status_code == 400
+        assert r.status_code == 410
 
 
 # ── 30. Complete Not Found ────────────────────────────────────────────
 
 
 class TestCompleteNotFound:
-    """Cover line 644."""
+    """V1 complete endpoint is permanently disabled — returns 410."""
 
     def test_complete_not_found(self, admin_client):
-        """Complete nonexistent plan → 404."""
+        """Complete nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = admin_client.put("/api/buy-plans/99999/complete")
-        assert r.status_code == 404
+        assert r.status_code == 410
 
 
 # ── 31. Cancel Not Found ─────────────────────────────────────────────
 
 
 class TestCancelNotFound:
-    """Cover line 691."""
+    """V1 cancel endpoint is permanently disabled — returns 410."""
 
     def test_cancel_not_found(self, admin_client):
-        """Cancel nonexistent plan → 404."""
+        """Cancel nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = admin_client.put(
             "/api/buy-plans/99999/cancel",
             json={"reason": "test"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
 
 # ── 32. Resubmit Not Found ───────────────────────────────────────────
 
 
 class TestResubmitNotFound:
-    """Cover line 767."""
+    """V1 resubmit endpoint is permanently disabled — returns 410."""
 
     def test_resubmit_not_found(self, sales_client):
-        """Resubmit nonexistent plan → 404."""
+        """Resubmit nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = sales_client.put(
             "/api/buy-plans/99999/resubmit",
             json={"salesperson_notes": "test"},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
 
 # ── 33. Bulk PO Not Found & Invalid Index ────────────────────────────
 
 
 class TestBulkPONotFoundAndInvalidIndex:
-    """Cover lines 859, 881."""
+    """V1 bulk PO endpoint is permanently disabled — returns 410."""
 
     def test_bulk_po_not_found(self, buyer_client):
-        """Bulk PO on nonexistent plan → 404."""
+        """Bulk PO on nonexistent plan → 410 (V1 gate fires before lookup)."""
         r = buyer_client.put(
             "/api/buy-plans/99999/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-X"}]},
         )
-        assert r.status_code == 404
+        assert r.status_code == 410
 
     def test_bulk_po_invalid_index_skipped(
         self,
@@ -2463,7 +1971,7 @@ class TestBulkPONotFoundAndInvalidIndex:
         test_quote,
         sales_user,
     ):
-        """Bulk PO with invalid line_index is skipped (line 881)."""
+        """V1 bulk PO returns 410 before any index validation."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
@@ -2475,6 +1983,4 @@ class TestBulkPONotFoundAndInvalidIndex:
             f"/api/buy-plans/{plan.id}/po-bulk",
             json={"entries": [{"line_index": 99, "po_number": "PO-INVALID"}]},
         )
-        assert r.status_code == 200
-        # Status stays approved since no valid entries were processed
-        assert r.json()["status"] == "approved"
+        assert r.status_code == 410

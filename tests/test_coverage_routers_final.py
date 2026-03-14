@@ -774,33 +774,19 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
     db_session.add(r)
     db_session.commit()
 
-    # Patch teams module to trigger the code path
-    # The key is: cfg.teams_hot_threshold needs to be <= qty*price
-    # and send_hot_requirement_alert must be importable but raise when called
-    with patch("app.config.settings") as mock_cfg:
-        mock_cfg.teams_hot_threshold = 0
-        # Make the import succeed but the function raise AttributeError
-        with patch.dict(
-            "sys.modules",
+    resp = client.post(
+        f"/api/requisitions/{req.id}/requirements",
+        json=[
             {
-                "app.services.teams": MagicMock(
-                    send_hot_requirement_alert=MagicMock(side_effect=AttributeError("no teams"))
-                )
-            },
-        ):
-            resp = client.post(
-                f"/api/requisitions/{req.id}/requirements",
-                json=[
-                    {
-                        "primary_mpn": "HOT-MPN-001",
-                        "target_qty": 100,
-                        "target_price": 1.00,
-                    }
-                ],
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert len(data["created"]) >= 1
+                "primary_mpn": "HOT-MPN-001",
+                "target_qty": 100,
+                "target_price": 1.00,
+            }
+        ],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["created"]) >= 1
 
 
 # ── 18. Upload with substitutes containing empty MPN (line 779) ──

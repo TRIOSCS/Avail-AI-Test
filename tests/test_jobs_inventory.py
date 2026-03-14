@@ -524,7 +524,6 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -579,7 +578,6 @@ def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="testvendor"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -640,7 +638,6 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -686,7 +683,6 @@ def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, tes
             "app.services.activity_service.match_email_to_entity",
             return_value={"type": "company", "id": test_company.id, "name": "Acme Electronics"},
         ),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -732,7 +728,6 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -818,7 +813,6 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="unknown"),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -875,7 +869,6 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -917,7 +910,6 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock) as mock_alert,
     ):
         from app.jobs.inventory_jobs import _download_and_import_stock_list
 
@@ -932,8 +924,6 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
                 vendor_email="sales@arrow.com",
             )
         )
-
-        mock_alert.assert_called_once()
 
     req_id = test_requisition.requirements[0].id
     sightings = (
@@ -947,45 +937,6 @@ def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, tes
     )
     assert len(sightings) == 1
     assert sightings[0].qty_available == 100
-
-
-def test_download_and_import_stock_list_teams_alert_exception(scheduler_db, test_user, test_requisition):
-    """Teams alert exception is caught silently."""
-    import base64
-
-    test_user.access_token = "at_dl"
-    test_requisition.status = "active"
-    scheduler_db.commit()
-
-    mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
-
-    rows = [{"mpn": "LM317T", "qty": 100}]
-
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
-        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
-        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
-        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
-        patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch(
-            "app.services.teams.send_stock_match_alert", new_callable=AsyncMock, side_effect=Exception("Teams error")
-        ),
-    ):
-        from app.jobs.inventory_jobs import _download_and_import_stock_list
-
-        asyncio.run(
-            _download_and_import_stock_list(
-                test_user,
-                scheduler_db,
-                message_id="msg1",
-                attachment_id="att1",
-                filename="stock.csv",
-                vendor_name="Arrow",
-                vendor_email="sales@arrow.com",
-            )
-        )
 
 
 def test_download_and_import_stock_list_null_att_data(scheduler_db, test_user):
@@ -1089,7 +1040,6 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
         patch("app.services.activity_service.match_email_to_entity", return_value=None),
-        patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock),
     ):
         scheduler_db.flush = _sometimes_failing_flush
         from app.jobs.inventory_jobs import _download_and_import_stock_list

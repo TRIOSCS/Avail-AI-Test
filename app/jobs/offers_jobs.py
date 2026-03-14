@@ -1,7 +1,7 @@
-"""Offers background jobs — proactive matching, offer expiry, stale flagging, performance.
+"""Offers background jobs — proactive matching, offer expiry, stale flagging, scoring.
 
 Called by: app/jobs/__init__.py via register_offers_jobs()
-Depends on: app.database, app.models, app.services.proactive_matching, app.services.performance_service
+Depends on: app.database, app.models, app.services.proactive_matching, app.services.avail_score_service
 """
 
 import asyncio
@@ -26,7 +26,7 @@ def register_offers_jobs(scheduler, settings):
         )
 
     scheduler.add_job(
-        _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Performance tracking"
+        _job_performance_tracking, IntervalTrigger(hours=12), id="performance_tracking", name="Scoring and leaderboards"
     )
 
     scheduler.add_job(
@@ -110,25 +110,25 @@ async def _job_proactive_matching():
 
 @_traced_job
 async def _job_performance_tracking():
-    """Compute vendor scorecards, buyer leaderboard, and Avail Scores."""
+    """Compute vendor scorecards, buyer leaderboard, Avail Scores, and other scoring metrics."""
     from ..database import SessionLocal
 
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
         from ..services.avail_score_service import compute_all_avail_scores
-        from ..services.performance_service import (
-            compute_all_vendor_scorecards,
-            compute_buyer_leaderboard,
-        )
+        from ..services.buyer_leaderboard import compute_buyer_leaderboard
+        from ..services.vendor_scorecard import compute_all_vendor_scorecards
 
         loop = asyncio.get_running_loop()
+        # Vendor scorecards
         vs_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_all_vendor_scorecards, db),
             timeout=600,
         )
         logger.info(f"Vendor scorecards: {vs_result['updated']} updated, {vs_result['skipped_cold_start']} cold-start")
         current_month = now.date().replace(day=1)
+        # Buyer leaderboard
         bl_result = await asyncio.wait_for(
             loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month),
             timeout=300,

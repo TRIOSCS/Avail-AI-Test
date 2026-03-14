@@ -106,26 +106,8 @@ async def main():
             db.commit()
             print("\nTeams configuration saved!")
 
-            # Send test card
-            print("\nSending test card...")
-            from app.services.teams import _make_card, post_to_channel
-
-            card = _make_card(
-                title="AVAIL TEST",
-                subtitle="Teams integration is working correctly.",
-                facts=[
-                    {"title": "Sent By", "value": admin.name or admin.email},
-                    {"title": "Status", "value": "Connection verified"},
-                ],
-                action_url="",
-                action_title="Open AVAIL",
-                accent_color="accent",
-            )
-            ok = await post_to_channel(selected["team_id"], selected["channel_id"], card, token)
-            if ok:
-                print("Test card posted successfully!")
-            else:
-                print("WARNING: Failed to post test card. Check Graph API permissions.")
+            # Test card posting removed — Teams V1 card service was cleaned up.
+            print("\nTeams setup complete. Test card posting is no longer available.")
 
     finally:
         db.close()

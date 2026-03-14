@@ -496,9 +496,9 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Apollo, Explorium, Clearbit, Gradient run concurrently.
+    Phase 1: Explorium + Gradient run concurrently.
     Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Apollo > Explorium > Clearbit > Gradient > AI.
+    Merge priority: Explorium > Gradient > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
@@ -536,39 +536,17 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "linkedin_url",
     ]
 
-    # ── Phase 1: Apollo + Explorium + Clearbit + Gradient concurrently ──
-    async def _safe_apollo_company(domain: str):
-        try:
-            from .connectors.apollo_client import enrich_company as apollo_enrich
-
-            return await apollo_enrich(domain)
-        except Exception as e:
-            logger.debug("Apollo company enrichment skipped: %s", e)
-            return None
-
-    async def _safe_clearbit(domain: str):
-        try:
-            from .connectors.clearbit_client import enrich_company as clearbit_enrich
-
-            return await clearbit_enrich(domain)
-        except Exception as e:
-            logger.debug("Clearbit enrichment skipped: %s", e)
-            return None
-
-    apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
-        _safe_apollo_company(domain),
+    # ── Phase 1: Explorium + Gradient concurrently ──
+    exp_result, grad_result = await asyncio.gather(
         _explorium_find_company(domain, name),
-        _safe_clearbit(domain),
         _gradient_find_company(domain, name),
         return_exceptions=True,
     )
 
-    # Merge in priority order: Apollo > Explorium > Clearbit > Gradient
+    # Merge in priority order: Explorium > Gradient
     sources = []
     for provider_data, provider_name in [  # pragma: no cover
-        (apollo_result, "apollo"),
         (exp_result, "explorium"),
-        (cb_result, "clearbit"),
         (grad_result, "gradient"),
     ]:
         if isinstance(provider_data, Exception) or not provider_data:
@@ -606,120 +584,14 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
 async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    All 7 sources run concurrently via asyncio.gather.
+    Explorium and AI sources run concurrently via asyncio.gather.
     Returns deduplicated list sorted by relevance. Each contact has:
     full_name, title, email, phone, linkedin_url, location, source
     """
 
-    async def _safe_hunter(domain: str) -> list[dict]:
-        try:
-            from .connectors.hunter_client import find_domain_emails
-
-            raw = await find_domain_emails(domain, limit=10)
-            return [
-                {
-                    "source": "hunter",
-                    "full_name": hc["full_name"],
-                    "title": hc.get("position"),
-                    "email": hc.get("email"),
-                    "phone": hc.get("phone_number"),
-                    "linkedin_url": hc.get("linkedin_url"),
-                    "location": None,
-                    "company": name or domain,
-                }
-                for hc in raw
-                if hc.get("full_name")
-            ]
-        except Exception as e:
-            logger.debug("Hunter contacts skipped: %s", e)
-            return []
-
-    async def _safe_rocketreach(domain: str) -> list[dict]:
-        try:
-            from .connectors.rocketreach_client import search_company_contacts
-
-            raw = await search_company_contacts(
-                company=name or domain,
-                domain=domain,
-                title_filter=title_filter,
-                limit=5,
-            )
-            return [
-                {
-                    "source": "rocketreach",
-                    "full_name": rc["full_name"],
-                    "title": rc.get("title"),
-                    "email": rc.get("email"),
-                    "phone": rc.get("phone"),
-                    "linkedin_url": rc.get("linkedin_url"),
-                    "location": None,
-                    "company": rc.get("company_name") or name or domain,
-                }
-                for rc in raw
-                if rc.get("full_name")
-            ]
-        except Exception as e:
-            logger.debug("RocketReach contacts skipped: %s", e)
-            return []
-
-    async def _safe_apollo_contacts(domain: str) -> list[dict]:
-        try:
-            from .connectors.apollo_client import search_contacts as apollo_search
-
-            raw = await apollo_search(
-                company_name=name or domain,
-                domain=domain,
-                title_keywords=[title_filter] if title_filter else None,
-                limit=5,
-            )
-            return [
-                {
-                    "source": "apollo",
-                    "full_name": ac.get("full_name"),
-                    "title": ac.get("title"),
-                    "email": ac.get("email"),
-                    "phone": ac.get("phone"),
-                    "linkedin_url": ac.get("linkedin_url"),
-                    "location": ac.get("city"),
-                    "company": name or domain,
-                }
-                for ac in raw
-                if ac.get("full_name")
-            ]
-        except Exception as e:
-            logger.debug("Apollo contacts skipped: %s", e)
-            return []
-
-    async def _safe_lusha(domain: str) -> list[dict]:
-        try:
-            from .connectors.lusha_client import find_person
-
-            result = await find_person(company_domain=domain)
-            if not result or not result.get("full_name"):
-                return []
-            return [
-                {
-                    "source": "lusha",
-                    "full_name": result["full_name"],
-                    "title": result.get("title"),
-                    "email": result.get("email"),
-                    "phone": result.get("phone"),
-                    "linkedin_url": result.get("linkedin_url"),
-                    "location": result.get("location"),
-                    "company": name or domain,
-                }
-            ]
-        except Exception as e:
-            logger.debug("Lusha contacts skipped: %s", e)
-            return []
-
-    # Run all 6 sources concurrently (Apollo first for dedup priority)
+    # Run all sources concurrently
     results = await asyncio.gather(
-        _safe_apollo_contacts(domain),
-        _safe_hunter(domain),
-        _safe_lusha(domain),
         _explorium_find_contacts(domain, title_filter),
-        _safe_rocketreach(domain),
         _ai_find_contacts(domain, name, title_filter),
         return_exceptions=True,
     )
@@ -732,33 +604,14 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
         all_contacts.extend(r)
 
     # Deduplicate by email or linkedin_url or full_name
-    # Apollo contacts appear first → win dedup ties
     seen = set()
     unique = []
-    lusha_phones = {}  # email → phone from Lusha for post-dedup merge
     for c in all_contacts:
         key = (c.get("email") or "").lower() or c.get("linkedin_url") or (c.get("full_name") or "").lower()
         if not key or key in seen:
-            # Collect Lusha phone data from duplicates for later merge
-            if c.get("source") == "lusha" and c.get("phone"):
-                email_key = (c.get("email") or "").lower()
-                if email_key:
-                    lusha_phones[email_key] = c["phone"]
             continue
         seen.add(key)
-        # Also collect Lusha phones from unique contacts
-        if c.get("source") == "lusha" and c.get("phone"):
-            email_key = (c.get("email") or "").lower()
-            if email_key:
-                lusha_phones[email_key] = c["phone"]
         unique.append(c)
-
-    # Merge Lusha phone data into winning contacts that lack phones
-    for c in unique:
-        if not c.get("phone"):
-            email_key = (c.get("email") or "").lower()
-            if email_key in lusha_phones:
-                c["phone"] = lusha_phones[email_key]
 
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
     _RELEVANT_KEYWORDS = {
