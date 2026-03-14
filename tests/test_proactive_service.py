@@ -704,7 +704,7 @@ class TestConvertProactiveToWin:
         # Verify buy plan
         bp = db_session.get(BuyPlan, result["buy_plan_id"])
         assert bp is not None
-        assert bp.status == "pending_approval"
+        assert bp.status == "pending"
         assert bp.submitted_by_id == test_user.id
 
         # ProactiveOffer updated
@@ -1199,7 +1199,6 @@ class TestScorecardPOCounts:
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             status="approved",
-            line_items=[],
             submitted_by_id=test_user.id,
         )
         db_session.add(bp)
@@ -1231,7 +1230,6 @@ class TestScorecardPOCounts:
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             status="po_entered",
-            line_items=[],
             submitted_by_id=test_user.id,
         )
         db_session.add(bp)

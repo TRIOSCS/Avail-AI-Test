@@ -292,7 +292,3 @@ class VerificationGroupMember(Base):
     user = relationship("User", foreign_keys=[user_id])
 
     __table_args__ = (Index("ix_vgm_active", "is_active"),)
-
-
-# Backward-compat alias so existing imports don't break during migration
-BuyPlanV3 = BuyPlan

@@ -24,6 +24,7 @@ from app.models import (
     VendorCard,
     VendorReview,
 )
+from app.models.buy_plan import BuyPlanLine
 from app.services.vendor_score import (
     _calc_stage_points,
     _get_buyplan_offer_ids,
@@ -381,15 +382,30 @@ def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
 
 
 def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
-    """Create a BuyPlan with line_items referencing offer_ids."""
+    """Create a BuyPlan with BuyPlanLine rows referencing offer_ids."""
+    v4_status = {"approved": "active", "po_confirmed": "active",
+                 "po_entered": "active", "complete": "completed"}.get(status, status)
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,
-        status=status,
-        line_items=[{"offer_id": oid} for oid in offer_ids],
+        status=v4_status,
         created_at=datetime.now(timezone.utc),
     )
     db.add(bp)
+    db.flush()
+    for oid in offer_ids:
+        line_status = "awaiting_po"
+        if status == "po_confirmed":
+            line_status = "verified"
+        elif status == "po_entered":
+            line_status = "pending_verify"
+        line = BuyPlanLine(
+            buy_plan_id=bp.id,
+            offer_id=oid,
+            quantity=1,
+            status=line_status,
+        )
+        db.add(line)
     db.flush()
     return bp
 
@@ -678,13 +694,13 @@ class TestGetBuyplanOfferIds:
         assert len(result) == 0
 
     def test_po_confirmed_statuses(self, db_session):
-        """PO confirmed status offers are found with PO_CONFIRMED_STATUSES."""
+        """Completed status offers are found with PO_CONFIRMED_STATUSES."""
         card = _make_vendor_card(db_session, "po confirm vendor")
         offers, user, req = _make_offers_full(db_session, card.id, "po confirm vendor", 6)
         db_session.flush()
 
         q = _make_quote(db_session, req.id, user.id, [offers[0].id], status="sent")
-        _make_buy_plan(db_session, req.id, q.id, [offers[0].id], status="po_confirmed")
+        _make_buy_plan(db_session, req.id, q.id, [offers[0].id], status="complete")
         db_session.commit()
 
         offer_ids = {o.id for o in offers}
@@ -750,15 +766,15 @@ class TestComputeAllVendorScoresGaps:
                 pass  # commit may also fail; the point is flush doesn't crash
 
     @pytest.mark.asyncio
-    async def test_po_confirmed_stage_scoring(self, db_session):
-        """Vendor with PO-confirmed BuyPlan scores highest (8 pts per offer)."""
+    async def test_completed_stage_scoring(self, db_session):
+        """Vendor with completed BuyPlan scores highest (8 pts per offer)."""
         card = _make_vendor_card(db_session, "po master vendor")
         offers, user, req = _make_offers_full(db_session, card.id, "po master vendor", 6)
         db_session.flush()
 
         offer_ids = [o.id for o in offers]
         q = _make_quote(db_session, req.id, user.id, offer_ids, status="won")
-        _make_buy_plan(db_session, req.id, q.id, offer_ids, status="po_confirmed")
+        _make_buy_plan(db_session, req.id, q.id, offer_ids, status="complete")
         db_session.commit()
 
         result = await compute_all_vendor_scores(db_session)
@@ -769,8 +785,8 @@ class TestComputeAllVendorScoresGaps:
         assert card.advancement_score == 100.0
 
     @pytest.mark.asyncio
-    async def test_buyplan_with_none_line_items(self, db_session):
-        """BuyPlan with None line_items is handled gracefully."""
+    async def test_buyplan_with_no_lines(self, db_session):
+        """BuyPlan with no BuyPlanLine rows is handled gracefully."""
         card = _make_vendor_card(db_session, "none bp vendor")
         offers, user, req = _make_offers_full(db_session, card.id, "none bp vendor", 6)
         db_session.flush()
@@ -779,8 +795,7 @@ class TestComputeAllVendorScoresGaps:
         bp = BuyPlan(
             requisition_id=req.id,
             quote_id=q.id,
-            status="approved",
-            line_items=None,
+            status="active",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(bp)

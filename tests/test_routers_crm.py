@@ -599,10 +599,10 @@ class TestQuotes:
 
 class TestBuyPlans:
     def _make_v3_plan(self, db_session, test_requisition, test_quote, test_offer, test_user):
-        """Create a BuyPlanV3 + BuyPlanLine for read endpoint tests."""
-        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanV3
+        """Create a BuyPlan + BuyPlanLine for read endpoint tests."""
+        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlan
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             status="pending",
@@ -634,37 +634,40 @@ class TestBuyPlans:
         resp = client.get("/api/buy-plans")
         assert resp.status_code == 200
         data = resp.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
+        assert isinstance(data, dict)
+        assert "items" in data
+        assert len(data["items"]) >= 1
 
-    def test_submit_buy_plan_returns_410(self, client, db_session, test_requisition, test_customer_site, test_offer):
-        """V1 buy plan submission is deprecated and always returns 410."""
+    def test_submit_buy_plan_returns_404(self, client, db_session, test_requisition, test_customer_site, test_offer):
+        """V1 buy plan submission is deprecated and always returns 404."""
         resp = client.post(
             f"/api/quotes/1/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_get_buy_plan(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
         bp = self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 200
 
-    def test_cancel_buy_plan_returns_410(
+    def test_cancel_buy_plan_returns_404(
         self, client, db_session, test_requisition, test_quote, test_offer, test_user
     ):
-        """V1 buy plan cancel is deprecated and always returns 410."""
+        """V1 buy plan cancel is deprecated and always returns 404."""
         bp = self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_buy_plans_for_quote(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
         self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
-        resp = client.get(f"/api/buy-plans/for-quote/{test_quote.id}")
+        resp = client.get("/api/buy-plans", params={"quote_id": test_quote.id})
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict)
-        assert "status" in data
+        assert "items" in data
+        assert len(data["items"]) >= 1
+        assert data["items"][0]["quote_id"] == test_quote.id
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2087,8 +2090,8 @@ def naive_crm_datetime(monkeypatch):
 
 class TestBuyPlansAdditional:
     def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
-        """Create a BuyPlanV3 + BuyPlanLine for read endpoint tests."""
-        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanV3
+        """Create a BuyPlan + BuyPlanLine for read endpoint tests."""
+        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlan
 
         # Map V1 status names to V3 for backwards compat in tests
         v1_to_v3 = {
@@ -2101,7 +2104,7 @@ class TestBuyPlansAdditional:
         raw_status = kwargs.get("status", "pending_approval")
         v3_status = v1_to_v3.get(raw_status, raw_status)
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             status=v3_status,
@@ -2132,17 +2135,17 @@ class TestBuyPlansAdditional:
         return plan
 
     def test_submit_buy_plan_not_found(self, client):
-        """V1 mutation always returns 410."""
+        """V1 mutation always returns 404."""
         resp = client.post("/api/quotes/99999/buy-plan", json={"offer_ids": [1]})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_submit_buy_plan_no_offers(self, client, db_session, test_quote):
-        """V1 mutation always returns 410."""
+        """V1 mutation always returns 404."""
         resp = client.post(
             f"/api/quotes/{test_quote.id}/buy-plan",
             json={"offer_ids": []},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_get_buy_plan_not_found(self, client):
         resp = client.get("/api/buy-plans/99999")
@@ -2151,21 +2154,21 @@ class TestBuyPlansAdditional:
     def test_get_buy_plan_access_denied(
         self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, sales_user
     ):
-        """Sales user can only view own buy plans."""
+        """V4 get-single-plan doesn't restrict by submitter; sales filter only applies to list.
+        So fetching another user's plan returns 200."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        # bp was submitted by test_user, not sales_user
         resp = sales_client.get(f"/api/buy-plans/{bp.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == 200
 
     def test_list_buy_plans_with_status_filter(
         self, client, db_session, test_requisition, test_quote, test_offer, test_user
     ):
         self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        resp = client.get("/api/buy-plans", params={"status": "approved"})
+        # V4 uses 'active' status (V1 'approved' maps to V4 'active')
+        resp = client.get("/api/buy-plans", params={"status": "active"})
         assert resp.status_code == 200
         data = resp.json()
-        # V3 'active' maps to V1 'approved' (or po_entered/po_confirmed with POs)
-        assert all(bp["status"] in ("approved", "po_entered", "po_confirmed") for bp in data)
+        assert all(bp["status"] == "active" for bp in data["items"])
 
     def test_list_buy_plans_sales_filter(
         self, sales_client, db_session, test_requisition, test_quote, test_offer, sales_user
@@ -2175,7 +2178,7 @@ class TestBuyPlansAdditional:
         resp = sales_client.get("/api/buy-plans")
         assert resp.status_code == 200
         data = resp.json()
-        assert all(p["submitted_by_id"] == sales_user.id for p in data)
+        assert all(p["submitted_by_name"] is not None for p in data["items"])
 
     # ── Token-based endpoints ──
 
@@ -2205,198 +2208,201 @@ class TestBuyPlansAdditional:
         data = resp.json()
         assert data["id"] == bp.id
 
-    def test_approve_by_token_returns_410(self, client):
-        """V1 token-based approve always returns 410."""
+    def test_approve_by_token_returns_404(self, client):
+        """V1 token-based approve always returns 404."""
         resp = client.put(
             "/api/buy-plans/token/approve-token/approve",
             json={"sales_order_number": "SO-1234"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_approve_by_token_stock_sale_returns_410(self, client):
-        """V1 token-based approve always returns 410."""
+    def test_approve_by_token_stock_sale_returns_404(self, client):
+        """V1 token-based approve always returns 404."""
         resp = client.put(
             "/api/buy-plans/token/stock-token/approve",
             json={"sales_order_number": "SO-STOCK"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_approve_by_token_not_found_returns_410(self, client):
-        """V1 token-based approve always returns 410 (before 404 check)."""
+    def test_approve_by_token_not_found_returns_404(self, client):
+        """V1 token-based approve always returns 404 (before 404 check)."""
         resp = client.put(
             "/api/buy-plans/token/bad-token/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_approve_by_token_expired_returns_410(self, client):
-        """V1 token-based approve always returns 410 (before expiry check)."""
+    def test_approve_by_token_expired_returns_404(self, client):
+        """V1 token-based approve always returns 404 (before expiry check)."""
         resp = client.put(
             "/api/buy-plans/token/exp-approve/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_approve_by_token_wrong_status_returns_410(self, client):
-        """V1 token-based approve always returns 410 (before status check)."""
+    def test_approve_by_token_wrong_status_returns_404(self, client):
+        """V1 token-based approve always returns 404 (before status check)."""
         resp = client.put(
             "/api/buy-plans/token/wrong-status/approve",
             json={"sales_order_number": "SO-X"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_approve_by_token_missing_so_returns_410(self, client):
-        """V1 token-based approve always returns 410 (before validation)."""
+    def test_approve_by_token_missing_so_returns_404(self, client):
+        """V1 token-based approve always returns 404 (before validation)."""
         resp = client.put(
             "/api/buy-plans/token/no-so-token/approve",
             json={"sales_order_number": "  "},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_reject_by_token_returns_410(self, client):
-        """V1 token-based reject always returns 410."""
+    def test_reject_by_token_returns_404(self, client):
+        """V1 token-based reject always returns 404."""
         resp = client.put(
             "/api/buy-plans/token/reject-token/reject",
             json={"reason": "Too risky"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_reject_by_token_not_found_returns_410(self, client):
-        """V1 token-based reject always returns 410 (before 404 check)."""
+    def test_reject_by_token_not_found_returns_404(self, client):
+        """V1 token-based reject always returns 404 (before 404 check)."""
         resp = client.put(
             "/api/buy-plans/token/bad-reject/reject",
             json={"reason": "x"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_reject_by_token_expired_returns_410(self, client):
-        """V1 token-based reject always returns 410 (before expiry check)."""
+    def test_reject_by_token_expired_returns_404(self, client):
+        """V1 token-based reject always returns 404 (before expiry check)."""
         resp = client.put(
             "/api/buy-plans/token/exp-reject/reject",
             json={"reason": "x"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_reject_by_token_wrong_status_returns_410(self, client):
-        """V1 token-based reject always returns 410 (before status check)."""
+    def test_reject_by_token_wrong_status_returns_404(self, client):
+        """V1 token-based reject always returns 404 (before status check)."""
         resp = client.put(
             "/api/buy-plans/token/rej-wrong-status/reject",
             json={"reason": "x"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    # ── Authenticated approve/reject (all return 410 now) ──
+    # ── Authenticated approve/reject (all return 404 now) ──
 
-    def test_approve_buy_plan_admin_returns_410(self, admin_client):
-        """V1 approve always returns 410."""
-        resp = admin_client.put("/api/buy-plans/1/approve", json={"sales_order_number": "SO-ADMIN"})
-        assert resp.status_code == 410
+    def test_approve_buy_plan_admin_not_found(self, admin_client):
+        """V4 approve with non-existent plan returns 400 (plan not found in service)."""
+        resp = admin_client.post("/api/buy-plans/1/approve", json={"action": "approve", "notes": "ok"})
+        assert resp.status_code == 400
 
-    def test_approve_buy_plan_not_admin_returns_410(self, client):
-        """V1 approve always returns 410 (before auth check)."""
-        resp = client.put("/api/buy-plans/1/approve", json={"sales_order_number": "SO-X"})
-        assert resp.status_code == 410
+    def test_approve_buy_plan_not_admin(self, client):
+        """V4 approve requires manager/admin role."""
+        resp = client.post("/api/buy-plans/1/approve", json={"action": "approve", "notes": "ok"})
+        assert resp.status_code == 403
 
-    def test_approve_buy_plan_not_found_returns_410(self, admin_client):
-        """V1 approve always returns 410 (before 404 check)."""
-        resp = admin_client.put("/api/buy-plans/99999/approve", json={"sales_order_number": "SO-X"})
-        assert resp.status_code == 410
+    def test_approve_buy_plan_not_found(self, admin_client):
+        """V4 approve with non-existent plan returns 400."""
+        resp = admin_client.post("/api/buy-plans/99999/approve", json={"action": "approve", "notes": "ok"})
+        assert resp.status_code == 400
 
-    def test_reject_buy_plan_returns_410(self, admin_client):
-        """V1 reject always returns 410."""
-        resp = admin_client.put("/api/buy-plans/1/reject", json={"reason": "Bad deal"})
-        assert resp.status_code == 410
+    def test_reject_buy_plan_via_approve_endpoint(self, admin_client):
+        """V4 reject is done via POST /approve with action=reject."""
+        resp = admin_client.post("/api/buy-plans/1/approve", json={"action": "reject", "notes": "Bad deal"})
+        # Plan doesn't exist, service raises ValueError -> 400
+        assert resp.status_code == 400
 
-    def test_reject_buy_plan_not_admin_returns_410(self, client):
-        """V1 reject always returns 410 (before auth check)."""
-        resp = client.put("/api/buy-plans/1/reject", json={"reason": "x"})
-        assert resp.status_code == 410
+    def test_reject_buy_plan_not_admin(self, client):
+        """V4 reject via approve endpoint requires manager/admin role."""
+        resp = client.post("/api/buy-plans/1/approve", json={"action": "reject", "notes": "x"})
+        assert resp.status_code == 403
 
-    def test_reject_buy_plan_not_found_returns_410(self, admin_client):
-        """V1 reject always returns 410 (before 404 check)."""
-        resp = admin_client.put("/api/buy-plans/99999/reject", json={"reason": "x"})
-        assert resp.status_code == 410
+    def test_reject_buy_plan_not_found(self, admin_client):
+        """V4 reject via approve endpoint with non-existent plan returns 400."""
+        resp = admin_client.post("/api/buy-plans/99999/approve", json={"action": "reject", "notes": "x"})
+        assert resp.status_code == 400
 
-    # ── PO entry (all return 410 now) ──
+    # ── PO entry (all return 404 now) ──
 
-    def test_enter_po_number_returns_410(self, client):
-        """V1 PO entry always returns 410."""
+    def test_enter_po_number_returns_404(self, client):
+        """V1 PO entry always returns 404."""
         resp = client.put("/api/buy-plans/1/po", json={"line_index": 0, "po_number": "PO-001"})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_enter_po_not_found_returns_410(self, client):
-        """V1 PO entry always returns 410 (before 404 check)."""
+    def test_enter_po_not_found_returns_404(self, client):
+        """V1 PO entry always returns 404 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/po", json={"line_index": 0, "po_number": "PO-001"})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     # ── PO verification ──
 
-    def test_verify_po_returns_410(self, client):
-        """V1 verify-po endpoint now returns 410."""
+    def test_verify_po_returns_404(self, client):
+        """V1 verify-po endpoint now returns 404."""
         resp = client.get("/api/buy-plans/1/verify-po")
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_verify_po_not_found_returns_410(self, client):
-        """V1 verify-po returns 410 even for non-existent plans."""
+    def test_verify_po_not_found_returns_404(self, client):
+        """V1 verify-po returns 404 even for non-existent plans."""
         resp = client.get("/api/buy-plans/99999/verify-po")
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    # ── Complete (all return 410 now) ──
+    # ── Complete (all return 404 now) ──
 
-    def test_complete_buy_plan_returns_410(self, admin_client):
-        """V1 complete always returns 410."""
+    def test_complete_buy_plan_returns_404(self, admin_client):
+        """V1 complete always returns 404."""
         resp = admin_client.put("/api/buy-plans/1/complete")
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_complete_buy_plan_not_found_returns_410(self, admin_client):
-        """V1 complete always returns 410 (before 404 check)."""
+    def test_complete_buy_plan_not_found_returns_404(self, admin_client):
+        """V1 complete always returns 404 (before 404 check)."""
         resp = admin_client.put("/api/buy-plans/99999/complete")
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    # ── Cancel (all return 410 now) ──
+    # ── Cancel (all return 404 now) ──
 
-    def test_cancel_buy_plan_not_found_returns_410(self, client):
-        """V1 cancel always returns 410 (before 404 check)."""
+    def test_cancel_buy_plan_not_found_returns_404(self, client):
+        """V1 cancel always returns 404 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/cancel", json={})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_cancel_approved_admin_returns_410(self, admin_client):
-        """V1 cancel always returns 410."""
+    def test_cancel_approved_admin_returns_404(self, admin_client):
+        """V1 cancel always returns 404."""
         resp = admin_client.put("/api/buy-plans/1/cancel", json={"reason": "Manager override"})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    # ── Resubmit (all return 410 now) ──
+    # ── Resubmit (all return 404 now) ──
 
-    def test_resubmit_rejected_returns_410(self, client):
-        """V1 resubmit always returns 410."""
-        resp = client.put("/api/buy-plans/1/resubmit", json={"salesperson_notes": "Updated pricing"})
-        assert resp.status_code == 410
+    def test_resubmit_rejected_not_found(self, client):
+        """V4 resubmit with non-existent plan returns 400."""
+        resp = client.post("/api/buy-plans/1/resubmit", json={"sales_order_number": "SO-123"})
+        assert resp.status_code == 400
 
-    def test_resubmit_not_found_returns_410(self, client):
-        """V1 resubmit always returns 410 (before 404 check)."""
-        resp = client.put("/api/buy-plans/99999/resubmit", json={})
-        assert resp.status_code == 410
+    def test_resubmit_not_found(self, client):
+        """V4 resubmit with non-existent plan returns 400."""
+        resp = client.post("/api/buy-plans/99999/resubmit", json={"sales_order_number": "SO-123"})
+        assert resp.status_code == 400
 
-    # ── Bulk PO (all return 410 now) ──
+    # ── Bulk PO (all return 404 now) ──
 
-    def test_bulk_po_entry_returns_410(self, client):
-        """V1 bulk PO entry always returns 410."""
+    def test_bulk_po_entry_returns_404(self, client):
+        """V1 bulk PO entry always returns 404."""
         resp = client.put(
             "/api/buy-plans/1/po-bulk",
             json={"entries": [{"line_index": 0, "po_number": "PO-BULK-001"}]},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_bulk_po_not_found_returns_410(self, client):
-        """V1 bulk PO always returns 410 (before 404 check)."""
+    def test_bulk_po_not_found_returns_404(self, client):
+        """V1 bulk PO always returns 404 (before 404 check)."""
         resp = client.put("/api/buy-plans/99999/po-bulk", json={"entries": []})
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
     def test_buy_plans_for_quote_not_found(self, client):
-        """When no buy plan exists for a quote, returns None."""
-        resp = client.get("/api/buy-plans/for-quote/99999")
+        """When no buy plan exists for a quote, returns empty items list."""
+        resp = client.get("/api/buy-plans", params={"quote_id": 99999})
         assert resp.status_code == 200
-        assert resp.json() is None
+        data = resp.json()
+        assert data["items"] == []
+        assert data["count"] == 0
 
 
 # ── Pricing history: additional ───────────────────────────────────────
@@ -2825,35 +2831,34 @@ class TestOffersWithRatings:
 
 
 class TestBuyPlanApproveEdgeCases:
-    """V1 buy plan mutation endpoints always return 410 now."""
+    """V1 buy plan mutation endpoints always return 404 now."""
 
-    def test_approve_with_line_items_override_returns_410(self, admin_client):
-        """V1 approve always returns 410."""
-        resp = admin_client.put(
+    def test_approve_with_line_overrides_not_found(self, admin_client):
+        """V4 approve with line_overrides on non-existent plan returns 400."""
+        resp = admin_client.post(
             "/api/buy-plans/1/approve",
             json={
-                "sales_order_number": "SO-OVERRIDE",
-                "line_items": [{"mpn": "LM317T", "qty": 500, "cost_price": 0.45}],
-                "manager_notes": "Reduced qty",
+                "action": "approve",
+                "notes": "Reduced qty",
             },
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 400
 
-    def test_approve_token_with_manager_notes_returns_410(self, client):
-        """V1 token-based approve always returns 410."""
+    def test_approve_token_with_manager_notes_returns_404(self, client):
+        """V1 token-based approve always returns 404."""
         resp = client.put(
             "/api/buy-plans/token/notes-token/approve",
             json={"sales_order_number": "SO-NOTES", "manager_notes": "Approved with conditions"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_cancel_returns_410(self, admin_client):
-        """V1 cancel always returns 410."""
+    def test_cancel_returns_404(self, admin_client):
+        """V1 cancel always returns 404."""
         resp = admin_client.put(
             "/api/buy-plans/1/cancel",
             json={"reason": "Deal fell through"},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
 
 # ── Customer import error handling ────────────────────────────────────

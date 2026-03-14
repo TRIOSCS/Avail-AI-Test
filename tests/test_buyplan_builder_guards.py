@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
-from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, BuyPlanV3
+from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, BuyPlan
 from app.services.buyplan_builder import build_buy_plan, generate_ai_flags
 
 # ── Helpers ────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ class TestBuildBuyPlanDuplicate:
         quote, req, *_ = _setup_quote_with_offer(db_session)
 
         # Create first plan
-        existing = BuyPlanV3(
+        existing = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.draft.value,
@@ -162,7 +162,7 @@ class TestBuildBuyPlanDuplicate:
         """Should allow building a new plan if old one is cancelled."""
         quote, req, *_ = _setup_quote_with_offer(db_session)
 
-        cancelled = BuyPlanV3(
+        cancelled = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.cancelled.value,
@@ -183,7 +183,7 @@ class TestNoBuyerFlag:
         """Lines with no buyer should get a critical AI flag."""
         quote, req, requirement, offer, user = _setup_quote_with_offer(db_session)
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
             status=BuyPlanStatus.draft.value,

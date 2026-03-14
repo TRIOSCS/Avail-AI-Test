@@ -1,12 +1,12 @@
 """
-test_buy_plan_v3_router.py — Buy Plan V4 (unified) API Endpoint Tests
+test_buy_plan_router.py — Buy Plan (unified) API Endpoint Tests
 
 Covers all buy plan endpoints via TestClient: build, get, list, submit,
 approve, verify-so, confirm-po, verify-po, flag-issue, resubmit, offer
 comparison, and verification group CRUD.
 
 Called by: pytest
-Depends on: conftest.py fixtures, app.routers.crm.buy_plans_v3
+Depends on: conftest.py fixtures, app.routers.crm.buy_plans
 """
 
 from datetime import datetime, timezone
@@ -22,7 +22,7 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )
@@ -76,7 +76,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
         req.id,
         entered_by_id=test_user.id,
     )
-    plan = BuyPlanV3(
+    plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=test_quote.requisition_id,
         status=BuyPlanStatus.draft.value,
@@ -549,7 +549,7 @@ class TestVerificationGroup:
 class TestEnhancedAIFlags:
     def test_stale_offer_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """Offers older than threshold trigger a stale_offer flag."""
-        from app.services.buy_plan_v3_service import generate_ai_flags
+        from app.services.buy_plan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         old_offer = _make_offer(
@@ -558,7 +558,7 @@ class TestEnhancedAIFlags:
             req.id,
             created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.draft.value,
@@ -587,11 +587,11 @@ class TestEnhancedAIFlags:
 
     def test_low_margin_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """Lines with margin below threshold trigger a low_margin flag."""
-        from app.services.buy_plan_v3_service import generate_ai_flags
+        from app.services.buy_plan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.draft.value,
@@ -620,7 +620,7 @@ class TestEnhancedAIFlags:
 
     def test_better_offer_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """When a cheaper alternative exists, a better_offer flag is raised."""
-        from app.services.buy_plan_v3_service import generate_ai_flags
+        from app.services.buy_plan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         expensive = _make_offer(
@@ -637,7 +637,7 @@ class TestEnhancedAIFlags:
             vendor_name="Cheap Co",
             unit_price=0.80,
         )
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.draft.value,
@@ -666,14 +666,14 @@ class TestEnhancedAIFlags:
 
     def test_quantity_gap_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """When allocated qty < required qty, a quantity_gap flag is raised."""
-        from app.services.buy_plan_v3_service import generate_ai_flags
+        from app.services.buy_plan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         req.target_qty = 1000
         db_session.flush()
 
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.draft.value,
@@ -713,14 +713,14 @@ class TestFavoritism:
         admin_user: User,
     ):
         """When one buyer gets >60% of lines, favoritism is flagged."""
-        from app.services.buy_plan_v3_service import detect_favoritism
+        from app.services.buy_plan_service import detect_favoritism
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
 
         # Create 3 plans all assigned to test_user (same buyer)
         for i in range(3):
-            plan = BuyPlanV3(
+            plan = BuyPlan(
                 quote_id=test_quote.id,
                 requisition_id=test_quote.requisition_id,
                 status="active",
@@ -752,7 +752,7 @@ class TestFavoritism:
         admin_user: User,
     ):
         """Less than 3 plans returns no findings."""
-        from app.services.buy_plan_v3_service import detect_favoritism
+        from app.services.buy_plan_service import detect_favoritism
 
         findings = detect_favoritism(admin_user.id, db_session)
         assert findings == []
@@ -791,11 +791,11 @@ class TestCaseReport:
         test_user: User,
     ):
         """Case report is generated when plan auto-completes."""
-        from app.services.buy_plan_v3_service import check_completion
+        from app.services.buy_plan_service import check_completion
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status=BuyPlanStatus.active.value,
@@ -836,7 +836,7 @@ class TestCaseReport:
         """POST /api/buy-plans/{id}/case-report regenerates the report."""
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status="completed",
@@ -871,7 +871,7 @@ class TestCaseReport:
         test_user: User,
     ):
         """Case report endpoint rejects non-completed plans."""
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             status="active",

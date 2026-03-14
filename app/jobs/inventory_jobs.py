@@ -1,12 +1,12 @@
 """Inventory background jobs — PO verification, stock auto-complete, stock list parsing.
 
 Called by: app/jobs/__init__.py via register_inventory_jobs()
-Depends on: app.database, app.models, app.services.buyplan_service
+Depends on: app.database, app.models, app.services.buyplan_workflow
 """
 
 import asyncio
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -33,15 +33,25 @@ def register_inventory_jobs(scheduler, settings):
 
 @_traced_job
 async def _job_po_verification():
-    """Verify PO sent status for pending buy plans."""
+    """Verify PO sent status for active buy plans with pending_verify lines."""
     from ..database import SessionLocal
-    from ..models import BuyPlan
+    from ..models.buy_plan import BuyPlan, BuyPlanLineStatus, BuyPlanStatus
 
     db = SessionLocal()
     try:
-        from ..services.buyplan_service import verify_po_sent
+        from ..services.buyplan_workflow import verify_po_sent
 
-        unverified_plans = db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
+        # Find active plans that have lines in pending_verify status
+        plans = (
+            db.query(BuyPlan)
+            .filter(BuyPlan.status == BuyPlanStatus.active.value)
+            .all()
+        )
+        # Filter to plans with at least one pending_verify line
+        plans_to_verify = [
+            p for p in plans
+            if any(l.status == BuyPlanLineStatus.pending_verify.value for l in p.lines)
+        ]
 
         async def _safe_verify(plan):
             try:
@@ -49,8 +59,8 @@ async def _job_po_verification():
             except Exception as e:
                 logger.error(f"PO verify error for plan {plan.id}: {e}")
 
-        if unverified_plans:
-            await asyncio.gather(*[_safe_verify(p) for p in unverified_plans])
+        if plans_to_verify:
+            await asyncio.gather(*[_safe_verify(p) for p in plans_to_verify])
     except Exception as e:
         logger.error(f"PO verification scan error: {e}")
         db.rollback()
@@ -60,23 +70,33 @@ async def _job_po_verification():
 
 @_traced_job
 async def _job_stock_autocomplete():
-    """Auto-complete stock sales at configured hour."""
+    """Auto-complete stock sales stuck in active for 1+ hours (safety net)."""
     from ..database import SessionLocal
+    from ..models.buy_plan import BuyPlan, BuyPlanStatus
 
     db = SessionLocal()
     try:
-        from ..services.buyplan_service import auto_complete_stock_sales
-
-        loop = asyncio.get_running_loop()
-        completed = await asyncio.wait_for(
-            loop.run_in_executor(None, auto_complete_stock_sales, db),
-            timeout=300,
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        stuck = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.is_stock_sale == True,  # noqa: E712
+                BuyPlan.status == BuyPlanStatus.active.value,
+                BuyPlan.approved_at < cutoff,
+            )
+            .all()
         )
+
+        completed = 0
+        for plan in stuck:
+            plan.status = BuyPlanStatus.completed.value
+            plan.completed_at = datetime.now(timezone.utc)
+            logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
+            completed += 1
+
         if completed:
+            db.commit()
             logger.info(f"Stock sale auto-complete: {completed} plan(s) completed")
-    except asyncio.TimeoutError:
-        logger.error("Stock sale auto-complete timed out after 300s")
-        db.rollback()
     except Exception as e:
         logger.error(f"Stock sale auto-complete error: {e}")
         db.rollback()

@@ -813,16 +813,23 @@ class TestAvailScoreCoverageGaps:
         db_session.add(quote)
         db_session.flush()
 
-        # BuyPlan with line_items referencing the offer
+        # BuyPlan with BuyPlanLine referencing the offer
         bp = BuyPlan(
             requisition_id=reqn.id,
             quote_id=quote.id,
-            status="po_confirmed",
-            line_items=[{"offer_id": offer.id}],
+            status="completed",
             submitted_by_id=buyer.id,
             created_at=NOW,
         )
         db_session.add(bp)
+        db_session.flush()
+        from app.models.buy_plan import BuyPlanLine
+        line = BuyPlanLine(
+            buy_plan_id=bp.id,
+            offer_id=offer.id,
+            quantity=100,
+        )
+        db_session.add(line)
         db_session.commit()
 
         result = compute_buyer_avail_score(db_session, buyer.id, MONTH)

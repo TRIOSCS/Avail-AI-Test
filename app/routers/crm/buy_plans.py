@@ -1,305 +1,783 @@
-"""buy_plans.py — V1→V3 redirect shim for Buy Plan endpoints.
+"""
+buy_plans.py — Buy Plan V4 (unified) API Endpoints
 
-Read-only endpoints adapt BuyPlanV3 data to V1 JSON shape.
-All mutation endpoints return 410, pointing callers to V3.
+Structured buy plan system with split lines, dual approval tracks,
+AI-powered vendor selection, and per-line PO tracking.
 
-Called by: routers/crm/__init__.py
-Depends on: models.buy_plan (BuyPlanV3, BuyPlanLine), dependencies
+Endpoints:
+  POST /api/quotes/{quote_id}/buy-plan/build       — AI-build draft plan
+  GET  /api/buy-plans                               — List / queue view
+  GET  /api/buy-plans/{plan_id}                     — Full detail + lines
+  POST /api/buy-plans/{plan_id}/submit              — Submit with SO#
+  POST /api/buy-plans/{plan_id}/approve             — Manager approve/reject
+  POST /api/buy-plans/{plan_id}/resubmit            — Resubmit after rejection
+  POST /api/buy-plans/{plan_id}/verify-so           — Ops verify SO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/confirm-po  — Buyer PO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/verify-po   — Ops verify PO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/issue       — Flag issue
+  GET  /api/buy-plans/{plan_id}/offers/{req_id}     — Offer comparison
+  GET  /api/buy-plans/verification-group             — List ops members
+  POST /api/buy-plans/verification-group             — Add/remove member
+
+Called by: frontend, HTMX views
+Depends on: services/buy_plan_service.py, schemas/buy_plan.py
 """
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
-from ...dependencies import require_user
-from ...models import Quote, Requisition, User
-from ...models.buy_plan import BuyPlanLine, BuyPlanStatus, BuyPlanV3
+from ...dependencies import require_buyer, require_user
+from ...models import Offer, Requirement, User
+from ...models.buy_plan import (
+    BuyPlan,
+    BuyPlanLine,
+    BuyPlanStatus,
+    VerificationGroupMember,
+)
+from ...schemas.buy_plan import (
+    BuyPlanLineIssue,
+    BuyPlanApproval,
+    BuyPlanSubmit,
+    BuyPlanTokenApproval,
+    BuyPlanTokenReject,
+    POConfirmation,
+    POVerificationRequest,
+    SOVerificationRequest,
+    VerificationGroupUpdate,
+)
+from ...services.buy_plan_service import (
+    approve_buy_plan,
+    build_buy_plan,
+    check_completion,
+    confirm_po as svc_confirm_po,
+    detect_favoritism,
+    flag_line_issue as svc_flag_line_issue,
+    generate_case_report,
+    reset_buy_plan_to_draft,
+    resubmit_buy_plan,
+    submit_buy_plan,
+    verify_po as svc_verify_po,
+    verify_so as svc_verify_so,
+)
+from ...services.buyplan_notifications import (
+    notify_approved,
+    notify_completed,
+    notify_po_confirmed,
+    notify_rejected,
+    notify_so_rejected,
+    notify_so_verified,
+    notify_submitted,
+    run_notify_bg,
+)
 
 router = APIRouter()
 
-# ── V3→V1 status mapping ─────────────────────────────────────────────
 
-_V3_TO_V1_STATUS = {
-    "draft": "draft",
-    "pending": "pending_approval",
-    "active": "approved",
-    "halted": "cancelled",
-    "completed": "complete",
-    "cancelled": "cancelled",
-}
-
-_V1_TO_V3_STATUS = {v: k for k, v in _V3_TO_V1_STATUS.items()}
-# Extra V1 statuses that don't have direct V3 counterparts:
-_V1_TO_V3_STATUS["pending_approval"] = "pending"
-_V1_TO_V3_STATUS["approved"] = "active"
-_V1_TO_V3_STATUS["complete"] = "completed"
-_V1_TO_V3_STATUS["po_entered"] = "active"
-_V1_TO_V3_STATUS["po_confirmed"] = "active"
+# ── Serialization helpers ────────────────────────────────────────────
 
 
-def _v3_to_v1_status(plan: BuyPlanV3) -> str:
-    """Map V3 status to V1 status, detecting PO substates."""
-    base = _V3_TO_V1_STATUS.get(plan.status, plan.status)
-    if plan.status == "active" and plan.lines:
-        has_po = any(l.po_number for l in plan.lines)
-        all_verified = has_po and all(
-            l.status == "verified" for l in plan.lines if l.po_number
-        )
-        if all_verified:
-            return "po_confirmed"
-        elif has_po:
-            return "po_entered"
-    return base
-
-
-def _line_to_v1_dict(line: BuyPlanLine) -> dict:
-    """Convert V3 BuyPlanLine to V1 line_items dict shape."""
+def _line_to_dict(line: BuyPlanLine) -> dict:
+    """Serialize a BuyPlanLine for API response."""
     offer = line.offer
     req = line.requirement
+    buyer = line.buyer
     return {
+        "id": line.id,
+        "buy_plan_id": line.buy_plan_id,
+        "requirement_id": line.requirement_id,
         "offer_id": line.offer_id,
+        "quantity": line.quantity,
+        "unit_cost": float(line.unit_cost) if line.unit_cost else None,
+        "unit_sell": float(line.unit_sell) if line.unit_sell else None,
+        "margin_pct": float(line.margin_pct) if line.margin_pct else None,
+        "ai_score": line.ai_score,
+        "buyer_id": line.buyer_id,
+        "buyer_name": buyer.name if buyer else None,
+        "assignment_reason": line.assignment_reason,
+        "status": line.status,
+        "po_number": line.po_number,
+        "estimated_ship_date": str(line.estimated_ship_date) if line.estimated_ship_date else None,
+        "po_confirmed_at": str(line.po_confirmed_at) if line.po_confirmed_at else None,
+        "po_verified_by_id": line.po_verified_by_id,
+        "po_verified_at": str(line.po_verified_at) if line.po_verified_at else None,
+        "po_rejection_note": line.po_rejection_note,
+        "issue_type": line.issue_type,
+        "issue_note": line.issue_note,
+        "sales_note": line.sales_note,
+        "manager_note": line.manager_note,
         "mpn": offer.mpn if offer else (req.primary_mpn if req else None),
         "vendor_name": offer.vendor_name if offer else None,
-        "qty": line.quantity,
-        "plan_qty": line.quantity,
-        "cost_price": float(line.unit_cost) if line.unit_cost else None,
-        "sell_price": float(line.unit_sell) if line.unit_sell else None,
-        "lead_time": None,
-        "condition": None,
-        "entered_by_id": line.buyer_id,
-        "po_number": line.po_number,
-        "po_entered_at": str(line.po_confirmed_at) if line.po_confirmed_at else None,
-        "po_sent_at": str(line.po_confirmed_at) if line.po_confirmed_at else None,
-        "po_recipient": None,
-        "po_verified": line.status == "verified",
+        "manufacturer": offer.manufacturer if offer else None,
+        "requirement_qty": req.target_qty if req else None,
+        "lead_time": offer.lead_time if offer else None,
+        "condition": offer.condition if offer else None,
     }
 
 
-def _v3_to_v1_dict(plan: BuyPlanV3, db: Session) -> dict:
-    """Convert V3 plan + lines to V1-shaped dict."""
-    # Load related objects
-    requisition = db.get(Requisition, plan.requisition_id) if plan.requisition_id else None
-    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
+def _plan_to_dict(plan: BuyPlan) -> dict:
+    """Serialize a BuyPlan for API response."""
+    lines = [_line_to_dict(ln) for ln in (plan.lines or [])]
+    vendor_names = {ln.get("vendor_name") for ln in lines if ln.get("vendor_name")}
 
-    line_items = [_line_to_v1_dict(l) for l in (plan.lines or [])]
-    total_cost = float(plan.total_cost) if plan.total_cost else 0
-    total_revenue = float(plan.total_revenue) if plan.total_revenue else 0
-    total_profit = total_revenue - total_cost
+    quote = plan.quote
+    req = plan.requisition
+    customer_name = None
+    if quote and quote.customer_site:
+        site = quote.customer_site
+        co = site.company if hasattr(site, "company") else None
+        customer_name = co.name if co else site.site_name
 
     return {
         "id": plan.id,
-        "requisition_id": plan.requisition_id,
-        "requisition_name": requisition.name if requisition else None,
         "quote_id": plan.quote_id,
-        "quote_number": quote.quote_number if quote else None,
-        "quote_subtotal": float(quote.subtotal) if quote and quote.subtotal else None,
-        "customer_name": requisition.customer_name if requisition else None,
-        "status": _v3_to_v1_status(plan),
-        "line_items": line_items,
-        "is_stock_sale": plan.is_stock_sale or False,
-        "total_cost": total_cost,
-        "total_revenue": total_revenue,
-        "total_profit": total_profit,
-        "overall_margin_pct": float(plan.total_margin_pct) if plan.total_margin_pct else None,
+        "requisition_id": plan.requisition_id,
         "sales_order_number": plan.sales_order_number,
-        "salesperson_notes": plan.salesperson_notes,
-        "manager_notes": plan.approval_notes,
-        "rejection_reason": plan.cancellation_reason,
-        "submitted_by": plan.submitted_by.name if plan.submitted_by else None,
-        "submitted_by_id": plan.submitted_by_id,
-        "approved_by": plan.approved_by.name if plan.approved_by else None,
+        "customer_po_number": plan.customer_po_number,
+        "quote_number": quote.quote_number if quote else None,
+        "customer_name": customer_name,
+        "requisition_name": req.name if req else None,
+        "status": plan.status,
+        "so_status": plan.so_status,
+        "total_cost": float(plan.total_cost) if plan.total_cost else None,
+        "total_revenue": float(plan.total_revenue) if plan.total_revenue else None,
+        "total_margin_pct": float(plan.total_margin_pct) if plan.total_margin_pct else None,
+        "ai_summary": plan.ai_summary,
+        "ai_flags": plan.ai_flags or [],
+        "auto_approved": plan.auto_approved or False,
         "approved_by_id": plan.approved_by_id,
-        "rejected_by": None,
-        "rejected_by_id": None,
-        "submitted_at": str(plan.submitted_at) if plan.submitted_at else None,
+        "approved_by_name": plan.approved_by.name if plan.approved_by else None,
         "approved_at": str(plan.approved_at) if plan.approved_at else None,
-        "rejected_at": None,
+        "approval_notes": plan.approval_notes,
+        "so_verified_by_id": plan.so_verified_by_id,
+        "so_verified_at": str(plan.so_verified_at) if plan.so_verified_at else None,
+        "so_rejection_note": plan.so_rejection_note,
+        "submitted_by_id": plan.submitted_by_id,
+        "submitted_by_name": plan.submitted_by.name if plan.submitted_by else None,
+        "submitted_at": str(plan.submitted_at) if plan.submitted_at else None,
+        "salesperson_notes": plan.salesperson_notes,
         "completed_at": str(plan.completed_at) if plan.completed_at else None,
-        "completed_by": None,
-        "cancelled_at": str(plan.cancelled_at) if plan.cancelled_at else None,
-        "cancelled_by": plan.cancelled_by.name if plan.cancelled_by else None,
-        "cancellation_reason": plan.cancellation_reason,
+        "case_report": plan.case_report,
+        "is_stock_sale": plan.is_stock_sale or False,
+        "lines": lines,
+        "line_count": len(lines),
+        "vendor_count": len(vendor_names),
+        "created_at": str(plan.created_at) if plan.created_at else None,
     }
 
 
-# ── Read Endpoints (adapt V3 data to V1 shape) ──────────────────────
+def _plan_to_list_item(plan: BuyPlan) -> dict:
+    """Lightweight serialization for queue/list views."""
+    quote = plan.quote
+    customer_name = None
+    if quote and quote.customer_site:
+        site = quote.customer_site
+        co = site.company if hasattr(site, "company") else None
+        customer_name = co.name if co else site.site_name
+
+    flags = plan.ai_flags or []
+    return {
+        "id": plan.id,
+        "quote_id": plan.quote_id,
+        "requisition_id": plan.requisition_id,
+        "status": plan.status,
+        "so_status": plan.so_status,
+        "sales_order_number": plan.sales_order_number,
+        "customer_name": customer_name,
+        "quote_number": quote.quote_number if quote else None,
+        "total_cost": float(plan.total_cost) if plan.total_cost else None,
+        "total_revenue": float(plan.total_revenue) if plan.total_revenue else None,
+        "total_margin_pct": float(plan.total_margin_pct) if plan.total_margin_pct else None,
+        "line_count": len(plan.lines) if plan.lines else 0,
+        "vendor_count": 0,
+        "ai_flag_count": len(flags),
+        "submitted_by_name": plan.submitted_by.name if plan.submitted_by else None,
+        "approved_by_name": plan.approved_by.name if plan.approved_by else None,
+        "submitted_at": str(plan.submitted_at) if plan.submitted_at else None,
+        "approved_at": str(plan.approved_at) if plan.approved_at else None,
+        "created_at": str(plan.created_at) if plan.created_at else None,
+        "auto_approved": plan.auto_approved or False,
+        "is_stock_sale": plan.is_stock_sale or False,
+    }
+
+
+# ── Verification Group (must be before /{plan_id} routes) ────────────
+
+
+@router.get("/api/buy-plans/verification-group")
+async def list_verification_group(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List all members of the ops verification group."""
+    # Safety cap — verification group is small by design but guard against unbounded growth
+    members = db.query(VerificationGroupMember).options(joinedload(VerificationGroupMember.user)).limit(1000).all()
+    return {
+        "items": [
+            {
+                "id": m.id,
+                "user_id": m.user_id,
+                "user_name": m.user.name if m.user else None,
+                "user_email": m.user.email if m.user else None,
+                "is_active": m.is_active,
+                "added_at": str(m.added_at) if m.added_at else None,
+            }
+            for m in members
+        ]
+    }
+
+
+@router.post("/api/buy-plans/verification-group")
+async def update_verification_group(
+    body: VerificationGroupUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add or remove a user from the ops verification group (admin only)."""
+    if not _is_admin(user):
+        raise HTTPException(403, "Admin access required")
+
+    target = db.get(User, body.user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+
+    if body.action == "add":
+        existing = db.query(VerificationGroupMember).filter_by(user_id=body.user_id).first()
+        if existing:
+            existing.is_active = True
+        else:
+            db.add(VerificationGroupMember(user_id=body.user_id, is_active=True))
+        db.commit()
+        return {"ok": True, "action": "added", "user_id": body.user_id}
+
+    elif body.action == "remove":
+        member = db.query(VerificationGroupMember).filter_by(user_id=body.user_id).first()
+        if member:
+            member.is_active = False
+            db.commit()
+        return {"ok": True, "action": "removed", "user_id": body.user_id}
+
+
+# ── Token-based Approval (public, no auth) ──────────────────────────
+
+
+def _token_expired(expires_at) -> bool:
+    """Timezone-safe token expiration check (SQLite returns naive datetimes)."""
+    now = datetime.now(timezone.utc)
+    if expires_at is not None and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at is not None and expires_at < now
+
+
+@router.get("/api/buy-plans/token/{token}")
+async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
+    """Public endpoint — no auth required. Get plan details by approval token."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    return _plan_to_dict(plan)
+
+
+@router.put("/api/buy-plans/token/{token}/approve")
+async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session = Depends(get_db)):
+    """Public token-based approval. Sets SO number and activates plan."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    if plan.status != BuyPlanStatus.pending.value:
+        raise HTTPException(400, f"Cannot approve plan in '{plan.status}' status")
+    plan.status = BuyPlanStatus.active.value
+    plan.sales_order_number = body.sales_order_number
+    plan.approval_notes = body.notes
+    plan.approved_at = datetime.now(timezone.utc)
+    plan.approval_token = None  # Invalidate token after use
+    # Stock sale fast-track: if is_stock_sale, auto-complete
+    if plan.is_stock_sale:
+        plan.status = BuyPlanStatus.completed.value
+        plan.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(plan)
+    return _plan_to_dict(plan)
+
+
+@router.put("/api/buy-plans/token/{token}/reject")
+async def reject_by_token(token: str, body: BuyPlanTokenReject, db: Session = Depends(get_db)):
+    """Public token-based rejection. Resets plan to draft."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid token")
+    if plan.token_expires_at and _token_expired(plan.token_expires_at):
+        raise HTTPException(410, "Token expired")
+    if plan.status != BuyPlanStatus.pending.value:
+        raise HTTPException(400, f"Cannot reject plan in '{plan.status}' status")
+    plan.status = BuyPlanStatus.draft.value
+    plan.cancellation_reason = body.reason
+    plan.approval_token = None  # Invalidate token
+    db.commit()
+    db.refresh(plan)
+    return _plan_to_dict(plan)
+
+
+# ── Intelligence ─────────────────────────────────────────────────────
+
+
+@router.get("/api/buy-plans/favoritism/{user_id}")
+async def get_favoritism_report(
+    user_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Detect buyer favoritism patterns for a salesperson (manager/admin only)."""
+    if user.role not in ("manager", "admin"):
+        raise HTTPException(403, "Manager or admin role required")
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    findings = detect_favoritism(user_id, db)
+    return {"user_id": user_id, "user_name": target.name, "findings": findings}
+
+
+@router.post("/api/buy-plans/{plan_id}/case-report")
+async def regenerate_case_report(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Regenerate the case report for a completed buy plan."""
+    plan = (
+        db.query(BuyPlan)
+        .options(
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlan.quote),
+        )
+        .filter(BuyPlan.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(404, "Buy plan not found")
+    if plan.status != "completed":
+        raise HTTPException(400, "Case report only available for completed plans")
+    plan.case_report = generate_case_report(plan, db)
+    db.commit()
+    return {"ok": True, "plan_id": plan.id, "case_report": plan.case_report}
+
+
+# ── Build ────────────────────────────────────────────────────────────
+
+
+@router.post("/api/quotes/{quote_id}/buy-plan/build")
+async def build_plan(
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-build a draft buy plan from a won quote.
+
+    Scores all offers, auto-splits where needed, assigns buyers.
+    Returns the unsaved draft for salesperson review before submit.
+    """
+    try:
+        plan = build_buy_plan(quote_id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    logger.info("Buy plan #{} built for quote #{}", plan.id, quote_id)
+    return _plan_to_dict(plan)
+
+
+# ── Get / List ───────────────────────────────────────────────────────
 
 
 @router.get("/api/buy-plans")
 async def list_buy_plans(
-    status: str | None = None,
-    db: Session = Depends(get_db),
+    status: str | None = Query(None),
+    so_status: str | None = Query(None),
+    buyer_id: int | None = Query(None),
+    quote_id: int | None = Query(None),
     user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
-    """List buy plans (reads from V3, returns V1 shape)."""
-    q = db.query(BuyPlanV3).options(
-        joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-        joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.requirement),
-        joinedload(BuyPlanV3.submitted_by),
-        joinedload(BuyPlanV3.approved_by),
-        joinedload(BuyPlanV3.cancelled_by),
+    """List buy plans with optional filters for queue views."""
+    q = db.query(BuyPlan).options(
+        joinedload(BuyPlan.quote),
+        joinedload(BuyPlan.submitted_by),
+        joinedload(BuyPlan.approved_by),
+        joinedload(BuyPlan.lines),
     )
+    # Validate status filters against known enums
+    _valid_statuses = {"draft", "pending", "active", "halted", "completed", "cancelled"}
+    _valid_so_statuses = {"pending", "approved", "rejected"}
+    if status and status not in _valid_statuses:
+        raise HTTPException(400, f"Invalid status: {status}. Must be one of: {', '.join(sorted(_valid_statuses))}")
+    if so_status and so_status not in _valid_so_statuses:
+        raise HTTPException(
+            400, f"Invalid so_status: {so_status}. Must be one of: {', '.join(sorted(_valid_so_statuses))}"
+        )
 
-    # Access control: admin/manager/buyer see all, sales/trader see own
-    if user.role not in ("admin", "manager", "buyer"):
-        q = q.filter(BuyPlanV3.submitted_by_id == user.id)
-
-    # Status filter: convert V1 status name to V3
     if status:
-        v3_status = _V1_TO_V3_STATUS.get(status, status)
-        q = q.filter(BuyPlanV3.status == v3_status)
+        q = q.filter(BuyPlan.status == status)
+    if so_status:
+        q = q.filter(BuyPlan.so_status == so_status)
+    if buyer_id:
+        q = q.join(BuyPlanLine).filter(BuyPlanLine.buyer_id == buyer_id)
+    if quote_id:
+        q = q.filter(BuyPlan.quote_id == quote_id)
 
-    plans = q.order_by(BuyPlanV3.created_at.desc()).all()
-    return [_v3_to_v1_dict(p, db) for p in plans]
+    # Sales users see only their own plans
+    if user.role == "sales":
+        q = q.filter(BuyPlan.submitted_by_id == user.id)
 
-
-@router.get("/api/buy-plans/for-quote/{quote_id}")
-async def get_plan_for_quote(
-    quote_id: int,
-    db: Session = Depends(get_db),
-    user: User = Depends(require_user),
-):
-    """Get buy plan for a quote (reads from V3)."""
-    plan = (
-        db.query(BuyPlanV3)
-        .options(
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.requirement),
-            joinedload(BuyPlanV3.submitted_by),
-            joinedload(BuyPlanV3.approved_by),
-            joinedload(BuyPlanV3.cancelled_by),
-        )
-        .filter(BuyPlanV3.quote_id == quote_id)
-        .order_by(BuyPlanV3.created_at.desc())
-        .first()
-    )
-    if not plan:
-        return None
-    return _v3_to_v1_dict(plan, db)
-
-
-@router.get("/api/buy-plans/token/{token}")
-async def get_plan_by_token(
-    token: str,
-    db: Session = Depends(get_db),
-):
-    """Public: get plan by approval token (reads from V3)."""
-    plan = (
-        db.query(BuyPlanV3)
-        .options(
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.requirement),
-            joinedload(BuyPlanV3.submitted_by),
-            joinedload(BuyPlanV3.approved_by),
-            joinedload(BuyPlanV3.cancelled_by),
-        )
-        .filter(BuyPlanV3.approval_token == token)
-        .first()
-    )
-    if not plan:
-        raise HTTPException(404, "Invalid or expired token")
-    return _v3_to_v1_dict(plan, db)
+    plans = q.order_by(BuyPlan.created_at.desc()).limit(500).all()
+    return {"items": [_plan_to_list_item(p) for p in plans], "count": len(plans)}
 
 
 @router.get("/api/buy-plans/{plan_id}")
 async def get_buy_plan(
     plan_id: int,
-    db: Session = Depends(get_db),
     user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
-    """Get buy plan detail (reads from V3, returns V1 shape)."""
+    """Get full buy plan detail with all lines."""
     plan = (
-        db.query(BuyPlanV3)
+        db.query(BuyPlan)
         .options(
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.requirement),
-            joinedload(BuyPlanV3.submitted_by),
-            joinedload(BuyPlanV3.approved_by),
-            joinedload(BuyPlanV3.cancelled_by),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.buyer),
+            joinedload(BuyPlan.quote),
+            joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.submitted_by),
+            joinedload(BuyPlan.approved_by),
         )
-        .filter(BuyPlanV3.id == plan_id)
+        .filter(BuyPlan.id == plan_id)
         .first()
     )
     if not plan:
         raise HTTPException(404, "Buy plan not found")
-
-    # Access control: admin/manager/buyer see all, others only own
-    if user.role not in ("admin", "manager", "buyer"):
-        if plan.submitted_by_id != user.id:
-            raise HTTPException(403, "Not authorized to view this plan")
-
-    return _v3_to_v1_dict(plan, db)
+    return _plan_to_dict(plan)
 
 
-# ── Mutation Endpoints (return 410, point to V3) ─────────────────────
-
-_V1_DEPRECATED_MSG = "V1 buy plan mutations are disabled. Use /api/buy-plans-v3/ endpoints."
+# ── Submit ───────────────────────────────────────────────────────────
 
 
-@router.post("/api/quotes/{quote_id}/buy-plan/draft")
-async def create_buy_plan_draft(quote_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+@router.post("/api/buy-plans/{plan_id}/submit")
+async def submit_plan(
+    plan_id: int,
+    body: BuyPlanSubmit,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Submit a draft buy plan with SO# and optional line edits."""
+    edits = None
+    if body.line_edits:
+        edits = [e.model_dump() for e in body.line_edits]
+
+    try:
+        plan = submit_buy_plan(
+            plan_id,
+            body.sales_order_number,
+            user,
+            db,
+            customer_po_number=body.customer_po_number,
+            line_edits=edits,
+            salesperson_notes=body.salesperson_notes,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    logger.info("Buy plan #{} submitted by {}", plan_id, user.email)
+    if plan.auto_approved:
+        run_notify_bg(notify_approved, plan.id)
+    else:
+        run_notify_bg(notify_submitted, plan.id)
+    return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
-@router.post("/api/quotes/{quote_id}/buy-plan")
-async def submit_buy_plan(quote_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+# ── Approval ─────────────────────────────────────────────────────────
 
 
-@router.put("/api/buy-plans/{plan_id}/submit")
-async def submit_draft_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+@router.post("/api/buy-plans/{plan_id}/approve")
+async def approve_plan(
+    plan_id: int,
+    body: BuyPlanApproval,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager approves or rejects a pending buy plan."""
+    if user.role not in ("manager", "admin"):
+        raise HTTPException(403, "Manager or admin role required")
+
+    overrides = None
+    if body.line_overrides:
+        overrides = [o.model_dump() for o in body.line_overrides]
+
+    try:
+        plan = approve_buy_plan(
+            plan_id,
+            body.action,
+            user,
+            db,
+            line_overrides=overrides,
+            notes=body.notes,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    if body.action == "approve":
+        run_notify_bg(notify_approved, plan.id)
+    else:
+        run_notify_bg(notify_rejected, plan.id)
+    return {"ok": True, "plan_id": plan.id, "status": plan.status}
 
 
-@router.put("/api/buy-plans/{plan_id}/approve")
-async def approve_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+# ── Resubmit ─────────────────────────────────────────────────────────
 
 
-@router.put("/api/buy-plans/{plan_id}/reject")
-async def reject_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+@router.post("/api/buy-plans/{plan_id}/resubmit")
+async def resubmit_plan(
+    plan_id: int,
+    body: BuyPlanSubmit,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Resubmit a rejected (draft) buy plan with corrected SO#."""
+    try:
+        plan = resubmit_buy_plan(
+            plan_id,
+            body.sales_order_number,
+            user,
+            db,
+            customer_po_number=body.customer_po_number,
+            salesperson_notes=body.salesperson_notes,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    if plan.auto_approved:
+        run_notify_bg(notify_approved, plan.id)
+    else:
+        run_notify_bg(notify_submitted, plan.id)
+    return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
-@router.put("/api/buy-plans/{plan_id}/po")
-async def enter_po_number(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+# ── Reset to Draft (halted/cancelled) ────────────────────────────────
 
 
-@router.put("/api/buy-plans/{plan_id}/po-bulk")
-async def bulk_po_entry(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+@router.post("/api/buy-plans/{plan_id}/reset-to-draft")
+async def reset_plan_to_draft(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reset a halted/cancelled buy plan back to draft."""
+    try:
+        plan = reset_buy_plan_to_draft(plan_id, user, db)
+        db.commit()
+        return {"id": plan.id, "status": plan.status}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
-@router.put("/api/buy-plans/{plan_id}/complete")
-async def complete_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+# ── SO Verification ──────────────────────────────────────────────────
 
 
-@router.put("/api/buy-plans/{plan_id}/cancel")
-async def cancel_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+@router.post("/api/buy-plans/{plan_id}/verify-so")
+async def verify_so(
+    plan_id: int,
+    body: SOVerificationRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Ops verifies the Sales Order setup in Acctivate."""
+    try:
+        plan = svc_verify_so(
+            plan_id,
+            body.action,
+            user,
+            db,
+            rejection_note=body.rejection_note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+    db.commit()
+    if body.action == "approve":
+        run_notify_bg(notify_so_verified, plan.id)
+    else:
+        run_notify_bg(notify_so_rejected, plan.id, action=body.action)
+    return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status, "status": plan.status}
 
 
-@router.put("/api/buy-plans/{plan_id}/resubmit")
-async def resubmit_buy_plan(plan_id: int):
-    raise HTTPException(410, _V1_DEPRECATED_MSG)
+# ── PO Confirmation ──────────────────────────────────────────────────
 
 
-@router.put("/api/buy-plans/token/{token}/approve")
-async def approve_buyplan_by_token(token: str):
-    raise HTTPException(410, "Use PUT /api/buy-plans-v3/token/{token}/approve")
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/confirm-po")
+async def confirm_po(
+    plan_id: int,
+    line_id: int,
+    body: POConfirmation,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Buyer confirms PO was cut in Acctivate for a line."""
+    try:
+        line = svc_confirm_po(
+            plan_id,
+            line_id,
+            body.po_number,
+            body.estimated_ship_date,
+            user,
+            db,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    run_notify_bg(notify_po_confirmed, plan_id, line_id=line.id)
+    return {"ok": True, "line_id": line.id, "status": line.status, "po_number": line.po_number}
 
 
-@router.put("/api/buy-plans/token/{token}/reject")
-async def reject_buyplan_by_token(token: str):
-    raise HTTPException(410, "Use PUT /api/buy-plans-v3/token/{token}/reject")
+# ── PO Verification ──────────────────────────────────────────────────
+
+
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/verify-po")
+async def verify_po(
+    plan_id: int,
+    line_id: int,
+    body: POVerificationRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Ops verifies a PO was properly entered."""
+    try:
+        line = svc_verify_po(
+            plan_id,
+            line_id,
+            body.action,
+            user,
+            db,
+            rejection_note=body.rejection_note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+
+    db.commit()
+    # Check if all lines verified → auto-complete
+    updated_plan = check_completion(plan_id, db)
+    if updated_plan and updated_plan.status == "completed":
+        db.commit()
+        run_notify_bg(notify_completed, plan_id)
+    return {"ok": True, "line_id": line.id, "status": line.status}
+
+
+# ── Flag Issue ───────────────────────────────────────────────────────
+
+
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/issue")
+async def flag_issue(
+    plan_id: int,
+    line_id: int,
+    body: BuyPlanLineIssue,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Buyer flags an issue on a line (sold out, price changed, etc.)."""
+    try:
+        line = svc_flag_line_issue(
+            plan_id,
+            line_id,
+            body.issue_type,
+            user,
+            db,
+            note=body.note,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.commit()
+    return {"ok": True, "line_id": line.id, "status": line.status, "issue_type": line.issue_type}
+
+
+# ── PO Verification Scanning ─────────────────────────────────────────
 
 
 @router.get("/api/buy-plans/{plan_id}/verify-po")
-async def check_po_verification(plan_id: int):
-    raise HTTPException(410, "Use GET /api/buy-plans-v3/{plan_id}/verify-po")
+async def verify_po_scan(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Scan buyer's Outlook for PO emails matching each line."""
+    plan = db.query(BuyPlan).filter(BuyPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Plan not found")
+    from ...services.buy_plan_service import verify_po_sent
+    results = await verify_po_sent(plan, db)
+    return {"plan_id": plan.id, "verifications": results}
+
+
+# ── Offer Comparison ─────────────────────────────────────────────────
+
+
+@router.get("/api/buy-plans/{plan_id}/offers/{requirement_id}")
+async def offer_comparison(
+    plan_id: int,
+    requirement_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get all available offers for a requirement — used in manager/salesperson views."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Buy plan not found")
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+
+    # Current selections
+    selected_ids = {ln.offer_id for ln in (plan.lines or []) if ln.requirement_id == requirement_id and ln.offer_id}
+
+    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == "active").all()
+    items = []
+    for o in offers:
+        items.append(
+            {
+                "offer_id": o.id,
+                "vendor_name": o.vendor_name,
+                "unit_price": float(o.unit_price) if o.unit_price else None,
+                "qty_available": o.qty_available,
+                "lead_time": o.lead_time,
+                "condition": o.condition,
+                "date_code": o.date_code,
+                "packaging": o.packaging,
+                "is_selected": o.id in selected_ids,
+                "created_at": str(o.created_at) if o.created_at else None,
+            }
+        )
+
+    return {
+        "requirement_id": requirement_id,
+        "mpn": requirement.primary_mpn,
+        "target_qty": requirement.target_qty,
+        "selected_offer_ids": list(selected_ids),
+        "offers": items,
+    }

@@ -26,7 +26,7 @@ sys.path.insert(0, "/root/availai")
 
 from app.database import SessionLocal
 from app.models import Requirement, Requisition
-from app.models.buy_plan import BuyPlanLine, BuyPlanStatus, BuyPlanV3
+from app.models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanStatus
 
 
 def check_invalid_requisition_statuses(db, fix=False):
@@ -105,7 +105,7 @@ def check_bad_requirements(db, fix=False):
 def check_buyplan_status_mismatches(db, fix=False):
     """Find buy plans where header status doesn't match line states."""
     issues = []
-    plans = db.query(BuyPlanV3).all()
+    plans = db.query(BuyPlan).all()
     for plan in plans:
         lines = db.query(BuyPlanLine).filter_by(buy_plan_id=plan.id).all()
         if not lines:
@@ -151,7 +151,7 @@ def check_orphan_buyplan_lines(db, fix=False):
     """Find buy plan lines whose parent plan doesn't exist."""
     from sqlalchemy import not_, select
 
-    plan_ids = select(BuyPlanV3.id)
+    plan_ids = select(BuyPlan.id)
     orphans = db.query(BuyPlanLine).filter(not_(BuyPlanLine.buy_plan_id.in_(plan_ids))).all()
     issues = [{"line_id": l.id, "buy_plan_id": l.buy_plan_id, "issue": "orphan_line"} for l in orphans]
     return issues

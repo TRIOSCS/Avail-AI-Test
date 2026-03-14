@@ -1,4 +1,4 @@
-"""Buy Plan V3 Service Layer — re-export façade.
+"""Buy Plan Service Layer — re-export façade.
 
 Split into domain modules:
   - buyplan_scoring: offer scoring, lead time parsing, buyer assignment, routing maps
@@ -38,9 +38,9 @@ from app.services.buyplan_scoring import (  # noqa: F401
 )
 
 # ── Notifications ──────────────────────────────────────────────────
-from app.services.buyplan_v3_notifications import (  # noqa: F401
+from app.services.buyplan_notifications import (  # noqa: F401
     log_buyplan_activity,
-    notify_v3_stock_sale_approved,
+    notify_stock_sale_approved,
 )
 
 # ── Workflow & Intelligence ─────────────────────────────────────────
@@ -59,6 +59,6 @@ from app.services.buyplan_workflow import (  # noqa: F401
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
-    verify_po_sent_v3,
+    verify_po_sent,
     verify_so,
 )

@@ -4,7 +4,7 @@ Provides get_valid_token() for background jobs and refresh_user_token()
 for foreground request auth. Extracted from scheduler.py for cleaner imports.
 
 Called by: dependencies.py, routers (admin, enrichment, proactive, sources),
-          services (buyplan, buyplan_v3_notifications, deep_enrichment,
+          services (buyplan, buyplan_notifications, deep_enrichment,
           ownership, teams, webhook)
 Depends on: config.py, http_client.py
 """

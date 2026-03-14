@@ -1,5 +1,5 @@
 """
-test_buy_plan_schemas.py — Buy Plan V3 Schema Validation Tests
+test_buy_plan_schemas.py — Buy Plan Schema Validation Tests
 
 Covers request validation (required fields, blank rejection, enum constraints)
 and response schema structure for buy plan submit, approval, SO/PO verification,
@@ -21,10 +21,10 @@ from app.schemas.buy_plan import (
     BuyPlanLineIssue,
     BuyPlanLineOverride,
     BuyPlanLineResponse,
-    BuyPlanV3Approval,
-    BuyPlanV3ListItem,
-    BuyPlanV3Response,
-    BuyPlanV3Submit,
+    BuyPlanApproval,
+    BuyPlanListItem,
+    BuyPlanResponse,
+    BuyPlanSubmit,
     OfferComparisonItem,
     OfferComparisonResponse,
     POConfirmation,
@@ -34,31 +34,31 @@ from app.schemas.buy_plan import (
     VerificationGroupUpdate,
 )
 
-# ── BuyPlanV3Submit ──────────────────────────────────────────────────
+# ── BuyPlanSubmit ──────────────────────────────────────────────────
 
 
-class TestBuyPlanV3Submit:
+class TestBuyPlanSubmit:
     def test_valid_submit(self):
-        s = BuyPlanV3Submit(sales_order_number="SO-2026-001")
+        s = BuyPlanSubmit(sales_order_number="SO-2026-001")
         assert s.sales_order_number == "SO-2026-001"
         assert s.line_edits is None
         assert s.salesperson_notes is None
 
     def test_so_number_required(self):
         with pytest.raises(ValidationError) as exc:
-            BuyPlanV3Submit(sales_order_number="")
+            BuyPlanSubmit(sales_order_number="")
         assert "Sales Order" in str(exc.value)
 
     def test_so_number_whitespace_only(self):
         with pytest.raises(ValidationError):
-            BuyPlanV3Submit(sales_order_number="   ")
+            BuyPlanSubmit(sales_order_number="   ")
 
     def test_so_number_stripped(self):
-        s = BuyPlanV3Submit(sales_order_number="  SO-123  ")
+        s = BuyPlanSubmit(sales_order_number="  SO-123  ")
         assert s.sales_order_number == "SO-123"
 
     def test_with_line_edits(self):
-        s = BuyPlanV3Submit(
+        s = BuyPlanSubmit(
             sales_order_number="SO-001",
             line_edits=[
                 BuyPlanLineEdit(requirement_id=1, offer_id=10, quantity=500),
@@ -68,7 +68,7 @@ class TestBuyPlanV3Submit:
         assert len(s.line_edits) == 2
 
     def test_with_customer_po(self):
-        s = BuyPlanV3Submit(
+        s = BuyPlanSubmit(
             sales_order_number="SO-001",
             customer_po_number="CPO-42",
         )
@@ -112,25 +112,25 @@ class TestBuyPlanLineEdit:
         assert e.sales_note is not None
 
 
-# ── BuyPlanV3Approval ───────────────────────────────────────────────
+# ── BuyPlanApproval ───────────────────────────────────────────────
 
 
-class TestBuyPlanV3Approval:
+class TestBuyPlanApproval:
     def test_approve(self):
-        a = BuyPlanV3Approval(action="approve")
+        a = BuyPlanApproval(action="approve")
         assert a.action == "approve"
 
     def test_reject(self):
-        a = BuyPlanV3Approval(action="reject", notes="Margin too low")
+        a = BuyPlanApproval(action="reject", notes="Margin too low")
         assert a.action == "reject"
         assert a.notes == "Margin too low"
 
     def test_invalid_action(self):
         with pytest.raises(ValidationError):
-            BuyPlanV3Approval(action="maybe")
+            BuyPlanApproval(action="maybe")
 
     def test_with_line_overrides(self):
-        a = BuyPlanV3Approval(
+        a = BuyPlanApproval(
             action="approve",
             line_overrides=[
                 BuyPlanLineOverride(line_id=1, offer_id=20, manager_note="Better vendor"),
@@ -283,7 +283,7 @@ class TestResponseSchemas:
         assert lr.status == "awaiting_po"
 
     def test_plan_response_with_lines(self):
-        pr = BuyPlanV3Response(
+        pr = BuyPlanResponse(
             id=1,
             quote_id=1,
             requisition_id=1,
@@ -301,7 +301,7 @@ class TestResponseSchemas:
 
     def test_plan_response_allows_extra_fields(self):
         """extra='allow' prevents breaking frontends when new fields added."""
-        pr = BuyPlanV3Response(
+        pr = BuyPlanResponse(
             id=1,
             quote_id=1,
             requisition_id=1,
@@ -310,7 +310,7 @@ class TestResponseSchemas:
         assert pr.id == 1
 
     def test_list_item(self):
-        li = BuyPlanV3ListItem(
+        li = BuyPlanListItem(
             id=1,
             quote_id=1,
             requisition_id=1,

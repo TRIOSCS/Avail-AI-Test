@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models.buy_plan import BuyPlanStatus, BuyPlanV3
+from app.models.buy_plan import BuyPlanStatus, BuyPlan
 from app.models.offers import Contact
 
 
@@ -188,7 +188,7 @@ class TestBuyPlanResubmission:
         )
         db_session.add(q)
         db_session.flush()
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=q.id,
             requisition_id=_rfq_requisition.id,
             status="halted",
