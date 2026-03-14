@@ -111,6 +111,35 @@ def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> No
         group["buyer_outcomes"] = outcome_counts
 
 
+def _attach_lead_cards(requirements: list[Requirement], results: dict, db: Session) -> None:
+    """Attach one-lead-per-vendor-per-part cards to each requirement result group."""
+    from ...services.sourcing_lead_engine import build_requirement_lead_cards
+
+    for req_item in requirements:
+        group = results.get(str(req_item.id))
+        if not isinstance(group, dict):
+            continue
+        sightings = group.get("sightings") or []
+        if not isinstance(sightings, list):
+            group["lead_cards"] = []
+            continue
+        try:
+            lead_cards = build_requirement_lead_cards(req_item, sightings, db)
+        except Exception:
+            logger.exception("Lead-card projection failed for requirement {}", req_item.id)
+            lead_cards = []
+        group["lead_cards"] = lead_cards
+        group["lead_summary"] = {
+            "total_leads": len(lead_cards),
+            "high_confidence": sum(
+                1 for lead in lead_cards if (lead.get("lead_confidence_pct") or 0) >= 75
+            ),
+            "high_safety": sum(
+                1 for lead in lead_cards if (lead.get("vendor_safety_pct") or 0) >= 75
+            ),
+        }
+
+
 def _enqueue_ics_nc_batch(requirement_ids: list[int]):
     """Queue requirements for ICS and NC browser-based searches (background task)."""
     from ...database import SessionLocal
@@ -709,6 +738,7 @@ async def search_all(
 
     _enrich_with_vendor_cards(results, db)
     _annotate_buyer_outcomes(req, results, db)
+    _attach_lead_cards(reqs_to_search, results, db)
 
     results["source_stats"] = list(merged_source_stats.values())
     return results
@@ -737,10 +767,16 @@ async def search_one(
     results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
     _enrich_with_vendor_cards(results, db)
     _annotate_buyer_outcomes(req, results, db)
+    _attach_lead_cards([r], results, db)
 
     background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
 
-    return {"sightings": results[str(r.id)]["sightings"], "source_stats": source_stats}
+    return {
+        "sightings": results[str(r.id)]["sightings"],
+        "lead_cards": results[str(r.id)].get("lead_cards", []),
+        "lead_summary": results[str(r.id)].get("lead_summary", {}),
+        "source_stats": source_stats,
+    }
 
 
 # ── Saved sightings (no re-search) ──────────────────────────────────────
@@ -886,6 +922,7 @@ async def get_saved_sightings(
         }
     _enrich_with_vendor_cards(results, db)
     _annotate_buyer_outcomes(req, results, db)
+    _attach_lead_cards(req.requirements, results, db)
     return results
 
 
@@ -1071,6 +1108,7 @@ async def list_requirement_sightings(
         }
     }
     _enrich_with_vendor_cards(payload, db)
+    _attach_lead_cards([req_item], payload, db)
     return payload[str(requirement_id)]
 
 
