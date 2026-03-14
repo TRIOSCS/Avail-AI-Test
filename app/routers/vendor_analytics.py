@@ -39,9 +39,12 @@ async def get_vendor_offer_history(
     if not card:
         raise HTTPException(404, "Vendor not found")
 
-    q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "100")), 500)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    q_param = request.query_params.get("q", "").strip().lower()
+    try:
+        limit = min(int(request.query_params.get("limit", "100")), 500)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     query = (
         db.query(MaterialVendorHistory, MaterialCard)
@@ -51,8 +54,8 @@ async def get_vendor_offer_history(
             MaterialCard.deleted_at.is_(None),
         )
     )
-    if q:
-        safe_q = escape_like(q)
+    if q_param:
+        safe_q = escape_like(q_param)
         query = query.filter(MaterialCard.normalized_mpn.ilike(f"%{safe_q}%"))
 
     total = query.count()
@@ -97,8 +100,11 @@ async def get_vendor_confirmed_offers(
         raise HTTPException(404, "Vendor not found")
 
     q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "50")), 200)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    try:
+        limit = min(int(request.query_params.get("limit", "50")), 200)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     query = db.query(Offer).filter(Offer.vendor_card_id == card_id)
     if q:

@@ -19,10 +19,12 @@ Called by: all routers
 Depends on: models, database, config
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
@@ -51,8 +53,10 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         from .config import settings
 
         agent_key = request.headers.get("x-agent-key")
-        if agent_key and settings.agent_api_key and agent_key == settings.agent_api_key:
+        if agent_key and settings.agent_api_key and secrets.compare_digest(agent_key, settings.agent_api_key):
             user = db.query(User).filter_by(email="agent@availai.local").first()
+            if user:
+                logger.info("Agent API key auth used from %s", request.client.host if request.client else "unknown")
     if not user:
         raise HTTPException(401, "Not authenticated")
     if not getattr(user, "is_active", True):

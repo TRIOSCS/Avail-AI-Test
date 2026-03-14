@@ -214,6 +214,7 @@ def _verify_password(stored: str, password: str) -> bool:
 
 
 @router.post("/auth/login")
+@limiter.limit("5/minute")
 async def password_login(
     request: Request,
     email: str = Form(...),
