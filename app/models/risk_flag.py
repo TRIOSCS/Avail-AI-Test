@@ -5,7 +5,7 @@ Purpose: Tracks risk flags attached to buy plan lines and offers.
          Replaces ad-hoc JSON ai_flags with queryable, auditable records.
          Enables surfacing risk signals during offer review (not just in buy plans).
 
-Called by: services/buy_plan_v3_service.py, routers/crm/offers.py, routers/crm/quotes.py
+Called by: services/buy_plan_service.py, routers/crm/offers.py, routers/crm/quotes.py
 Depends on: models.base, models.buy_plan, models.offers
 """
 
@@ -44,7 +44,7 @@ class RiskFlagSeverity(str, enum.Enum):
 class RiskFlag(Base):
     """Structured risk flag attached to a buy plan line or source offer.
 
-    Replaces the JSON ai_flags field on BuyPlanV3 with queryable records.
+    Replaces the JSON ai_flags field on BuyPlan with queryable records.
     Risk flags can be raised by AI analysis, rule-based checks, or manual review.
     """
 

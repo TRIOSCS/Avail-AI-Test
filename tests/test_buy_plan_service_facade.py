@@ -1,12 +1,12 @@
 """
-test_buy_plan_v3_service.py — Tests for Buy Plan V3 AI Build Logic
+test_buy_plan_service.py — Tests for Buy Plan V3 AI Build Logic
 
 Covers: score_offer, assign_buyer, build_buy_plan, generate_ai_summary,
         generate_ai_flags, _check_quantity_gaps, _parse_lead_time_days,
         _country_to_region, _get_routing_maps, _create_line, _build_lines_for_requirement
 
 Called by: pytest
-Depends on: conftest fixtures, buy_plan_v3_service module
+Depends on: conftest fixtures, buy_plan_service module
 """
 
 from datetime import datetime, timedelta, timezone
@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus
-from app.services.buy_plan_v3_service import (
+from app.services.buy_plan_service import (
     _check_quantity_gaps,
     _country_to_region,
     _create_line,

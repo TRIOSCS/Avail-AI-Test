@@ -1,7 +1,7 @@
 """
-buyplan_v3_notifications.py — Buy Plan V3 notification service.
+buyplan_notifications.py — Buy Plan notification service.
 
-Handles notifications for all V3 buy plan state transitions:
+Handles notifications for all buy plan state transitions:
 - Submit  → email + Teams + in-app to managers
 - Approve → email + Teams + in-app to buyers + salesperson
 - Reject  → email + in-app to salesperson
@@ -12,7 +12,7 @@ Handles notifications for all V3 buy plan state transitions:
 - Completed → email + Teams + in-app to salesperson
 - Resubmit → email + in-app to managers
 
-Called by: routers/crm/buy_plans_v3.py
+Called by: routers/crm/buy_plans.py
 Depends on: models, config, utils/graph_client, teams_notifications (post_teams_channel, send_teams_dm)
 """
 
@@ -29,8 +29,8 @@ from ..models.buy_plan import BuyPlan
 # ── Background runner ────────────────────────────────────────────────
 
 
-def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
-    """Fire-and-forget a V3 notification coroutine with its own DB session."""
+def run_notify_bg(coro_factory, plan_id: int, **kwargs):
+    """Fire-and-forget a notification coroutine with its own DB session."""
 
     async def _run():
         from ..database import SessionLocal
@@ -41,7 +41,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
-            logger.exception("Background %s failed for V3 plan %s", coro_factory.__name__, plan_id)
+            logger.exception("Background %s failed for buy plan %s", coro_factory.__name__, plan_id)
         finally:
             bg_db.close()
 
@@ -52,7 +52,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
 
 
 def _plan_context(plan: BuyPlan, db: Session) -> dict:
-    """Extract common context fields from a V3 plan."""
+    """Extract common context fields from a buy plan."""
     from ..models import Quote
 
     submitter = db.get(User, plan.submitted_by_id) if plan.submitted_by_id else None
@@ -127,9 +127,9 @@ async def _send_email(user: User, subject: str, html_body: str, db: Session):
                 "saveToSentItems": "false",
             },
         )
-        logger.info("V3 buy plan email sent to %s", user.email)
+        logger.info("buy plan email sent to %s", user.email)
     except Exception as e:
-        logger.error("Failed to send V3 buy plan email to %s: %s", user.email, e)
+        logger.error("Failed to send buy plan email to %s: %s", user.email, e)
 
 
 # ── Reuse V1 Teams helpers ───────────────────────────────────────────
@@ -159,11 +159,10 @@ def log_buyplan_activity(
     activity_type: str,
     detail: str = "",
 ):
-    """Create an ActivityLog entry for a V3 buy plan state change.
+    """Create an ActivityLog entry for a buy plan state change.
 
     Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores
-    plan linkage in notes (since buy_plan_id FK targets V3), this version can
-    use the plan id directly in subject and notes fields.
+    plan linkage in notes this version uses the plan id directly in subject and notes fields.
     """
     db.add(
         ActivityLog(
@@ -171,8 +170,8 @@ def log_buyplan_activity(
             activity_type=activity_type,
             channel="system",
             requisition_id=plan.requisition_id,
-            subject=f"Buy plan V3 #{plan.id}: {detail}" if detail else f"Buy plan V3 #{plan.id}",
-            notes=f"v3_plan_id={plan.id} status={plan.status}",
+            subject=f"Buy Plan #{plan.id}: {detail}" if detail else f"Buy Plan #{plan.id}",
+            notes=f"plan_id={plan.id} status={plan.status}",
         )
     )
 
@@ -180,8 +179,8 @@ def log_buyplan_activity(
 # ── Notification Functions ───────────────────────────────────────────
 
 
-async def notify_v3_submitted(plan: BuyPlan, db: Session):
-    """Notify managers that a V3 buy plan needs approval."""
+async def notify_submitted(plan: BuyPlan, db: Session):
+    """Notify managers that a buy plan needs approval."""
     ctx = _plan_context(plan, db)
     rows, total = _lines_html(plan)
 
@@ -209,7 +208,7 @@ async def notify_v3_submitted(plan: BuyPlan, db: Session):
         f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
         f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
     )
-    html_body = _wrap_email("Buy Plan V3 — Approval Required", body)
+    html_body = _wrap_email("Buy Plan — Approval Required", body)
 
     # Email to managers/admins
     managers = db.query(User).filter(User.role.in_(["manager", "admin"])).all()
@@ -228,21 +227,21 @@ async def notify_v3_submitted(plan: BuyPlan, db: Session):
                 activity_type="buyplan_pending",
                 channel="system",
                 requisition_id=plan.requisition_id,
-                subject=f"Buy plan V3 #{plan.id} needs approval — {ctx['submitter_name']}",
+                subject=f"Buy Plan #{plan.id} needs approval — {ctx['submitter_name']}",
             )
         )
     db.commit()
 
     # Teams
     await _teams_channel(
-        f"**Buy Plan V3 #{plan.id} — Approval Required**\n\n"
+        f"**Buy Plan #{plan.id} — Approval Required**\n\n"
         f"Submitted by: {ctx['submitter_name']}\n"
         f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'}\n"
         f"Total: ${total:,.2f} | {len(plan.lines or [])} lines"
     )
 
 
-async def notify_v3_approved(plan: BuyPlan, db: Session):
+async def notify_approved(plan: BuyPlan, db: Session):
     """Notify buyers and salesperson that the plan was approved."""
     ctx = _plan_context(plan, db)
     rows, total = _lines_html(plan)
@@ -304,7 +303,7 @@ async def notify_v3_approved(plan: BuyPlan, db: Session):
     db.commit()
 
     await _teams_channel(
-        f"**Buy Plan V3 #{plan.id} — Approved**\n\n"
+        f"**Buy Plan #{plan.id} — Approved**\n\n"
         f"Customer: {ctx['customer_name']} | ${total:,.2f}\n"
         f"Buyers notified: {', '.join(b.name or b.email for b in buyers)}"
     )
@@ -320,7 +319,7 @@ async def notify_v3_approved(plan: BuyPlan, db: Session):
     )
 
 
-async def notify_v3_rejected(plan: BuyPlan, db: Session):
+async def notify_rejected(plan: BuyPlan, db: Session):
     """Notify salesperson that the plan was rejected."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -355,7 +354,7 @@ async def notify_v3_rejected(plan: BuyPlan, db: Session):
     )
 
 
-async def notify_v3_so_verified(plan: BuyPlan, db: Session):
+async def notify_so_verified(plan: BuyPlan, db: Session):
     """Notify buyers that SO has been verified — they can proceed."""
     buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     for bid in buyer_ids:
@@ -371,7 +370,7 @@ async def notify_v3_so_verified(plan: BuyPlan, db: Session):
     db.commit()
 
 
-async def notify_v3_so_rejected(plan: BuyPlan, db: Session, action: str):
+async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
     """Notify salesperson that SO was rejected or halted."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -400,7 +399,7 @@ async def notify_v3_so_rejected(plan: BuyPlan, db: Session, action: str):
     db.commit()
 
 
-async def notify_v3_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
+async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
     """Notify ops verification group that a PO was confirmed and needs verification."""
     from ..models.buy_plan import BuyPlanLine, VerificationGroupMember
 
@@ -422,7 +421,7 @@ async def notify_v3_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
     db.commit()
 
 
-async def notify_v3_completed(plan: BuyPlan, db: Session):
+async def notify_completed(plan: BuyPlan, db: Session):
     """Notify salesperson that the plan is complete."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -450,13 +449,13 @@ async def notify_v3_completed(plan: BuyPlan, db: Session):
     db.commit()
 
     await _teams_channel(
-        f"**Buy Plan V3 #{plan.id} — Completed**\n\n"
+        f"**Buy Plan #{plan.id} — Completed**\n\n"
         f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'} | ${total:,.2f}"
     )
 
 
-async def notify_v3_stock_sale_approved(plan: BuyPlan, db: Session):
-    """Notify logistics/accounting that a V3 stock sale was approved (no PO required).
+async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
+    """Notify logistics/accounting that a stock sale was approved (no PO required).
 
     Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete,
     sends an email to the stock_sale_notify_emails list and creates an in-app
@@ -508,16 +507,16 @@ async def notify_v3_stock_sale_approved(plan: BuyPlan, db: Session):
                         "/me/sendMail",
                         {
                             "message": {
-                                "subject": f"[AVAIL] Stock Sale Approved — V3 Plan #{plan.id}",
+                                "subject": f"[AVAIL] Stock Sale Approved — Plan #{plan.id}",
                                 "body": {"contentType": "HTML", "content": html_body},
                                 "toRecipients": [{"emailAddress": {"address": email_addr}}],
                             },
                             "saveToSentItems": "false",
                         },
                     )
-                    logger.info("V3 stock sale email sent to %s", email_addr)
+                    logger.info("stock sale email sent to %s", email_addr)
                 except Exception as e:
-                    logger.error("Failed to send V3 stock sale email to %s: %s", email_addr, e)
+                    logger.error("Failed to send stock sale email to %s: %s", email_addr, e)
 
             await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
 
@@ -529,14 +528,14 @@ async def notify_v3_stock_sale_approved(plan: BuyPlan, db: Session):
                 activity_type="buyplan_completed",
                 channel="system",
                 requisition_id=plan.requisition_id,
-                subject=f"Stock sale V3 #{plan.id} approved and completed — no PO required",
+                subject=f"Stock sale #{plan.id} approved and completed — no PO required",
             )
         )
     db.commit()
 
     # Teams channel post
     await _teams_channel(
-        f"**Buy Plan V3 #{plan.id} — Stock Sale Approved**\n\n"
+        f"**Buy Plan #{plan.id} — Stock Sale Approved**\n\n"
         f"Approved by: {approver_name}\n"
         f"Submitted by: {ctx['submitter_name']}\n"
         f"Total: ${total:,.2f} | Type: Stock Sale (no PO required)"

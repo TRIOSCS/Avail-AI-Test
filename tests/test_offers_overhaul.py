@@ -285,10 +285,10 @@ class TestQuotedOfferBadge:
 
 
 class TestBuyPlanQuoteLineItems:
-    """V1 buy plan submission is deprecated and always returns 410."""
+    """V1 buy plan submission is deprecated and always returns 404."""
 
-    def test_buy_plan_submit_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
-        """V1 submit_buy_plan always returns 410."""
+    def test_buy_plan_submit_returns_404(self, client, test_requisition, test_offer, db_session, test_user):
+        """V1 submit_buy_plan always returns 404."""
         from app.models import Company, CustomerSite
 
         co = Company(name="BP Test Co", is_active=True, created_at=datetime.now(timezone.utc))
@@ -330,10 +330,10 @@ class TestBuyPlanQuoteLineItems:
                 "salesperson_notes": "Rush order",
             },
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
-    def test_buy_plan_fallback_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
-        """V1 submit_buy_plan always returns 410 regardless of quote line_items."""
+    def test_buy_plan_fallback_returns_404(self, client, test_requisition, test_offer, db_session, test_user):
+        """V1 submit_buy_plan always returns 404 regardless of quote line_items."""
         from app.models import Company, CustomerSite
 
         co = Company(name="BP Fallback Co", is_active=True, created_at=datetime.now(timezone.utc))
@@ -362,7 +362,7 @@ class TestBuyPlanQuoteLineItems:
             f"/api/quotes/{q.id}/buy-plan",
             json={"offer_ids": [test_offer.id], "salesperson_notes": ""},
         )
-        assert resp.status_code == 410
+        assert resp.status_code == 404
 
 
 # ── Auto-Parse Email Offers ──────────────────────────────────────────

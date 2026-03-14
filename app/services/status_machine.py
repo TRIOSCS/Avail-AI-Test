@@ -5,7 +5,7 @@ Purpose: Prevents invalid status transitions on offers, quotes, requisitions,
          and buy plans. Enforces valid state transitions and provides clear error
          messages when invalid transitions are attempted.
 
-Called by: routers/crm/offers.py, routers/crm/quotes.py, routers/crm/buy_plans_v3.py
+Called by: routers/crm/offers.py, routers/crm/quotes.py, routers/crm/buy_plans.py
 Depends on: nothing (pure logic)
 """
 

@@ -20,7 +20,7 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
     SOVerificationStatus,
 )
 from app.services.buyplan_workflow import (
@@ -37,7 +37,7 @@ from app.services.buyplan_workflow import (
 def _make_plan_with_lines(
     db: Session, *, status="draft", so_status="pending", line_statuses=None, total_cost=100.0, ai_flags=None
 ):
-    """Create a BuyPlanV3 with associated records for testing."""
+    """Create a BuyPlan with associated records for testing."""
     user = User(
         email="test@trioscs.com",
         name="Test",
@@ -95,7 +95,7 @@ def _make_plan_with_lines(
     db.add(quote)
     db.flush()
 
-    plan = BuyPlanV3(
+    plan = BuyPlan(
         quote_id=quote.id,
         requisition_id=req.id,
         status=status,

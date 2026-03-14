@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from app.models import (
     BuyPlanLine,
-    BuyPlanV3,
+    BuyPlan,
     Company,
     CustomerSite,
     Offer,
@@ -159,7 +159,7 @@ def sample_buy_plans(db_session, test_user, sample_requisition, sample_quote, sa
         ("completed", None),
         ("draft", test_user.id),
     ]:
-        bp = BuyPlanV3(
+        bp = BuyPlan(
             quote_id=sample_quote.id,
             requisition_id=req.id,
             status=status,
@@ -272,7 +272,7 @@ class TestBuyPlansMyOnly:
         db_session.add(other_user)
         db_session.flush()
 
-        other_bp = BuyPlanV3(
+        other_bp = BuyPlan(
             quote_id=sample_quote.id,
             requisition_id=req.id,
             status="pending",

@@ -136,18 +136,6 @@ class TestAdminVendorMergeFKException:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  2. buy_plans.py:154 — skip missing offer in buy plan submission
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestBuyPlanMissingOffer:
-    def test_v1_submit_returns_410(self, client, test_quote):
-        """V1 buy plan submit endpoint now returns 410 (use V3 endpoints)."""
-        resp = client.post(f"/api/quotes/{test_quote.id}/buy-plan")
-        assert resp.status_code == 410
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  3. sites.py:56 — non-admin cannot unassign (owner_id=None)
 #     Note: This is already tested in test_prospecting.py but line 56 is
 #     specifically about setting owner_id=None on a site that currently

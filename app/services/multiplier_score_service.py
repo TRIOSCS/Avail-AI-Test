@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     BuyPlan,
+    BuyPlanLine,
     Company,
     Contact,
     Offer,
@@ -86,16 +87,19 @@ def _load_quoted_offer_ids(db: Session) -> set[int]:
 
 
 def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
-    """Return (bp_offer_ids, po_confirmed_offer_ids) from buy plan line_items."""
+    """Return (bp_offer_ids, po_confirmed_offer_ids) from buy plan lines."""
     bp_ids = set()
     po_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                bp_ids.add(oid)
-                if bp_status in ("po_confirmed", "complete"):
-                    po_ids.add(oid)
+    for bp_status, offer_id in (
+        db.query(BuyPlan.status, BuyPlanLine.offer_id)
+        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlanLine.offer_id.isnot(None))
+        .limit(10000)
+        .all()
+    ):
+        bp_ids.add(offer_id)
+        if bp_status in ("completed",):
+            po_ids.add(offer_id)
     return bp_ids, po_ids
 
 

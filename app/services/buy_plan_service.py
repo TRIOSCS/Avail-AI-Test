@@ -38,9 +38,9 @@ from app.services.buyplan_scoring import (  # noqa: F401
 )
 
 # ── Notifications ──────────────────────────────────────────────────
-from app.services.buyplan_v3_notifications import (  # noqa: F401
+from app.services.buyplan_notifications import (  # noqa: F401
     log_buyplan_activity,
-    notify_v3_stock_sale_approved,
+    notify_stock_sale_approved,
 )
 
 # ── Workflow & Intelligence ─────────────────────────────────────────
@@ -60,6 +60,5 @@ from app.services.buyplan_workflow import (  # noqa: F401
     submit_buy_plan,
     verify_po,
     verify_po_sent,
-    verify_po_sent_v3,  # backward-compat alias
     verify_so,
 )

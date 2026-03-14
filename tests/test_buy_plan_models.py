@@ -1,5 +1,5 @@
 """
-test_buy_plan_models.py — Buy Plan V3 Model Tests
+test_buy_plan_models.py — Buy Plan Model Tests
 
 Covers model creation, ENUM values, relationships, split lines
 (multiple BuyPlanLine rows sharing the same requirement_id),
@@ -24,7 +24,7 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
     LineIssueType,
     SOVerificationStatus,
     VerificationGroupMember,
@@ -81,12 +81,12 @@ class TestEnums:
         assert BuyPlanStatus.draft == "draft"
 
 
-# ── BuyPlanV3 Model Tests ───────────────────────────────────────────
+# ── BuyPlan Model Tests ───────────────────────────────────────────
 
 
-class TestBuyPlanV3Model:
+class TestBuyPlanModel:
     def test_create_minimal(self, db_session: Session, test_quote: Quote):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -102,7 +102,7 @@ class TestBuyPlanV3Model:
         assert plan.auto_approved is False
 
     def test_create_with_all_fields(self, db_session: Session, test_quote: Quote, test_user: User):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             sales_order_number="SO-2026-001",
@@ -129,7 +129,7 @@ class TestBuyPlanV3Model:
         assert plan.ai_flags[0]["type"] == "stale_offer"
 
     def test_quote_relationship(self, db_session: Session, test_quote: Quote):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )
@@ -142,7 +142,7 @@ class TestBuyPlanV3Model:
         assert plan.requisition is not None
 
     def test_submitted_by_relationship(self, db_session: Session, test_quote: Quote, test_user: User):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
             submitted_by_id=test_user.id,
@@ -160,7 +160,7 @@ class TestBuyPlanV3Model:
 
 class TestBuyPlanLineModel:
     def _make_plan(self, db_session, test_quote):
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
         )

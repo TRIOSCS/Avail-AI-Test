@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from ..models import (
     ActivityLog,
     BuyPlan,
+    BuyPlanLine,
     Company,
     Contact,
     CustomerSite,
@@ -123,13 +124,16 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     po_confirmed_offer_ids = set()
     bp_offer_ids = set()
-    for bp_status, items in db.query(BuyPlan.status, BuyPlan.line_items).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                bp_offer_ids.add(oid)
-                if bp_status in ("po_confirmed", "complete"):
-                    po_confirmed_offer_ids.add(oid)
+    for bp_status, offer_id in (
+        db.query(BuyPlan.status, BuyPlanLine.offer_id)
+        .join(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlanLine.offer_id.isnot(None))
+        .limit(10000)
+        .all()
+    ):
+        bp_offer_ids.add(offer_id)
+        if bp_status in ("completed",):
+            po_confirmed_offer_ids.add(offer_id)
 
     # User's offers this month
     user_offers = (

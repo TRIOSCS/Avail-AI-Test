@@ -1,5 +1,5 @@
 """
-buy_plans_v3.py — Buy Plan V4 (unified) API Endpoints
+buy_plans.py — Buy Plan V4 (unified) API Endpoints
 
 Structured buy plan system with split lines, dual approval tracks,
 AI-powered vendor selection, and per-line PO tracking.
@@ -20,7 +20,7 @@ Endpoints:
   POST /api/buy-plans/verification-group             — Add/remove member
 
 Called by: frontend, HTMX views
-Depends on: services/buy_plan_v3_service.py, schemas/buy_plan.py
+Depends on: services/buy_plan_service.py, schemas/buy_plan.py
 """
 
 from datetime import datetime, timezone
@@ -50,29 +50,29 @@ from ...schemas.buy_plan import (
     SOVerificationRequest,
     VerificationGroupUpdate,
 )
-from ...services.buy_plan_v3_service import (
+from ...services.buy_plan_service import (
     approve_buy_plan,
     build_buy_plan,
     check_completion,
-    confirm_po,
+    confirm_po as svc_confirm_po,
     detect_favoritism,
-    flag_line_issue,
+    flag_line_issue as svc_flag_line_issue,
     generate_case_report,
     reset_buy_plan_to_draft,
     resubmit_buy_plan,
     submit_buy_plan,
-    verify_po,
-    verify_so,
+    verify_po as svc_verify_po,
+    verify_so as svc_verify_so,
 )
-from ...services.buyplan_v3_notifications import (
-    notify_v3_approved,
-    notify_v3_completed,
-    notify_v3_po_confirmed,
-    notify_v3_rejected,
-    notify_v3_so_rejected,
-    notify_v3_so_verified,
-    notify_v3_submitted,
-    run_v3_notify_bg,
+from ...services.buyplan_notifications import (
+    notify_approved,
+    notify_completed,
+    notify_po_confirmed,
+    notify_rejected,
+    notify_so_rejected,
+    notify_so_verified,
+    notify_submitted,
+    run_notify_bg,
 )
 
 router = APIRouter()
@@ -374,7 +374,7 @@ async def regenerate_case_report(
 
 
 @router.post("/api/quotes/{quote_id}/buy-plan/build")
-async def build_plan_v3(
+async def build_plan(
     quote_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -392,7 +392,7 @@ async def build_plan_v3(
     db.add(plan)
     db.commit()
     db.refresh(plan)
-    logger.info("Buy plan V3 #{} built for quote #{}", plan.id, quote_id)
+    logger.info("Buy plan #{} built for quote #{}", plan.id, quote_id)
     return _plan_to_dict(plan)
 
 
@@ -400,7 +400,7 @@ async def build_plan_v3(
 
 
 @router.get("/api/buy-plans")
-async def list_buy_plans_v3(
+async def list_buy_plans(
     status: str | None = Query(None),
     so_status: str | None = Query(None),
     buyer_id: int | None = Query(None),
@@ -443,7 +443,7 @@ async def list_buy_plans_v3(
 
 
 @router.get("/api/buy-plans/{plan_id}")
-async def get_buy_plan_v3(
+async def get_buy_plan(
     plan_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -472,7 +472,7 @@ async def get_buy_plan_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/submit")
-async def submit_plan_v3(
+async def submit_plan(
     plan_id: int,
     body: BuyPlanSubmit,
     user: User = Depends(require_user),
@@ -497,11 +497,11 @@ async def submit_plan_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
-    logger.info("Buy plan V3 #{} submitted by {}", plan_id, user.email)
+    logger.info("Buy plan #{} submitted by {}", plan_id, user.email)
     if plan.auto_approved:
-        run_v3_notify_bg(notify_v3_approved, plan.id)
+        run_notify_bg(notify_approved, plan.id)
     else:
-        run_v3_notify_bg(notify_v3_submitted, plan.id)
+        run_notify_bg(notify_submitted, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
@@ -509,7 +509,7 @@ async def submit_plan_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/approve")
-async def approve_plan_v3(
+async def approve_plan(
     plan_id: int,
     body: BuyPlanApproval,
     user: User = Depends(require_user),
@@ -537,9 +537,9 @@ async def approve_plan_v3(
 
     db.commit()
     if body.action == "approve":
-        run_v3_notify_bg(notify_v3_approved, plan.id)
+        run_notify_bg(notify_approved, plan.id)
     else:
-        run_v3_notify_bg(notify_v3_rejected, plan.id)
+        run_notify_bg(notify_rejected, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status}
 
 
@@ -547,7 +547,7 @@ async def approve_plan_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/resubmit")
-async def resubmit_plan_v3(
+async def resubmit_plan(
     plan_id: int,
     body: BuyPlanSubmit,
     user: User = Depends(require_user),
@@ -568,9 +568,9 @@ async def resubmit_plan_v3(
 
     db.commit()
     if plan.auto_approved:
-        run_v3_notify_bg(notify_v3_approved, plan.id)
+        run_notify_bg(notify_approved, plan.id)
     else:
-        run_v3_notify_bg(notify_v3_submitted, plan.id)
+        run_notify_bg(notify_submitted, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status, "auto_approved": plan.auto_approved}
 
 
@@ -596,7 +596,7 @@ async def reset_plan_to_draft(
 
 
 @router.post("/api/buy-plans/{plan_id}/verify-so")
-async def verify_so_v3(
+async def verify_so(
     plan_id: int,
     body: SOVerificationRequest,
     user: User = Depends(require_user),
@@ -604,7 +604,7 @@ async def verify_so_v3(
 ):
     """Ops verifies the Sales Order setup in Acctivate."""
     try:
-        plan = verify_so(
+        plan = svc_verify_so(
             plan_id,
             body.action,
             user,
@@ -618,9 +618,9 @@ async def verify_so_v3(
 
     db.commit()
     if body.action == "approve":
-        run_v3_notify_bg(notify_v3_so_verified, plan.id)
+        run_notify_bg(notify_so_verified, plan.id)
     else:
-        run_v3_notify_bg(notify_v3_so_rejected, plan.id, action=body.action)
+        run_notify_bg(notify_so_rejected, plan.id, action=body.action)
     return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status, "status": plan.status}
 
 
@@ -628,7 +628,7 @@ async def verify_so_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/lines/{line_id}/confirm-po")
-async def confirm_po_v3(
+async def confirm_po(
     plan_id: int,
     line_id: int,
     body: POConfirmation,
@@ -637,7 +637,7 @@ async def confirm_po_v3(
 ):
     """Buyer confirms PO was cut in Acctivate for a line."""
     try:
-        line = confirm_po(
+        line = svc_confirm_po(
             plan_id,
             line_id,
             body.po_number,
@@ -649,7 +649,7 @@ async def confirm_po_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
-    run_v3_notify_bg(notify_v3_po_confirmed, plan_id, line_id=line.id)
+    run_notify_bg(notify_po_confirmed, plan_id, line_id=line.id)
     return {"ok": True, "line_id": line.id, "status": line.status, "po_number": line.po_number}
 
 
@@ -657,7 +657,7 @@ async def confirm_po_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/lines/{line_id}/verify-po")
-async def verify_po_v3(
+async def verify_po(
     plan_id: int,
     line_id: int,
     body: POVerificationRequest,
@@ -666,7 +666,7 @@ async def verify_po_v3(
 ):
     """Ops verifies a PO was properly entered."""
     try:
-        line = verify_po(
+        line = svc_verify_po(
             plan_id,
             line_id,
             body.action,
@@ -684,7 +684,7 @@ async def verify_po_v3(
     updated_plan = check_completion(plan_id, db)
     if updated_plan and updated_plan.status == "completed":
         db.commit()
-        run_v3_notify_bg(notify_v3_completed, plan_id)
+        run_notify_bg(notify_completed, plan_id)
     return {"ok": True, "line_id": line.id, "status": line.status}
 
 
@@ -692,7 +692,7 @@ async def verify_po_v3(
 
 
 @router.post("/api/buy-plans/{plan_id}/lines/{line_id}/issue")
-async def flag_issue_v3(
+async def flag_issue(
     plan_id: int,
     line_id: int,
     body: BuyPlanLineIssue,
@@ -701,7 +701,7 @@ async def flag_issue_v3(
 ):
     """Buyer flags an issue on a line (sold out, price changed, etc.)."""
     try:
-        line = flag_line_issue(
+        line = svc_flag_line_issue(
             plan_id,
             line_id,
             body.issue_type,
@@ -720,7 +720,7 @@ async def flag_issue_v3(
 
 
 @router.get("/api/buy-plans/{plan_id}/verify-po")
-async def verify_po_scan_v3(
+async def verify_po_scan(
     plan_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
@@ -729,7 +729,7 @@ async def verify_po_scan_v3(
     plan = db.query(BuyPlan).filter(BuyPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(404, "Plan not found")
-    from ...services.buy_plan_v3_service import verify_po_sent
+    from ...services.buy_plan_service import verify_po_sent
     results = await verify_po_sent(plan, db)
     return {"plan_id": plan.id, "verifications": results}
 
@@ -738,7 +738,7 @@ async def verify_po_scan_v3(
 
 
 @router.get("/api/buy-plans/{plan_id}/offers/{requirement_id}")
-async def offer_comparison_v3(
+async def offer_comparison(
     plan_id: int,
     requirement_id: int,
     user: User = Depends(require_user),

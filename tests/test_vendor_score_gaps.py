@@ -6,7 +6,7 @@ Covers:
 - _get_buyplan_offer_ids with various statuses
 - compute_all_vendor_scores flush exception path
 - compute_all_vendor_scores with PO confirmed offers
-- compute_all_vendor_scores with quotes having empty/None line_items
+- compute_all_vendor_scores with quotes having empty/None line_items or no BuyPlanLine rows
 - compute_vendor_score edge cases (boundary values, clamping)
 
 Called by: pytest
@@ -29,6 +29,7 @@ from app.models import (
     VendorCard,
     VendorReview,
 )
+from app.models.buy_plan import BuyPlanLine
 from app.services.vendor_score import (
     _get_buyplan_offer_ids,
     _get_quote_offer_ids,
@@ -133,14 +134,29 @@ def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
 
 
 def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
+    v4_status = {"approved": "active", "po_confirmed": "active",
+                 "po_entered": "active", "complete": "completed"}.get(status, status)
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,
-        status=status,
-        line_items=[{"offer_id": oid} for oid in offer_ids],
+        status=v4_status,
         created_at=datetime.now(timezone.utc),
     )
     db.add(bp)
+    db.flush()
+    for oid in offer_ids:
+        line_status = "awaiting_po"
+        if status == "po_confirmed":
+            line_status = "verified"
+        elif status == "po_entered":
+            line_status = "pending_verify"
+        line = BuyPlanLine(
+            buy_plan_id=bp.id,
+            offer_id=oid,
+            quantity=1,
+            status=line_status,
+        )
+        db.add(line)
     db.flush()
     return bp
 
@@ -283,7 +299,7 @@ class TestGetBuyplanOfferIds:
         db_session.flush()
 
         q = _make_quote(db_session, req.id, user.id, [offers[0].id], status="sent")
-        _make_buy_plan(db_session, req.id, q.id, [offers[0].id], status="po_confirmed")
+        _make_buy_plan(db_session, req.id, q.id, [offers[0].id], status="complete")
         db_session.commit()
 
         offer_ids = {o.id for o in offers}
@@ -364,10 +380,10 @@ class TestComputeAllVendorScoresGaps:
         offers, user, req = _make_offers(db_session, card.id, "po master vendor", 6)
         db_session.flush()
 
-        # Create quotes and PO-confirmed buy plans for ALL offers
+        # Create quotes and completed buy plans for ALL offers (highest stage)
         offer_ids = [o.id for o in offers]
         q = _make_quote(db_session, req.id, user.id, offer_ids, status="won")
-        _make_buy_plan(db_session, req.id, q.id, offer_ids, status="po_confirmed")
+        _make_buy_plan(db_session, req.id, q.id, offer_ids, status="complete")
         db_session.commit()
 
         result = await compute_all_vendor_scores(db_session)
@@ -379,8 +395,8 @@ class TestComputeAllVendorScoresGaps:
         assert card.advancement_score == 100.0
 
     @pytest.mark.asyncio
-    async def test_buyplan_with_none_line_items(self, db_session):
-        """BuyPlan with None line_items is handled gracefully."""
+    async def test_buyplan_with_no_lines(self, db_session):
+        """BuyPlan with no BuyPlanLine rows is handled gracefully."""
         card = _make_vendor_card(db_session, "none bp vendor")
         offers, user, req = _make_offers(db_session, card.id, "none bp vendor", 6)
         db_session.flush()
@@ -388,12 +404,11 @@ class TestComputeAllVendorScoresGaps:
         # Need a quote for the FK
         q = _make_quote(db_session, req.id, user.id, [offers[0].id], status="sent")
 
-        # Create a buy plan with None line_items
+        # Create a buy plan with no lines (V4: no BuyPlanLine rows)
         bp = BuyPlan(
             requisition_id=req.id,
             quote_id=q.id,
-            status="approved",
-            line_items=None,
+            status="active",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(bp)

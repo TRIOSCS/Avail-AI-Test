@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..models import (
     BuyPlan,
+    BuyPlanLine,
     Contact,
     Offer,
     Quote,
@@ -127,16 +128,15 @@ def compute_vendor_scorecard(
     if total_offers > 0:
         if po_offer_ids is None:
             po_offer_ids = set()
-            for (items,) in (
-                db.query(BuyPlan.line_items)
-                .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
+            for (offer_id,) in (
+                db.query(BuyPlanLine.offer_id)
+                .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+                .filter(BuyPlan.status.in_(["completed"]))
+                .filter(BuyPlanLine.offer_id.isnot(None))
                 .limit(10000)
                 .all()
             ):
-                for item in items or []:
-                    oid = item.get("offer_id")
-                    if oid:
-                        po_offer_ids.add(oid)
+                po_offer_ids.add(offer_id)
 
         for o in offers_in_window:
             if o.id in po_offer_ids:
@@ -229,16 +229,15 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
                 quoted_offer_ids.add(oid)
 
     po_offer_ids: set[int] = set()
-    for (items,) in (
-        db.query(BuyPlan.line_items)
-        .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
+    for (offer_id,) in (
+        db.query(BuyPlanLine.offer_id)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlan.status.in_(["completed"]))
+        .filter(BuyPlanLine.offer_id.isnot(None))
         .limit(10000)
         .all()
     ):
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                po_offer_ids.add(oid)
+        po_offer_ids.add(offer_id)
 
     # Process vendor IDs in chunks of 500 to avoid loading all at once
     CHUNK_SIZE = 500

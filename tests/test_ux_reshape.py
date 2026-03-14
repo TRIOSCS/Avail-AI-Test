@@ -170,13 +170,14 @@ class TestProactiveBoard:
 
 class TestBuyPlanExecution:
     def test_buyplan_summary_stats(self, crm_js):
-        """Buy plans list has summary status strip."""
-        assert "_bpActive" in crm_js
-        assert "_bpCompleted" in crm_js
+        """Buy plans list has summary status strip with color/label helpers."""
+        assert "_bpStatusColor" in crm_js
+        assert "_bpStatusLabel" in crm_js
 
     def test_buyplan_blocker_strip(self, crm_js):
-        """Buy plans show halted/flagged blockers."""
-        assert "renderBlockerStrip" in crm_js
+        """Buy plans show halted status and issue flagging UI."""
+        assert "halted" in crm_js
+        assert "openFlagIssue" in crm_js
 
     def test_buyplan_uses_status_strip(self, crm_js):
         assert "renderStatusStrip" in crm_js

@@ -23,7 +23,7 @@ from app.models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
+    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )
@@ -202,7 +202,7 @@ class TestRequirementStatusProgression:
 # ── Full buy plan V3 lifecycle ────────────────────────────────────────
 
 
-class TestBuyPlanV3FullLifecycle:
+class TestBuyPlanFullLifecycle:
     def _setup_plan(self, db_session, *, total_cost=100.0):
         """Create a complete buy plan ready for submission."""
         data = _full_setup(db_session)
@@ -233,7 +233,7 @@ class TestBuyPlanV3FullLifecycle:
         db_session.add(quote)
         db_session.flush()
 
-        plan = BuyPlanV3(
+        plan = BuyPlan(
             quote_id=quote.id,
             requisition_id=data["requisition"].id,
             status=BuyPlanStatus.draft.value,

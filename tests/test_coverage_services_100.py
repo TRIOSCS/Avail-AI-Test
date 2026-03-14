@@ -157,14 +157,14 @@ def _make_sqlite_engine():
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# 1. buyplan_v3_notifications.py — lines 66-67
+# 1. buyplan_notifications.py — lines 66-67
 # ═══════════════════════════════════════════════════════════════════════
 
 
 class TestBuyplanV3NotificationsCustomerSiteNoCompany:
     def test_plan_context_site_without_company(self, db_session):
         """When quote has customer_site but site.company is None, use site_name."""
-        from app.services.buyplan_v3_notifications import _plan_context
+        from app.services.buyplan_notifications import _plan_context
 
         # Create a mock quote with customer_site that has no company
         mock_site = MagicMock()
@@ -192,7 +192,7 @@ class TestBuyplanV3NotificationsCustomerSiteNoCompany:
 
     def test_plan_context_site_no_company_no_sitename(self, db_session):
         """When site.company is None and site_name is None, return empty string."""
-        from app.services.buyplan_v3_notifications import _plan_context
+        from app.services.buyplan_notifications import _plan_context
 
         mock_site = MagicMock()
         mock_site.company = None

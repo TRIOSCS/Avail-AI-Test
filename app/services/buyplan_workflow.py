@@ -1,9 +1,9 @@
-"""Buy Plan V3 — Workflow: submit, approve, verify, complete, intelligence.
+"""Buy Plan — Workflow: submit, approve, verify, complete, intelligence.
 
 Phase 4: Approval + Execution — submit, approve, verify SO/PO, flag issues,
          auto-complete, favoritism detection, case reports.
 
-Called by: routers/buy_plans_v3.py
+Called by: routers/crm/buy_plans.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """
 
@@ -810,7 +810,3 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
 
     db.commit()
     return results
-
-
-# Backward-compat alias during migration
-verify_po_sent_v3 = verify_po_sent
