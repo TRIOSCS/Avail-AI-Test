@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import ActivityLog, User
-from ..models.buy_plan import BuyPlanV3
+from ..models.buy_plan import BuyPlan
 
 # ── Background runner ────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
 
         bg_db = SessionLocal()
         try:
-            bg_plan = bg_db.get(BuyPlanV3, plan_id)
+            bg_plan = bg_db.get(BuyPlan, plan_id)
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
@@ -51,7 +51,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _plan_context(plan: BuyPlanV3, db: Session) -> dict:
+def _plan_context(plan: BuyPlan, db: Session) -> dict:
     """Extract common context fields from a V3 plan."""
     from ..models import Quote
 
@@ -73,7 +73,7 @@ def _plan_context(plan: BuyPlanV3, db: Session) -> dict:
     }
 
 
-def _lines_html(plan: BuyPlanV3) -> tuple[str, float]:
+def _lines_html(plan: BuyPlan) -> tuple[str, float]:
     """Build HTML table rows for plan lines. Returns (rows_html, total_cost)."""
     rows = ""
     total = 0.0
@@ -155,13 +155,13 @@ async def _teams_dm(user: User, message: str, db: Session):
 def log_buyplan_activity(
     db: Session,
     user_id: int,
-    plan: "BuyPlanV3",
+    plan: "BuyPlan",
     activity_type: str,
     detail: str = "",
 ):
     """Create an ActivityLog entry for a V3 buy plan state change.
 
-    Adapted from V1 log_buyplan_activity for BuyPlanV3. Unlike V1 which stores
+    Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores
     plan linkage in notes (since buy_plan_id FK targets V3), this version can
     use the plan id directly in subject and notes fields.
     """
@@ -180,7 +180,7 @@ def log_buyplan_activity(
 # ── Notification Functions ───────────────────────────────────────────
 
 
-async def notify_v3_submitted(plan: BuyPlanV3, db: Session):
+async def notify_v3_submitted(plan: BuyPlan, db: Session):
     """Notify managers that a V3 buy plan needs approval."""
     ctx = _plan_context(plan, db)
     rows, total = _lines_html(plan)
@@ -242,7 +242,7 @@ async def notify_v3_submitted(plan: BuyPlanV3, db: Session):
     )
 
 
-async def notify_v3_approved(plan: BuyPlanV3, db: Session):
+async def notify_v3_approved(plan: BuyPlan, db: Session):
     """Notify buyers and salesperson that the plan was approved."""
     ctx = _plan_context(plan, db)
     rows, total = _lines_html(plan)
@@ -320,7 +320,7 @@ async def notify_v3_approved(plan: BuyPlanV3, db: Session):
     )
 
 
-async def notify_v3_rejected(plan: BuyPlanV3, db: Session):
+async def notify_v3_rejected(plan: BuyPlan, db: Session):
     """Notify salesperson that the plan was rejected."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -355,7 +355,7 @@ async def notify_v3_rejected(plan: BuyPlanV3, db: Session):
     )
 
 
-async def notify_v3_so_verified(plan: BuyPlanV3, db: Session):
+async def notify_v3_so_verified(plan: BuyPlan, db: Session):
     """Notify buyers that SO has been verified — they can proceed."""
     buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
     for bid in buyer_ids:
@@ -371,7 +371,7 @@ async def notify_v3_so_verified(plan: BuyPlanV3, db: Session):
     db.commit()
 
 
-async def notify_v3_so_rejected(plan: BuyPlanV3, db: Session, action: str):
+async def notify_v3_so_rejected(plan: BuyPlan, db: Session, action: str):
     """Notify salesperson that SO was rejected or halted."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -400,7 +400,7 @@ async def notify_v3_so_rejected(plan: BuyPlanV3, db: Session, action: str):
     db.commit()
 
 
-async def notify_v3_po_confirmed(plan: BuyPlanV3, db: Session, line_id: int):
+async def notify_v3_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
     """Notify ops verification group that a PO was confirmed and needs verification."""
     from ..models.buy_plan import BuyPlanLine, VerificationGroupMember
 
@@ -422,7 +422,7 @@ async def notify_v3_po_confirmed(plan: BuyPlanV3, db: Session, line_id: int):
     db.commit()
 
 
-async def notify_v3_completed(plan: BuyPlanV3, db: Session):
+async def notify_v3_completed(plan: BuyPlan, db: Session):
     """Notify salesperson that the plan is complete."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
@@ -455,7 +455,7 @@ async def notify_v3_completed(plan: BuyPlanV3, db: Session):
     )
 
 
-async def notify_v3_stock_sale_approved(plan: BuyPlanV3, db: Session):
+async def notify_v3_stock_sale_approved(plan: BuyPlan, db: Session):
     """Notify logistics/accounting that a V3 stock sale was approved (no PO required).
 
     Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete,

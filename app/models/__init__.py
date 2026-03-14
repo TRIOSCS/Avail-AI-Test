@@ -8,8 +8,8 @@ Or from submodules: from app.models.auth import User
 from .auth import User  # noqa: F401
 from .base import Base  # noqa: F401
 
-# Buy Plans V3 (structured lines, dual approval tracks)
-from .buy_plan import BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
+# Buy Plans (unified V4 — structured lines, dual approval tracks)
+from .buy_plan import BuyPlan, BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
 
 # System Config
 from .config import ApiSource, ApiUsageLog, GraphSubscription, SystemConfig  # noqa: F401
@@ -88,8 +88,8 @@ from .prospect_account import ProspectAccount  # noqa: F401
 # Purchase History (Proactive matching backbone)
 from .purchase_history import CustomerPartHistory  # noqa: F401
 
-# Quotes & Buy Plans (V1 — JSON line_items)
-from .quotes import BuyPlan, Quote, QuoteLine  # noqa: F401
+# Quotes (V1 BuyPlan model removed — use BuyPlan from buy_plan module)
+from .quotes import Quote, QuoteLine  # noqa: F401
 
 # Risk Flags (structured deal intelligence)
 from .risk_flag import RiskFlag  # noqa: F401

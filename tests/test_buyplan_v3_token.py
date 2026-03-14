@@ -110,21 +110,21 @@ def stock_sale_plan(db_session: Session, test_user: User, test_quote: Quote) -> 
 
 
 class TestGetPlanByToken:
-    """GET /api/buy-plans-v3/token/{token}"""
+    """GET /api/buy-plans/token/{token}"""
 
     def test_valid_token(self, noauth_client: TestClient, pending_plan: BuyPlanV3):
-        resp = noauth_client.get(f"/api/buy-plans-v3/token/{pending_plan.approval_token}")
+        resp = noauth_client.get(f"/api/buy-plans/token/{pending_plan.approval_token}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == pending_plan.id
         assert data["status"] == "pending"
 
     def test_invalid_token_404(self, noauth_client: TestClient, pending_plan: BuyPlanV3):
-        resp = noauth_client.get("/api/buy-plans-v3/token/nonexistent-token")
+        resp = noauth_client.get("/api/buy-plans/token/nonexistent-token")
         assert resp.status_code == 404
 
     def test_expired_token_410(self, noauth_client: TestClient, expired_plan: BuyPlanV3):
-        resp = noauth_client.get(f"/api/buy-plans-v3/token/{expired_plan.approval_token}")
+        resp = noauth_client.get(f"/api/buy-plans/token/{expired_plan.approval_token}")
         assert resp.status_code == 410
 
 
@@ -132,11 +132,11 @@ class TestGetPlanByToken:
 
 
 class TestApproveByToken:
-    """PUT /api/buy-plans-v3/token/{token}/approve"""
+    """PUT /api/buy-plans/token/{token}/approve"""
 
     def test_approve_success(self, noauth_client: TestClient, pending_plan: BuyPlanV3, db_session: Session):
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{pending_plan.approval_token}/approve",
+            f"/api/buy-plans/token/{pending_plan.approval_token}/approve",
             json={"sales_order_number": "SO-12345", "notes": "Looks good"},
         )
         assert resp.status_code == 200
@@ -148,20 +148,20 @@ class TestApproveByToken:
     def test_token_invalidated_after_use(self, noauth_client: TestClient, pending_plan: BuyPlanV3, db_session: Session):
         token = pending_plan.approval_token
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{token}/approve",
+            f"/api/buy-plans/token/{token}/approve",
             json={"sales_order_number": "SO-99999"},
         )
         assert resp.status_code == 200
         # Second attempt with same token should fail
         resp2 = noauth_client.put(
-            f"/api/buy-plans-v3/token/{token}/approve",
+            f"/api/buy-plans/token/{token}/approve",
             json={"sales_order_number": "SO-99999"},
         )
         assert resp2.status_code == 404
 
     def test_stock_sale_auto_complete(self, noauth_client: TestClient, stock_sale_plan: BuyPlanV3):
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{stock_sale_plan.approval_token}/approve",
+            f"/api/buy-plans/token/{stock_sale_plan.approval_token}/approve",
             json={"sales_order_number": "SO-STOCK-001"},
         )
         assert resp.status_code == 200
@@ -174,14 +174,14 @@ class TestApproveByToken:
         pending_plan.status = BuyPlanStatus.active.value
         db_session.commit()
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{pending_plan.approval_token}/approve",
+            f"/api/buy-plans/token/{pending_plan.approval_token}/approve",
             json={"sales_order_number": "SO-000"},
         )
         assert resp.status_code == 400
 
     def test_expired_token_410(self, noauth_client: TestClient, expired_plan: BuyPlanV3):
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{expired_plan.approval_token}/approve",
+            f"/api/buy-plans/token/{expired_plan.approval_token}/approve",
             json={"sales_order_number": "SO-000"},
         )
         assert resp.status_code == 410
@@ -191,23 +191,23 @@ class TestApproveByToken:
 
 
 class TestRejectByToken:
-    """PUT /api/buy-plans-v3/token/{token}/reject"""
+    """PUT /api/buy-plans/token/{token}/reject"""
 
     def test_reject_success(self, noauth_client: TestClient, pending_plan: BuyPlanV3, db_session: Session):
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{pending_plan.approval_token}/reject",
+            f"/api/buy-plans/token/{pending_plan.approval_token}/reject",
             json={"reason": "Need better pricing"},
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "draft"
         # Token should be invalidated
-        resp2 = noauth_client.get(f"/api/buy-plans-v3/token/{pending_plan.approval_token}")
+        resp2 = noauth_client.get(f"/api/buy-plans/token/{pending_plan.approval_token}")
         assert resp2.status_code == 404
 
     def test_empty_reason_ok(self, noauth_client: TestClient, pending_plan: BuyPlanV3):
         resp = noauth_client.put(
-            f"/api/buy-plans-v3/token/{pending_plan.approval_token}/reject",
+            f"/api/buy-plans/token/{pending_plan.approval_token}/reject",
             json={"reason": ""},
         )
         assert resp.status_code == 200

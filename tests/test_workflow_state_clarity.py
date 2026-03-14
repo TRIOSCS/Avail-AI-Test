@@ -199,7 +199,7 @@ class TestBuyPlanResubmission:
         return plan
 
     def test_reset_halted_plan_to_draft(self, client, db_session, _halted_plan):
-        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        resp = client.post(f"/api/buy-plans/{_halted_plan.id}/reset-to-draft")
         assert resp.status_code == 200
         db_session.refresh(_halted_plan)
         assert _halted_plan.status == BuyPlanStatus.draft.value
@@ -207,13 +207,13 @@ class TestBuyPlanResubmission:
     def test_reset_active_plan_fails(self, client, db_session, _halted_plan):
         _halted_plan.status = BuyPlanStatus.active.value
         db_session.commit()
-        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        resp = client.post(f"/api/buy-plans/{_halted_plan.id}/reset-to-draft")
         assert resp.status_code == 400
 
     def test_reset_cancelled_plan_to_draft(self, client, db_session, _halted_plan):
         _halted_plan.status = BuyPlanStatus.cancelled.value
         db_session.commit()
-        resp = client.post(f"/api/buy-plans-v3/{_halted_plan.id}/reset-to-draft")
+        resp = client.post(f"/api/buy-plans/{_halted_plan.id}/reset-to-draft")
         assert resp.status_code == 200
         db_session.refresh(_halted_plan)
         assert _halted_plan.status == BuyPlanStatus.draft.value

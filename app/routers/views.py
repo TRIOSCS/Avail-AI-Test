@@ -20,7 +20,6 @@ from app.models import (
     ActivityLog,
     BuyPlan,
     BuyPlanLine,
-    BuyPlanV3,
     Company,
     CustomerSite,
     MaterialCard,
@@ -1200,16 +1199,16 @@ def _query_buy_plans(db: Session, user: User, q: str, status: str, mine: bool, s
     """
     line_count_sq = sqlfunc.count(BuyPlanLine.id)
     base = (
-        db.query(BuyPlanV3, line_count_sq, User.name.label("submitted_by_name"))
-        .outerjoin(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlanV3.id)
-        .outerjoin(User, BuyPlanV3.submitted_by_id == User.id)
-        .outerjoin(Requisition, BuyPlanV3.requisition_id == Requisition.id)
-        .group_by(BuyPlanV3.id, User.name)
+        db.query(BuyPlan, line_count_sq, User.name.label("submitted_by_name"))
+        .outerjoin(BuyPlanLine, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .outerjoin(User, BuyPlan.submitted_by_id == User.id)
+        .outerjoin(Requisition, BuyPlan.requisition_id == Requisition.id)
+        .group_by(BuyPlan.id, User.name)
     )
 
     # "My Only" filter — show only plans submitted by this user
     if mine:
-        base = base.filter(BuyPlanV3.submitted_by_id == user.id)
+        base = base.filter(BuyPlan.submitted_by_id == user.id)
 
     # Search filter
     if q.strip():
@@ -1217,23 +1216,23 @@ def _query_buy_plans(db: Session, user: User, q: str, status: str, mine: bool, s
         base = base.filter(
             or_(
                 Requisition.customer_name.ilike(f"%{safe_q}%"),
-                BuyPlanV3.sales_order_number.ilike(f"%{safe_q}%"),
-                BuyPlanV3.customer_po_number.ilike(f"%{safe_q}%"),
+                BuyPlan.sales_order_number.ilike(f"%{safe_q}%"),
+                BuyPlan.customer_po_number.ilike(f"%{safe_q}%"),
             )
         )
 
     # Status filter
     if status:
-        base = base.filter(BuyPlanV3.status == status)
+        base = base.filter(BuyPlan.status == status)
 
     # Sort
     allowed_sorts = {
-        "created_at": BuyPlanV3.created_at,
-        "total": BuyPlanV3.total_cost,
+        "created_at": BuyPlan.created_at,
+        "total": BuyPlan.total_cost,
         "customer": Requisition.customer_name,
-        "name": BuyPlanV3.id,
+        "name": BuyPlan.id,
     }
-    sort_col = allowed_sorts.get(sort, BuyPlanV3.created_at)
+    sort_col = allowed_sorts.get(sort, BuyPlan.created_at)
     sort_expr = sort_col.asc() if dir == "asc" else sort_col.desc()
 
     total = base.count()
@@ -1338,7 +1337,7 @@ async def buy_plan_detail(
     db: Session = Depends(get_db),
 ):
     """Buy plan detail page with workflow actions."""
-    bp = db.query(BuyPlanV3).filter(BuyPlanV3.id == bp_id).first()
+    bp = db.query(BuyPlan).filter(BuyPlan.id == bp_id).first()
     if not bp:
         raise HTTPException(status_code=404, detail="Buy plan not found")
 

@@ -1,15 +1,14 @@
-"""Quote and Buy Plan models."""
+"""Quote models. Buy Plan V1 model removed — use BuyPlan from models.buy_plan."""
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    JSON,
-    Boolean,
     Column,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    JSON,
     Numeric,
     String,
     Text,
@@ -95,55 +94,6 @@ class QuoteLine(Base):
     )
 
 
-class BuyPlan(Base):
-    """Purchase plan submitted after a quote is won — requires manager approval."""
-
-    __tablename__ = "buy_plans"
-    id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
-    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
-
-    status = Column(String(30), default="pending_approval")
-    # Workflow: draft | pending_approval | approved | complete (UI shows: Draft -> Pending -> Approved -> Completed)
-    # Legacy: po_entered, po_confirmed map to Approved in UI; rejected, cancelled are terminal.
-
-    line_items = Column(JSON, nullable=False, default=list)
-
-    manager_notes = Column(Text)
-    salesperson_notes = Column(Text)
-    rejection_reason = Column(Text)
-    sales_order_number = Column(String(100))
-
-    submitted_by_id = Column(Integer, ForeignKey("users.id"))
-    approved_by_id = Column(Integer, ForeignKey("users.id"))
-
-    submitted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    approved_at = Column(DateTime)
-    rejected_at = Column(DateTime)
-    completed_at = Column(DateTime)
-    completed_by_id = Column(Integer, ForeignKey("users.id"))
-    cancelled_at = Column(DateTime)
-    cancelled_by_id = Column(Integer, ForeignKey("users.id"))
-    cancellation_reason = Column(Text)
-
-    approval_token = Column(String(100), unique=True)
-    token_expires_at = Column(DateTime)
-    is_stock_sale = Column(Boolean, default=False)
-
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    requisition = relationship("Requisition", foreign_keys=[requisition_id])
-    quote = relationship("Quote", foreign_keys=[quote_id])
-    submitted_by = relationship("User", foreign_keys=[submitted_by_id])
-    approved_by = relationship("User", foreign_keys=[approved_by_id])
-    completed_by = relationship("User", foreign_keys=[completed_by_id])
-    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
-
-    __table_args__ = (
-        Index("ix_buyplans_req", "requisition_id"),
-        Index("ix_buyplans_quote", "quote_id"),
-        Index("ix_buyplans_status", "status"),
-        Index("ix_buyplans_token", "approval_token"),
-        Index("ix_buyplans_status_created", "status", "created_at"),
-        Index("ix_buyplans_submitter_created", "submitted_by_id", "created_at"),
-    )
+# V1 BuyPlan model removed. All buy plan functionality now in models/buy_plan.py (BuyPlan).
+# The old `buy_plans` table still exists in the DB but is no longer mapped by SQLAlchemy.
+# Migration 076 already moved all V1 data to buy_plans_v3 + buy_plan_lines.

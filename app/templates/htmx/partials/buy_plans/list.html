@@ -1,0 +1,113 @@
+{#
+  list.html — Buy plans list view with status filter tabs and search.
+  Receives: buy_plans (list of dicts), q (str), status (str), total (int).
+  Called by: htmx_views.py buy_plans_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS.
+#}
+<div x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">
+
+  {# Header #}
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Buy Plans</h1>
+    <span class="text-sm text-gray-500">{{ total }} total</span>
+  </div>
+
+  {# Status filter tabs #}
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    {% for s, label in [('', 'All'), ('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active'), ('completed', 'Completed'), ('cancelled', 'Cancelled')] %}
+    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
+            :class="status === '{{ s }}' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+            @click="status = '{{ s }}'"
+            hx-get="/v2/partials/buy-plans?status={{ s }}"
+            hx-target="#main-content"
+            hx-include="[name='bp-search']">
+      {{ label }}
+    </button>
+    {% endfor %}
+
+    <label class="ml-4 flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+      <input type="checkbox" x-model="mine" name="mine_toggle"
+             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+             hx-get="/v2/partials/buy-plans"
+             hx-trigger="change"
+             hx-target="#main-content"
+             hx-include="[name='bp-search']"
+             :hx-vals="JSON.stringify({mine: mine, status: status})">
+      My Only
+    </label>
+  </div>
+
+  {# Search #}
+  <div class="mb-4">
+    <input type="search" name="bp-search" value="{{ q }}"
+           placeholder="Search by SO#, customer, quote..."
+           class="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+           hx-get="/v2/partials/buy-plans"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#main-content"
+           :hx-vals="JSON.stringify({status: status, mine: mine})">
+  </div>
+
+  {# Table #}
+  <div class="overflow-x-auto bg-white rounded-lg shadow">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quote</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SO#</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Lines</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SO</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitted</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% if buy_plans %}
+          {% for bp in buy_plans %}
+          <tr class="hover:bg-gray-50 cursor-pointer"
+              hx-get="/v2/partials/buy-plans/{{ bp.id }}"
+              hx-target="#main-content"
+              hx-push-url="/v2/buy-plans/{{ bp.id }}">
+            <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ bp.customer_name or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600 font-mono">{{ bp.quote_number or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ bp.sales_order_number or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ bp.line_count }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</td>
+            <td class="px-4 py-3 text-sm text-right
+                        {% if (bp.total_margin_pct or 0) >= 30 %}text-green-600{% elif (bp.total_margin_pct or 0) >= 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+              {{ '{:.1f}'.format(bp.total_margin_pct or 0) }}%
+            </td>
+            <td class="px-4 py-3">
+              {% set status_colors = {'draft': 'bg-gray-100 text-gray-700', 'pending': 'bg-yellow-100 text-yellow-800', 'active': 'bg-blue-100 text-blue-800', 'completed': 'bg-green-100 text-green-800', 'halted': 'bg-red-100 text-red-800', 'cancelled': 'bg-gray-100 text-gray-500'} %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
+                {{ bp.status }}
+              </span>
+              {% if bp.auto_approved %}
+              <span class="ml-1 text-xs text-green-600" title="Auto-approved">auto</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-3">
+              {% set so_colors = {'pending': 'bg-yellow-100 text-yellow-800', 'approved': 'bg-green-100 text-green-800', 'rejected': 'bg-red-100 text-red-800'} %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-700') }}">
+                {{ bp.so_status }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ bp.submitted_by_name or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ bp.created_at[:10] if bp.created_at else '-' }}</td>
+          </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="10" class="px-4 py-8 text-center text-sm text-gray-500">
+              No buy plans found.
+            </td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
