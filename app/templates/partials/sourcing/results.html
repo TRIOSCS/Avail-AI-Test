@@ -21,6 +21,9 @@
                 ('live', 'Live Stock'),
                 ('historical', 'Historical'),
                 ('affinity', 'Vendor Affinity'),
+                ('high_confidence', 'High Confidence'),
+                ('safe_vendors', 'Safe Vendors'),
+                ('has_lead', 'Has Lead'),
             ] %}
             {% for val, label in filters %}
             <button class="filter-pill"
@@ -41,7 +44,9 @@
                 hx-swap="innerHTML"
                 hx-include="this"
                 name="sort_by">
-            <option value="confidence" {{ 'selected' if sort_by == 'confidence' or not sort_by }}>Confidence</option>
+            <option value="confidence" {{ 'selected' if sort_by == 'confidence' or not sort_by }}>Best Overall</option>
+            <option value="safest" {{ 'selected' if sort_by == 'safest' }}>Safest</option>
+            <option value="freshest" {{ 'selected' if sort_by == 'freshest' }}>Freshest</option>
             <option value="price_asc" {{ 'selected' if sort_by == 'price_asc' }}>Price (low)</option>
             <option value="price_desc" {{ 'selected' if sort_by == 'price_desc' }}>Price (high)</option>
             <option value="qty_desc" {{ 'selected' if sort_by == 'qty_desc' }}>Qty (high)</option>
@@ -84,6 +89,9 @@
          style="display:none;">
     </div>
 </div>
+
+{# Lead detail panel — populated via HTMX when a lead "View" button is clicked #}
+<div id="lead-detail-container"></div>
 
 {# Modal container for material card popups #}
 <div id="modal-content"></div>

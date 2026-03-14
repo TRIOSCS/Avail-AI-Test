@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.dependencies import require_user
@@ -33,6 +33,8 @@ from app.models import (
     Sighting,
     SiteContact,
     SourcingLead,
+    LeadEvidence,
+    LeadFeedbackEvent,
     User,
     VendorCard,
     VendorContact,
@@ -361,11 +363,21 @@ _SOURCE_FILTERS = {
 
 
 def _filter_results(results: list, filter_value: str) -> list:
-    """Filter sourcing results by source category."""
+    """Filter sourcing results by source category or lead attribute."""
     if filter_value == "all" or not filter_value:
         return results
+    # Source type filters
     allowed_types = _SOURCE_FILTERS.get(filter_value, set())
-    return [r for r in results if r.get("source_type", "") in allowed_types]
+    if allowed_types:
+        return [r for r in results if r.get("source_type", "") in allowed_types]
+    # Lead attribute filters
+    if filter_value == "high_confidence":
+        return [r for r in results if r.get("confidence_band") == "high"]
+    if filter_value == "safe_vendors":
+        return [r for r in results if r.get("vendor_safety_band") in ("low_risk", None)]
+    if filter_value == "has_lead":
+        return [r for r in results if r.get("lead_id") is not None]
+    return results
 
 
 def _sort_results(results: list, sort_by: str) -> list:
@@ -376,6 +388,10 @@ def _sort_results(results: list, sort_by: str) -> list:
         return sorted(results, key=lambda r: (r.get("unit_price") is None, -(r.get("unit_price") or 0)))
     elif sort_by == "qty_desc":
         return sorted(results, key=lambda r: (r.get("qty_available") is None, -(r.get("qty_available") or 0)))
+    elif sort_by == "safest":
+        return sorted(results, key=lambda r: (r.get("vendor_safety_score") is None, -(r.get("vendor_safety_score") or 0)))
+    elif sort_by == "freshest":
+        return sorted(results, key=lambda r: (r.get("score", 0)), reverse=True)
     # Default: confidence descending
     return sorted(results, key=lambda r: (r.get("confidence_pct", 0), r.get("score", 0)), reverse=True)
 
@@ -498,6 +514,57 @@ async def material_card_detail(
             "card": card,
             "sightings": sightings,
         },
+    )
+
+
+@router.get("/views/sourcing/follow-up-queue")
+async def follow_up_queue_view(
+    request: Request,
+    status: str = "all",
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return follow-up queue partial showing all leads across requisitions."""
+    from app.models import Requisition as Req
+
+    q = (
+        db.query(SourcingLead)
+        .join(Req, SourcingLead.requisition_id == Req.id)
+        .filter(Req.created_by == user.id)
+    )
+    if status and status != "all":
+        q = q.filter(SourcingLead.buyer_status == status)
+    leads = q.order_by(SourcingLead.updated_at.desc()).limit(200).all()
+
+    return templates.TemplateResponse(
+        "partials/sourcing/follow_up_queue.html",
+        {"request": request, "leads": leads, "active_status": status},
+    )
+
+
+@router.get("/views/sourcing/leads/{lead_id}")
+async def lead_detail_view(
+    lead_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return lead detail partial with evidence, safety, contacts, and activity timeline."""
+    lead = (
+        db.query(SourcingLead)
+        .options(
+            joinedload(SourcingLead.evidence),
+            joinedload(SourcingLead.feedback_events),
+        )
+        .filter(SourcingLead.id == lead_id)
+        .first()
+    )
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    return templates.TemplateResponse(
+        "partials/sourcing/lead_detail.html",
+        {"request": request, "lead": lead},
     )
 
 

@@ -1,0 +1,290 @@
+{#
+  lead_detail.html — Lead detail panel showing evidence, safety, contacts, and activity timeline.
+  Receives: lead (SourcingLead ORM object with evidence and feedback_events loaded).
+  Called by: views.py get_lead_detail_view endpoint.
+  Depends on: Alpine.js for interactions, HTMX for status updates.
+#}
+<div class="lead-detail-panel" x-data="{ activeTab: 'evidence' }">
+
+    {# Header with back button #}
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+        <button class="btn btn-xs btn-ghost" onclick="closeSourcingLeadDetail()">Back</button>
+        <h3 style="margin:0;">{{ lead.vendor_name }}</h3>
+        <span class="badge" style="background:#e2e8f0;color:#334155;">
+            {{ (lead.buyer_status or 'new').replace("_", " ")|upper }}
+        </span>
+    </div>
+
+    {# Lead summary card #}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+        <div class="card" style="padding:12px;">
+            <div style="font-size:0.85em;color:#64748b;">Part</div>
+            <div style="font-weight:600;">{{ lead.part_number_matched }}</div>
+            {% if lead.part_number_requested != lead.part_number_matched %}
+                <div style="font-size:0.85em;color:#64748b;">Requested: {{ lead.part_number_requested }}</div>
+            {% endif %}
+            {% if lead.match_type and lead.match_type != 'exact' %}
+                <div style="font-size:0.85em;color:#b45309;">Match: {{ lead.match_type }}</div>
+            {% endif %}
+        </div>
+        <div class="card" style="padding:12px;">
+            <div style="font-size:0.85em;color:#64748b;">Confidence</div>
+            <div style="font-weight:600;">
+                {% set conf_color = '#16a34a' if lead.confidence_band == 'high' else ('#d97706' if lead.confidence_band == 'medium' else '#dc2626') %}
+                <span style="color:{{ conf_color }};">{{ lead.confidence_band|upper }}</span>
+                <span style="margin-left:6px;">{{ lead.confidence_score|round|int }}%</span>
+            </div>
+            <div style="font-size:0.85em;color:#64748b;">
+                {{ lead.evidence_count }} source{{ 's' if lead.evidence_count != 1 else '' }}
+                {% if lead.corroborated %} &middot; Corroborated{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {# Reason summary #}
+    {% if lead.reason_summary %}
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin-bottom:16px;font-size:0.9em;">
+        {{ lead.reason_summary }}
+    </div>
+    {% endif %}
+
+    {# Risk flags #}
+    {% if lead.risk_flags %}
+    <div style="margin-bottom:16px;">
+        {% for flag in lead.risk_flags %}
+        <span class="badge" style="background:#fef3c7;color:#92400e;margin-right:4px;">{{ flag }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Tab navigation #}
+    <div style="display:flex;gap:2px;border-bottom:2px solid #e2e8f0;margin-bottom:12px;">
+        {% for tab_id, tab_label in [('evidence', 'Evidence'), ('safety', 'Safety'), ('contact', 'Contact'), ('activity', 'Activity')] %}
+        <button class="btn btn-xs"
+                :class="{ 'btn-active': activeTab === '{{ tab_id }}' }"
+                @click="activeTab = '{{ tab_id }}'"
+                style="border-radius:6px 6px 0 0;border:1px solid #e2e8f0;border-bottom:none;padding:6px 14px;">
+            {{ tab_label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    {# Evidence tab #}
+    <div x-show="activeTab === 'evidence'">
+        {% if lead.evidence %}
+        <table class="data-table" style="font-size:0.9em;">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Type</th>
+                    <th>Part Observed</th>
+                    <th>Freshness</th>
+                    <th>Reliability</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ev in lead.evidence %}
+                <tr>
+                    <td>
+                        <span class="source-badge source-{{ ev.source_type or 'unknown' }}">
+                            {{ ev.source_name or ev.source_type or 'Unknown' }}
+                        </span>
+                    </td>
+                    <td>{{ ev.signal_type }}</td>
+                    <td>{{ ev.part_number_observed or '--' }}</td>
+                    <td>
+                        {% if ev.freshness_age_days is not none %}
+                            {{ ev.freshness_age_days|round|int }}d ago
+                        {% else %}
+                            --
+                        {% endif %}
+                    </td>
+                    <td>{{ ev.source_reliability_band or '--' }}</td>
+                    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">
+                        {{ ev.explanation or '--' }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="padding:16px;color:#64748b;text-align:center;">No evidence records.</div>
+        {% endif %}
+    </div>
+
+    {# Safety tab #}
+    <div x-show="activeTab === 'safety'">
+        <div class="card" style="padding:12px;margin-bottom:12px;">
+            {% set safety_bg = '#dcfce7' if lead.vendor_safety_band == 'low_risk' else ('#fef3c7' if lead.vendor_safety_band == 'medium_risk' else ('#fee2e2' if lead.vendor_safety_band == 'high_risk' else '#f1f5f9')) %}
+            {% set safety_fg = '#166534' if lead.vendor_safety_band == 'low_risk' else ('#92400e' if lead.vendor_safety_band == 'medium_risk' else ('#991b1b' if lead.vendor_safety_band == 'high_risk' else '#475569')) %}
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span class="badge" style="background:{{ safety_bg }};color:{{ safety_fg }};font-size:0.95em;">
+                    {{ (lead.vendor_safety_band or 'unknown').replace('_', ' ')|upper }}
+                </span>
+                {% if lead.vendor_safety_score is not none %}
+                    <span style="color:#64748b;">Score: {{ lead.vendor_safety_score|round|int }}</span>
+                {% endif %}
+            </div>
+            {% if lead.vendor_safety_summary %}
+                <div style="font-size:0.9em;margin-bottom:8px;">{{ lead.vendor_safety_summary }}</div>
+            {% endif %}
+
+            {% if lead.vendor_safety_flags %}
+                <div style="font-size:0.85em;color:#64748b;margin-bottom:4px;">Signals:</div>
+                {% for flag in lead.vendor_safety_flags %}
+                    <div style="font-size:0.9em;padding:2px 0;">{{ flag }}</div>
+                {% endfor %}
+            {% endif %}
+        </div>
+
+        <div style="font-size:0.85em;color:#94a3b8;padding:4px;">
+            Safety signals reflect available data and should be used alongside your own due diligence.
+        </div>
+    </div>
+
+    {# Contact tab #}
+    <div x-show="activeTab === 'contact'">
+        <div class="card" style="padding:12px;">
+            <table style="font-size:0.9em;width:100%;">
+                {% if lead.contact_name %}
+                <tr><td style="color:#64748b;padding:4px 8px 4px 0;">Name</td><td>{{ lead.contact_name }}</td></tr>
+                {% endif %}
+                {% if lead.contact_email %}
+                <tr><td style="color:#64748b;padding:4px 8px 4px 0;">Email</td><td><a href="mailto:{{ lead.contact_email }}">{{ lead.contact_email }}</a></td></tr>
+                {% endif %}
+                {% if lead.contact_phone %}
+                <tr><td style="color:#64748b;padding:4px 8px 4px 0;">Phone</td><td>{{ lead.contact_phone }}</td></tr>
+                {% endif %}
+                {% if lead.contact_url %}
+                <tr><td style="color:#64748b;padding:4px 8px 4px 0;">URL</td><td><a href="{{ lead.contact_url }}" target="_blank">{{ lead.contact_url }}</a></td></tr>
+                {% endif %}
+                {% if lead.location %}
+                <tr><td style="color:#64748b;padding:4px 8px 4px 0;">Location</td><td>{{ lead.location }}</td></tr>
+                {% endif %}
+            </table>
+            {% if not lead.contact_name and not lead.contact_email and not lead.contact_phone and not lead.contact_url %}
+                <div style="color:#64748b;text-align:center;padding:8px;">No contact information available.</div>
+            {% endif %}
+        </div>
+
+        {% if lead.suggested_next_action %}
+        <div style="margin-top:12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:10px;font-size:0.9em;">
+            <strong>Suggested next step:</strong> {{ lead.suggested_next_action }}
+        </div>
+        {% endif %}
+    </div>
+
+    {# Activity tab #}
+    <div x-show="activeTab === 'activity'">
+        {% if lead.feedback_events %}
+        <div style="font-size:0.9em;">
+            {% for evt in lead.feedback_events|reverse %}
+            <div style="border-left:2px solid #e2e8f0;padding:8px 0 8px 12px;margin-left:8px;{% if not loop.last %}margin-bottom:8px;{% endif %}">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="badge" style="background:#e2e8f0;color:#334155;">
+                        {{ evt.status.replace('_', ' ')|upper }}
+                    </span>
+                    {% if evt.contact_method %}
+                        <span style="color:#64748b;">via {{ evt.contact_method }}</span>
+                    {% endif %}
+                    {% if evt.created_at %}
+                        <span style="color:#94a3b8;font-size:0.85em;">
+                            {{ evt.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        </span>
+                    {% endif %}
+                </div>
+                {% if evt.note %}
+                    <div style="margin-top:4px;color:#475569;">{{ evt.note }}</div>
+                {% endif %}
+                {% if evt.reason_code %}
+                    <div style="margin-top:2px;font-size:0.85em;color:#94a3b8;">Reason: {{ evt.reason_code }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div style="padding:16px;color:#64748b;text-align:center;">No activity yet.</div>
+        {% endif %}
+
+        {# Quick feedback form #}
+        <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;">
+            <div style="font-size:0.85em;color:#64748b;margin-bottom:6px;">Add note</div>
+            <form hx-post="/api/leads/{{ lead.id }}/feedback"
+                  hx-target="#lead-detail-container"
+                  hx-swap="innerHTML"
+                  hx-headers='{"Content-Type": "application/json"}'
+                  x-data="{ note: '', contact_method: '' }">
+                <textarea x-model="note" name="note" rows="2"
+                          style="width:100%;border:1px solid #e2e8f0;border-radius:4px;padding:6px;font-size:0.9em;"
+                          placeholder="E.g. Called sales line, awaiting reply..."></textarea>
+                <div style="display:flex;gap:8px;margin-top:6px;">
+                    <select x-model="contact_method" name="contact_method"
+                            style="border:1px solid #e2e8f0;border-radius:4px;padding:4px;font-size:0.9em;">
+                        <option value="">Method...</option>
+                        <option value="email">Email</option>
+                        <option value="phone">Phone</option>
+                        <option value="portal">Portal</option>
+                        <option value="other">Other</option>
+                    </select>
+                    <button type="button" class="btn btn-xs"
+                            @click="
+                                fetch('/api/leads/{{ lead.id }}/feedback', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({note: note, contact_method: contact_method})
+                                }).then(() => {
+                                    htmx.ajax('GET', '/views/sourcing/leads/{{ lead.id }}', '#lead-detail-container');
+                                });
+                            ">
+                        Save Note
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {# Status change row #}
+    <div style="margin-top:16px;border-top:1px solid #e2e8f0;padding-top:12px;display:flex;align-items:center;gap:8px;">
+        <span style="font-size:0.85em;color:#64748b;">Status:</span>
+        <select class="btn btn-xs" style="min-width:140px;"
+                onchange="updateLeadStatusFromDetail({{ lead.id }}, this.value)">
+            {% set lead_status = lead.buyer_status or 'new' %}
+            {% for status_opt, status_label in [
+                ('new', 'New'),
+                ('contacted', 'Contacted'),
+                ('replied', 'Replied'),
+                ('has_stock', 'Has Stock'),
+                ('no_stock', 'No Stock'),
+                ('bad_lead', 'Bad Lead'),
+                ('do_not_contact', 'Do Not Contact'),
+            ] %}
+            <option value="{{ status_opt }}" {{ 'selected' if lead_status == status_opt else '' }}>{{ status_label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<script>
+function updateLeadStatusFromDetail(leadId, status) {
+    if (!leadId || !status) return;
+    fetch(`/api/leads/${leadId}/status`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ status })
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error("Status update failed");
+        return resp.json();
+    })
+    .then(() => {
+        htmx.ajax("GET", `/views/sourcing/leads/${leadId}`, "#lead-detail-container");
+    })
+    .catch(() => alert("Unable to update lead status."));
+}
+
+function closeSourcingLeadDetail() {
+    const container = document.getElementById("lead-detail-container");
+    if (container) container.innerHTML = "";
+}
+</script>

@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import MaterialCard, Requirement, Requisition, Sighting, SourcingLead
+from app.models import LeadEvidence, LeadFeedbackEvent, MaterialCard, Requirement, Requisition, Sighting, SourcingLead
 
 
 @pytest.fixture()
@@ -305,3 +305,126 @@ class TestSSEStreamEndpoint:
         resp = htmx_client.get(f"/views/sourcing/{requirement.id}/stream")
         assert resp.status_code == 200
         assert "search-progress" in resp.text
+
+
+class TestLeadDetailView:
+    """Test GET /views/sourcing/leads/{lead_id} returns lead detail partial."""
+
+    def test_lead_detail_renders_evidence_and_safety(self, htmx_client, sourcing_data, db_session):
+        """Lead detail view returns HTML with evidence, safety, and contact sections."""
+        lead = db_session.query(SourcingLead).filter(
+            SourcingLead.lead_id == "ld_htmx_test_001"
+        ).first()
+        assert lead is not None
+
+        # Add evidence and feedback for the lead
+        ev = LeadEvidence(
+            evidence_id="ev_htmx_test_001",
+            lead_id=lead.id,
+            signal_type="live_stock",
+            source_type="brokerbin",
+            source_name="Brokerbin",
+            part_number_observed="LM317T",
+            vendor_name_observed="Arrow Electronics",
+            freshness_age_days=1.5,
+            explanation="Live stock listing from Brokerbin",
+            source_reliability_band="high",
+        )
+        fb = LeadFeedbackEvent(
+            lead_id=lead.id,
+            status="contacted",
+            note="Called Arrow sales line",
+            contact_method="phone",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([ev, fb])
+        db_session.commit()
+
+        resp = htmx_client.get(f"/views/sourcing/leads/{lead.id}")
+        assert resp.status_code == 200
+        html = resp.text
+
+        # Lead header
+        assert "Arrow Electronics" in html
+        assert "HIGH" in html  # confidence band
+        assert "LM317T" in html
+
+        # Evidence tab
+        assert "Brokerbin" in html
+        assert "live_stock" in html
+
+        # Safety tab
+        assert "MEDIUM RISK" in html
+
+        # Activity tab
+        assert "Called Arrow sales line" in html
+        assert "CONTACTED" in html
+
+    def test_lead_detail_404(self, htmx_client):
+        """Returns 404 for nonexistent lead."""
+        resp = htmx_client.get("/views/sourcing/leads/99999")
+        assert resp.status_code == 404
+
+
+class TestFollowUpQueue:
+    """Test GET /views/sourcing/follow-up-queue returns buyer queue."""
+
+    def test_follow_up_queue_renders(self, htmx_client, sourcing_data):
+        """Queue endpoint shows leads table with status tabs."""
+        resp = htmx_client.get("/views/sourcing/follow-up-queue")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Buyer Follow-Up Queue" in html
+        assert "Arrow Electronics" in html
+        assert "LM317T" in html
+        assert "NEW" in html
+
+    def test_follow_up_queue_filter_by_status(self, htmx_client, sourcing_data):
+        """Queue filters by status parameter."""
+        resp = htmx_client.get("/views/sourcing/follow-up-queue?status=contacted")
+        assert resp.status_code == 200
+        html = resp.text
+        # No leads with contacted status in fixture
+        assert "No leads found" in html
+
+    def test_follow_up_queue_all_shows_leads(self, htmx_client, sourcing_data):
+        """Queue with status=all shows all leads."""
+        resp = htmx_client.get("/views/sourcing/follow-up-queue?status=all")
+        assert resp.status_code == 200
+        assert "Arrow Electronics" in resp.text
+
+
+class TestFilterAndSort:
+    """Test extended filter and sort options on sourcing results."""
+
+    def test_filter_high_confidence(self, htmx_client, sourcing_data):
+        """High confidence filter shows only high-confidence results with leads."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?filter=has_lead")
+        assert resp.status_code == 200
+        html = resp.text
+        # Only Arrow has a lead in fixture
+        assert "Arrow Electronics" in html
+
+    def test_sort_safest(self, htmx_client, sourcing_data):
+        """Safest sort option returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?sort_by=safest")
+        assert resp.status_code == 200
+
+    def test_sort_freshest(self, htmx_client, sourcing_data):
+        """Freshest sort option returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?sort_by=freshest")
+        assert resp.status_code == 200
+
+    def test_results_html_has_new_filter_pills(self, htmx_client, sourcing_data):
+        """Results page includes the new filter pills."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "High Confidence" in html
+        assert "Safe Vendors" in html
+        assert "Best Overall" in html
+        assert "Safest" in html

@@ -1092,6 +1092,22 @@ async def add_lead_feedback(
     return {"ok": True, "lead_id": updated.id, "status": updated.buyer_status}
 
 
+@router.get("/api/leads/queue", response_model=list[LeadOut])
+async def leads_queue(
+    status: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition buyer follow-up queue. Filterable by buyer_status."""
+    q = db.query(SourcingLead).join(
+        Requisition, SourcingLead.requisition_id == Requisition.id
+    ).filter(Requisition.created_by == user.id)
+    if status and status != "all":
+        q = q.filter(SourcingLead.buyer_status == status)
+    q = q.order_by(SourcingLead.updated_at.desc())
+    return q.limit(200).all()
+
+
 # ── Mark sighting as unavailable ─────────────────────────────────────────
 @router.put("/api/sightings/{sighting_id}/unavailable")
 async def mark_unavailable(

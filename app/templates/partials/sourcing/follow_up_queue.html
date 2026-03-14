@@ -1,0 +1,147 @@
+{#
+  follow_up_queue.html — Buyer follow-up queue showing all leads across requisitions.
+  Receives: leads (list of SourcingLead ORM objects), active_status (str: current filter tab).
+  Called by: views.py follow_up_queue_view endpoint.
+  Depends on: Alpine.js for interactions, HTMX for status updates and tab switching.
+#}
+<div class="follow-up-queue" x-data="{ selectedLead: null }">
+
+    <h2 style="margin-bottom:12px;">Buyer Follow-Up Queue</h2>
+
+    {# Status tabs #}
+    <div style="display:flex;gap:2px;border-bottom:2px solid #e2e8f0;margin-bottom:12px;">
+        {% set status_tabs = [
+            ('all', 'All'),
+            ('new', 'New'),
+            ('contacted', 'Contacted'),
+            ('replied', 'Replied'),
+            ('has_stock', 'Has Stock'),
+            ('no_stock', 'No Stock'),
+            ('bad_lead', 'Bad Lead'),
+        ] %}
+        {% for tab_val, tab_label in status_tabs %}
+        <button class="btn btn-xs"
+                style="border-radius:6px 6px 0 0;border:1px solid #e2e8f0;border-bottom:none;padding:6px 14px;{% if active_status == tab_val %}background:#334155;color:#fff;{% endif %}"
+                hx-get="/views/sourcing/follow-up-queue?status={{ tab_val }}"
+                hx-target="#follow-up-queue-container"
+                hx-swap="innerHTML">
+            {{ tab_label }}
+            {% set count = leads|selectattr('buyer_status', 'equalto', tab_val)|list|length if tab_val != 'all' else leads|length %}
+        </button>
+        {% endfor %}
+    </div>
+
+    {# Queue table #}
+    {% if leads %}
+    <table class="data-table" style="font-size:0.9em;">
+        <thead>
+            <tr>
+                <th>Vendor</th>
+                <th>Part</th>
+                <th>Confidence</th>
+                <th>Safety</th>
+                <th>Status</th>
+                <th>Sources</th>
+                <th>Last Updated</th>
+                <th>Next Step</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for lead in leads %}
+            <tr>
+                <td style="font-weight:600;">{{ lead.vendor_name }}</td>
+                <td>{{ lead.part_number_matched }}</td>
+                <td>
+                    {% set conf_color = '#16a34a' if lead.confidence_band == 'high' else ('#d97706' if lead.confidence_band == 'medium' else '#dc2626') %}
+                    <span style="color:{{ conf_color }};font-weight:600;">
+                        {{ lead.confidence_score|round|int }}%
+                    </span>
+                </td>
+                <td>
+                    {% if lead.vendor_safety_band %}
+                        {% set safety_bg = '#dcfce7' if lead.vendor_safety_band == 'low_risk' else ('#fef3c7' if lead.vendor_safety_band == 'medium_risk' else ('#fee2e2' if lead.vendor_safety_band == 'high_risk' else '#f1f5f9')) %}
+                        {% set safety_fg = '#166534' if lead.vendor_safety_band == 'low_risk' else ('#92400e' if lead.vendor_safety_band == 'medium_risk' else ('#991b1b' if lead.vendor_safety_band == 'high_risk' else '#475569')) %}
+                        <span class="badge" style="background:{{ safety_bg }};color:{{ safety_fg }};">
+                            {{ lead.vendor_safety_band.replace('_', ' ')|upper }}
+                        </span>
+                    {% else %}
+                        <span style="color:#94a3b8;">--</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <span class="badge" style="background:#e2e8f0;color:#334155;">
+                        {{ lead.buyer_status.replace('_', ' ')|upper }}
+                    </span>
+                </td>
+                <td style="text-align:center;">{{ lead.evidence_count }}</td>
+                <td style="color:#64748b;font-size:0.85em;">
+                    {% if lead.updated_at %}
+                        {{ lead.updated_at.strftime('%Y-%m-%d') }}
+                    {% else %}
+                        --
+                    {% endif %}
+                </td>
+                <td style="font-size:0.85em;max-width:180px;overflow:hidden;text-overflow:ellipsis;">
+                    {{ lead.suggested_next_action or '--' }}
+                </td>
+                <td class="actions-cell">
+                    <button class="btn btn-xs btn-ghost"
+                            hx-get="/views/sourcing/leads/{{ lead.id }}"
+                            hx-target="#lead-detail-container"
+                            hx-swap="innerHTML"
+                            title="View lead detail">
+                        View
+                    </button>
+                    <select class="btn btn-xs" style="margin-left:4px;min-width:110px;"
+                            onchange="updateQueueLeadStatus({{ lead.id }}, this.value)">
+                        {% set lead_status = lead.buyer_status or 'new' %}
+                        {% for status_opt, status_label in [
+                            ('new', 'New'),
+                            ('contacted', 'Contacted'),
+                            ('replied', 'Replied'),
+                            ('has_stock', 'Has Stock'),
+                            ('no_stock', 'No Stock'),
+                            ('bad_lead', 'Bad Lead'),
+                            ('do_not_contact', 'Do Not Contact'),
+                        ] %}
+                        <option value="{{ status_opt }}" {{ 'selected' if lead_status == status_opt else '' }}>{{ status_label }}</option>
+                        {% endfor %}
+                    </select>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="padding:32px;text-align:center;color:#64748b;">
+        No leads found{% if active_status and active_status != 'all' %} with status "{{ active_status.replace('_', ' ') }}"{% endif %}.
+    </div>
+    {% endif %}
+
+    {# Lead detail container for inline detail view #}
+    <div id="lead-detail-container" style="margin-top:16px;"></div>
+</div>
+
+<script>
+function updateQueueLeadStatus(leadId, status) {
+    if (!leadId || !status) return;
+    fetch(`/api/leads/${leadId}/status`, {
+        method: "PATCH",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ status })
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error("Status update failed");
+        return resp.json();
+    })
+    .then(() => {
+        const container = document.getElementById("follow-up-queue-container");
+        if (container && window.htmx) {
+            const currentUrl = container.getAttribute("data-current-url") || "/views/sourcing/follow-up-queue";
+            htmx.ajax("GET", currentUrl, "#follow-up-queue-container");
+        }
+    })
+    .catch(() => alert("Unable to update lead status."));
+}
+</script>

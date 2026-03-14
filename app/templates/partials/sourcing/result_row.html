@@ -87,6 +87,14 @@
         </button>
         {% endif %}
         {% if result.lead_id %}
+        <button class="btn btn-xs btn-ghost"
+                hx-get="/views/sourcing/leads/{{ result.lead_id }}"
+                hx-target="#lead-detail-container"
+                hx-swap="innerHTML"
+                title="View lead detail"
+                style="margin-left:6px;">
+            View
+        </button>
         <select class="btn btn-xs"
                 style="margin-left:6px;min-width:130px"
                 onchange="updateSourcingLeadStatus({{ result.lead_id }}, this.value, {{ req_row_id }})">
