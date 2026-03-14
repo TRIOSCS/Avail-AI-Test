@@ -102,6 +102,7 @@ from .sourcing import (  # noqa: F401
     RequisitionAttachment,
     Sighting,
 )
+from .sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead  # noqa: F401
 
 # Strategic Vendors (per-buyer assignments with 39-day TTL)
 from .strategic import StrategicVendor  # noqa: F401
