@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AvailAI{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-block; }
+    .htmx-request.htmx-indicator { display: inline-block; }
+    /* Smooth content transitions */
+    .htmx-swapping { opacity: 0; transition: opacity 0.15s ease-out; }
+    .htmx-settling { opacity: 1; transition: opacity 0.15s ease-in; }
+    /* Spinner animation */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin 0.6s linear infinite; }
+  </style>
+</head>
+<body class="h-full" x-data="{ sidebarOpen: false, currentView: '{{ current_view|default("requisitions") }}' }">
+  {% block body %}
+  <div class="min-h-full flex">
+
+    {# ── Sidebar ─────────────────────────────────────────────── #}
+    <aside class="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-gray-900">
+      {# Logo #}
+      <div class="flex items-center h-16 px-6 border-b border-gray-800">
+        <span class="text-xl font-bold text-white tracking-tight">Avail<span class="text-blue-400">AI</span></span>
+      </div>
+
+      {# Navigation #}
+      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <p class="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Command Center</p>
+
+        <a href="/v2/requisitions"
+           hx-get="/v2/partials/requisitions"
+           hx-target="#main-content"
+           hx-push-url="/v2/requisitions"
+           @click="currentView = 'requisitions'"
+           :class="currentView === 'requisitions' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          Requisitions
+        </a>
+
+        <a href="/v2/search"
+           hx-get="/v2/partials/search"
+           hx-target="#main-content"
+           hx-push-url="/v2/search"
+           @click="currentView = 'search'"
+           :class="currentView === 'search' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          Part Search
+        </a>
+
+        <p class="px-3 pt-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Relationships</p>
+
+        <a href="/v2/vendors"
+           hx-get="/v2/partials/vendors"
+           hx-target="#main-content"
+           hx-push-url="/v2/vendors"
+           @click="currentView = 'vendors'"
+           :class="currentView === 'vendors' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+          Vendors
+        </a>
+
+        <a href="/v2/companies"
+           hx-get="/v2/partials/companies"
+           hx-target="#main-content"
+           hx-push-url="/v2/companies"
+           @click="currentView = 'companies'"
+           :class="currentView === 'companies' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          Companies
+        </a>
+      </nav>
+
+      {# User info #}
+      <div class="flex items-center px-4 py-3 border-t border-gray-800">
+        <div class="flex-shrink-0">
+          <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-medium">
+            {{ user_name[0]|upper if user_name else "?" }}
+          </div>
+        </div>
+        <div class="ml-3 min-w-0 flex-1">
+          <p class="text-sm font-medium text-white truncate">{{ user_name }}</p>
+          <p class="text-xs text-gray-400 truncate">{{ user_email }}</p>
+        </div>
+        <a href="/auth/logout" class="ml-2 text-gray-400 hover:text-white">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        </a>
+      </div>
+    </aside>
+
+    {# ── Mobile header ───────────────────────────────────────── #}
+    <div class="lg:hidden fixed top-0 inset-x-0 z-40 bg-gray-900 border-b border-gray-800 h-14 flex items-center px-4">
+      <button @click="sidebarOpen = !sidebarOpen" class="text-gray-300 hover:text-white">
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <span class="ml-3 text-lg font-bold text-white">Avail<span class="text-blue-400">AI</span></span>
+    </div>
+
+    {# Mobile sidebar overlay #}
+    <div x-show="sidebarOpen" x-cloak class="lg:hidden fixed inset-0 z-50" @click.self="sidebarOpen = false">
+      <div class="fixed inset-0 bg-black/50"></div>
+      <aside class="fixed inset-y-0 left-0 w-64 bg-gray-900 shadow-xl z-50 overflow-y-auto">
+        <div class="flex items-center justify-between h-14 px-4 border-b border-gray-800">
+          <span class="text-lg font-bold text-white">Avail<span class="text-blue-400">AI</span></span>
+          <button @click="sidebarOpen = false" class="text-gray-400 hover:text-white">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <nav class="px-3 py-4 space-y-1">
+          <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions" @click="currentView = 'requisitions'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Requisitions</a>
+          <a href="/v2/search" hx-get="/v2/partials/search" hx-target="#main-content" hx-push-url="/v2/search" @click="currentView = 'search'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Part Search</a>
+          <a href="/v2/vendors" hx-get="/v2/partials/vendors" hx-target="#main-content" hx-push-url="/v2/vendors" @click="currentView = 'vendors'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Vendors</a>
+          <a href="/v2/companies" hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies" @click="currentView = 'companies'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Companies</a>
+        </nav>
+      </aside>
+    </div>
+
+    {# ── Main content ────────────────────────────────────────── #}
+    <main class="lg:pl-64 flex-1 min-h-screen pt-14 lg:pt-0">
+      <div id="main-content" class="p-4 lg:p-8">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+
+  </div>
+  {% endblock %}
+
+  {# Global HTMX config #}
+  <script>
+    document.body.addEventListener('htmx:beforeSwap', function(evt) {
+      // Handle 401 — redirect to login
+      if (evt.detail.xhr.status === 401) {
+        window.location.href = '/auth/login';
+      }
+    });
+  </script>
+</body>
+</html>

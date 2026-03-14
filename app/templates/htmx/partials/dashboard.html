@@ -1,0 +1,42 @@
+{# Dashboard partial — loaded into #main-content on initial page load.
+   Shows summary stats and quick actions. #}
+
+<div class="max-w-7xl mx-auto">
+  <h1 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+
+  {# Stats cards #}
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Open Requisitions</p>
+      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.open_reqs }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Active Vendors</p>
+      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.vendor_count }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Companies</p>
+      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.company_count }}</p>
+    </div>
+  </div>
+
+  {# Quick actions #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
+    <div class="flex flex-wrap gap-3">
+      <a href="/v2/requisitions"
+         hx-get="/v2/partials/requisitions/create-form"
+         hx-target="#main-content"
+         class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+        + New Requisition
+      </a>
+      <a href="/v2/search"
+         hx-get="/v2/partials/search"
+         hx-target="#main-content"
+         hx-push-url="/v2/search"
+         class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+        Search Parts
+      </a>
+    </div>
+  </div>
+</div>
