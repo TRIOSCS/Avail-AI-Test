@@ -144,6 +144,10 @@ class BaseConnector(ABC):
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
         raise last_err  # propagate so caller can track the error
 
+    @abstractmethod
+    async def _do_search(self, part_number: str) -> list[dict]:
+        pass
+
 
 def _parse_retry_after(response: httpx.Response) -> float:
     """Extract wait time from Retry-After header, default to exponential backoff."""
@@ -155,11 +159,6 @@ def _parse_retry_after(response: httpx.Response) -> float:
             pass
     # No header or unparseable — default to 5s + jitter
     return 5.0 + random.uniform(0, 2)
-
-    @abstractmethod
-    async def _do_search(self, part_number: str) -> list[dict]:
-        pass
-
 
 class NexarConnector(BaseConnector):
     """Nexar/Octopart API — full seller data via GraphQL or REST v4."""
@@ -347,8 +346,8 @@ class NexarConnector(BaseConnector):
                             "vendor_name": name,
                             "manufacturer": mfr,
                             "mpn_matched": mpn,
-                            "qty_available": int(qty) if qty else None,
-                            "unit_price": round(float(price), 4) if price else None,
+                            "qty_available": safe_int(qty),
+                            "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
                             "currency": currency,
                             "source_type": "octopart",
                             "is_authorized": auth,
@@ -478,8 +477,8 @@ class NexarConnector(BaseConnector):
                             "vendor_name": name,
                             "manufacturer": mfr,
                             "mpn_matched": mpn,
-                            "qty_available": int(qty) if qty else None,
-                            "unit_price": round(float(price), 4) if price else None,
+                            "qty_available": safe_int(qty),
+                            "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
                             "currency": currency,
                             "source_type": "octopart",
                             "is_authorized": auth,
@@ -523,8 +522,8 @@ class NexarConnector(BaseConnector):
                     "vendor_name": "Octopart (aggregate)",
                     "manufacturer": mfr,
                     "mpn_matched": mpn,
-                    "qty_available": int(total_avail) if total_avail else None,
-                    "unit_price": round(float(price), 4) if price else None,
+                    "qty_available": safe_int(total_avail),
+                    "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
                     "currency": currency,
                     "source_type": "octopart",
                     "is_authorized": True,

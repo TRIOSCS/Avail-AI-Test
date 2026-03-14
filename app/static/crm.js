@@ -18,7 +18,7 @@ import {
     toggleDrillDown, guardBtn, openVendorPopup,
     loadVendorContacts, refreshProactiveBadge,
     currentReqId, setCurrentReqId,
-    sanitizeRichHtml,
+    sanitizeRichHtml, safeHref,
     _renderAvailScoreTable,
 } from 'app';
 
@@ -57,6 +57,10 @@ function safeUrl(url) {
     if (!url) return '';
     const val = String(url).trim();
     return /^(https?:\/\/|mailto:|tel:)/i.test(val) ? val : '';
+}
+
+function jsArg(value) {
+    return JSON.stringify(String(value ?? ''));
 }
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -239,8 +243,16 @@ async function loadCustomers(append) {
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         if (_custFilterMode === 'unassigned') url += '&unassigned=1';
         const [result, reqs] = await Promise.all([
-            apiFetch(url, {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load accounts', 'error'); return {items:[],total:0}; }),
-            apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load requisitions','warn'); return []; }),
+            apiFetch(url, {signal: _custAbort.signal}).catch(e => {
+                if (e.name === 'AbortError') throw e;
+                showToast('Failed to load accounts', 'error');
+                return {items:[],total:0};
+            }),
+            apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(e => {
+                if (e.name === 'AbortError') throw e;
+                showToast('Failed to load requisitions','warn');
+                return { requisitions: [] };
+            }),
         ]);
         const items = (result.items || result || []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
@@ -252,7 +264,8 @@ async function loadCustomers(append) {
             crmCustomers = items;
         }
         _custOffset = crmCustomers.length;
-        _enrichCustomersWithReqStats(crmCustomers, Array.isArray(reqs) ? reqs : []);
+        const reqItems = Array.isArray(reqs) ? reqs : (Array.isArray(reqs?.requisitions) ? reqs.requisitions : []);
+        _enrichCustomersWithReqStats(crmCustomers, reqItems);
         renderCustomers();
     } catch (e) { if (e.name === 'AbortError') return; showToast('Failed to load customers', 'error'); console.error(e); }
 }
@@ -545,7 +558,7 @@ function _renderMobileContact(ct, companyId) {
         actionsHtml += phoneLink(ct.phone, {company_id: companyId || null, origin: 'crm_mobile_contact'});
     }
     if (ct.email) {
-        actionsHtml += `<a href="mailto:${escAttr(ct.email)}" onclick="event.stopPropagation();autoLogEmail('${escAttr(ct.email)}','${escAttr(ct.full_name || '')}')" style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--blue-bg,#eff6ff);border-radius:8px;color:var(--blue,#2563eb);text-decoration:none;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis">${esc(ct.email)}</a>`;
+        actionsHtml += `<a href="mailto:${escAttr(ct.email)}" onclick='event.stopPropagation();autoLogEmail(${jsArg(ct.email)},${jsArg(ct.full_name || "")})' style="display:flex;align-items:center;gap:6px;padding:10px 14px;background:var(--blue-bg,#eff6ff);border-radius:8px;color:var(--blue,#2563eb);text-decoration:none;font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis">${esc(ct.email)}</a>`;
     }
 
     return `<div class="m-card" style="margin-bottom:8px">
@@ -877,19 +890,21 @@ async function _autoLoadAccountSummary(companyId) {
 }
 
 async function switchCustDrawerTab(tab, btn) {
+    const companyId = _selectedCustId;
     _currentCustTab = tab; // persist for account switches
     document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    if (!_selectedCustId) return;
+    if (!companyId) return;
     // Lazy-load full detail (sites, contacts) when needed
     const needsDetail = (tab === 'sites' || tab === 'contacts' || tab === 'overview');
-    if (needsDetail) await _ensureCompanyDetail(_selectedCustId);
-    if (tab === 'overview') _renderCustDrawerOverview(_selectedCustId);
-    else if (tab === 'contacts') _renderCustDrawerContacts(_selectedCustId);
-    else if (tab === 'sites') _renderCustDrawerSites(_selectedCustId);
-    else if (tab === 'activity') _renderCustDrawerActivity(_selectedCustId);
-    else if (tab === 'pipeline') _renderCustDrawerPipeline(_selectedCustId);
-    else if (tab === 'apollo') _renderCustDrawerApollo(_selectedCustId);
+    if (needsDetail) await _ensureCompanyDetail(companyId);
+    if (_selectedCustId !== companyId || _currentCustTab !== tab) return;
+    if (tab === 'overview') _renderCustDrawerOverview(companyId);
+    else if (tab === 'contacts') _renderCustDrawerContacts(companyId);
+    else if (tab === 'sites') _renderCustDrawerSites(companyId);
+    else if (tab === 'activity') _renderCustDrawerActivity(companyId);
+    else if (tab === 'pipeline') _renderCustDrawerPipeline(companyId);
+    else if (tab === 'apollo') _renderCustDrawerApollo(companyId);
 }
 
 async function _ensureCompanyDetail(companyId) {
@@ -907,10 +922,11 @@ async function _ensureCompanyDetail(companyId) {
         const detail = await apiFetch('/api/companies/' + companyId);
         c.sites = detail.sites || [];
         c._detail = detail;
+        c._detailLoadFailed = false;
         _setCachedCompanyDetail(companyId, detail);
     } catch (e) {
         logCatchError('_ensureCompanyDetail', e);
-        c.sites = [];
+        c._detailLoadFailed = true;
     }
 }
 
@@ -1031,14 +1047,14 @@ async function _renderCustDrawerSites(companyId) {
 
     const sites = c.sites || [];
     if (!sites.length) {
-        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="javascript:void(0)" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p></div>`;
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="#" onclick='event.preventDefault();openAddSiteModal(${c.id},${jsArg(c.name)})'>add one</a></p></div>`;
         return;
     }
 
     let html = `<div class="drawer-section" style="padding-bottom:8px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
             <div class="drawer-section-title" style="margin:0">${sites.length} Sites</div>
-            <button class="btn btn-ghost btn-sm" onclick="openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>
+            <button class="btn btn-ghost btn-sm" onclick='openAddSiteModal(${c.id},${jsArg(c.name)})'>+ Add Site</button>
         </div>`;
 
     for (const s of sites) {
@@ -1114,9 +1130,9 @@ async function toggleSiteAccordion(siteId) {
                         ${lastContact ? '<div style="font-size:10px;color:var(--muted)">Last contact: ' + lastContact + '</div>' : ''}
                     </div>
                     <div class="site-contact-actions">
-                        ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">✉</a>' : ''}
+                        ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick=\'event.stopPropagation();autoLogEmail('+jsArg(c.email)+','+jsArg(c.full_name || '')+')\'>✉</a>' : ''}
                         ${c.phone ? '<a href="tel:'+escAttr(toE164(c.phone) || c.phone)+'" class="phone-link" onclick="logCallInitiated(this)" data-phone="'+escAttr(c.phone)+'" data-ctx="'+escAttr(JSON.stringify({company_id: _selectedCustId, customer_site_id: s.id, origin: 'site_contacts'}))+'" title="Call">📞</a>' : ''}
-                        ${c.email && !c.email_verified ? '<a href="#" onclick="event.preventDefault();event.stopPropagation();verifyContactEmail('+c.id+',\''+escAttr(c.email)+'\')" title="Verify email" style="font-size:10px">Verify</a>' : ''}
+                        ${c.email && !c.email_verified ? '<a href="#" onclick=\'event.preventDefault();event.stopPropagation();verifyContactEmail('+c.id+','+jsArg(c.email)+')\' title="Verify email" style="font-size:10px">Verify</a>' : ''}
                         <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</a>
                     </div>
                 </div>`;
@@ -1169,10 +1185,11 @@ async function _renderCustDrawerActivity(companyId) {
     body.innerHTML = '<div class="drawer-section"><p class="empty">Loading activity...</p></div>';
     try {
         const activities = await apiFetch('/api/companies/' + companyId + '/activities');
+        if (_selectedCustId !== companyId || _currentCustTab !== 'activity') return;
         const c = crmCustomers.find(x => x.id === companyId);
         if (!activities.length) {
             body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No activity recorded — send an RFQ or log a note to get started</p>
-                ${c ? '<button class="btn btn-ghost btn-sm" onclick="openLogNoteModal('+c.id+',\''+escAttr(c.name)+'\')">+ Add Note</button>' : ''}
+                ${c ? '<button class="btn btn-ghost btn-sm" onclick=\'openLogNoteModal('+c.id+','+jsArg(c.name)+')\'>+ Add Note</button>' : ''}
             </div>`;
             return;
         }
@@ -1204,6 +1221,7 @@ async function _renderCustDrawerActivity(companyId) {
         html += '</div></div>';
         body.innerHTML = html;
     } catch (e) {
+        if (_selectedCustId !== companyId || _currentCustTab !== 'activity') return;
         body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load activity</p></div>';
     }
 }
@@ -1222,6 +1240,7 @@ async function _renderCustDrawerPipeline(companyId) {
         // Fetch site details for recent reqs
         const sitePromises = siteIds.slice(0, 20).map(sid => apiFetch('/api/sites/' + sid).catch(() => null));
         const siteResults = await Promise.all(sitePromises);
+        if (_selectedCustId !== companyId || _currentCustTab !== 'pipeline') return;
         const allReqs = [];
         for (const s of siteResults) {
             if (s && s.recent_reqs) {
@@ -1279,6 +1298,7 @@ async function _renderCustDrawerPipeline(companyId) {
         html += '</div>';
         body.innerHTML = html;
     } catch (e) {
+        if (_selectedCustId !== companyId || _currentCustTab !== 'pipeline') return;
         body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load pipeline</p></div>';
     }
 }
@@ -1376,7 +1396,7 @@ function _buildContactCardHtml(ct, companyId) {
                 ${location ? '<div class="contact-card-location">' + esc(location) + '</div>' : ''}
             </div>
             <div class="contact-card-actions">
-                ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" title="'+escAttr(ct.email)+'" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(ct.email)+'\',\''+escAttr(ct.full_name || '')+'\')">✉</a>' : ''}
+                ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" title="'+escAttr(ct.email)+'" onclick=\'event.stopPropagation();autoLogEmail('+jsArg(ct.email)+','+jsArg(ct.full_name || '')+')\'>✉</a>' : ''}
                 ${ct.phone ? '<a href="tel:'+escAttr(toE164(ct.phone) || ct.phone)+'" class="phone-link" onclick="logCallInitiated(this)" data-phone="'+escAttr(ct.phone)+'" data-ctx="'+escAttr(JSON.stringify({company_id: companyId, customer_site_id: ct.site_id, origin: 'contact_card'}))+'" title="'+escAttr(ct.phone)+'">📞</a>' : ''}
                 <button onclick="openEditSiteContact(${ct.site_id},${ct.id})" title="Edit">✎</button>
                 ${archiveBtn}
@@ -1482,7 +1502,7 @@ async function _renderCustDrawerContacts(companyId) {
 
     const sites = c.sites || [];
     if (!sites.length) {
-        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites yet — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add a site</a> to start adding contacts</p></div>`;
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites yet — <a href="#" onclick='event.preventDefault();openAddSiteModal(${c.id},${jsArg(c.name)})'>add a site</a> to start adding contacts</p></div>`;
         return;
     }
 
@@ -1584,7 +1604,7 @@ async function toggleSiteDetail(siteId) {
                         </div>
                         ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
                         <div class="si-contact-meta">
-                            ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'" onclick="autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">'+esc(c.email)+'</a>' : ''}
+                            ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'" onclick=\'autoLogEmail('+jsArg(c.email)+','+jsArg(c.full_name || '')+')\'>'+esc(c.email)+'</a>' : ''}
                             ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, customer_site_id: s.id, origin: 'site_contact_detail'}) : ''}
                         </div>
                         ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
@@ -1598,7 +1618,7 @@ async function toggleSiteDetail(siteId) {
                     <div class="si-contact-actions">
                         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</button>
                         ${archiveBtn}
-                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')">✕</button>
+                        <button class="btn btn-danger btn-sm" onclick='event.stopPropagation();deleteSiteContact(${s.id},${c.id},${jsArg(c.full_name)})'>✕</button>
                     </div>
                 </div>`;
             };
@@ -2439,7 +2459,7 @@ function renderQuote() {
             <div><strong>${esc(q.quote_number)} Rev ${q.revision}</strong> <span class="status-badge status-${q.status}">${q.status}</span> <span id="quoteAutoSaveStatus" style="font-size:10px;color:var(--muted);margin-left:6px"></span></div>
             <div style="color:var(--text2);font-size:12px;margin-top:2px">
                 ${esc(q.customer_name || '')}<br>
-                ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'" onclick="autoLogEmail(\''+escAttr(q.contact_email)+'\',\''+escAttr(q.contact_name || '')+'\')">'+esc(q.contact_email)+'</a>' : ''}
+                ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'" onclick=\'autoLogEmail('+jsArg(q.contact_email)+','+jsArg(q.contact_name || '')+')\'>'+esc(q.contact_email)+'</a>' : ''}
             </div>
         </div>
     </div>
@@ -4330,7 +4350,7 @@ function renderSuggestedContacts() {
                 <div class="sc-name">${esc(c.full_name || '—')}</div>
                 <div class="sc-title">${esc(c.title || 'No title')}</div>
                 <div class="sc-meta">
-                    ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="event.stopPropagation();autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">✉ ' + esc(c.email) + '</a>' : ''}
+                    ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick=\'event.stopPropagation();autoLogEmail(' + jsArg(c.email) + ',' + jsArg(c.full_name || '') + ')\'>✉ ' + esc(c.email) + '</a>' : ''}
                     ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, origin: 'enrichment_contacts'}) : ''}
                     ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" onclick="event.stopPropagation()">LinkedIn ↗</a>' : ''}
                     ${c.location ? '<span>📍 ' + esc(c.location) + '</span>' : ''}
@@ -4621,7 +4641,7 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                             <div class="ai-contact-name">${esc(c.full_name)}</div>
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
                             <div class="ai-contact-meta">
-                                ${c.email ? `<a href="mailto:${escAttr(c.email)}" onclick="autoLogEmail('${escAttr(c.email)}','${escAttr(c.full_name || '')}')">✉ ${esc(c.email)}</a>` : ''}
+                                ${c.email ? `<a href="mailto:${escAttr(c.email)}" onclick='autoLogEmail(${jsArg(c.email)},${jsArg(c.full_name || "")})'>✉ ${esc(c.email)}</a>` : ''}
                                 ${c.phone ? phoneLink(c.phone, {company_id: _selectedCustId, origin: 'ai_contacts'}) : ''}
                                 ${c.linkedin_url ? `<a href="${escAttr(c.linkedin_url)}" target="_blank">LinkedIn ↗</a>` : ''}
                             </div>
@@ -5545,7 +5565,7 @@ function renderProactiveSent() {
             </div>
             <div style="font-size:12px;color:var(--text2);margin-top:4px">
                 ${itemCount} item${itemCount !== 1 ? 's' : ''} · Revenue: $${Number(po.total_sell||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
-                · To: ${(po.recipient_emails||[]).join(', ')}
+                · To: ${(po.recipient_emails||[]).map(v => esc(v)).join(', ')}
             </div>
             ${convertBtn}
         </div>`;
@@ -6987,8 +7007,8 @@ function renderSuggestedGrid(data) {
             ${similarHtml}
             ${writeupHtml}
             <div class="suggested-card-actions">
-                <button class="btn-claim" onclick="claimSuggestedAccount(${a.id},'${escAttr(a.name)}')">Claim</button>
-                <select class="dismiss-select" onchange="dismissSuggestedAccount(${a.id},'${escAttr(a.name)}',this.value);this.selectedIndex=0">
+                <button class="btn-claim" onclick='claimSuggestedAccount(${a.id},${jsArg(a.name)})'>Claim</button>
+                <select class="dismiss-select" onchange='dismissSuggestedAccount(${a.id},${jsArg(a.name)},this.value);this.selectedIndex=0'>
                     <option value="">Dismiss…</option>
                     <option value="not_relevant">Not relevant</option>
                     <option value="competitor">Competitor</option>
@@ -7105,7 +7125,10 @@ async function openSuggestedDetail(prospectId) {
             ['Revenue', detail.revenue_range],
             ['Location', detail.hq_location],
             ['Region', detail.region],
-            ['Domain', detail.domain ? `<a href="https://${detail.domain}" target="_blank" rel="noopener">${detail.domain}</a>` : null],
+            ['Domain', detail.domain ? (() => {
+                const href = safeHref(`https://${detail.domain}`);
+                return href ? `<a href="${escAttr(href)}" target="_blank" rel="noopener">${esc(detail.domain)}</a>` : esc(detail.domain);
+            })() : null],
         ];
         for (const [label, val] of fields) {
             if (val) html += `<div style="display:flex;gap:8px;font-size:12px;padding:3px 0"><span style="color:var(--muted);min-width:80px">${label}</span><span>${val}</span></div>`;
@@ -7183,7 +7206,7 @@ async function openSuggestedDetail(prospectId) {
                 const typeColor = n.signal_type === 'funding' ? '#22c55e' : n.signal_type === 'acquisition' ? '#8b5cf6' : n.signal_type === 'expansion' ? '#3b82f6' : n.signal_type === 'contract' ? '#059669' : 'var(--muted)';
                 const typeBadge = n.signal_type !== 'general' ? `<span style="font-size:9px;padding:1px 4px;border-radius:4px;background:${typeColor};color:white;margin-right:4px">${esc(n.signal_type)}</span>` : '';
                 html += `<div style="padding:4px 0;border-top:1px solid var(--border);font-size:11px">
-                    ${typeBadge}<a href="${esc(n.link)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(n.title)}</a>
+                    ${typeBadge}${safeUrl(n.link) ? `<a href="${escAttr(safeUrl(n.link))}" target="_blank" rel="noopener" style="color:var(--text)">${esc(n.title)}</a>` : `<span style="color:var(--text)">${esc(n.title)}</span>`}
                     ${n.source ? '<div style="font-size:10px;color:var(--muted)">' + esc(n.source) + '</div>' : ''}
                 </div>`;
             }
@@ -7231,9 +7254,9 @@ async function openSuggestedDetail(prospectId) {
 
         // Actions
         html += `<div style="display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">
-            <button class="btn btn-primary" onclick="claimSuggestedAccount(${detail.id},'${escAttr(detail.name)}')">Claim Account</button>
+            <button class="btn btn-primary" onclick='claimSuggestedAccount(${detail.id},${jsArg(detail.name)})'>Claim Account</button>
             <button class="btn btn-ghost" onclick="enrichProspectFree(${detail.id})" id="enrichBtn-${detail.id}" title="SAM.gov + Google News (free)">Enrich</button>
-            <select class="dismiss-select" onchange="dismissSuggestedAccount(${detail.id},'${escAttr(detail.name)}',this.value);if(this.value)closeSuggestedDetail();this.selectedIndex=0" style="font-size:12px">
+            <select class="dismiss-select" onchange='dismissSuggestedAccount(${detail.id},${jsArg(detail.name)},this.value);if(this.value)closeSuggestedDetail();this.selectedIndex=0' style="font-size:12px">
                 <option value="">Dismiss…</option>
                 <option value="not_relevant">Not relevant</option>
                 <option value="competitor">Competitor</option>

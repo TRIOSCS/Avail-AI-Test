@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import get_req_for_user, require_user
 from ..models import (
     Contact,
     CustomerSite,
@@ -58,8 +58,13 @@ def _ai_enabled(user: User) -> bool:
     flag = settings.ai_features_enabled
     if flag == "off":
         return False
-    # "mike_only" and "all" both allow any authenticated user for now
-    return True
+    if flag == "all":
+        return True
+    if flag == "mike_only":
+        allowed = {str(e).strip().lower() for e in (settings.admin_emails or []) if str(e).strip()}
+        allowed.add("mike@trioscs.com")
+        return (user.email or "").strip().lower() in allowed
+    return False
 
 
 def _build_vendor_history(vendor_name: str, db: Session) -> dict:
@@ -416,6 +421,8 @@ async def ai_parse_response(
     vr = db.query(VendorResponse).filter(VendorResponse.id == response_id).first()
     if not vr:
         raise HTTPException(404, "Vendor response not found")
+    if vr.requisition_id and not get_req_for_user(db, user, vr.requisition_id, options=[]):
+        raise HTTPException(404, "Vendor response not found")
 
     rfq_context = None
     if vr.requisition_id:
@@ -481,6 +488,13 @@ async def save_parsed_offers(
     """Save AI-parsed draft offers to the Offers table."""
     response_id = payload.response_id
     requisition_id = payload.requisition_id
+    req = get_req_for_user(db, user, requisition_id, options=[])
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    if response_id:
+        vr = db.query(VendorResponse).filter(VendorResponse.id == response_id).first()
+        if not vr or (vr.requisition_id and vr.requisition_id != requisition_id):
+            raise HTTPException(404, "Vendor response not found")
 
     created = []
     for o in payload.offers:
@@ -630,6 +644,9 @@ async def ai_parse_freeform_offer(
 
     rfq_context = None
     if payload.requisition_id:
+        req = get_req_for_user(db, user, payload.requisition_id, options=[])
+        if not req:
+            raise HTTPException(404, "Requisition not found")
         reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
         rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
 

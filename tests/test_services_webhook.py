@@ -763,7 +763,7 @@ class TestRenewSubscription:
         old_expiration = sub.expiration_dt.replace(tzinfo=None) if sub.expiration_dt.tzinfo else sub.expiration_dt
 
         mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value={})
+        mock_gc.patch_json = AsyncMock(return_value={})
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
@@ -810,7 +810,7 @@ class TestRenewSubscription:
         sub_id_val = sub.id
 
         mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(side_effect=Exception("Graph 404"))
+        mock_gc.patch_json = AsyncMock(side_effect=Exception("Graph 404"))
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
@@ -829,18 +829,39 @@ class TestRenewSubscription:
         sub = _make_subscription(db_session, test_user, sub_id="sub-endpoint-check")
 
         mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value={})
+        mock_gc.patch_json = AsyncMock(return_value={})
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
         ):
             _run(renew_subscription(sub, db_session))
-            call_args = mock_gc.post_json.call_args
+            call_args = mock_gc.patch_json.call_args
             path = call_args[0][0]
             assert path == "/subscriptions/sub-endpoint-check"
             payload = call_args[0][1]
             assert "expirationDateTime" in payload
+
+    def test_renew_graph_error_payload_deletes_subscription(self, db_session, test_user):
+        """Graph error payload (non-exception) is treated as renewal failure."""
+        from app.services.webhook_service import renew_subscription
+
+        sub = _make_subscription(db_session, test_user, sub_id="sub-graph-error-payload")
+        sub_id_val = sub.id
+        old_exp = sub.expiration_dt
+
+        mock_gc = MagicMock()
+        mock_gc.patch_json = AsyncMock(return_value={"error": 404, "detail": "Not Found"})
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
+            result = _run(renew_subscription(sub, db_session))
+
+        assert result is False
+        assert db_session.get(GraphSubscription, sub_id_val) is None
+        assert sub.expiration_dt == old_exp
 
 
 # ══════════════════════════════════════════════════════════════════════

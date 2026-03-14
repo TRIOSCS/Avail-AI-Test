@@ -30,7 +30,7 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     Returns: {prospect_id, company_id, company_name, status, path, warning}
     Raises: ValueError for invalid state transitions.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
     if not prospect:
         raise LookupError("Prospect not found")
 
@@ -49,13 +49,17 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
 
     if prospect.company_id:
         # PATH A: SF-migrated — update existing Company
-        company = db.get(Company, prospect.company_id)
+        company = db.query(Company).filter(Company.id == prospect.company_id).with_for_update().first()
         if company:
             company.account_owner_id = user_id
         path = "existing_company"
     else:
         # PATH B: New discovery — check for domain collision first
-        existing = (db.query(Company).filter(Company.domain == prospect.domain).first()) if prospect.domain else None
+        existing = (
+            db.query(Company).filter(Company.domain == prospect.domain).with_for_update().first()
+            if prospect.domain
+            else None
+        )
 
         if existing:
             # Domain collision: link to existing Company instead of creating

@@ -269,7 +269,9 @@ async def update_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    quote = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
     if quote.status not in ("draft", None):
@@ -306,7 +308,9 @@ async def delete_quote(
     db: Session = Depends(get_db),
 ):
     """Delete a draft quote. Sent/won/lost quotes cannot be deleted."""
-    quote = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
     if quote.status != "draft":
@@ -324,7 +328,9 @@ async def preview_quote_email(
     db: Session = Depends(get_db),
 ):
     """Return the HTML email preview without sending."""
-    quote = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
     override_name = ((body.to_name if body else None) or "").strip()
@@ -344,8 +350,9 @@ async def send_quote(
     db: Session = Depends(get_db),
 ):
     from ...dependencies import require_fresh_token
+    from ...dependencies import get_quote_for_user
 
-    quote = db.get(Quote, quote_id)
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
 
@@ -408,7 +415,9 @@ async def quote_result(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    quote = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
     quote.result = payload.result
@@ -457,7 +466,9 @@ async def quote_result(
 
 @router.post("/api/quotes/{quote_id}/revise")
 async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    old = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    old = get_quote_for_user(db, user, quote_id)
     if not old:
         raise HTTPException(404, "Quote not found")
     old.status = "revised"
@@ -487,7 +498,9 @@ async def reopen_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    quote = db.get(Quote, quote_id)
+    from ...dependencies import get_quote_for_user
+
+    quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
     req = db.get(Requisition, quote.requisition_id)
@@ -541,8 +554,10 @@ async def pricing_history(mpn: str, user: User = Depends(require_user), db: Sess
         .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(500)
-        .all()
     )
+    if user.role == "sales":
+        quotes = quotes.join(Requisition, Quote.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+    quotes = quotes.all()
     history = []
     card_id = card.id if card else None
     for q in quotes:

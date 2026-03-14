@@ -291,7 +291,6 @@ if not os.environ.get("TESTING"):
             re.compile(r"/health"),
             re.compile(r"/metrics"),
             re.compile(r"/api/buy-plans/token/.*"),  # external approval links
-            re.compile(r"/v2/.*"),  # HTMX views use session auth, not CSRF tokens
         ],
     )
 

@@ -765,3 +765,84 @@ def test_sse_broker_no_subscribers():
         await b.publish("empty-ch", "event", "data")
 
     asyncio.get_event_loop().run_until_complete(_test())
+
+
+def test_sse_broker_queue_is_bounded():
+    """Slow subscribers should not accumulate unbounded queue growth."""
+    import asyncio
+    from app.services.sse_broker import SSEBroker
+
+    async def _test():
+        b = SSEBroker()
+        q = b.subscribe("bounded")
+        for i in range(1000):
+            await b.publish("bounded", "ev", str(i))
+        assert q.qsize() <= 200
+
+    asyncio.get_event_loop().run_until_complete(_test())
+
+
+def test_requisitions_stream_requires_auth(db_session):
+    """SSE stream endpoint should reject unauthenticated requests."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    with TestClient(app) as c:
+        resp = c.get("/requisitions2/stream")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 401
+
+
+def test_inline_edit_scope_enforced_for_sales(db_session, sales_user, test_requisition):
+    """Sales users cannot inline-edit requisitions they don't own."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c:
+        resp = c.get(f"/requisitions2/{test_requisition.id}/edit/name")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
+
+
+def test_bulk_scope_enforced_for_sales(db_session, sales_user, test_requisition):
+    """Sales users cannot bulk mutate requisitions they don't own."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    test_requisition.status = "active"
+    db_session.commit()
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c:
+        resp = c.post("/requisitions2/bulk/archive", data={"ids": str(test_requisition.id)})
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "active"

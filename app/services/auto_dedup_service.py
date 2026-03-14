@@ -17,10 +17,25 @@ Called by: scheduler.py (job_auto_dedup)
 Depends on: vendor_merge_service, company_merge_service, company_utils, claude_client
 """
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models import VendorCard
+
+
+def _run_coro_sync(coro) -> bool:
+    """Run an async coroutine from sync code, even if an event loop is active."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    # Scheduler jobs run in an active loop; execute coroutine in a worker thread.
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        return ex.submit(lambda: asyncio.run(coro)).result()
 
 
 def run_auto_dedup(db: Session) -> dict:
@@ -175,10 +190,8 @@ def _dedup_companies(db: Session) -> int:
 
 def _ai_confirm_vendor_merge(name_a: str, name_b: str, score: int) -> bool:
     """Ask Claude if two vendor names are the same entity."""
-    import asyncio
-
     try:
-        return asyncio.get_event_loop().run_until_complete(
+        return _run_coro_sync(
             _ask_claude_merge(
                 f"Are these two vendor names the same company?\nA: {name_a}\nB: {name_b}\nFuzzy score: {score}%",
             )
@@ -189,8 +202,6 @@ def _ai_confirm_vendor_merge(name_a: str, name_b: str, score: int) -> bool:
 
 def _ai_confirm_company_merge(name_a: str, name_b: str, domain_a: str | None, domain_b: str | None, score: int) -> bool:
     """Ask Claude if two company names are the same entity."""
-    import asyncio
-
     prompt = (
         f"Are these two companies the same entity?\n"
         f"A: {name_a} (domain: {domain_a or 'unknown'})\n"
@@ -198,7 +209,7 @@ def _ai_confirm_company_merge(name_a: str, name_b: str, domain_a: str | None, do
         f"Fuzzy score: {score}%"
     )
     try:
-        return asyncio.get_event_loop().run_until_complete(_ask_claude_merge(prompt))
+        return _run_coro_sync(_ask_claude_merge(prompt))
     except Exception:
         return False
 

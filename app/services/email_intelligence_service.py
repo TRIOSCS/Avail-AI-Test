@@ -624,6 +624,7 @@ async def extract_durable_facts(
             dedup_q = db.query(KnowledgeEntry).filter(
                 KnowledgeEntry.entry_type == "fact",
                 KnowledgeEntry.created_at >= seven_days_ago,
+                KnowledgeEntry.content == f"[{fact_type}] {value}",
             )
             if mpn:
                 dedup_q = dedup_q.filter(KnowledgeEntry.mpn == mpn)
@@ -647,9 +648,12 @@ async def extract_durable_facts(
                 expires_at=expires_at,
                 mpn=mpn,
                 vendor_card_id=vendor_card_id,
+                commit=False,
             )
             created.append(entry)
 
+        if created:
+            db.commit()
         logger.info("Extracted {} durable facts from email by {}", len(created), sender_email)
         return created
 

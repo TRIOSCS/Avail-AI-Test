@@ -58,7 +58,7 @@ def upgrade():
             text("""
                 SELECT id FROM buy_plans_v3
                 WHERE quote_id = :qid AND requisition_id = :rid
-                  AND submitted_at = :sat
+                  AND submitted_at IS NOT DISTINCT FROM :sat
             """),
             {"qid": plan.quote_id, "rid": plan.requisition_id, "sat": plan.submitted_at},
         ).fetchone()
@@ -214,7 +214,7 @@ def downgrade():
                 INNER JOIN buy_plans v1
                     ON v1.quote_id = v3.quote_id
                    AND v1.requisition_id = v3.requisition_id
-                   AND v1.submitted_at = v3.submitted_at
+                   AND v1.submitted_at IS NOT DISTINCT FROM v3.submitted_at
             )
         """)
     )
@@ -227,7 +227,7 @@ def downgrade():
                 INNER JOIN buy_plans v1
                     ON v1.quote_id = v3.quote_id
                    AND v1.requisition_id = v3.requisition_id
-                   AND v1.submitted_at = v3.submitted_at
+                   AND v1.submitted_at IS NOT DISTINCT FROM v3.submitted_at
             )
         """)
     )

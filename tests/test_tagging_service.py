@@ -263,6 +263,27 @@ def test_tag_material_card_upsert_lower_confidence_ignored(db_session, test_mate
     assert mt.source == "existing_data"
 
 
+def test_tag_material_card_conflict_does_not_rollback_session(db_session, test_material_card):
+    """Insert conflicts should not rollback unrelated pending session work."""
+    tag = _make_tag(db_session)
+    unrelated = Tag(name="Unrelated", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(unrelated)
+
+    result = tag_material_card(
+        test_material_card.id,
+        [
+            {"tag_id": tag.id, "source": "existing_data", "confidence": 0.95},
+            {"tag_id": None, "source": "existing_data", "confidence": 0.9},  # force IntegrityError
+        ],
+        db_session,
+    )
+    db_session.commit()
+
+    assert len(result) == 1
+    assert db_session.query(MaterialTag).filter_by(material_card_id=test_material_card.id, tag_id=tag.id).count() == 1
+    assert db_session.query(Tag).filter_by(name="Unrelated").count() == 1
+
+
 # ── recalculate_entity_tag_visibility ──────────────────────────────────
 
 

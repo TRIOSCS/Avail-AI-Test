@@ -96,7 +96,9 @@ def clone_requisition(
     db.add(new_req)
     db.flush()
 
-    # Clone requirements with MPN normalization + substitute dedup
+    # Clone requirements with MPN normalization + substitute dedup.
+    # Keep a deterministic old->new ID map to avoid collisions on duplicate MPNs.
+    req_map: dict[int, int] = {}
     for r in source_req.requirements:
         cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
         seen_keys = {normalize_mpn_key(cloned_mpn)}
@@ -122,17 +124,8 @@ def clone_requisition(
             notes=r.notes,
         )
         db.add(new_r)
-
-    db.flush()
-
-    # Map old requirement IDs → new for offer cloning
-    new_reqs = db.query(Requirement).filter(Requirement.requisition_id == new_req.id).all()
-    mpn_to_new_id = {r.primary_mpn: r.id for r in new_reqs}
-    req_map = {
-        old_r.id: mpn_to_new_id[old_r.primary_mpn]
-        for old_r in source_req.requirements
-        if old_r.primary_mpn in mpn_to_new_id
-    }
+        db.flush()
+        req_map[r.id] = new_r.id
 
     for o in source_req.offers:
         if o.status in ("active", "selected"):

@@ -257,6 +257,28 @@ def test_status_unauthenticated(auth_client):
     assert data["connected"] is False
 
 
+@patch("app.routers.auth.get_user")
+def test_status_non_admin_only_sees_self(mock_get_user, client, test_user, db_session):
+    """Non-admin users should not receive org-wide user status list."""
+    other = User(
+        email="other@trioscs.com",
+        name="Other User",
+        role="buyer",
+        azure_id="other-azure",
+        refresh_token="other-refresh",
+    )
+    test_user.refresh_token = "self-refresh"
+    db_session.add(other)
+    db_session.commit()
+    mock_get_user.return_value = test_user
+
+    resp = client.get("/auth/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["users"]) == 1
+    assert data["users"][0]["id"] == test_user.id
+
+
 # ── Index ────────────────────────────────────────────────────────────
 
 

@@ -10,6 +10,7 @@ Depends on: tagging_ai_classify, app.utils.claude_client, app.http_client
 import asyncio
 import json
 import tempfile
+from pathlib import Path
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -120,8 +121,9 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
         batch_ids.append(batch_id)
         logger.info(f"Submitted batch chunk: {batch_id} ({len(chunk)} requests)")
 
-    # Persist metadata so we can process results later
-    meta_path = "/tmp/ai_backfill_meta.json"
+    # Persist metadata so we can process results later.
+    # Use per-batch file names to avoid cross-run clobbering.
+    meta_path = f"/tmp/ai_backfill_meta_{batch_ids[0] if batch_ids else 'none'}.json"
     with open(meta_path, "w") as f:
         json.dump(
             {
@@ -138,17 +140,20 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
         "batch_ids": batch_ids,
         "total_requests": len(requests),
         "total_mpns": len(untagged),
+        "meta_path": meta_path,
     }
 
 
-async def check_and_apply_batch_results(db: Session) -> dict:  # pragma: no cover
+async def check_and_apply_batch_results(db: Session, meta_path: str | None = None) -> dict:  # pragma: no cover
     """Poll batch status and apply results if complete.
 
     Returns: {status, ...} where status is 'processing', 'complete', or 'error'
     """
     from app.utils.claude_client import claude_batch_results
 
-    meta_path = "/tmp/ai_backfill_meta.json"
+    if not meta_path:
+        candidates = sorted(Path("/tmp").glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        meta_path = str(candidates[0]) if candidates else "/tmp/ai_backfill_meta.json"
     try:
         with open(meta_path) as f:
             meta = json.load(f)
@@ -437,7 +442,9 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
 
     # Step 2: Stream results to temp file (avoid loading into memory)
     logger.info(f"Downloading batch {batch_id} results to temp file...")
-    tmp_path = tempfile.mktemp(suffix=".jsonl", dir="/tmp")
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False)
+    tmp_path = tmp_file.name
+    tmp_file.close()
     try:
         async with http.stream("GET", results_url, headers=headers, timeout=300) as stream:
             with open(tmp_path, "wb") as f:

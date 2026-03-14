@@ -190,3 +190,22 @@ def test_worker_health_circuit_breaker(client, db_session):
     assert data["worker_status"] == "circuit_breaker_open"
     assert data["circuit_breaker"]["is_open"] is True
     assert "429" in data["circuit_breaker"]["trip_reason"]
+
+
+def test_ics_admin_requires_admin(db_session, sales_user, monkeypatch):
+    """Non-admin authenticated users are denied ICS admin endpoints."""
+    from fastapi.testclient import TestClient
+
+    from app import dependencies
+    from app.database import get_db
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: sales_user)
+    app.dependency_overrides[get_db] = _override_db
+    with TestClient(app) as c:
+        resp = c.get("/api/ics/queue/stats")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403

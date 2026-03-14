@@ -7,6 +7,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.services.requisition_service import (
+    clone_requisition,
     parse_date_field,
     parse_positive_int,
     safe_commit,
@@ -127,3 +128,33 @@ class TestSafeCommit:
         assert exc_info.value.status_code == 409
         assert "requisition" in exc_info.value.detail
         db.rollback.assert_called_once()
+
+
+def test_clone_requisition_duplicate_mpn_preserves_offer_mapping(db_session, test_user):
+    """Clone keeps offers mapped to distinct cloned requirement rows even with duplicate MPNs."""
+    from app.models import Offer, Requirement, Requisition
+
+    src = Requisition(
+        name="SRC-REQ",
+        customer_name="Acme",
+        status="active",
+        created_by=test_user.id,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    r1 = Requirement(requisition_id=src.id, primary_mpn="LM317T", target_qty=10)
+    r2 = Requirement(requisition_id=src.id, primary_mpn="LM317T", target_qty=20)
+    db_session.add_all([r1, r2])
+    db_session.flush()
+
+    o1 = Offer(requisition_id=src.id, requirement_id=r1.id, vendor_name="V1", mpn="LM317T", status="active")
+    o2 = Offer(requisition_id=src.id, requirement_id=r2.id, vendor_name="V2", mpn="LM317T", status="active")
+    db_session.add_all([o1, o2])
+    db_session.commit()
+
+    cloned = clone_requisition(src.id, test_user.id, db_session)
+    cloned_offers = db_session.query(Offer).filter(Offer.requisition_id == cloned.id).all()
+
+    assert len(cloned_offers) == 2
+    assert len({o.requirement_id for o in cloned_offers}) == 2

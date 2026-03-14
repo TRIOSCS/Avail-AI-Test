@@ -439,8 +439,18 @@ export function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 export function escAttr(s) {
-    if (!s) return '';
-    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    if (s === null || s === undefined) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+export function safeHref(url, { allowRelative = false } = {}) {
+    if (!url) return '';
+    const val = String(url).trim();
+    if (/^(https?:|mailto:|tel:)/i.test(val)) return val;
+    if (allowRelative && /^(\/|#)/.test(val)) return val;
+    return '';
+}
+function jsArg(value) {
+    return JSON.stringify(String(value ?? ''));
 }
 export function sanitizeRichHtml(rawHtml) {
     if (!rawHtml) return '';
@@ -1524,7 +1534,9 @@ async function loadContacts() {
                 people.push({
                     id: c.id,
                     company_id: c.company_id,
-                    site_id: c.site_id,
+                    site_id: c.site_id || c.customer_site_id,
+                    customer_site_id: c.customer_site_id || c.site_id,
+                    site_contact_id: c.site_contact_id || c.id,
                     vendor_name: c.company_name || 'Unknown',
                     company_name: c.company_name || 'Unknown',
                     full_name: c.full_name || '',
@@ -1538,6 +1550,7 @@ async function loadContacts() {
                     last_interaction_at: null,
                     first_seen_at: c.created_at || null,
                     contact_type: 'customer',
+                    contact_status: c.contact_status || 'new',
                 });
             }
         }
@@ -1694,7 +1707,7 @@ async function updateContactStatus(siteContactId, newStatus) {
         if (!contact) { showToast('Contact not found', 'error'); return; }
         await apiFetch(`/api/sites/${contact.customer_site_id}/contacts/${siteContactId}`, {
             method: 'PUT',
-            body: JSON.stringify({ contact_status: newStatus }),
+            body: { contact_status: newStatus },
         });
         // Update cache locally
         contact.contact_status = newStatus;
@@ -2520,7 +2533,7 @@ let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
 // Main view: 'reqs' (Pipeline), 'deals', 'archive'. Legacy 'sales'/'sourcing'/'purchasing' → 'reqs'.
-let _currentMainView = localStorage.getItem('avail_main_view') || 'reqs';
+let _currentMainView = safeGet('avail_main_view', 'reqs') || 'reqs';
 if (_currentMainView === 'sales' || _currentMainView === 'sourcing' || _currentMainView === 'purchasing') _currentMainView = 'reqs';
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
@@ -2617,13 +2630,16 @@ let _reqSortDir = 'asc';
 
 // Column visibility — persisted in localStorage
 const _defaultHiddenCols = {};
-let _hiddenCols = JSON.parse(localStorage.getItem('reqHiddenCols') || '{}');
+let _hiddenCols = (() => {
+    try { return JSON.parse(safeGet('reqHiddenCols', '{}') || '{}'); }
+    catch (e) { return {}; }
+})();
 
 function _isColHidden(col) { return !!_hiddenCols[col]; }
 function toggleColVisibility(col) {
     _hiddenCols[col] = !_hiddenCols[col];
     if (!_hiddenCols[col]) delete _hiddenCols[col];
-    localStorage.setItem('reqHiddenCols', JSON.stringify(_hiddenCols));
+    safeSet('reqHiddenCols', JSON.stringify(_hiddenCols));
     renderReqList();
 }
 function _toggleColGear() {
@@ -3052,7 +3068,7 @@ function _renderDdActivity(reqId, data, panel) {
                     if (isReply && t.parsed_data) {
                         bodyHtml += _renderParsedSummary(t.parsed_data, reqId, t.response_id, t.vendor_name);
                     } else if (isReply && !t.parsed_data && t.response_id) {
-                        bodyHtml += `<div style="margin-bottom:6px"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${t.response_id},'${escAttr(t.vendor_name||'')}',this)">Parse with AI</button></div>`;
+                        bodyHtml += `<div style="margin-bottom:6px"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick='event.stopPropagation();aiParseReply(${reqId},${t.response_id},${jsArg(t.vendor_name || '')},this)'>Parse with AI</button></div>`;
                     }
                     bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
                     html += `<div class="act-body" id="${mid}">${bodyHtml}</div>`;
@@ -3068,21 +3084,25 @@ function _renderDdActivity(reqId, data, panel) {
 }
 
 async function checkForReplies(reqId, btn) {
-    const origText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '&#x21bb; Checking\u2026';
+    const origText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '&#x21bb; Checking\u2026';
+    }
     try {
         await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
         // Clear cached activity data so it re-fetches
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
-        const panel = btn.closest('.dd-panel');
+        const panel = btn ? btn.closest('.dd-panel') : null;
         if (panel) await _loadDdSubTab(reqId, 'activity', panel);
         showToast('Inbox checked for replies', 'info');
     } catch (e) {
-        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error', { action: { label: 'Retry', fn: () => checkForReplies() } });
+        showToast('Couldn\'t check inbox — ' + friendlyError(e, 'please try again'), 'error', { action: { label: 'Retry', fn: () => checkForReplies(reqId, btn) } });
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = origText;
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = origText;
+        }
     }
 }
 
@@ -3096,7 +3116,7 @@ function _renderParsedSummary(pd, reqId, responseId, vendorName) {
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px">AI-Parsed Response</span>';
     html += '<span style="display:flex;gap:4px">';
     if (reqId && responseId) {
-        html += `<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${responseId},'${escAttr(vendorName||'')}',this)" title="Re-parse email with AI">Re-parse</button>`;
+        html += `<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick='event.stopPropagation();aiParseReply(${reqId},${responseId},${jsArg(vendorName || '')},this)' title="Re-parse email with AI">Re-parse</button>`;
     }
     if (quotedParts.length && reqId && responseId) {
         html += `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();_acceptParsedOffers(${reqId},${responseId},this)" title="Create draft offers from parsed data">Accept ${quotedParts.length} Offer${quotedParts.length > 1 ? 's' : ''}</button>`;
@@ -3277,7 +3297,7 @@ let _ddHistoryExpanded = {};  // "reqId-requirementId" → bool
 // ---------------------------------------------------------------------------
 
 async function _renderInsightsCard(reqId, container) {
-    var collapsed = localStorage.getItem('insights_collapsed') === '1';
+    var collapsed = safeGet('insights_collapsed') === '1';
     var wrap = document.createElement('div');
     wrap.className = 'insights-card';
     wrap.id = 'insights-' + reqId;
@@ -3369,7 +3389,7 @@ function _toggleInsightsCard(reqId) {
     var hidden = body.style.display === 'none';
     body.style.display = hidden ? '' : 'none';
     toggle.textContent = hidden ? '\u25bc' : '\u25b6';
-    localStorage.setItem('insights_collapsed', hidden ? '0' : '1');
+    safeSet('insights_collapsed', hidden ? '0' : '1');
 }
 
 // Wrap a promise with a timeout (ms). Rejects with 'timeout' error if exceeded.
@@ -3443,7 +3463,7 @@ async function _renderEntityInsightsCard(entityType, entityId, container, opts) 
     var title = (opts && opts.title) || 'AI Insights';
     var queryParam = (opts && opts.queryParam) || '';
     var storageKey = 'sprinkle_collapsed_' + entityType;
-    var collapsed = localStorage.getItem(storageKey) === '1';
+    var collapsed = safeGet(storageKey) === '1';
 
     var wrap = document.createElement('div');
     wrap.className = 'insights-card';
@@ -3457,11 +3477,11 @@ async function _renderEntityInsightsCard(entityType, entityId, container, opts) 
         if (b.style.display === 'none') {
             b.style.display = '';
             t.textContent = '\u25bc';
-            localStorage.removeItem(storageKey);
+            safeRemove(storageKey);
         } else {
             b.style.display = 'none';
             t.textContent = '\u25b6';
-            localStorage.setItem(storageKey, '1');
+            safeSet(storageKey, '1');
         }
     };
 
@@ -3902,7 +3922,7 @@ function _renderMyTaskItem(task) {
         // Ensure closed and clear stale preference
         sidebar.classList.remove('open');
         document.body.classList.remove('tasks-open');
-        try { localStorage.removeItem('myTasksOpen'); } catch(e) {}
+        safeRemove('myTasksOpen');
         // Load badge count only
         (async function() {
             try {
@@ -9506,7 +9526,7 @@ function setMainView(view, btn) {
 
     _currentMainView = view;
     // Persist view preference (not archive — that's a temporary view)
-    if (view !== 'archive') localStorage.setItem('avail_main_view', view);
+    if (view !== 'archive') safeSet('avail_main_view', view);
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
@@ -11421,11 +11441,11 @@ function renderRfqMessage() {
                 if (rfqSubj) rfqSubj.value = draft.subject;
                 if (rfqBod) rfqBod.value = draft.body;
             } else {
-                localStorage.removeItem(draftKey);
+                safeRemove(draftKey);
                 saved = null;
             }
         } catch {
-            localStorage.removeItem(draftKey);
+            safeRemove(draftKey);
             saved = null;
         }
     }
@@ -14601,10 +14621,11 @@ function _buildCtxFiles(files) {
     let html = '<div class="ctx-section"><div class="ctx-section-title">Files</div>';
     for (const f of files) {
         const size = f.file_size ? (f.file_size > 1048576 ? (f.file_size / 1048576).toFixed(1) + ' MB' : (f.file_size / 1024).toFixed(0) + ' KB') : '';
+        const href = safeHref(f.url);
         html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px">
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.filename || f.name || 'file')}</span>
             <span style="font-size:10px;color:var(--muted)">${size}</span>
-            ${f.url ? `<a href="${esc(f.url)}" target="_blank" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px">Open</a>` : ''}
+            ${href ? `<a href="${escAttr(href)}" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px">Open</a>` : ''}
         </div>`;
     }
     html += '</div>';

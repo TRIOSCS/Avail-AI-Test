@@ -3712,3 +3712,49 @@ class TestOfferCompetitiveNotif:
             },
         )
         assert resp2.status_code == 200
+
+
+def test_quote_mutation_scope_enforced_for_sales(db_session, sales_user, test_quote):
+    """Sales users cannot mutate quotes tied to other users' requisitions."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c:
+        resp = c.put(f"/api/quotes/{test_quote.id}", json={"notes": "should fail"})
+    app.dependency_overrides.clear()
+    assert resp.status_code == 404
+
+
+def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
+    """Sales users only see pricing history from their own requisitions."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    # Ensure quote has a matching line item.
+    test_quote.status = "sent"
+    test_quote.line_items = [{"mpn": "LM317T", "qty": 10, "sell_price": 1.0}]
+    db_session.commit()
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    with TestClient(app) as c:
+        resp = c.get("/api/pricing-history/LM317T")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 200
+    assert resp.json() == []

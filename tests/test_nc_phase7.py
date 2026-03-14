@@ -135,3 +135,22 @@ def test_nc_worker_health(client, db_session):
     data = resp.json()
     assert "worker_status" in data
     assert "queue_stats" in data
+
+
+def test_nc_admin_requires_admin(db_session, sales_user, monkeypatch):
+    """Non-admin authenticated users are denied NC admin endpoints."""
+    from fastapi.testclient import TestClient
+
+    from app import dependencies
+    from app.database import get_db
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: sales_user)
+    app.dependency_overrides[get_db] = _override_db
+    with TestClient(app) as c:
+        resp = c.get("/api/nc/queue/stats")
+    app.dependency_overrides.clear()
+    assert resp.status_code == 403
