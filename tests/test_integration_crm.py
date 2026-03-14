@@ -7,6 +7,10 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
+import pytest
+
+pytestmark = pytest.mark.slow
+
 
 # -- Companies ----------------------------------------------------------------
 

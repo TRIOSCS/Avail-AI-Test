@@ -32,6 +32,8 @@ from app.services.enrichment_orchestrator import (
 )
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
+pytestmark = pytest.mark.slow
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

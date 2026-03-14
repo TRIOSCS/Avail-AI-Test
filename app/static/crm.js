@@ -5654,8 +5654,7 @@ let _perfVendorOrder = 'desc';
 let _perfActiveOnly = true;
 
 function showPerformance() {
-    // Redirect to scorecard page (backward compat)
-    sidebarNav('scorecard', document.getElementById('navScorecard'));
+    // Legacy — no-op, scorecard removed
 }
 
 async function loadManagerDigest() {

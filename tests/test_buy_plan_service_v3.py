@@ -9,6 +9,7 @@ Depends on: conftest.py fixtures, app.services.buy_plan_v3_service
 """
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -28,6 +29,10 @@ from app.services.buy_plan_v3_service import (
     _apply_line_overrides,
     _check_better_offer,
     _check_geo_mismatch,
+    _check_quantity_gaps,
+    _country_to_region,
+    _create_line,
+    _get_routing_maps,
     _is_stock_sale,
     _parse_lead_time_days,
     approve_buy_plan,
@@ -2258,8 +2263,6 @@ class TestCoverageGaps2:
 
     def test_country_to_region_empty(self):
         """Line 59: _country_to_region returns None for empty string."""
-        from app.services.buy_plan_v3_service import _country_to_region
-
         assert _country_to_region("") is None
         assert _country_to_region(None) is None
 
@@ -2283,3 +2286,251 @@ class TestCoverageGaps2:
             assert "country_region_map" in result
         finally:
             scoring_mod._ROUTING_MAPS = old
+
+
+# ── Tests merged from test_buy_plan_v3_service.py ────────────────────
+
+
+def _make_simple_offer(**kw):
+    """SimpleNamespace-based offer helper (no DB needed)."""
+    defaults = {
+        "id": 1,
+        "unit_price": 0.50,
+        "lead_time": "5 days",
+        "qty_available": 1000,
+        "status": "active",
+        "manufacturer": None,
+        "entered_by_id": None,
+        "vendor_card": None,
+        "vendor_name": "Acme",
+        "requirement_id": 1,
+        "created_at": datetime.now(timezone.utc),
+    }
+    defaults.update(kw)
+    return SimpleNamespace(**defaults)
+
+
+def _make_simple_requirement(**kw):
+    """SimpleNamespace-based requirement helper (no DB needed)."""
+    defaults = {"id": 1, "target_qty": 1000, "target_price": 1.00, "requisition_id": 10}
+    defaults.update(kw)
+    return SimpleNamespace(**defaults)
+
+
+def _make_simple_vendor_card(**kw):
+    """SimpleNamespace-based vendor card helper (no DB needed)."""
+    defaults = {
+        "vendor_score": 75,
+        "is_new_vendor": False,
+        "hq_country": "united states",
+        "total_pos": 10,
+        "commodity_tags": ["semiconductors"],
+    }
+    defaults.update(kw)
+    return SimpleNamespace(**defaults)
+
+
+# ── _create_line ──────────────────────────────────────────────────────
+
+
+class TestCreateLine:
+    def test_creates_with_margin(self):
+        req = _make_simple_requirement(target_price=1.00)
+        offer = _make_simple_offer(unit_price=0.50)
+        buyer = SimpleNamespace(id=42)
+        line = _create_line(req, offer, 100, 85.0, buyer, "workload")
+        assert line.quantity == 100
+        assert float(line.unit_cost) == 0.50
+        assert float(line.unit_sell) == 1.00
+        assert line.margin_pct == 50.0
+        assert line.buyer_id == 42
+        assert line.assignment_reason == "workload"
+        assert line.status == BuyPlanLineStatus.awaiting_po.value
+
+    def test_no_buyer(self):
+        req = _make_simple_requirement(target_price=1.00)
+        offer = _make_simple_offer(unit_price=0.50)
+        line = _create_line(req, offer, 100, 75.0, None, "no_buyers")
+        assert line.buyer_id is None
+
+    def test_no_prices(self):
+        req = _make_simple_requirement(target_price=None)
+        offer = _make_simple_offer(unit_price=None)
+        line = _create_line(req, offer, 100, 50.0, None, "no_buyers")
+        assert line.unit_cost is None
+        assert line.unit_sell is None
+        assert line.margin_pct is None
+
+
+# ── _check_quantity_gaps ─────────────────────────────────────────────
+
+
+class TestCheckQuantityGaps:
+    def test_gap_detected(self, db_session):
+        req = SimpleNamespace(target_qty=1000)
+        line = SimpleNamespace(requirement_id=1, quantity=500, requirement=req)
+        plan = SimpleNamespace(lines=[line])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        assert len(flags) == 1
+        assert flags[0]["type"] == "quantity_gap"
+        assert flags[0]["severity"] == "critical"
+
+    def test_no_gap(self, db_session):
+        req = SimpleNamespace(target_qty=1000)
+        line = SimpleNamespace(requirement_id=1, quantity=1000, requirement=req)
+        plan = SimpleNamespace(lines=[line])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        assert len(flags) == 0
+
+    def test_split_lines_cover_qty(self, db_session):
+        req = SimpleNamespace(target_qty=1000)
+        l1 = SimpleNamespace(requirement_id=1, quantity=600, requirement=req)
+        l2 = SimpleNamespace(requirement_id=1, quantity=400, requirement=None)
+        plan = SimpleNamespace(lines=[l1, l2])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        assert len(flags) == 0
+
+    def test_no_requirement_id(self, db_session):
+        line = SimpleNamespace(requirement_id=None, quantity=100, requirement=None)
+        plan = SimpleNamespace(lines=[line])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        assert len(flags) == 0
+
+    def test_zero_target_no_gap(self, db_session):
+        req = SimpleNamespace(target_qty=0)
+        line = SimpleNamespace(requirement_id=1, quantity=0, requirement=req)
+        plan = SimpleNamespace(lines=[line])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        assert len(flags) == 0
+
+    def test_req_fetched_from_db_when_none(self, db_session):
+        """When line.requirement is None, it fetches from db."""
+        line = SimpleNamespace(requirement_id=999, quantity=100, requirement=None)
+        plan = SimpleNamespace(lines=[line])
+        flags = []
+        _check_quantity_gaps(plan, flags, db_session)
+        # Req 999 doesn't exist, so no gap flagged (no target)
+        assert len(flags) == 0
+
+
+# ── Routing Maps (loads / cached) ────────────────────────────────────
+
+
+class TestRoutingMapsLoadAndCache:
+    def setup_method(self):
+        import app.services.buyplan_scoring as mod
+
+        mod._ROUTING_MAPS = None
+
+    def test_get_routing_maps_loads_file(self):
+        maps = _get_routing_maps()
+        assert "brand_commodity_map" in maps
+        assert "country_region_map" in maps
+
+    def test_get_routing_maps_cached(self):
+        maps1 = _get_routing_maps()
+        maps2 = _get_routing_maps()
+        assert maps1 is maps2
+
+    def teardown_method(self):
+        import app.services.buyplan_scoring as mod
+
+        mod._ROUTING_MAPS = None
+
+
+# ── AI Summary edge cases (SimpleNamespace-based) ───────────────────
+
+
+class TestAISummaryEdgeCases:
+    def test_no_vendor_names_uses_offer_ids(self):
+        lines = [
+            SimpleNamespace(offer_id=1, margin_pct=None, offer=None),
+            SimpleNamespace(offer_id=2, margin_pct=None, offer=None),
+        ]
+        plan = SimpleNamespace(lines=lines, ai_flags=[])
+        summary = generate_ai_summary(plan)
+        assert "2 vendor" in summary
+
+    def test_none_lines(self):
+        plan = SimpleNamespace(lines=None, ai_flags=[])
+        assert "Empty buy plan" in generate_ai_summary(plan)
+
+
+# ── AI Flags edge cases (SimpleNamespace-based) ─────────────────────
+
+
+class TestAIFlagsEdgeCases:
+    def test_stale_offer_fetched_from_db(self, db_session):
+        """When line.offer is None, the flag code fetches from DB via offer_id."""
+        line = SimpleNamespace(
+            id=1,
+            offer_id=999,
+            offer=None,
+            margin_pct=50.0,
+            requirement_id=None,
+            quantity=100,
+            buyer_id=1,
+        )
+        plan = SimpleNamespace(lines=[line], quote_id=None)
+        flags = generate_ai_flags(plan, db_session)
+        # No crash -- offer not found, just skips the stale check
+        assert all(f["type"] != "stale_offer" for f in flags)
+
+    def test_none_lines(self, db_session):
+        plan = SimpleNamespace(lines=None, quote_id=None)
+        flags = generate_ai_flags(plan, db_session)
+        assert flags == []
+
+
+# ── Build Buy Plan with customer site region ─────────────────────────
+
+
+class TestBuildBuyPlanCustomerSiteRegion:
+    def test_customer_site_region(self, db_session):
+        """Exercises customer_region from customer_site."""
+        from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User
+
+        user = User(email="reg@test.com", name="Reg", role="buyer", azure_id="azreg2", is_active=True)
+        db_session.add(user)
+        db_session.flush()
+        co = Company(name="Co2", website="https://co2.com", industry="Electronics", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", country="united states")
+        db_session.add(site)
+        db_session.flush()
+        req = Requisition(name="REQ-REG2", customer_name="Co2", status="open", created_by=user.id)
+        db_session.add(req)
+        db_session.flush()
+        item = Requirement(requisition_id=req.id, primary_mpn="Z2", target_qty=50, target_price=2.00)
+        db_session.add(item)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-REG2",
+            status="sent",
+            line_items=[],
+            subtotal=100,
+        )
+        db_session.add(q)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id,
+            requirement_id=item.id,
+            vendor_name="V2",
+            mpn="Z2",
+            qty_available=100,
+            unit_price=1.00,
+            entered_by_id=user.id,
+            status="active",
+        )
+        db_session.add(offer)
+        db_session.commit()
+        plan = build_buy_plan(q.id, db_session)
+        assert len(plan.lines) >= 1

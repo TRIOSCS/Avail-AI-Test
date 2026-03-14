@@ -22,6 +22,8 @@ from app.services.prospect_claim import (
 )
 from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
 
+pytestmark = pytest.mark.slow
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

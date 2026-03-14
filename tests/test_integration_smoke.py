@@ -8,7 +8,11 @@ Called by: pytest
 Depends on: conftest.py fixtures
 """
 
+import pytest
+
 from app.models import User
+
+pytestmark = pytest.mark.slow
 
 
 def test_db_session_creates_tables(db_session):

@@ -172,7 +172,7 @@ function mobileMoreNav(page) {
         t.classList.toggle('active', t.dataset.nav === 'more');
     });
     _mobileNavStack = [page];
-    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',scorecard:'navScorecard',contacts:'navContacts',settings:'navSettings'};
+    var navBtnMap = {vendors:'navVendors',materials:'navMaterials',buyplans:'navBuyPlans',contacts:'navContacts',settings:'navSettings'};
     var navBtn = document.getElementById(navBtnMap[page] || '');
     sidebarNav(page, navBtn);
 }
@@ -943,7 +943,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-customers': () => window.showCustomers(),
             'view-buyplans': () => window.showBuyPlans(),
             'view-proactive': () => window.showProactiveOffers(),
-            'view-scorecard': () => showScorecard(),
             'view-settings': () => {
                 var settingsTab = (initBaseHash === 'apihealth') ? initBaseHash : undefined;
                 window.showSettings(settingsTab);
@@ -952,7 +951,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-contacts': () => showContacts(),
         };
         if (initRoutes[effectiveView]) initRoutes[effectiveView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-settings':'navSettings','view-suggested':'navProspecting','view-contacts':'navContacts'};
         const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         } catch(e) { console.error('init route error:', e); }
@@ -1235,18 +1234,6 @@ function applyRoleGating() {
         navProspecting.style.display = canProspect ? '' : 'none';
     }
 
-    // ── Dashboard: hide Command Center and Scorecard from all users ──
-    const navDashboard = document.getElementById('navDashboard');
-    if (navDashboard) {
-        navDashboard.style.display = 'none';
-    }
-    const ccGroup = document.querySelector('.sb-cc-group');
-    if (ccGroup) ccGroup.style.display = 'none';
-    const ccGradient = document.querySelector('.sb-top-gradient-cc');
-    if (ccGradient) ccGradient.style.display = 'none';
-    const perfNav = document.getElementById('navScorecard');
-    if (perfNav) perfNav.style.display = 'none';
-
     // ── Settings: admin only ──
     const navSettings = document.getElementById('navSettings');
     if (navSettings) { if (isAdmin) navSettings.classList.remove('u-hidden'); else navSettings.classList.add('u-hidden'); }
@@ -1276,12 +1263,11 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-scorecard', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-strategic', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-settings', 'view-contacts', 'view-suggested', 'view-offers', 'view-alerts'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-scorecard':'scorecard','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-strategic':'strategic','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-settings':'settings','view-contacts':'contacts','view-suggested':'suggested','view-offers':'offers','view-alerts':'alerts'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
-_hashToView['performance'] = 'view-scorecard'; // backward compat
 _hashToView['apihealth'] = 'view-settings'; // apihealth moved into settings
 _hashToView['prospecting'] = 'view-suggested'; // old prospecting view removed
 let _navFromPopstate = false;
@@ -1333,7 +1319,6 @@ window.addEventListener('popstate', (e) => {
         'view-customers': () => window.showCustomers(),
         'view-buyplans': () => window.showBuyPlans(),
         'view-proactive': () => window.showProactiveOffers(),
-        'view-scorecard': () => showScorecard(),
         'view-settings': () => {
             var settingsTab = (baseHash === 'apihealth') ? baseHash : undefined;
             window.showSettings(settingsTab);
@@ -1343,7 +1328,7 @@ window.addEventListener('popstate', (e) => {
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-scorecard':'navScorecard','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-settings':'navSettings','view-contacts':'navContacts','view-suggested':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     } catch(e) { console.error('popstate error:', e); }
@@ -1829,121 +1814,6 @@ function _effectivePerspective() {
     return window.userRole === 'sales' ? 'sales' : 'purchasing';
 }
 
-// ── Scorecard Page ──────────────────────────────────────────────────────
-let _scPeriod = '30d';
-
-function showScorecard() {
-    showView('view-scorecard');
-    _loadScPersonalSummary();
-    _loadDashTeamLeaderboard(document.getElementById('scContent'));
-}
-window.showScorecard = showScorecard;
-
-function setScPeriod(period, chip) {
-    _scPeriod = period;
-    document.querySelectorAll('#scPeriodPills .chip').forEach(c => c.classList.remove('on'));
-    if (chip) chip.classList.add('on');
-}
-
-async function _loadScPersonalSummary() {
-    const el = document.getElementById('scPersonalSummary');
-    if (!el) return;
-    const isTrader = window.userRole === 'trader';
-    const perspective = _effectivePerspective();
-    const role = perspective === 'sales' ? 'sales' : 'buyer';
-
-    try {
-        // Traders get both perspectives side by side
-        const fetches = [apiFetch(`/api/performance/avail-scores?role=${role}`)];
-        if (isTrader) {
-            const otherRole = role === 'buyer' ? 'sales' : 'buyer';
-            fetches.push(apiFetch(`/api/performance/avail-scores?role=${otherRole}`));
-        }
-        // Also fetch outcome numbers
-        const daysParam = _scPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _scPeriod === '90d' ? 90 : 30;
-        fetches.push(Promise.resolve(null));
-
-        const results = await Promise.all(fetches);
-        const data = results[0];
-        const otherData = isTrader ? results[1] : null;
-        const brief = isTrader ? results[2] : results[1];
-
-        const entries = data.entries || [];
-        const me = entries.find(e => e.user_id === window.userId);
-
-        const renderBars = (metrics) => metrics.map(m => {
-            const pct = Math.min(100, Math.max(0, (m.score || 0)));
-            const color = pct >= 60 ? 'var(--green)' : pct >= 40 ? 'var(--amber)' : 'var(--red)';
-            return `<div class="sc-bar-row">
-                <span class="sc-bar-label">${esc(m.label || m.metric || '')}</span>
-                <div class="sc-bar-track"><div class="sc-bar-fill" style="width:${pct}%;background:${color}"></div></div>
-                <span class="sc-bar-val">${pct.toFixed(0)}</span>
-            </div>`;
-        }).join('');
-
-        const renderScoreRing = (entry, label) => {
-            if (!entry) return '';
-            const score = (entry.avail_score || 0).toFixed(0);
-            const scoreColor = entry.avail_score >= 60 ? 'var(--green)' : entry.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
-            return `<div class="sc-score-ring" style="--ring-color:${scoreColor}">
-                <span class="sc-score-num">${score}</span>
-                <span class="sc-score-label">${esc(label)}</span>
-            </div>`;
-        };
-
-        // Outcome numbers from buyer brief
-        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
-        const revProfit = brief ? (brief.revenue_profit || {}) : {};
-        const completed = brief ? (brief.completed_deals || {}) : {};
-
-        let outcomesHtml = `<div class="sc-outcomes-row">
-            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:var(--green)">${fmtMoney(revProfit.est_revenue)}</span><span class="sc-outcome-lbl">Revenue</span></div>
-            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:${(revProfit.est_gross_profit || 0) > 0 ? 'var(--green)' : 'var(--text-muted)'}">${fmtMoney(revProfit.est_gross_profit)}</span><span class="sc-outcome-lbl">Profit</span></div>
-            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:var(--green)">${completed.won_count || 0}</span><span class="sc-outcome-lbl">Won</span></div>
-        </div>`;
-
-        if (!me && !isTrader) { el.innerHTML = ''; return; }
-
-        if (isTrader && otherData) {
-            const otherEntries = otherData.entries || [];
-            const meOther = otherEntries.find(e => e.user_id === window.userId);
-            const primaryLabel = role === 'buyer' ? 'Buyer' : 'Sales';
-            const otherLabel = role === 'buyer' ? 'Sales' : 'Buyer';
-
-            el.innerHTML = `<div class="sc-personal card-v2 sc-personal-dual">
-                <div class="sc-personal-left">
-                    ${renderScoreRing(me, primaryLabel)}
-                    ${renderScoreRing(meOther, otherLabel)}
-                </div>
-                <div class="sc-personal-right">
-                    ${me && me.behaviors ? '<div class="sc-metric-col"><div class="sc-metric-title">Behaviors</div>' + renderBars(me.behaviors) + '</div>' : ''}
-                    ${me && me.outcomes ? '<div class="sc-metric-col"><div class="sc-metric-title">Outcomes</div>' + renderBars(me.outcomes) + '</div>' : ''}
-                </div>
-            </div>${outcomesHtml}`;
-        } else if (me) {
-            const score = (me.avail_score || 0).toFixed(0);
-            const scoreColor = me.avail_score >= 60 ? 'var(--green)' : me.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
-            const behaviorMetrics = me.behaviors || [];
-            const outcomeMetrics = me.outcomes || [];
-
-            el.innerHTML = `<div class="sc-personal card-v2">
-                <div class="sc-personal-left">
-                    <div class="sc-score-ring" style="--ring-color:${scoreColor}">
-                        <span class="sc-score-num">${score}</span>
-                        <span class="sc-score-label">Avail Score</span>
-                    </div>
-                </div>
-                <div class="sc-personal-right">
-                    ${behaviorMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Behaviors</div>' + renderBars(behaviorMetrics) + '</div>' : ''}
-                    ${outcomeMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Outcomes</div>' + renderBars(outcomeMetrics) + '</div>' : ''}
-                </div>
-            </div>${outcomesHtml}`;
-        }
-    } catch(e) {
-        console.error('Scorecard personal summary load error:', e);
-        el.innerHTML = '';
-    }
-}
 
 let _scoringInfoCache = null;
 async function _loadDashTeamLeaderboard(el) {
@@ -9682,13 +9552,8 @@ function toggleSidebarGroup(headerEl) {
 
 export function sidebarNav(page, el) {
     safeSet('_lastActivityTs', String(Date.now()));
-    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
-    // Highlight Command Center group for scorecard views
-    if (page === 'scorecard' || page === 'performance') {
-        const ccBtn = document.getElementById('navCmdCenter');
-        if (ccBtn) ccBtn.classList.add('active');
-    }
     var section = el && el.closest('[data-section]');
     if (section) {
         var gradient = document.querySelector('.sb-top-gradient');
@@ -9708,8 +9573,6 @@ export function sidebarNav(page, el) {
         materials: () => showMaterials(),
         buyplans: () => window.showBuyPlans(),
         proactive: () => window.showProactiveOffers(),
-        performance: () => { sidebarNav('scorecard', document.getElementById('navScorecard')); },
-        scorecard: () => showScorecard(),
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
         prospecting: () => window.showSuggested(),
@@ -15737,12 +15600,10 @@ Object.assign(window, {
     CONTACT_STATUS, CONTACT_STATUS_ORDER,
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
-    // Dashboard / Command Center
+    // Dashboard
     setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, setDashUserFilter,
     setUserFilter, _populateUserFilter, _populateDashUserSelect,
     goToReq, _toggleColGear, toggleColVisibility,
-    // Scorecard
-    showScorecard, setScPeriod,
     // Unified state helpers
     stateLoading, stateEmpty, stateError,
     // Mobile navigation & drill-down

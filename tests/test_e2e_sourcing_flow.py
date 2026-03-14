@@ -45,6 +45,8 @@ from app.services.requirement_status import (
 )
 from app.services.requisition_state import transition as req_transition
 
+pytestmark = pytest.mark.slow
+
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 

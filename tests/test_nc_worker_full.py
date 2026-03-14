@@ -40,6 +40,8 @@ from app.services.nc_worker.scheduler import SearchScheduler
 from app.services.nc_worker.search_engine import build_search_url, search_part
 from app.services.nc_worker.sighting_writer import save_nc_sightings
 
+pytestmark = pytest.mark.slow
+
 # ═══════════════════════════════════════════════════════════════════════
 # MPN NORMALIZER
 # ═══════════════════════════════════════════════════════════════════════

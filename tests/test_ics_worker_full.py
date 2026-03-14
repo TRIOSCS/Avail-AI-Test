@@ -40,6 +40,8 @@ from app.services.ics_worker.scheduler import SearchScheduler
 from app.services.ics_worker.search_engine import SEARCH_URL, search_part
 from app.services.ics_worker.sighting_writer import save_ics_sightings
 
+pytestmark = pytest.mark.slow
+
 # ═══════════════════════════════════════════════════════════════════════
 # MPN NORMALIZER
 # ═══════════════════════════════════════════════════════════════════════
