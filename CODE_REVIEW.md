@@ -114,93 +114,137 @@ Mouser connector sends API key as a URL query parameter (`params={"apiKey": self
 7. **Security headers** — CSRF, CSP, GZip, Sentry scrubbing of sensitive fields.
 8. **Rate limiting** — slowapi with configurable limits (120/min default, 20/min for search).
 9. **Comprehensive config** — 80+ settings with validators, CSV parsing, fail-fast on bad values.
-10. **Test suite** — 301 test files using in-memory SQLite with auth overrides.
+10. **Test suite** — 314 test files, 8,605 test functions using in-memory SQLite with auth overrides.
+
+---
+
+## Data Model & Schema Issues
+
+### 12. Missing Index on `material_cards.deleted_at`
+**File:** `app/models/intelligence.py:49`
+**Severity:** HIGH
+
+Soft-delete queries (`WHERE deleted_at IS NULL`) run on every MaterialCard lookup without an index — full table scan.
+
+**Fix:** Add migration with `Index("ix_material_cards_deleted_at", "deleted_at")`.
+
+### 13. 101 Relationships Missing `back_populates`
+**Severity:** MEDIUM
+
+Many relationships are one-way (no inverse). Worst offenders: `offers.py` (4 User FKs), `buy_plan.py` (6 User FKs), `strategic.py` (2 using deprecated `backref=`).
+
+**Fix:** Replace `backref=` with explicit `back_populates` on both sides. Prioritize models used in list endpoints.
+
+### 14. Inconsistent Cascade Rules on BuyPlanLine
+**File:** `app/models/buy_plan.py:209-210`
+**Severity:** MEDIUM
+
+`requirement_id` and `offer_id` use `ondelete="SET NULL"` — when a Requirement is deleted, orphaned BuyPlanLine rows remain with NULL FK. Should be CASCADE or handled by application cleanup.
+
+### 15. Missing Unique Constraint on `site_contacts`
+**File:** `app/models/crm.py:149-188`
+**Severity:** MEDIUM
+
+No unique constraint on `(customer_site_id, email)` — duplicate contacts per site are allowed.
+
+### 16. Denormalized Count Columns Allow NULL
+**File:** `app/models/crm.py:54-55`
+**Severity:** LOW
+
+`site_count` and `open_req_count` have `default=0` and `server_default="0"` but are nullable. Add `nullable=False`.
+
+---
+
+## Test & Schema Gaps
+
+### 17. No N+1 Query Tests
+**Severity:** MEDIUM
+
+Zero tests verify eager-loading behavior. List endpoints for Offers, Requisitions, and ActivityLog likely have N+1 patterns under load.
+
+**Fix:** Add pytest hook using `sqlalchemy.event` to assert max query count per endpoint.
+
+### 18. No Cascade Delete Tests
+**Severity:** MEDIUM
+
+No tests verify that deleting a Requisition properly cascades through Requirements → Sightings → Offers → Quotes.
+
+### 19. Schemas Missing `from_attributes=True`
+**Severity:** LOW
+
+Only 6 of 24 Pydantic schema files have `ConfigDict(from_attributes=True)`. ORM → Pydantic serialization breaks silently without it.
+
+### 20. No Alembic Downgrade Tests
+**Severity:** MEDIUM
+
+76 migrations have `downgrade()` functions but none are tested. Production rollbacks could fail silently.
 
 ---
 
 ## Medium Priority Improvements
 
-### 4. Test Execution Verification
-301 test files exist but I couldn't collect them (pytest timed out). Verify tests actually pass:
+### 21. Test Execution Verification
+314 test files with 8,605 test functions exist. Verify they pass:
 ```bash
 pytest tests/ -x --timeout=60 -q
 ```
-If tests are slow or broken, that's a significant risk. Consider running a CI pipeline.
 
-### 5. Service File Count is High (106 files)
-The `app/services/` directory has grown to 106 files (~40K lines). While each file is focused, the sheer count makes discovery hard.
+### 22. Service File Count is High (106 files)
+Group into subdirectories by domain (sourcing, crm, rfq, enrichment, buyplan, intelligence). Some already exist (`ics_worker/`, `nc_worker/`).
 
-**Suggestion:** Group into subdirectories by domain:
-```
-services/
-  sourcing/       # search, scoring, connectors
-  crm/            # companies, contacts, activity
-  rfq/            # email, RFQ, offers
-  enrichment/     # Apollo, Hunter, orchestrator
-  buyplan/        # buy plan v3, PO, notifications
-  intelligence/   # email mining, proactive matching
-```
-Some subdirectories already exist (`ics_worker/`, `nc_worker/`, `search_worker_base/`).
+### 23. No CI/CD Pipeline
+No `.github/workflows/` found. Add GitHub Actions for pytest, ruff, and Alembic drift check.
 
-### 6. Missing Index Audit
-With 81 models and frequent queries, verify indexes exist on:
-- All foreign key columns (SQLAlchemy doesn't auto-create them)
-- Columns used in `filter_by()` / `WHERE` clauses
-- `normalized_name`, `vendor_name_normalized`, `mpn_matched` (used in search/analytics)
-
-Run in production:
-```sql
-SELECT schemaname, tablename, indexname FROM pg_indexes
-WHERE schemaname = 'public' ORDER BY tablename;
-```
-
-### 7. No CI/CD Pipeline Visible
-No `.github/workflows/`, `.gitlab-ci.yml`, or similar CI config found. Deployment is via manual `scripts/deploy.sh`.
-
-**Recommendation:** Add GitHub Actions for:
-- `pytest` on every PR
-- `ruff` linting
-- Alembic migration check (ensure no drift)
-
-### 8. Frontend is Vanilla JS (10 files, 82 HTML templates)
-The frontend (`app.js`, `crm.js`, plus 82 HTMX templates) is growing. The recent HTMX/Alpine.js migration (PR #35) is a good step. Continue this direction rather than adding more vanilla JS.
+### 24. Missing Backup/Restore Documentation
+CLAUDE.md has deploy rules but no pre-migration backup procedure. Add `pg_dump` step before migrations.
 
 ---
 
 ## Low Priority / Tech Debt
 
-### 9. MVP Mode Flag
-`mvp_mode: bool = True` in config disables Dashboard/Analytics, Enrichment, Teams, Task Manager. Clarify the roadmap: if these features are stable, flip to `False`. If not needed, remove the dead code.
+### 25. MVP Mode Flag
+`mvp_mode: bool = True` disables several features. Decide: flip to `False` or remove dead code.
 
-### 10. Duplicate Config Pattern
-`config.py` uses `str` fields with `model_validator` to convert CSV strings to lists. This works but is surprising. Consider documenting this more prominently or using a custom type.
+### 26. Buy Plan V1 Deprecation
+`buy_plan_v1_enabled: bool = False` — if V1 is fully retired, remove its code paths.
 
-### 11. Buy Plan V1 Deprecation
-`buy_plan_v1_enabled: bool = False` exists alongside V3 code. If V1 is fully retired, remove its code paths to reduce maintenance burden.
-
-### 12. Single TODO in Codebase
-`app/routers/views.py:64` — `results = []  # TODO: aggregate search across requisitions, companies, vendors`. Either implement or remove if not planned.
+### 27. Redundant `index=True` on Unique Columns
+5 models have both `unique=True` and `index=True` — the index is implicit with unique. Minor cleanup.
 
 ---
 
 ## Recommended Next Steps (Priority Order)
 
+### Quick Wins (< 1 hour each)
 | # | Action | Effort | Impact |
 |---|--------|--------|--------|
-| 1 | Use `secrets.compare_digest()` for agent API key | 15 min | Fixes timing attack |
-| 2 | Add rate limiting to password login endpoint | 15 min | Prevents brute force |
-| 3 | Fix SQL f-string pattern in `vendor_analytics.py` | 1 hour | Eliminates injection risk |
-| 4 | Cap Retry-After header at 300s in `sources.py` | 15 min | Prevents connector lockup |
-| 5 | Validate `href` schemes in JS HTML sanitizer | 30 min | Closes XSS vector |
-| 6 | Wrap vendor merge in proper transaction | 1 hour | Prevents data orphaning |
-| 7 | Upgrade password hashing to bcrypt/argon2 | 1 hour | Security hardening |
-| 8 | Add GitHub Actions CI (pytest + ruff) | 2-3 hours | Prevents regressions |
-| 9 | Verify full test suite passes | 1 hour | Confidence baseline |
-| 10 | Add Pydantic Query validation on raw int() params | 1 hour | Prevents 500 errors |
-| 11 | Mask API keys in connector log output | 1 hour | Prevents credential leaks |
-| 12 | Audit and add missing DB indexes | 2 hours | Performance |
-| 13 | Narrow `except Exception` catches in top 5 files | 2 hours | Debuggability |
-| 14 | Organize services into subdirectories | 3-4 hours | Developer experience |
+| 1 | `secrets.compare_digest()` for agent API key | 15 min | Fixes timing attack |
+| 2 | Rate limit password login endpoint | 15 min | Prevents brute force |
+| 3 | Cap Retry-After header at 300s | 15 min | Prevents connector lockup |
+| 4 | Validate `href` schemes in JS sanitizer | 30 min | Closes XSS vector |
+| 5 | Pydantic Query validation on raw int() params | 30 min | Prevents 500 errors |
+
+### High Priority (1-2 hours each)
+| # | Action | Effort | Impact |
+|---|--------|--------|--------|
+| 6 | Fix SQL f-string in `vendor_analytics.py` | 1 hour | Eliminates injection risk |
+| 7 | Wrap vendor merge in proper transaction | 1 hour | Prevents data orphaning |
+| 8 | Add index on `material_cards.deleted_at` | 30 min | Soft-delete performance |
+| 9 | Upgrade password hashing to bcrypt/argon2 | 1 hour | Security hardening |
+| 10 | Mask API keys in connector log output | 1 hour | Prevents credential leaks |
+| 11 | Add unique constraint on site_contacts email | 30 min | Data integrity |
+
+### Medium Priority (2+ hours each)
+| # | Action | Effort | Impact |
+|---|--------|--------|--------|
+| 12 | Add GitHub Actions CI (pytest + ruff) | 2-3 hours | Prevents regressions |
+| 13 | Verify 8,605 tests pass end-to-end | 1 hour | Confidence baseline |
+| 14 | Add N+1 query tests to list endpoints | 2 hours | Performance safety |
+| 15 | Audit FK indexes across all 42 tables | 2 hours | Query performance |
+| 16 | Replace `backref=` with `back_populates` | 2 hours | ORM correctness |
+| 17 | Narrow `except Exception` in top 5 files | 2 hours | Debuggability |
+| 18 | Add backup/restore docs to CLAUDE.md | 30 min | Operational safety |
+| 19 | Organize services into subdirectories | 3-4 hours | Developer experience |
 
 ---
 
@@ -212,7 +256,10 @@ The frontend (`app.js`, `crm.js`, plus 82 HTMX templates) is growing. The recent
 - Sentry integration with sensitive data scrubbing is production-ready
 - The connector pattern (parallel search via `asyncio.gather()`) is well-designed
 - Loguru usage is consistent (no `print()` calls found)
-- Test coverage is broad (301 files covering routers, services, connectors, schemas)
+- Test coverage is broad (314 files, 8,605 functions covering routers, services, connectors, schemas)
+- Test isolation is excellent: fresh event loop, auto-rollback, FK enforcement via PRAGMA
+- 20+ reusable fixtures for User roles (buyer, seller, admin, manager, trader)
+- Type adapters handle SQLite/PostgreSQL incompatibilities (ARRAY→JSON, TSVECTOR→TEXT)
 - Circuit breaker pattern in connectors prevents cascading failures
 - Per-connector concurrency limits prevent API hammering
 - OAuth state validation provides proper CSRF protection
