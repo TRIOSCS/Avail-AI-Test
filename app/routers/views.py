@@ -10,12 +10,12 @@ import math
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.templating import Jinja2Templates
 from loguru import logger
-from sqlalchemy import or_
 from sqlalchemy import func as sqlfunc
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_user, wants_html
+from app.dependencies import require_user
 from app.models import (
     ActivityLog,
     BuyPlan,
@@ -31,8 +31,8 @@ from app.models import (
     Requisition,
     RequisitionTask,
     Sighting,
-    SourcingLead,
     SiteContact,
+    SourcingLead,
     User,
     VendorCard,
     VendorContact,
