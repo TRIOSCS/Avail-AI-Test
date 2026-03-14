@@ -6,7 +6,7 @@ Sub-modules:
   enrichment.py — Enrichment, suggested contacts, sync logs, users, customer import
   offers.py     — Offer CRUD, attachments, OneDrive, changelog
   quotes.py     — Quote CRUD, preview, send, pricing history
-  buy_plans.py  — Buy plan workflows (submit/approve/reject/complete/PO)
+  buy_plans_v3.py — Unified buy plan V4 (submit/approve/verify/PO/complete)
   clone.py      — Requisition clone
 """
 
@@ -21,8 +21,7 @@ from ._helpers import (  # noqa: F401
     quote_to_dict,
     record_changes,
 )
-from .buy_plans import router as buy_plans_router
-from .buy_plans_v3 import router as buy_plans_v3_router
+from .buy_plans_v3 import router as buy_plans_router
 from .clone import router as clone_router
 from .companies import router as companies_router
 from .enrichment import router as enrichment_router
@@ -37,5 +36,4 @@ router.include_router(enrichment_router)
 router.include_router(offers_router)
 router.include_router(quotes_router)
 router.include_router(buy_plans_router)
-router.include_router(buy_plans_v3_router)
 router.include_router(clone_router)

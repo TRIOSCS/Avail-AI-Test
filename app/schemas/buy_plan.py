@@ -1,5 +1,5 @@
 """
-schemas/buy_plan.py — Pydantic schemas for Buy Plan V3 API
+schemas/buy_plan.py — Pydantic schemas for Buy Plan V4 (unified) API
 
 Request and response models for the structured buy plan system with
 split lines, dual approval tracks, and AI-powered vendor selection.
@@ -11,7 +11,7 @@ Business Rules:
 - Manager approval supports line-level vendor overrides
 - Offer comparison shows all feasible offers per requirement
 
-Called by: routers/buy_plan.py
+Called by: routers/crm/buy_plans_v3.py, routers/htmx_views.py
 Depends on: pydantic, models/buy_plan.py (enum values)
 """
 
@@ -34,7 +34,7 @@ class BuyPlanLineEdit(BaseModel):
     sales_note: str | None = None
 
 
-class BuyPlanV3Submit(BaseModel):
+class BuyPlanSubmit(BaseModel):
     """Submit a buy plan from a won quote."""
 
     sales_order_number: str
@@ -60,7 +60,7 @@ class BuyPlanLineOverride(BaseModel):
     manager_note: str | None = None
 
 
-class BuyPlanV3Approval(BaseModel):
+class BuyPlanApproval(BaseModel):
     """Manager approves or rejects the buy plan."""
 
     action: Literal["approve", "reject"]
@@ -193,7 +193,7 @@ class AIFlag(BaseModel):
     message: str
 
 
-class BuyPlanV3Response(BaseModel, extra="allow"):
+class BuyPlanResponse(BaseModel, extra="allow"):
     """Full buy plan with nested lines and AI analysis."""
 
     id: int
@@ -254,7 +254,7 @@ class BuyPlanV3Response(BaseModel, extra="allow"):
     created_at: str | None = None
 
 
-class BuyPlanV3ListItem(BaseModel, extra="allow"):
+class BuyPlanListItem(BaseModel, extra="allow"):
     """Summary item for queue views."""
 
     id: int
@@ -331,10 +331,19 @@ class VerificationGroupMemberResponse(BaseModel):
     added_at: str | None = None
 
 
-class BuyPlanV3TokenApproval(BaseModel):
+class BuyPlanTokenApproval(BaseModel):
     sales_order_number: str
     notes: str | None = None
 
 
-class BuyPlanV3TokenReject(BaseModel):
+class BuyPlanTokenReject(BaseModel):
     reason: str = ""
+
+
+# Backward-compat aliases for V3 names
+BuyPlanV3Submit = BuyPlanSubmit
+BuyPlanV3Approval = BuyPlanApproval
+BuyPlanV3Response = BuyPlanResponse
+BuyPlanV3ListItem = BuyPlanListItem
+BuyPlanV3TokenApproval = BuyPlanTokenApproval
+BuyPlanV3TokenReject = BuyPlanTokenReject

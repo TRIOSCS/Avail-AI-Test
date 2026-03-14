@@ -1,25 +1,25 @@
 """
-buy_plans_v3.py — Buy Plan V3 API Endpoints
+buy_plans_v3.py — Buy Plan V4 (unified) API Endpoints
 
 Structured buy plan system with split lines, dual approval tracks,
 AI-powered vendor selection, and per-line PO tracking.
 
 Endpoints:
-  POST /api/quotes/{quote_id}/buy-plan-v3/build  — AI-build draft plan
-  GET  /api/buy-plans-v3                          — List / queue view
-  GET  /api/buy-plans-v3/{plan_id}                — Full detail + lines
-  POST /api/buy-plans-v3/{plan_id}/submit         — Submit with SO#
-  POST /api/buy-plans-v3/{plan_id}/approve        — Manager approve/reject
-  POST /api/buy-plans-v3/{plan_id}/resubmit       — Resubmit after rejection
-  POST /api/buy-plans-v3/{plan_id}/verify-so      — Ops verify SO
-  POST /api/buy-plans-v3/{plan_id}/lines/{line_id}/confirm-po  — Buyer PO
-  POST /api/buy-plans-v3/{plan_id}/lines/{line_id}/verify-po   — Ops verify PO
-  POST /api/buy-plans-v3/{plan_id}/lines/{line_id}/issue       — Flag issue
-  GET  /api/buy-plans-v3/{plan_id}/offers/{req_id} — Offer comparison
-  GET  /api/buy-plans-v3/verification-group        — List ops members
-  POST /api/buy-plans-v3/verification-group        — Add/remove member
+  POST /api/quotes/{quote_id}/buy-plan/build       — AI-build draft plan
+  GET  /api/buy-plans                               — List / queue view
+  GET  /api/buy-plans/{plan_id}                     — Full detail + lines
+  POST /api/buy-plans/{plan_id}/submit              — Submit with SO#
+  POST /api/buy-plans/{plan_id}/approve             — Manager approve/reject
+  POST /api/buy-plans/{plan_id}/resubmit            — Resubmit after rejection
+  POST /api/buy-plans/{plan_id}/verify-so           — Ops verify SO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/confirm-po  — Buyer PO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/verify-po   — Ops verify PO
+  POST /api/buy-plans/{plan_id}/lines/{line_id}/issue       — Flag issue
+  GET  /api/buy-plans/{plan_id}/offers/{req_id}     — Offer comparison
+  GET  /api/buy-plans/verification-group             — List ops members
+  POST /api/buy-plans/verification-group             — Add/remove member
 
-Called by: frontend (Phases 6-8)
+Called by: frontend, HTMX views
 Depends on: services/buy_plan_v3_service.py, schemas/buy_plan.py
 """
 
@@ -34,17 +34,17 @@ from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
 from ...models import Offer, Requirement, User
 from ...models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanStatus,
-    BuyPlanV3,
     VerificationGroupMember,
 )
 from ...schemas.buy_plan import (
     BuyPlanLineIssue,
-    BuyPlanV3Approval,
-    BuyPlanV3Submit,
-    BuyPlanV3TokenApproval,
-    BuyPlanV3TokenReject,
+    BuyPlanApproval,
+    BuyPlanSubmit,
+    BuyPlanTokenApproval,
+    BuyPlanTokenReject,
     POConfirmation,
     POVerificationRequest,
     SOVerificationRequest,
@@ -119,8 +119,8 @@ def _line_to_dict(line: BuyPlanLine) -> dict:
     }
 
 
-def _plan_to_dict(plan: BuyPlanV3) -> dict:
-    """Serialize a BuyPlanV3 for API response."""
+def _plan_to_dict(plan: BuyPlan) -> dict:
+    """Serialize a BuyPlan for API response."""
     lines = [_line_to_dict(ln) for ln in (plan.lines or [])]
     vendor_names = {ln.get("vendor_name") for ln in lines if ln.get("vendor_name")}
 
@@ -170,7 +170,7 @@ def _plan_to_dict(plan: BuyPlanV3) -> dict:
     }
 
 
-def _plan_to_list_item(plan: BuyPlanV3) -> dict:
+def _plan_to_list_item(plan: BuyPlan) -> dict:
     """Lightweight serialization for queue/list views."""
     quote = plan.quote
     customer_name = None
@@ -208,7 +208,7 @@ def _plan_to_list_item(plan: BuyPlanV3) -> dict:
 # ── Verification Group (must be before /{plan_id} routes) ────────────
 
 
-@router.get("/api/buy-plans-v3/verification-group")
+@router.get("/api/buy-plans/verification-group")
 async def list_verification_group(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -231,7 +231,7 @@ async def list_verification_group(
     }
 
 
-@router.post("/api/buy-plans-v3/verification-group")
+@router.post("/api/buy-plans/verification-group")
 async def update_verification_group(
     body: VerificationGroupUpdate,
     user: User = Depends(require_user),
@@ -273,10 +273,10 @@ def _token_expired(expires_at) -> bool:
     return expires_at is not None and expires_at < now
 
 
-@router.get("/api/buy-plans-v3/token/{token}")
+@router.get("/api/buy-plans/token/{token}")
 async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
     """Public endpoint — no auth required. Get plan details by approval token."""
-    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
@@ -284,10 +284,10 @@ async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
     return _plan_to_dict(plan)
 
 
-@router.put("/api/buy-plans-v3/token/{token}/approve")
-async def approve_by_token(token: str, body: BuyPlanV3TokenApproval, db: Session = Depends(get_db)):
+@router.put("/api/buy-plans/token/{token}/approve")
+async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session = Depends(get_db)):
     """Public token-based approval. Sets SO number and activates plan."""
-    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
@@ -308,10 +308,10 @@ async def approve_by_token(token: str, body: BuyPlanV3TokenApproval, db: Session
     return _plan_to_dict(plan)
 
 
-@router.put("/api/buy-plans-v3/token/{token}/reject")
-async def reject_by_token(token: str, body: BuyPlanV3TokenReject, db: Session = Depends(get_db)):
+@router.put("/api/buy-plans/token/{token}/reject")
+async def reject_by_token(token: str, body: BuyPlanTokenReject, db: Session = Depends(get_db)):
     """Public token-based rejection. Resets plan to draft."""
-    plan = db.query(BuyPlanV3).filter(BuyPlanV3.approval_token == token).first()
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
@@ -329,7 +329,7 @@ async def reject_by_token(token: str, body: BuyPlanV3TokenReject, db: Session = 
 # ── Intelligence ─────────────────────────────────────────────────────
 
 
-@router.get("/api/buy-plans-v3/favoritism/{user_id}")
+@router.get("/api/buy-plans/favoritism/{user_id}")
 async def get_favoritism_report(
     user_id: int,
     user: User = Depends(require_user),
@@ -345,7 +345,7 @@ async def get_favoritism_report(
     return {"user_id": user_id, "user_name": target.name, "findings": findings}
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/case-report")
+@router.post("/api/buy-plans/{plan_id}/case-report")
 async def regenerate_case_report(
     plan_id: int,
     user: User = Depends(require_user),
@@ -353,12 +353,12 @@ async def regenerate_case_report(
 ):
     """Regenerate the case report for a completed buy plan."""
     plan = (
-        db.query(BuyPlanV3)
+        db.query(BuyPlan)
         .options(
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanV3.quote),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlan.quote),
         )
-        .filter(BuyPlanV3.id == plan_id)
+        .filter(BuyPlan.id == plan_id)
         .first()
     )
     if not plan:
@@ -373,7 +373,7 @@ async def regenerate_case_report(
 # ── Build ────────────────────────────────────────────────────────────
 
 
-@router.post("/api/quotes/{quote_id}/buy-plan-v3/build")
+@router.post("/api/quotes/{quote_id}/buy-plan/build")
 async def build_plan_v3(
     quote_id: int,
     user: User = Depends(require_user),
@@ -399,7 +399,7 @@ async def build_plan_v3(
 # ── Get / List ───────────────────────────────────────────────────────
 
 
-@router.get("/api/buy-plans-v3")
+@router.get("/api/buy-plans")
 async def list_buy_plans_v3(
     status: str | None = Query(None),
     so_status: str | None = Query(None),
@@ -409,11 +409,11 @@ async def list_buy_plans_v3(
     db: Session = Depends(get_db),
 ):
     """List buy plans with optional filters for queue views."""
-    q = db.query(BuyPlanV3).options(
-        joinedload(BuyPlanV3.quote),
-        joinedload(BuyPlanV3.submitted_by),
-        joinedload(BuyPlanV3.approved_by),
-        joinedload(BuyPlanV3.lines),
+    q = db.query(BuyPlan).options(
+        joinedload(BuyPlan.quote),
+        joinedload(BuyPlan.submitted_by),
+        joinedload(BuyPlan.approved_by),
+        joinedload(BuyPlan.lines),
     )
     # Validate status filters against known enums
     _valid_statuses = {"draft", "pending", "active", "halted", "completed", "cancelled"}
@@ -426,23 +426,23 @@ async def list_buy_plans_v3(
         )
 
     if status:
-        q = q.filter(BuyPlanV3.status == status)
+        q = q.filter(BuyPlan.status == status)
     if so_status:
-        q = q.filter(BuyPlanV3.so_status == so_status)
+        q = q.filter(BuyPlan.so_status == so_status)
     if buyer_id:
         q = q.join(BuyPlanLine).filter(BuyPlanLine.buyer_id == buyer_id)
     if quote_id:
-        q = q.filter(BuyPlanV3.quote_id == quote_id)
+        q = q.filter(BuyPlan.quote_id == quote_id)
 
     # Sales users see only their own plans
     if user.role == "sales":
-        q = q.filter(BuyPlanV3.submitted_by_id == user.id)
+        q = q.filter(BuyPlan.submitted_by_id == user.id)
 
-    plans = q.order_by(BuyPlanV3.created_at.desc()).limit(500).all()
+    plans = q.order_by(BuyPlan.created_at.desc()).limit(500).all()
     return {"items": [_plan_to_list_item(p) for p in plans], "count": len(plans)}
 
 
-@router.get("/api/buy-plans-v3/{plan_id}")
+@router.get("/api/buy-plans/{plan_id}")
 async def get_buy_plan_v3(
     plan_id: int,
     user: User = Depends(require_user),
@@ -450,17 +450,17 @@ async def get_buy_plan_v3(
 ):
     """Get full buy plan detail with all lines."""
     plan = (
-        db.query(BuyPlanV3)
+        db.query(BuyPlan)
         .options(
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.requirement),
-            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.buyer),
-            joinedload(BuyPlanV3.quote),
-            joinedload(BuyPlanV3.requisition),
-            joinedload(BuyPlanV3.submitted_by),
-            joinedload(BuyPlanV3.approved_by),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.requirement),
+            joinedload(BuyPlan.lines).joinedload(BuyPlanLine.buyer),
+            joinedload(BuyPlan.quote),
+            joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.submitted_by),
+            joinedload(BuyPlan.approved_by),
         )
-        .filter(BuyPlanV3.id == plan_id)
+        .filter(BuyPlan.id == plan_id)
         .first()
     )
     if not plan:
@@ -471,10 +471,10 @@ async def get_buy_plan_v3(
 # ── Submit ───────────────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/submit")
+@router.post("/api/buy-plans/{plan_id}/submit")
 async def submit_plan_v3(
     plan_id: int,
-    body: BuyPlanV3Submit,
+    body: BuyPlanSubmit,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -508,10 +508,10 @@ async def submit_plan_v3(
 # ── Approval ─────────────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/approve")
+@router.post("/api/buy-plans/{plan_id}/approve")
 async def approve_plan_v3(
     plan_id: int,
-    body: BuyPlanV3Approval,
+    body: BuyPlanApproval,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -546,10 +546,10 @@ async def approve_plan_v3(
 # ── Resubmit ─────────────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/resubmit")
+@router.post("/api/buy-plans/{plan_id}/resubmit")
 async def resubmit_plan_v3(
     plan_id: int,
-    body: BuyPlanV3Submit,
+    body: BuyPlanSubmit,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -577,7 +577,7 @@ async def resubmit_plan_v3(
 # ── Reset to Draft (halted/cancelled) ────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/reset-to-draft")
+@router.post("/api/buy-plans/{plan_id}/reset-to-draft")
 async def reset_plan_to_draft(
     plan_id: int,
     user: User = Depends(require_user),
@@ -595,7 +595,7 @@ async def reset_plan_to_draft(
 # ── SO Verification ──────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/verify-so")
+@router.post("/api/buy-plans/{plan_id}/verify-so")
 async def verify_so_v3(
     plan_id: int,
     body: SOVerificationRequest,
@@ -627,7 +627,7 @@ async def verify_so_v3(
 # ── PO Confirmation ──────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/lines/{line_id}/confirm-po")
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/confirm-po")
 async def confirm_po_v3(
     plan_id: int,
     line_id: int,
@@ -656,7 +656,7 @@ async def confirm_po_v3(
 # ── PO Verification ──────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/lines/{line_id}/verify-po")
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/verify-po")
 async def verify_po_v3(
     plan_id: int,
     line_id: int,
@@ -691,7 +691,7 @@ async def verify_po_v3(
 # ── Flag Issue ───────────────────────────────────────────────────────
 
 
-@router.post("/api/buy-plans-v3/{plan_id}/lines/{line_id}/issue")
+@router.post("/api/buy-plans/{plan_id}/lines/{line_id}/issue")
 async def flag_issue_v3(
     plan_id: int,
     line_id: int,
@@ -719,14 +719,14 @@ async def flag_issue_v3(
 # ── PO Verification Scanning ─────────────────────────────────────────
 
 
-@router.get("/api/buy-plans-v3/{plan_id}/verify-po")
+@router.get("/api/buy-plans/{plan_id}/verify-po")
 async def verify_po_scan_v3(
     plan_id: int,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     """Scan buyer's Outlook for PO emails matching each line."""
-    plan = db.query(BuyPlanV3).filter(BuyPlanV3.id == plan_id).first()
+    plan = db.query(BuyPlan).filter(BuyPlan.id == plan_id).first()
     if not plan:
         raise HTTPException(404, "Plan not found")
     from ...services.buy_plan_v3_service import verify_po_sent_v3
@@ -737,7 +737,7 @@ async def verify_po_scan_v3(
 # ── Offer Comparison ─────────────────────────────────────────────────
 
 
-@router.get("/api/buy-plans-v3/{plan_id}/offers/{requirement_id}")
+@router.get("/api/buy-plans/{plan_id}/offers/{requirement_id}")
 async def offer_comparison_v3(
     plan_id: int,
     requirement_id: int,
@@ -745,7 +745,7 @@ async def offer_comparison_v3(
     db: Session = Depends(get_db),
 ):
     """Get all available offers for a requirement — used in manager/salesperson views."""
-    plan = db.get(BuyPlanV3, plan_id)
+    plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404, "Buy plan not found")
 

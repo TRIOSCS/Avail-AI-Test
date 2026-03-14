@@ -1,12 +1,12 @@
 """
-buy_plan.py — Buy Plan V3 Data Models
+buy_plan.py — Buy Plan V4 Data Models (unified from V1 + V3)
 
-Purpose: Structured buy plan tables replacing the JSON line_items approach.
-         Separate BuyPlanLine rows enable per-line status tracking, split lines,
+Purpose: Structured buy plan tables with per-line status tracking, split lines,
          buyer assignment, PO confirmation, and ops verification.
+         Replaces both the old V1 JSON line_items model and V3 intermediate model.
 
 Description:
-  - BuyPlanV3: header record linking quote → SO → customer PO, with dual
+  - BuyPlan: header record linking quote → SO → customer PO, with dual
     approval tracks (manager spend approval + ops SO verification)
   - BuyPlanLine: one row per vendor/requirement purchase, supports splits
     (multiple lines sharing the same requirement_id)
@@ -19,7 +19,7 @@ Business Rules:
   - Ops verification runs in parallel with buy execution
   - First ops member to act wins (no double-verify)
 
-Called by: services/buy_plan_service.py, routers/buy_plan.py
+Called by: services/buyplan_workflow.py, routers/crm/buy_plans.py
 Depends on: models.base, models.quotes, models.sourcing, models.offers, models.auth
 """
 
@@ -92,11 +92,15 @@ class AIFlagSeverity(str, enum.Enum):
     critical = "critical"
 
 
-# ── Buy Plan V3 (header) ────────────────────────────────────────────
+# ── Buy Plan (header) ──────────────────────────────────────────────
 
 
-class BuyPlanV3(Base):
-    """V3 buy plan with structured lines, dual approval tracks, and AI analysis."""
+class BuyPlan(Base):
+    """Buy plan with structured lines, dual approval tracks, and AI analysis.
+
+    Unified V4 model replacing both V1 (JSON line_items) and V3 (intermediate).
+    Table name kept as buy_plans_v3 for backward compatibility with existing data.
+    """
 
     __tablename__ = "buy_plans_v3"
 
@@ -252,7 +256,7 @@ class BuyPlanLine(Base):
     )
 
     # ── Relationships
-    buy_plan = relationship("BuyPlanV3", back_populates="lines")
+    buy_plan = relationship("BuyPlan", back_populates="lines")
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     offer = relationship("Offer", foreign_keys=[offer_id])
     buyer = relationship("User", foreign_keys=[buyer_id])
@@ -288,3 +292,7 @@ class VerificationGroupMember(Base):
     user = relationship("User", foreign_keys=[user_id])
 
     __table_args__ = (Index("ix_vgm_active", "is_active"),)
+
+
+# Backward-compat alias so existing imports don't break during migration
+BuyPlanV3 = BuyPlan

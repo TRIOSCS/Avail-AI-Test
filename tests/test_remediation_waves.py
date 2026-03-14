@@ -146,12 +146,12 @@ class TestApiContracts:
 
     def test_buy_plan_invalid_status_filter(self, client):
         """Invalid status filter returns 400, not empty results."""
-        resp = client.get("/api/buy-plans-v3?status=INVALID_STATUS")
+        resp = client.get("/api/buy-plans?status=INVALID_STATUS")
         assert resp.status_code == 400
 
     def test_buy_plan_valid_status_filter(self, client):
         """Valid status filter works normally."""
-        resp = client.get("/api/buy-plans-v3?status=draft")
+        resp = client.get("/api/buy-plans?status=draft")
         assert resp.status_code == 200
 
     def test_offer_mark_sold_endpoint(self, client):

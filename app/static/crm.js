@@ -3216,7 +3216,7 @@ async function markQuoteWonV3() {
         notifyStatusChange(resultData);
         crmQuote.status = 'won';
         renderQuote();
-        _currentBuyPlanV3 = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan-v3/build', { method: 'POST' });
+        _currentBuyPlanV3 = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan/build', { method: 'POST' });
         renderBuyPlanV3Status();
         showToast('AI buy plan built \u2014 review and submit', 'success');
     } catch (e) {
@@ -3229,10 +3229,10 @@ async function markQuoteWonV3() {
 async function loadBuyPlanV3() {
     if (!crmQuote) return;
     try {
-        const resp = await apiFetch('/api/buy-plans-v3?quote_id=' + crmQuote.id);
+        const resp = await apiFetch('/api/buy-plans?quote_id=' + crmQuote.id);
         const plans = (resp.items || []);
         if (plans.length > 0) {
-            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + plans[0].id);
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + plans[0].id);
         } else {
             _currentBuyPlanV3 = null;
         }
@@ -3516,10 +3516,10 @@ async function submitBuyPlanV3() {
         try {
             const body = { sales_order_number: soNum, customer_po_number: custPO, salesperson_notes: notes };
             if (lineEdits.length) body.line_edits = lineEdits;
-            const res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body });
+            const res = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body });
             const msg = res.auto_approved ? 'Buy plan auto-approved \u2014 buyers notified!' : 'Buy plan submitted for approval';
             showToast(msg, 'success');
-            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id);
             renderBuyPlanV3Status();
         } catch (e) {
             logCatchError('submitBuyPlanV3', e);
@@ -3554,9 +3554,9 @@ async function approveBuyPlanV3() {
         await guardBtn(btn, 'Approving\u2026', async () => {
             const body = { action: 'approve', notes };
             if (overrides.length) body.line_overrides = overrides;
-            await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/approve', { method: 'POST', body });
+            await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/approve', { method: 'POST', body });
             showToast('Buy plan approved \u2014 buyers notified', 'success');
-            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id);
             renderBuyPlanV3Status();
         });
     } catch (e) {
@@ -3576,11 +3576,11 @@ async function rejectBuyPlanV3() {
     if (!reason) { showToast('Rejection reason is required', 'error'); return; }
     if (rejectBuyPlanV3._busy) return; rejectBuyPlanV3._busy = true;
     try {
-        await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/approve', {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/approve', {
             method: 'POST', body: { action: 'reject', notes: reason }
         });
         showToast('Buy plan rejected', 'info');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id);
         renderBuyPlanV3Status();
     } catch (e) {
         logCatchError('rejectBuyPlanV3', e);
@@ -3598,11 +3598,11 @@ async function confirmPOV3(planId, lineId) {
     if (!po) { showToast('PO number is required', 'error'); poInput?.focus(); return; }
     if (!ship) { showToast('Estimated ship date is required', 'error'); shipInput?.focus(); return; }
     try {
-        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/confirm-po', {
+        await apiFetch('/api/buy-plans/' + planId + '/lines/' + lineId + '/confirm-po', {
             method: 'POST', body: { po_number: po, estimated_ship_date: ship + 'T00:00:00Z' }
         });
         showToast('PO confirmed', 'success');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + planId);
         renderBuyPlanV3Status();
     } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
@@ -3632,11 +3632,11 @@ async function submitFlagIssueV3(planId, lineId) {
     const note = (form.querySelector('.bpv3-issue-note')?.value || '').trim() || null;
     if (issueType === 'other' && !note) { showToast('Note required for "Other" issue', 'error'); return; }
     try {
-        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/issue', {
+        await apiFetch('/api/buy-plans/' + planId + '/lines/' + lineId + '/issue', {
             method: 'POST', body: { issue_type: issueType, note }
         });
         showToast('Issue flagged', 'info');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + planId);
         renderBuyPlanV3Status();
     } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
@@ -3664,33 +3664,33 @@ async function verifySOV3(action) {
         showToast('A note is required', 'error'); noteEl?.focus(); return;
     }
     try {
-        await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/verify-so', {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/verify-so', {
             method: 'POST', body: { action, rejection_note: note }
         });
         showToast(action === 'approve' ? 'SO verified' : 'SO ' + action + 'ed', action === 'approve' ? 'success' : 'info');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id);
         renderBuyPlanV3Status();
     } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 async function verifyPOV3(planId, lineId, action) {
     try {
-        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
+        await apiFetch('/api/buy-plans/' + planId + '/lines/' + lineId + '/verify-po', {
             method: 'POST', body: { action }
         });
         showToast('PO ' + (action === 'approve' ? 'verified' : 'rejected'), action === 'approve' ? 'success' : 'info');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + planId);
         renderBuyPlanV3Status();
     } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
 
 function openRejectPOV3(planId, lineId) {
     promptInput('Reject PO', 'Reason for rejection', function(note) {
-        apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
+        apiFetch('/api/buy-plans/' + planId + '/lines/' + lineId + '/verify-po', {
             method: 'POST', body: { action: 'reject', rejection_note: note.trim() }
         }).then(() => {
             showToast('PO rejected', 'info');
-            return apiFetch('/api/buy-plans-v3/' + planId);
+            return apiFetch('/api/buy-plans/' + planId);
         }).then(plan => {
             _currentBuyPlanV3 = plan;
             renderBuyPlanV3Status();
@@ -3707,11 +3707,11 @@ async function resubmitBuyPlanV3() {
     const custPO = (document.getElementById('bpV3ResubCustPO')?.value || '').trim() || null;
     const notes = (document.getElementById('bpV3ResubNotes')?.value || '').trim() || null;
     try {
-        const res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/resubmit', {
+        const res = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/resubmit', {
             method: 'POST', body: { sales_order_number: soNum, customer_po_number: custPO, salesperson_notes: notes }
         });
         showToast(res.auto_approved ? 'Resubmitted and auto-approved!' : 'Resubmitted for approval', 'success');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + res.plan_id);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + res.plan_id);
         renderBuyPlanV3Status();
     } catch (e) { showToast(friendlyError(e, 'Action failed — please try again'), 'error'); }
 }
@@ -3723,7 +3723,7 @@ async function openOfferComparisonV3(planId, reqId, currentLineId) {
     const body = modal.querySelector('.modal');
     body.innerHTML = '<h2>Offer Comparison</h2><div class="spinner-row"><div class="spinner"></div>Loading offers\u2026</div>';
     try {
-        const data = await apiFetch('/api/buy-plans-v3/' + planId + '/offers/' + reqId);
+        const data = await apiFetch('/api/buy-plans/' + planId + '/offers/' + reqId);
         const offers = data.offers || [];
         const selectedIds = new Set(data.selected_offer_ids || []);
         let html = '<h2>Offers for ' + esc(data.mpn || 'MPN') + '</h2>';
@@ -3764,7 +3764,7 @@ async function swapLineOfferV3(lineId, offerId, reqId) {
     line._swapped = true;
     // Fetch offer details to update display
     try {
-        const data = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/offers/' + reqId);
+        const data = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/offers/' + reqId);
         const offer = (data.offers || []).find(o => o.offer_id === offerId);
         if (offer) {
             line.vendor_name = offer.vendor_name;
@@ -3794,7 +3794,7 @@ async function loadBuyPlans() {
     var bpl = document.getElementById('buyPlansList');
     if (bpl && !_buyPlans.length) bpl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading buy plans\u2026</div>';
     try {
-        let url = '/api/buy-plans-v3';
+        let url = '/api/buy-plans';
         if (_bpFilter) url += '?status=' + encodeURIComponent(_bpFilter);
         const resp = await apiFetch(url);
         _buyPlans = resp.items || [];
@@ -3942,7 +3942,7 @@ async function openBuyPlanDetailV3(planId) {
     const el = document.getElementById('buyPlansList');
     el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading\u2026</div>';
     try {
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + planId);
     } catch (e) { showToast('Failed to load buy plan', 'error'); el.innerHTML = ''; return; }
     const backBtn = '<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">\u2190 Back to list</button>';
     el.innerHTML = backBtn;
@@ -3959,7 +3959,7 @@ async function checkTokenApproval() {
     const token = location.hash.replace('#approve-token/', '');
     if (!token) return false;
     try {
-        const bp = await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token));
+        const bp = await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token));
         showView('view-buyplans');
         const el = document.getElementById('buyPlansList');
         const statusLabel = bp.status === 'pending_approval' ? 'Pending Approval' : bp.status;
@@ -4007,7 +4007,7 @@ async function tokenApprovePlan(token) {
     if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
     const notes = document.getElementById('tokenManagerNotes')?.value?.trim() || '';
     try {
-        await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token) + '/approve', {
+        await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/approve', {
             method: 'PUT', body: { sales_order_number: soNumber, manager_notes: notes }
         });
         _showTokenResult('approved', 'Buy plan approved — buyers have been notified.');
@@ -4017,7 +4017,7 @@ async function tokenApprovePlan(token) {
 async function tokenRejectPlan(token) {
     promptInput('Reject', 'Rejection reason', async function(reason) {
         try {
-            await apiFetch('/api/buy-plans-v3/token/' + encodeURIComponent(token) + '/reject', {
+            await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
                 method: 'PUT', body: { reason }
             });
             _showTokenResult('rejected', 'Buy plan has been rejected.');
@@ -8003,10 +8003,10 @@ async function _openMobileBuyPlanForm(reqId) {
     var existingPlan = _currentBuyPlanV3;
     if (!existingPlan) {
         try {
-            var resp = await apiFetch('/api/buy-plans-v3?quote_id=' + crmQuote.id);
+            var resp = await apiFetch('/api/buy-plans?quote_id=' + crmQuote.id);
             var plans = (resp.items || []);
             if (plans.length > 0) {
-                existingPlan = await apiFetch('/api/buy-plans-v3/' + plans[0].id);
+                existingPlan = await apiFetch('/api/buy-plans/' + plans[0].id);
                 _currentBuyPlanV3 = existingPlan;
             }
         } catch (_e) { /* ignore */ }
@@ -8015,7 +8015,7 @@ async function _openMobileBuyPlanForm(reqId) {
     // If no existing plan, try to build one
     if (!existingPlan) {
         try {
-            existingPlan = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan-v3/build', { method: 'POST' });
+            existingPlan = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan/build', { method: 'POST' });
             _currentBuyPlanV3 = existingPlan;
         } catch (e) {
             logCatchError('_openMobileBuyPlanForm', e);
@@ -8120,10 +8120,10 @@ async function _mbpSubmit() {
 
     try {
         var body = { sales_order_number: soNum, salesperson_notes: notes };
-        var res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body: body });
+        var res = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body: body });
         var msg = res.auto_approved ? 'Buy plan auto-approved \u2014 buyers notified!' : 'Buy plan submitted for approval';
         showToast(msg, 'success');
-        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans/' + _currentBuyPlanV3.id);
         _closeMobileSheet();
         renderBuyPlanV3Status();
     } catch (e) {

@@ -1,9 +1,9 @@
 """
-test_buy_plan_v3_router.py — Buy Plan V3 API Endpoint Tests
+test_buy_plan_v3_router.py — Buy Plan V4 (unified) API Endpoint Tests
 
-Covers all V3 endpoints via TestClient: build, get, list, submit, approve,
-verify-so, confirm-po, verify-po, flag-issue, resubmit, offer comparison,
-and verification group CRUD.
+Covers all buy plan endpoints via TestClient: build, get, list, submit,
+approve, verify-so, confirm-po, verify-po, flag-issue, resubmit, offer
+comparison, and verification group CRUD.
 
 Called by: pytest
 Depends on: conftest.py fixtures, app.routers.crm.buy_plans_v3
@@ -126,7 +126,7 @@ class TestBuildEndpoint:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.post(f"/api/quotes/{test_quote.id}/buy-plan-v3/build")
+        r = c.post(f"/api/quotes/{test_quote.id}/buy-plan/build")
         assert r.status_code == 200
         data = r.json()
         assert data["status"] == "draft"
@@ -135,7 +135,7 @@ class TestBuildEndpoint:
 
     def test_build_invalid_quote(self, db_session: Session, test_user: User):
         c = _make_client(db_session, test_user)
-        r = c.post("/api/quotes/99999/buy-plan-v3/build")
+        r = c.post("/api/quotes/99999/buy-plan/build")
         assert r.status_code == 400
 
 
@@ -146,7 +146,7 @@ class TestGetListEndpoints:
     def test_get_plan(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3/{plan.id}")
+        r = c.get(f"/api/buy-plans/{plan.id}")
         assert r.status_code == 200
         data = r.json()
         assert data["id"] == plan.id
@@ -154,13 +154,13 @@ class TestGetListEndpoints:
 
     def test_get_not_found(self, db_session: Session, test_user: User):
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3/99999")
+        r = c.get("/api/buy-plans/99999")
         assert r.status_code == 404
 
     def test_list_all(self, db_session: Session, test_quote: Quote, test_user: User):
         _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3")
+        r = c.get("/api/buy-plans")
         assert r.status_code == 200
         data = r.json()
         assert data["count"] >= 1
@@ -169,21 +169,21 @@ class TestGetListEndpoints:
     def test_list_filter_status(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3?status=draft")
+        r = c.get("/api/buy-plans?status=draft")
         assert r.status_code == 200
         assert r.json()["count"] >= 1
 
-        r2 = c.get("/api/buy-plans-v3?status=completed")
+        r2 = c.get("/api/buy-plans?status=completed")
         assert r2.json()["count"] == 0
 
     def test_list_filter_quote_id(self, db_session: Session, test_quote: Quote, test_user: User):
         _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3?quote_id={test_quote.id}")
+        r = c.get(f"/api/buy-plans?quote_id={test_quote.id}")
         assert r.status_code == 200
         assert r.json()["count"] >= 1
 
-        r2 = c.get("/api/buy-plans-v3?quote_id=99999")
+        r2 = c.get("/api/buy-plans?quote_id=99999")
         assert r2.json()["count"] == 0
 
 
@@ -195,7 +195,7 @@ class TestSubmitEndpoint:
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/submit",
+            f"/api/buy-plans/{plan.id}/submit",
             json={"sales_order_number": "SO-2026-001"},
         )
         assert r.status_code == 200
@@ -213,7 +213,7 @@ class TestSubmitEndpoint:
         )
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/submit",
+            f"/api/buy-plans/{plan.id}/submit",
             json={"sales_order_number": "SO-BIG"},
         )
         assert r.status_code == 200
@@ -224,7 +224,7 @@ class TestSubmitEndpoint:
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         resp = c.post(
-            f"/api/buy-plans-v3/{plan.id}/submit",
+            f"/api/buy-plans/{plan.id}/submit",
             json={"sales_order_number": ""},
         )
         assert resp.status_code == 422
@@ -247,7 +247,7 @@ class TestApproveEndpoint:
 
         c = _make_client(db_session, manager_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/approve",
+            f"/api/buy-plans/{plan.id}/approve",
             json={"action": "approve", "notes": "LGTM"},
         )
         assert r.status_code == 200
@@ -266,7 +266,7 @@ class TestApproveEndpoint:
 
         c = _make_client(db_session, manager_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/approve",
+            f"/api/buy-plans/{plan.id}/approve",
             json={"action": "reject", "notes": "Fix margin"},
         )
         assert r.status_code == 200
@@ -280,7 +280,7 @@ class TestApproveEndpoint:
 
         c = _make_client(db_session, test_user)  # buyer role
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/approve",
+            f"/api/buy-plans/{plan.id}/approve",
             json={"action": "approve"},
         )
         assert r.status_code == 403
@@ -303,7 +303,7 @@ class TestVerifySOEndpoint:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/verify-so",
+            f"/api/buy-plans/{plan.id}/verify-so",
             json={"action": "approve"},
         )
         assert r.status_code == 200
@@ -322,7 +322,7 @@ class TestVerifySOEndpoint:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/verify-so",
+            f"/api/buy-plans/{plan.id}/verify-so",
             json={"action": "halt", "rejection_note": "Fraud suspected"},
         )
         assert r.status_code == 200
@@ -340,7 +340,7 @@ class TestVerifySOEndpoint:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/verify-so",
+            f"/api/buy-plans/{plan.id}/verify-so",
             json={"action": "approve"},
         )
         assert r.status_code == 403
@@ -357,7 +357,7 @@ class TestConfirmPOEndpoint:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/confirm-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
             json={
                 "po_number": "PO-2026-042",
                 "estimated_ship_date": "2026-03-15T00:00:00Z",
@@ -374,7 +374,7 @@ class TestConfirmPOEndpoint:
         # plan is draft, not active
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/confirm-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
             json={
                 "po_number": "PO-001",
                 "estimated_ship_date": "2026-03-15T00:00:00Z",
@@ -402,7 +402,7 @@ class TestVerifyPOEndpoint:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/verify-po",
             json={"action": "approve"},
         )
         assert r.status_code == 200
@@ -422,7 +422,7 @@ class TestVerifyPOEndpoint:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/verify-po",
             json={"action": "reject", "rejection_note": "Wrong amount"},
         )
         assert r.status_code == 200
@@ -440,7 +440,7 @@ class TestFlagIssueEndpoint:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/issue",
             json={"issue_type": "sold_out"},
         )
         assert r.status_code == 200
@@ -454,7 +454,7 @@ class TestFlagIssueEndpoint:
 
         c = _make_client(db_session, test_user)
         resp = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/issue",
             json={"issue_type": "other"},
         )
         assert resp.status_code == 422
@@ -469,7 +469,7 @@ class TestResubmitEndpoint:
         # Stays in draft (simulating manager rejection)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/resubmit",
+            f"/api/buy-plans/{plan.id}/resubmit",
             json={"sales_order_number": "SO-FIXED"},
         )
         assert r.status_code == 200
@@ -493,7 +493,7 @@ class TestOfferComparison:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3/{plan.id}/offers/{req.id}")
+        r = c.get(f"/api/buy-plans/{plan.id}/offers/{req.id}")
         assert r.status_code == 200
         data = r.json()
         assert data["requirement_id"] == req.id
@@ -507,28 +507,28 @@ class TestOfferComparison:
 class TestVerificationGroup:
     def test_list_empty(self, db_session: Session, test_user: User):
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3/verification-group")
+        r = c.get("/api/buy-plans/verification-group")
         assert r.status_code == 200
         assert r.json()["items"] == []
 
     def test_add_member(self, db_session: Session, admin_user: User, test_user: User):
         c = _make_client(db_session, admin_user)
         r = c.post(
-            "/api/buy-plans-v3/verification-group",
+            "/api/buy-plans/verification-group",
             json={"user_id": test_user.id, "action": "add"},
         )
         assert r.status_code == 200
         assert r.json()["action"] == "added"
 
         # Verify it appears in list
-        r2 = c.get("/api/buy-plans-v3/verification-group")
+        r2 = c.get("/api/buy-plans/verification-group")
         assert len(r2.json()["items"]) == 1
 
     def test_remove_member(self, db_session: Session, admin_user: User, test_user: User):
         _make_ops_member(db_session, test_user)
         c = _make_client(db_session, admin_user)
         r = c.post(
-            "/api/buy-plans-v3/verification-group",
+            "/api/buy-plans/verification-group",
             json={"user_id": test_user.id, "action": "remove"},
         )
         assert r.status_code == 200
@@ -537,7 +537,7 @@ class TestVerificationGroup:
     def test_non_admin_rejected(self, db_session: Session, test_user: User):
         c = _make_client(db_session, test_user)
         r = c.post(
-            "/api/buy-plans-v3/verification-group",
+            "/api/buy-plans/verification-group",
             json={"user_id": test_user.id, "action": "add"},
         )
         assert r.status_code == 403
@@ -763,9 +763,9 @@ class TestFavoritism:
         test_user: User,
         admin_user: User,
     ):
-        """GET /api/buy-plans-v3/favoritism/{user_id} works for admins."""
+        """GET /api/buy-plans/favoritism/{user_id} works for admins."""
         c = _make_client(db_session, admin_user)
-        r = c.get(f"/api/buy-plans-v3/favoritism/{test_user.id}")
+        r = c.get(f"/api/buy-plans/favoritism/{test_user.id}")
         assert r.status_code == 200
         assert "findings" in r.json()
 
@@ -776,7 +776,7 @@ class TestFavoritism:
     ):
         """Non-admin/manager users cannot access favoritism report."""
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3/favoritism/{test_user.id}")
+        r = c.get(f"/api/buy-plans/favoritism/{test_user.id}")
         assert r.status_code == 403
 
 
@@ -833,7 +833,7 @@ class TestCaseReport:
         test_quote: Quote,
         test_user: User,
     ):
-        """POST /api/buy-plans-v3/{id}/case-report regenerates the report."""
+        """POST /api/buy-plans/{id}/case-report regenerates the report."""
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
         plan = BuyPlanV3(
@@ -860,7 +860,7 @@ class TestCaseReport:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.post(f"/api/buy-plans-v3/{plan.id}/case-report")
+        r = c.post(f"/api/buy-plans/{plan.id}/case-report")
         assert r.status_code == 200
         assert "CASE REPORT" in r.json()["case_report"]
 
@@ -880,7 +880,7 @@ class TestCaseReport:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.post(f"/api/buy-plans-v3/{plan.id}/case-report")
+        r = c.post(f"/api/buy-plans/{plan.id}/case-report")
         assert r.status_code == 400
 
     def test_case_report_not_found(
@@ -890,7 +890,7 @@ class TestCaseReport:
     ):
         """Case report for nonexistent plan → 404 (line 307)."""
         c = _make_client(db_session, test_user)
-        r = c.post("/api/buy-plans-v3/99999/case-report")
+        r = c.post("/api/buy-plans/99999/case-report")
         assert r.status_code == 404
 
 
@@ -904,7 +904,7 @@ class TestVerificationGroupEdgeCases:
         """Add user_id that doesn't exist → 404 (line 244)."""
         c = _make_client(db_session, admin_user)
         r = c.post(
-            "/api/buy-plans-v3/verification-group",
+            "/api/buy-plans/verification-group",
             json={"user_id": 99999, "action": "add"},
         )
         assert r.status_code == 404
@@ -922,7 +922,7 @@ class TestVerificationGroupEdgeCases:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            "/api/buy-plans-v3/verification-group",
+            "/api/buy-plans/verification-group",
             json={"user_id": test_user.id, "action": "add"},
         )
         assert r.status_code == 200
@@ -942,7 +942,7 @@ class TestFavoritismEdgeCases:
     ):
         """Favoritism report for nonexistent user → 404 (line 285)."""
         c = _make_client(db_session, admin_user)
-        r = c.get("/api/buy-plans-v3/favoritism/99999")
+        r = c.get("/api/buy-plans/favoritism/99999")
         assert r.status_code == 404
 
 
@@ -964,7 +964,7 @@ class TestListV3Filters:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3?so_status=approved")
+        r = c.get("/api/buy-plans?so_status=approved")
         assert r.status_code == 200
         assert r.json()["count"] >= 1
 
@@ -978,7 +978,7 @@ class TestListV3Filters:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
 
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3?buyer_id={test_user.id}")
+        r = c.get(f"/api/buy-plans?buyer_id={test_user.id}")
         assert r.status_code == 200
         assert r.json()["count"] >= 1
 
@@ -997,7 +997,7 @@ class TestListV3Filters:
         # Sales user with different id should see 0 plans
         sales = sales_user
         c = _make_client(db_session, sales)
-        r = c.get("/api/buy-plans-v3")
+        r = c.get("/api/buy-plans")
         assert r.status_code == 200
         assert r.json()["count"] == 0
 
@@ -1018,7 +1018,7 @@ class TestSubmitV3EdgeCases:
         plan, line, offer, req = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/submit",
+            f"/api/buy-plans/{plan.id}/submit",
             json={
                 "sales_order_number": "SO-EDIT",
                 "line_edits": [
@@ -1046,7 +1046,7 @@ class TestSubmitV3EdgeCases:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/submit",
+            f"/api/buy-plans/{plan.id}/submit",
             json={"sales_order_number": "SO-FAIL"},
         )
         assert r.status_code == 400
@@ -1072,7 +1072,7 @@ class TestApproveV3EdgeCases:
 
         c = _make_client(db_session, manager_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/approve",
+            f"/api/buy-plans/{plan.id}/approve",
             json={
                 "action": "approve",
                 "line_overrides": [
@@ -1099,7 +1099,7 @@ class TestApproveV3EdgeCases:
         # Status is draft, not pending
         c = _make_client(db_session, manager_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/approve",
+            f"/api/buy-plans/{plan.id}/approve",
             json={"action": "approve"},
         )
         assert r.status_code == 400
@@ -1124,7 +1124,7 @@ class TestResubmitV3EdgeCases:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/resubmit",
+            f"/api/buy-plans/{plan.id}/resubmit",
             json={"sales_order_number": "SO-FAIL"},
         )
         assert r.status_code == 400
@@ -1145,7 +1145,7 @@ class TestResubmitV3EdgeCases:
         # Plan stays in draft for resubmit
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/resubmit",
+            f"/api/buy-plans/{plan.id}/resubmit",
             json={"sales_order_number": "SO-BIG-RESUB"},
         )
         assert r.status_code == 200
@@ -1177,7 +1177,7 @@ class TestVerifySOV3EdgeCases:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/verify-so",
+            f"/api/buy-plans/{plan.id}/verify-so",
             json={"action": "approve"},
         )
         assert r.status_code == 400
@@ -1204,7 +1204,7 @@ class TestVerifyPOV3EdgeCases:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/verify-po",
             json={"action": "approve"},
         )
         assert r.status_code == 400
@@ -1225,7 +1225,7 @@ class TestVerifyPOV3EdgeCases:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/verify-po",
             json={"action": "approve"},
         )
         assert r.status_code == 403
@@ -1252,7 +1252,7 @@ class TestVerifyPOV3EdgeCases:
 
         c = _make_client(db_session, admin_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/verify-po",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/verify-po",
             json={"action": "approve"},
         )
         assert r.status_code == 200
@@ -1280,7 +1280,7 @@ class TestFlagIssueV3EdgeCases:
 
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/api/buy-plans-v3/{plan.id}/lines/{line.id}/issue",
+            f"/api/buy-plans/{plan.id}/lines/{line.id}/issue",
             json={"issue_type": "sold_out"},
         )
         assert r.status_code == 400
@@ -1299,7 +1299,7 @@ class TestOfferComparisonEdgeCases:
     ):
         """Offer comparison for nonexistent plan → 404 (line 630)."""
         c = _make_client(db_session, test_user)
-        r = c.get("/api/buy-plans-v3/99999/offers/1")
+        r = c.get("/api/buy-plans/99999/offers/1")
         assert r.status_code == 404
 
     def test_offer_comparison_requirement_not_found(
@@ -1311,5 +1311,5 @@ class TestOfferComparisonEdgeCases:
         """Offer comparison for nonexistent requirement → 404 (line 634)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/api/buy-plans-v3/{plan.id}/offers/99999")
+        r = c.get(f"/api/buy-plans/{plan.id}/offers/99999")
         assert r.status_code == 404

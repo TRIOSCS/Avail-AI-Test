@@ -1,8 +1,8 @@
-"""Buy Plan V3 — Plan building, AI summary, AI flags.
+"""Buy Plan — Plan building, AI summary, AI flags.
 
 Auto-builds draft buy plans from won quotes: scoring, auto-split, buyer assignment.
 
-Called by: routers/buy_plans_v3.py
+Called by: routers/crm/buy_plans.py
 Depends on: buyplan_scoring, models
 """
 
@@ -18,10 +18,10 @@ from ..models import (
     VendorCard,
 )
 from ..models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
 )
 from .buyplan_scoring import (
     _country_to_region,
@@ -30,7 +30,7 @@ from .buyplan_scoring import (
 )
 
 
-def build_buy_plan(quote_id: int, db: Session) -> BuyPlanV3:
+def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     """Auto-build a draft buy plan from a won quote.
 
     For each requirement:
@@ -40,7 +40,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlanV3:
     4. Assign buyer
     5. Calculate margins
 
-    Returns an unsaved BuyPlanV3 with lines populated (caller saves).
+    Returns an unsaved BuyPlan with lines populated (caller saves).
     """
     quote = db.get(
         Quote,
@@ -59,10 +59,10 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlanV3:
 
     # Guard: prevent duplicate buy plans for same quote
     existing = (
-        db.query(BuyPlanV3)
+        db.query(BuyPlan)
         .filter(
-            BuyPlanV3.quote_id == quote_id,
-            BuyPlanV3.status.notin_(["cancelled"]),
+            BuyPlan.quote_id == quote_id,
+            BuyPlan.status.notin_(["cancelled"]),
         )
         .first()
     )
@@ -81,7 +81,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlanV3:
     if not requirements:
         raise ValueError(f"No requirements found for requisition {quote.requisition_id}")
 
-    plan = BuyPlanV3(
+    plan = BuyPlan(
         quote_id=quote_id,
         requisition_id=quote.requisition_id,
         status=BuyPlanStatus.draft.value,
@@ -211,7 +211,7 @@ def _create_line(
 # ── AI Summary ──────────────────────────────────────────────────────
 
 
-def generate_ai_summary(plan: BuyPlanV3) -> str:
+def generate_ai_summary(plan: BuyPlan) -> str:
     """Generate a plain English summary of the buy plan.
 
     Example: '3 lines across 2 vendors. Avg margin 42%. 1 flag.'
@@ -255,7 +255,7 @@ def generate_ai_summary(plan: BuyPlanV3) -> str:
 # ── AI Flags ────────────────────────────────────────────────────────
 
 
-def generate_ai_flags(plan: BuyPlanV3, db: Session) -> list[dict]:
+def generate_ai_flags(plan: BuyPlan, db: Session) -> list[dict]:
     """Generate AI flags for potential issues in the buy plan.
 
     Checks:
@@ -401,7 +401,7 @@ def _check_geo_mismatch(
         )
 
 
-def _check_quantity_gaps(plan: BuyPlanV3, flags: list[dict], db: Session):
+def _check_quantity_gaps(plan: BuyPlan, flags: list[dict], db: Session):
     """Check if split lines fully cover each requirement's target qty."""
     req_totals: dict[int, int] = {}
     req_targets: dict[int, int] = {}

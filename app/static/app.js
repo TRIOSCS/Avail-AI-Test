@@ -13796,7 +13796,7 @@ async function _updateVrStatus(vrId, status) {
 async function _resubmitBuyPlan(planId) {
     if (!confirm('Return this buy plan to Draft for re-submission?')) return;
     try {
-        const r = await apiFetch('/api/buy-plans-v3/' + planId + '/resubmit', {method:'POST'});
+        const r = await apiFetch('/api/buy-plans/' + planId + '/resubmit', {method:'POST'});
         if (r.status === 'draft') {
             showToast('Buy plan returned to draft', 'success');
             location.reload();

@@ -21,10 +21,10 @@ from ..models import (
     User,
 )
 from ..models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlanV3,
     SOVerificationStatus,
     VerificationGroupMember,
 )
@@ -42,13 +42,13 @@ def submit_buy_plan(
     customer_po_number: str | None = None,
     line_edits: list[dict] | None = None,
     salesperson_notes: str | None = None,
-) -> BuyPlanV3:
+) -> BuyPlan:
     """Submit a draft buy plan with SO# and optional line edits.
 
     Flow: draft → pending (needs manager) OR draft → active (auto-approved).
     Auto-approve when total cost < threshold AND no critical AI flags.
     """
-    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.draft.value:
@@ -92,13 +92,13 @@ def approve_buy_plan(
     *,
     line_overrides: list[dict] | None = None,
     notes: str | None = None,
-) -> BuyPlanV3:
+) -> BuyPlan:
     """Manager approves or rejects a pending buy plan.
 
     Approve → active (lines go to buyers). Reject → draft (back to salesperson).
     Line overrides let manager swap vendors on specific lines.
     """
-    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.pending.value:
@@ -138,13 +138,13 @@ def verify_so(
     db: Session,
     *,
     rejection_note: str | None = None,
-) -> BuyPlanV3:
+) -> BuyPlan:
     """Ops verifies (or rejects/halts) the Sales Order in Acctivate.
 
     Approve → so_status=approved. Reject → so_status=rejected.
     Halt → plan.status=halted (stops everything).
     """
-    plan = db.get(BuyPlanV3, plan_id)
+    plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.so_status != SOVerificationStatus.pending.value:
@@ -196,7 +196,7 @@ def confirm_po(
 
     Line status: awaiting_po → pending_verify.
     """
-    plan = db.get(BuyPlanV3, plan_id)
+    plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.active.value:
@@ -232,7 +232,7 @@ def verify_po(
     Approve → line verified. Reject → back to awaiting_po.
     After approval, checks if all lines are done → auto-complete.
     """
-    plan = db.get(BuyPlanV3, plan_id)
+    plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
 
@@ -283,7 +283,7 @@ def flag_line_issue(
 
     Line status → issue. Manager/salesperson needs to resolve.
     """
-    plan = db.get(BuyPlanV3, plan_id)
+    plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.active.value:
@@ -309,7 +309,7 @@ def flag_line_issue(
 # ── Workflow: Completion ─────────────────────────────────────────────
 
 
-def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
+def check_completion(plan_id: int, db: Session) -> BuyPlan:
     """Auto-complete the buy plan if all lines are in terminal state.
 
     Completion requires:
@@ -317,7 +317,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
     - All lines are verified or cancelled
     - SO is verified (so_status = approved)
     """
-    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan or plan.status != BuyPlanStatus.active.value:
         return plan
     if plan.status == BuyPlanStatus.completed.value:
@@ -342,9 +342,9 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
 RESUBMITTABLE_STATUSES = {BuyPlanStatus.halted.value, BuyPlanStatus.cancelled.value}
 
 
-def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlanV3:
+def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     """Reset a halted/cancelled buy plan back to draft for resubmission."""
-    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
 
@@ -379,12 +379,12 @@ def resubmit_buy_plan(
     *,
     customer_po_number: str | None = None,
     salesperson_notes: str | None = None,
-) -> BuyPlanV3:
+) -> BuyPlan:
     """Resubmit a rejected buy plan. Resets SO verification and approval.
 
     Used after manager rejection (plan back in draft).
     """
-    plan = db.get(BuyPlanV3, plan_id, options=[joinedload(BuyPlanV3.lines)])
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
     if plan.status != BuyPlanStatus.draft.value:
@@ -426,7 +426,7 @@ def resubmit_buy_plan(
 # ── Helpers: Auto-Approval ───────────────────────────────────────────
 
 
-def _should_auto_approve(plan: BuyPlanV3) -> bool:
+def _should_auto_approve(plan: BuyPlan) -> bool:
     """Decide whether a buy plan should be auto-approved.
 
     Auto-approves when total cost < threshold AND no critical AI flags.
@@ -443,7 +443,7 @@ def _should_auto_approve(plan: BuyPlanV3) -> bool:
 # ── Helpers: Line Edits ──────────────────────────────────────────────
 
 
-def _apply_line_edits(plan: BuyPlanV3, edits: list[dict], db: Session):
+def _apply_line_edits(plan: BuyPlan, edits: list[dict], db: Session):
     """Replace AI-generated lines with salesperson's vendor swaps/splits."""
     edits_by_req: dict[int, list[dict]] = {}
     for edit in edits:
@@ -488,7 +488,7 @@ def _apply_line_edits(plan: BuyPlanV3, edits: list[dict], db: Session):
     _recalculate_financials(plan)
 
 
-def _apply_line_overrides(plan: BuyPlanV3, overrides: list[dict], db: Session):
+def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
     """Apply manager's line-level overrides (vendor swap, quantity, notes)."""
     for ovr in overrides:
         line = next((ln for ln in plan.lines if ln.id == ovr["line_id"]), None)
@@ -515,7 +515,7 @@ def _apply_line_overrides(plan: BuyPlanV3, overrides: list[dict], db: Session):
     _recalculate_financials(plan)
 
 
-def _recalculate_financials(plan: BuyPlanV3):
+def _recalculate_financials(plan: BuyPlan):
     """Recompute plan-level cost, revenue, margin from lines."""
     total_cost = 0.0
     total_revenue = 0.0
@@ -531,7 +531,7 @@ def _recalculate_financials(plan: BuyPlanV3):
         plan.total_margin_pct = round(((total_revenue - total_cost) / total_revenue) * 100, 2)
 
 
-def _is_stock_sale(plan: BuyPlanV3, db: Session) -> bool:
+def _is_stock_sale(plan: BuyPlan, db: Session) -> bool:
     """Detect stock/internal sales by vendor name match against config."""
     stock_names = settings.stock_sale_vendor_names
     if not plan.lines:
@@ -564,12 +564,12 @@ def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
 
     # Get all plans by this salesperson
     plans = (
-        db.query(BuyPlanV3)
+        db.query(BuyPlan)
         .filter(
-            BuyPlanV3.submitted_by_id == salesperson_id,
-            BuyPlanV3.status.in_(["active", "completed", "pending"]),
+            BuyPlan.submitted_by_id == salesperson_id,
+            BuyPlan.status.in_(["active", "completed", "pending"]),
         )
-        .options(joinedload(BuyPlanV3.lines))
+        .options(joinedload(BuyPlan.lines))
         .all()
     )
     if len(plans) < 3:
@@ -615,7 +615,7 @@ def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
 # ── Intelligence: Case Report ──────────────────────────────────────
 
 
-def generate_case_report(plan: BuyPlanV3, db: Session) -> str:
+def generate_case_report(plan: BuyPlan, db: Session) -> str:
     """Generate a structured case report when a buy plan completes.
 
     Captures: deal metadata, margin analysis, vendor selection, timeline,
@@ -754,7 +754,7 @@ Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 # ── Workflow: PO Verification Scanning ─────────────────────────────
 
 
-async def verify_po_sent_v3(plan: "BuyPlanV3", db: "Session") -> list[dict]:
+async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> list[dict]:
     """Scan buyer's Outlook sent folder for PO emails matching each line.
 
     For each line with a po_number, searches Graph API for emails containing
