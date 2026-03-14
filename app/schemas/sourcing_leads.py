@@ -45,6 +45,8 @@ class LeadOut(BaseModel):
     vendor_name: str
     part_number_requested: str
     part_number_matched: str
+    primary_source_type: str | None = None
+    primary_source_category: str | None = None
     confidence_score: float
     confidence_band: str
     vendor_safety_score: float | None = None

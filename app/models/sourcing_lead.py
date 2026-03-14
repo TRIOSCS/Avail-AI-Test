@@ -59,6 +59,7 @@ class SourcingLead(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), index=True)
 
     primary_source_type = Column(String(64), nullable=False)
+    primary_source_category = Column(String(32), index=True)
     primary_source_name = Column(String(128), nullable=False)
     source_reference = Column(String(1000))
     source_first_seen_at = Column(DateTime(timezone=True))
@@ -131,6 +132,7 @@ class LeadEvidence(Base):
 
     signal_type = Column(String(64), nullable=False)
     source_type = Column(String(64), nullable=False)
+    source_category = Column(String(32), index=True)
     source_name = Column(String(128), nullable=False)
     source_reference = Column(String(1000))
 

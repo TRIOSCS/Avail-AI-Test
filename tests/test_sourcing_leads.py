@@ -39,9 +39,27 @@ def test_sync_sightings_creates_one_lead_with_multiple_evidence(db_session, test
     lead = leads[0]
     assert lead.evidence_count == 2
     assert lead.corroborated is True
+    assert lead.primary_source_category == "api_posting"
 
     ev_count = db_session.query(LeadEvidence).filter(LeadEvidence.lead_id == lead.id).count()
     assert ev_count == 2
+    categories = {
+        row[0]
+        for row in db_session.query(LeadEvidence.source_category)
+        .filter(LeadEvidence.lead_id == lead.id)
+        .all()
+    }
+    assert categories == {"api_posting", "marketplace"}
+
+
+def test_sync_sightings_defaults_safety_band_to_unknown_when_profile_is_missing(db_session, test_requisition):
+    requirement = test_requisition.requirements[0]
+    s1 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Unknown Spot Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s1])
+
+    lead = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).first()
+    assert lead is not None
+    assert lead.vendor_safety_band == "unknown"
 
 
 def test_update_lead_status_writes_feedback_event(db_session, test_requisition):
@@ -84,6 +102,7 @@ def test_lead_endpoints_return_status_and_feedback(client, db_session, test_requ
     data = leads_resp.json()
     assert data
     assert data[0]["buyer_status"] == "contacted"
+    assert data[0]["primary_source_category"] in {"api_posting", "marketplace", "other", "unknown"}
 
     sightings_resp = client.get(f"/api/requisitions/{test_requisition.id}/sightings")
     assert sightings_resp.status_code == 200

@@ -44,6 +44,23 @@ BUYER_STATUSES = {
 }
 
 
+def _source_category(source_type: str | None) -> str:
+    st = (source_type or "").strip().lower()
+    if not st or st == "unknown":
+        return "unknown"
+    if st in {"digikey", "mouser", "farnell", "element14", "nexar", "octopart"}:
+        return "api_posting"
+    if st in {"netcomponents", "icsource", "brokerbin", "sourcengine", "oemsecrets", "ebay"}:
+        return "marketplace"
+    if st in {"salesforce"}:
+        return "crm_history"
+    if st in {"avail_history", "historical_offer", "legacy_offer"}:
+        return "internal_history"
+    if st in {"ai", "web"}:
+        return "ai_web"
+    return "other"
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -95,6 +112,15 @@ def _safety_band(score: float) -> str:
     if score >= 50:
         return "medium_risk"
     return "high_risk"
+
+
+def _resolve_safety_band(score: float, safety_flags: list[str] | None = None) -> str:
+    flags = set(safety_flags or [])
+    if "buyer_marked_do_not_contact" in flags or "internal_do_not_contact_history" in flags:
+        return "high_risk"
+    if "no_internal_vendor_profile" in flags:
+        return "unknown"
+    return _safety_band(score)
 
 
 def _source_reliability(source_type: str, evidence_tier: str | None) -> float:
@@ -195,11 +221,13 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
         flags.append("limited_verified_contact_channels")
 
     score = round(_clamp(score), 1)
-    band = _safety_band(score)
+    band = _resolve_safety_band(score, flags)
     if band == "high_risk":
         summary = "Caution advised: verify identity and stock before outreach."
     elif band == "medium_risk":
         summary = "Moderate caution: confirm business footprint and contact path."
+    elif band == "unknown":
+        summary = "Safety data is limited; verify identity and contact path before relying on stock claims."
     else:
         summary = "Lower risk from current data, but still verify stock in outreach."
     return score, flags, summary
@@ -281,6 +309,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
             vendor_name_normalized=vendor_normalized,
             vendor_card_id=vendor_card.id if vendor_card else None,
             primary_source_type=(sighting.source_type or "unknown"),
+            primary_source_category=_source_category(sighting.source_type),
             primary_source_name=_source_name(sighting.source_type or ""),
             source_reference=_source_reference(sighting),
             source_first_seen_at=sighting.created_at or _now_utc(),
@@ -296,6 +325,8 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.part_number_matched = matched_part_norm
     lead.source_last_seen_at = sighting.created_at or _now_utc()
     lead.primary_source_type = lead.primary_source_type or (sighting.source_type or "unknown")
+    if not lead.primary_source_category or lead.primary_source_category == "unknown":
+        lead.primary_source_category = _source_category(sighting.source_type)
     lead.primary_source_name = lead.primary_source_name or _source_name(sighting.source_type or "")
     lead.source_reference = lead.source_reference or _source_reference(sighting)
     lead.contact_email = lead.contact_email or sighting.vendor_email
@@ -309,7 +340,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.confidence_score = confidence_score
     lead.confidence_band = confidence_band
     lead.vendor_safety_score = safety_score
-    lead.vendor_safety_band = _safety_band(safety_score)
+    lead.vendor_safety_band = _resolve_safety_band(safety_score, safety_flags)
     lead.vendor_safety_summary = safety_summary
     lead.vendor_safety_flags = safety_flags
     lead.vendor_safety_last_checked_at = _now_utc()
@@ -373,6 +404,7 @@ def append_evidence_from_sighting(db: Session, lead: SourcingLead, sighting: Sig
         lead_id=lead.id,
         signal_type="stock_listing",
         source_type=sighting.source_type or "unknown",
+        source_category=_source_category(sighting.source_type),
         source_name=_source_name(sighting.source_type or ""),
         source_reference=source_ref,
         part_number_observed=(sighting.mpn_matched or sighting.mpn or ""),
@@ -450,6 +482,8 @@ def attach_lead_metadata_to_results(db: Session, results_by_requirement: dict[in
             row["vendor_safety_score"] = lead.vendor_safety_score
             row["vendor_safety_band"] = lead.vendor_safety_band
             row["vendor_safety_summary"] = lead.vendor_safety_summary
+            row["primary_source_type"] = lead.primary_source_type
+            row["primary_source_category"] = lead.primary_source_category
             row["suggested_next_action"] = lead.suggested_next_action
             row["risk_flags"] = lead.risk_flags or []
             row["lead_reason_summary"] = lead.reason_summary
@@ -501,7 +535,7 @@ def update_lead_status(
 
     lead.confidence_band = _confidence_band(float(lead.confidence_score or 0.0))
     if lead.vendor_safety_score is not None:
-        lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score))
+        lead.vendor_safety_band = _resolve_safety_band(float(lead.vendor_safety_score), lead.vendor_safety_flags or [])
 
     event = LeadFeedbackEvent(
         lead_id=lead.id,
