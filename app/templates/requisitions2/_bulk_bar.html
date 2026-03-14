@@ -1,0 +1,45 @@
+<div id="rq2-bulk-bar" class="rq2-bulk-bar"
+     x-show="selectedIds.size > 0"
+     x-collapse
+     x-cloak>
+
+  <span x-text="selectedIds.size + ' selected'"></span>
+
+  <form hx-post="/requisitions2/bulk/archive"
+        hx-target="#rq2-table"
+        hx-target-error="#rq2-error"
+        hx-include="#rq2-filters"
+        hx-confirm="Archive selected requisitions?"
+        style="display:inline">
+    <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
+    <button type="submit" class="btn-sm" data-loading-aria-busy>Archive Selected</button>
+  </form>
+
+  <form hx-post="/requisitions2/bulk/activate"
+        hx-target="#rq2-table"
+        hx-target-error="#rq2-error"
+        hx-include="#rq2-filters"
+        style="display:inline">
+    <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
+    <button type="submit" class="btn-sm" data-loading-aria-busy>Activate Selected</button>
+  </form>
+
+  {% if user.role != 'sales' %}
+  <div x-data="{ showAssign: false }" class="rq2-assign-dropdown">
+    <button x-on:click="showAssign = !showAssign" class="btn-sm" type="button">Assign...</button>
+    <div x-show="showAssign" x-on:click.outside="showAssign = false" class="dropdown-menu" x-cloak>
+      {% for u in users %}
+      <form hx-post="/requisitions2/bulk/assign"
+            hx-target="#rq2-table"
+            hx-target-error="#rq2-error"
+            hx-include="#rq2-filters"
+            style="display:inline">
+        <input type="hidden" name="ids" x-bind:value="getSelectedIdsString()">
+        <input type="hidden" name="owner_id" value="{{ u.id }}">
+        <button type="submit" class="dropdown-item">{{ u.display_name }}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+</div>

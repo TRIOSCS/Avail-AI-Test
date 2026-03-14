@@ -1,0 +1,55 @@
+<form id="rq2-filters" class="rq2-filters"
+      hx-get="/requisitions2/table"
+      hx-target="#rq2-table"
+      hx-target-error="#rq2-error"
+      hx-trigger="change, keyup changed delay:300ms from:#rq2-search"
+      hx-push-url="/requisitions2"
+      hx-indicator="#rq2-loading">
+
+  <input type="search" id="rq2-search" name="q"
+         value="{{ filters.q }}"
+         placeholder="Search requisitions..."
+         autocomplete="off">
+
+  <select name="status">
+    {% for s in ['all','active','draft','sourcing','archived','won','lost'] %}
+    <option value="{{ s }}" {{ 'selected' if filters.status.value == s else '' }}>
+      {{ s | title }}
+    </option>
+    {% endfor %}
+  </select>
+
+  {% if user.role != 'sales' %}
+  <select name="owner">
+    <option value="">All owners</option>
+    {% for u in users %}
+    <option value="{{ u.id }}" {{ 'selected' if filters.owner == u.id else '' }}>
+      {{ u.display_name }}
+    </option>
+    {% endfor %}
+  </select>
+  {% endif %}
+
+  <select name="urgency">
+    <option value="">Any urgency</option>
+    {% for urg in ['normal','hot','critical'] %}
+    <option value="{{ urg }}" {{ 'selected' if filters.urgency and filters.urgency.value == urg else '' }}>
+      {{ urg | title }}
+    </option>
+    {% endfor %}
+  </select>
+
+  <input type="date" name="date_from" value="{{ filters.date_from or '' }}">
+  <input type="date" name="date_to" value="{{ filters.date_to or '' }}">
+
+  <input type="hidden" name="sort" value="{{ filters.sort.value }}">
+  <input type="hidden" name="order" value="{{ filters.order.value }}">
+  <input type="hidden" name="page" value="1">
+  <input type="hidden" name="per_page" value="{{ filters.per_page }}">
+
+  <span id="rq2-loading" class="htmx-indicator">
+    <span class="rq2-spinner"></span> Loading...
+  </span>
+  <span data-loading data-loading-class="rq2-loading" data-loading-target="#rq2-table">
+  </span>
+</form>
