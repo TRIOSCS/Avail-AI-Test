@@ -31,13 +31,16 @@ from app.models import (
     Requisition,
     RequisitionTask,
     Sighting,
+    SourcingLead,
     SiteContact,
     User,
     VendorCard,
     VendorContact,
     VendorReview,
 )
+from app.utils.normalization import normalize_mpn_key
 from app.utils.sql_helpers import escape_like
+from app.vendor_utils import normalize_vendor_name
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -404,9 +407,20 @@ async def sourcing_results(
         .order_by(Sighting.score.desc())
         .all()
     )
+    leads = db.query(SourcingLead).filter(SourcingLead.requirement_id == req_row_id).all()
+
+    lead_map: dict[tuple[str, str], SourcingLead] = {}
+    for lead in leads:
+        vendor_key = normalize_vendor_name(lead.vendor_name_normalized or lead.vendor_name or "")
+        part_key = normalize_mpn_key(lead.part_number_matched or "")
+        if vendor_key and part_key:
+            lead_map[(vendor_key, part_key)] = lead
 
     results = []
     for s in sightings:
+        vendor_key = normalize_vendor_name(s.vendor_name_normalized or s.vendor_name or "")
+        part_key = normalize_mpn_key((s.mpn_matched or requirement.primary_mpn or ""))
+        lead = lead_map.get((vendor_key, part_key))
         results.append({
             "vendor_name": s.vendor_name,
             "mpn": s.mpn_matched or requirement.primary_mpn,
@@ -422,6 +436,12 @@ async def sourcing_results(
             "is_authorized": s.is_authorized or False,
             "score": s.score or 0,
             "material_card_id": s.material_card_id,
+            "lead_id": lead.id if lead else None,
+            "buyer_status": lead.buyer_status if lead else None,
+            "confidence_band": lead.confidence_band if lead else None,
+            "vendor_safety_band": lead.vendor_safety_band if lead else None,
+            "vendor_safety_score": lead.vendor_safety_score if lead else None,
+            "vendor_safety_summary": lead.vendor_safety_summary if lead else None,
         })
 
     # Build source progress from seen source types

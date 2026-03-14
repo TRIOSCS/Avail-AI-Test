@@ -87,3 +87,32 @@
 
 {# Modal container for material card popups #}
 <div id="modal-content"></div>
+
+<script>
+function updateSourcingLeadStatus(leadId, status, reqRowId) {
+    if (!leadId || !status) return;
+    const headers = { "Content-Type": "application/json" };
+    const csrf = (document.cookie.match(/csrftoken=([^;]+)/) || [])[1];
+    if (csrf) headers["x-csrftoken"] = csrf;
+
+    fetch(`/api/leads/${leadId}/status`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status })
+    })
+    .then(resp => {
+        if (!resp.ok) throw new Error("Status update failed");
+        return resp.json();
+    })
+    .then(() => {
+        if (window.htmx) {
+            htmx.ajax("GET", `/views/sourcing/${reqRowId}/results`, "#sourcing-panel");
+        } else {
+            window.location.href = `/views/sourcing/${reqRowId}/results`;
+        }
+    })
+    .catch(() => {
+        alert("Unable to update lead status. Please try again.");
+    });
+}
+</script>

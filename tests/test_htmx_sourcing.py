@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import MaterialCard, Requirement, Requisition, Sighting
+from app.models import MaterialCard, Requirement, Requisition, Sighting, SourcingLead
 
 
 @pytest.fixture()
@@ -105,6 +105,28 @@ def sourcing_data(db_session, test_user):
             created_at=datetime.now(timezone.utc),
         ))
 
+    db_session.add(
+        SourcingLead(
+            lead_id="ld_htmx_test_001",
+            requirement_id=requirement.id,
+            requisition_id=req.id,
+            part_number_requested="LM317T",
+            part_number_matched="LM317T",
+            match_type="exact",
+            vendor_name="Arrow Electronics",
+            vendor_name_normalized="arrow electronics",
+            primary_source_type="brokerbin",
+            primary_source_name="Brokerbin",
+            confidence_score=82.0,
+            confidence_band="high",
+            reason_summary="Strong stock signal from live source",
+            vendor_safety_score=62.0,
+            vendor_safety_band="medium_risk",
+            vendor_safety_summary="Moderate caution: confirm business footprint and contact path.",
+            buyer_status="new",
+        )
+    )
+
     db_session.commit()
     db_session.refresh(requirement)
     return {"req": req, "requirement": requirement, "card": card}
@@ -127,6 +149,10 @@ class TestSourcingResultsPartial:
         assert "85%" in html  # brokerbin confidence
         # Should contain source badges
         assert "source-badge" in html
+        # Should include lead workflow/safety UI for rows with mapped leads
+        assert "NEW" in html
+        assert "MEDIUM RISK" in html
+        assert "updateSourcingLeadStatus" in html
         # Should contain filter pills
         assert "filter-pill" in html
         assert "Live Stock" in html
