@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 
+import sqlalchemy as sa
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
@@ -51,8 +52,8 @@ class Company(Base):
     material_tags_updated_at = Column(DateTime)
 
     # Denormalized counts (kept in sync by PostgreSQL triggers)
-    site_count = Column(Integer, default=0, server_default="0")
-    open_req_count = Column(Integer, default=0, server_default="0")
+    site_count = Column(Integer, default=0, server_default="0", nullable=False)
+    open_req_count = Column(Integer, default=0, server_default="0", nullable=False)
 
     # Record origin tracking
     source = Column(String(50), default="manual")
@@ -185,4 +186,11 @@ class SiteContact(Base):
     __table_args__ = (
         Index("ix_site_contacts_site", "customer_site_id"),
         Index("ix_site_contacts_email", "email"),
+        Index(
+            "uq_site_contacts_site_email",
+            "customer_site_id",
+            "email",
+            unique=True,
+            postgresql_where=sa.text("email IS NOT NULL AND email != ''"),
+        ),
     )

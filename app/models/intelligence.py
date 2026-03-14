@@ -46,7 +46,7 @@ class MaterialCard(Base):
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
-    deleted_at = Column(DateTime, nullable=True)  # NULL = active, non-NULL = soft-deleted
+    deleted_at = Column(DateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
