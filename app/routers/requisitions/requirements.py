@@ -42,8 +42,8 @@ from ...schemas.requisitions import (
 )
 from ...schemas.sourcing_leads import LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
 from ...services.sourcing_leads import (
-    attach_lead_metadata_to_results,
     append_lead_feedback,
+    attach_lead_metadata_to_results,
     get_requisition_leads,
     update_lead_status,
 )

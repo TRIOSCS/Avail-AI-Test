@@ -34,6 +34,7 @@ from .models import (
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
 from .services.sourcing_leads import sync_leads_for_sightings
+from .services.vendor_affinity_service import find_vendor_affinity
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -45,7 +46,6 @@ from .utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-from .services.vendor_affinity_service import find_vendor_affinity
 from .utils.normalization_helpers import fix_encoding
 from .vendor_utils import normalize_vendor_name
 

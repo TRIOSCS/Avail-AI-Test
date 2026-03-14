@@ -48,6 +48,14 @@ def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def normalize_mpn(mpn: str | None) -> str:
     if not mpn:
         return ""
@@ -112,7 +120,8 @@ def _source_reliability(source_type: str, evidence_tier: str | None) -> float:
 def _freshness_score(created_at: datetime | None) -> float:
     if not created_at:
         return 45.0
-    age_days = max(((_now_utc() - created_at).total_seconds() / 86400.0), 0.0)
+    created = _as_utc(created_at)
+    age_days = max(((_now_utc() - created).total_seconds() / 86400.0), 0.0)
     if age_days <= 1:
         return 95.0
     if age_days <= 3:
@@ -128,9 +137,9 @@ def _freshness_score(created_at: datetime | None) -> float:
 
 def _contactability_score(sighting: Sighting, vendor_card: VendorCard | None) -> float:
     score = 0.0
-    if sighting.contact_email:
+    if sighting.vendor_email:
         score += 45
-    if sighting.contact_phone:
+    if sighting.vendor_phone:
         score += 35
     if (sighting.raw_data or {}).get("website") or (sighting.raw_data or {}).get("vendor_url"):
         score += 20
@@ -289,8 +298,8 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.primary_source_type = lead.primary_source_type or (sighting.source_type or "unknown")
     lead.primary_source_name = lead.primary_source_name or _source_name(sighting.source_type or "")
     lead.source_reference = lead.source_reference or _source_reference(sighting)
-    lead.contact_email = lead.contact_email or sighting.contact_email
-    lead.contact_phone = lead.contact_phone or sighting.contact_phone
+    lead.contact_email = lead.contact_email or sighting.vendor_email
+    lead.contact_phone = lead.contact_phone or sighting.vendor_phone
     lead.contact_url = lead.contact_url or ((sighting.raw_data or {}).get("website") or (sighting.raw_data or {}).get("vendor_url"))
 
     lead.freshness_score = freshness
@@ -305,13 +314,15 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     lead.vendor_safety_flags = safety_flags
     lead.vendor_safety_last_checked_at = _now_utc()
     lead.reason_summary = explain_lead(
-        {
-            "source_type": sighting.source_type,
-            "qty_available": sighting.qty_available,
-            "price": sighting.unit_price,
-            "contact_email": lead.contact_email,
-            "contact_phone": lead.contact_phone,
-        }
+        vendor_name=vendor_name,
+        is_authorized=bool(sighting.is_authorized),
+        vendor_score=getattr(vendor_card, "vendor_score", None) if vendor_card else None,
+        unit_price=sighting.unit_price,
+        qty_available=sighting.qty_available,
+        target_qty=requirement.target_qty,
+        has_contact=bool(lead.contact_email or lead.contact_phone),
+        evidence_tier=sighting.evidence_tier,
+        source_type=sighting.source_type,
     )
     lead.suggested_next_action = _suggested_next_action(confidence_score, safety_score, contactability)
     lead.risk_flags = _build_lead_risk_flags(confidence_score, source_reliability, freshness, contactability)
@@ -354,7 +365,8 @@ def append_evidence_from_sighting(db: Session, lead: SourcingLead, sighting: Sig
 
     freshness_days = None
     if sighting.created_at:
-        freshness_days = max(((_now_utc() - sighting.created_at).total_seconds() / 86400.0), 0.0)
+        observed = _as_utc(sighting.created_at)
+        freshness_days = max(((_now_utc() - observed).total_seconds() / 86400.0), 0.0)
 
     evidence = LeadEvidence(
         evidence_id=f"ev_{uuid.uuid4().hex[:24]}",

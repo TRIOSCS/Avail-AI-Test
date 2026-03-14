@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from app.models import LeadFeedbackEvent, LeadEvidence, Sighting, SourcingLead
+from app.models import LeadEvidence, LeadFeedbackEvent, Sighting, SourcingLead
 from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
 
 
