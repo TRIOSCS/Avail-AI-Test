@@ -468,3 +468,57 @@ def test_bad_lead_sets_evidence_rejected(db_session, test_requisition):
     ev = db_session.query(LeadEvidence).filter(LeadEvidence.lead_id == lead.id).first()
     assert ev is not None
     assert ev.verification_state == "rejected"
+
+
+def test_positive_safety_signals_with_enriched_card(db_session):
+    """Enriched vendor card produces positive: prefixed safety flags."""
+    card = VendorCard(
+        normalized_name="positive-test-vendor",
+        display_name="Positive Test Vendor",
+        website="https://positivevendor.com",
+        domain="positivevendor.com",
+        hq_city="Austin",
+        hq_country="US",
+        legal_name="Positive Vendor LLC",
+        emails=["sales@positivevendor.com"],
+        phones=["+1-555-9999"],
+        is_new_vendor=False,
+        sighting_count=10,
+        relationship_months=12,
+        total_wins=5,
+        vendor_score=70.0,
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    score, flags, summary = _compute_vendor_safety(card, contactability=80.0)
+    positive = [f for f in flags if f.startswith("positive:")]
+    caution = [f for f in flags if not f.startswith("positive:")]
+
+    assert len(positive) >= 3, f"Expected at least 3 positive signals, got {positive}"
+    assert "positive:verified_business_footprint" in positive
+    assert "positive:established_relationship" in positive
+    assert "positive:proven_success_history" in positive
+    assert "positive:contact_channels_present" in positive
+    assert len(caution) == 0, f"Well-enriched card should have no caution flags, got {caution}"
+
+
+def test_no_positive_signals_for_bare_card(db_session):
+    """Bare vendor card produces only caution flags, no positive signals."""
+    card = VendorCard(
+        normalized_name="bare-pos-test",
+        display_name="Bare Pos Test",
+        is_new_vendor=True,
+        sighting_count=0,
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    score, flags, summary = _compute_vendor_safety(card, contactability=30.0)
+    positive = [f for f in flags if f.startswith("positive:")]
+    caution = [f for f in flags if not f.startswith("positive:")]
+
+    assert len(positive) == 0, f"Bare card should have no positive signals, got {positive}"
+    assert len(caution) >= 2, f"Bare card should have caution flags, got {caution}"

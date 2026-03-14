@@ -10,13 +10,13 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 ### Test Files and What They Cover
 | Test File | Tests | What It Verifies |
 |---|---|---|
-| `test_sourcing_leads.py` | 22 | Lead upsert, evidence fields (signal_type, match_type, reliability_band), source categories, corroboration (distinct categories), buyer status, safety flags, dedup, feedback loop, duplicate candidate flagging, verification_state lifecycle |
-| `test_htmx_sourcing.py` | 22 | Results partial, filters, sorts, lead detail view, follow-up queue |
+| `test_sourcing_leads.py` | 24 | Lead upsert, evidence fields (signal_type, match_type, reliability_band), source categories, corroboration (distinct categories), buyer status, safety flags (positive + caution), dedup (vendor card, domain, phone, email), feedback loop, duplicate candidate flagging, verification_state lifecycle |
+| `test_htmx_sourcing.py` | 26 | Results partial, filters (live, historical, affinity, confidence, safety, contactable, corroborated, has_lead), sorts (confidence, safest, freshest, price, qty, easiest_to_contact, most_proven), lead detail view, follow-up queue |
 | `test_e2e_sourcing_flow.py` | 10 | End-to-end search+lead flow |
 | `test_sourcing_lead_engine.py` | 3 | Legacy in-memory engine (retained for safety) |
 | `test_services_sourcing_score.py` | 11 | Requisition scoring |
 
-**Total: 131 sourcing tests, all passing.**
+**Total: 137 sourcing tests, all passing.**
 
 ---
 
@@ -93,6 +93,8 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 | Vendor Affinity | vendor_affinity matches |
 | High Confidence | Results with confidence_band = "high" |
 | Safe Vendors | Results with safety_band = "low_risk" or no safety data |
+| Contactable | Results with contactability_score >= 50 |
+| Corroborated | Results with corroborated = true |
 | Has Lead | Results linked to a persisted lead |
 
 ### Sorts
@@ -104,6 +106,8 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 | Price (low) | Unit price ascending |
 | Price (high) | Unit price descending |
 | Qty (high) | Quantity available descending |
+| Easiest to Contact | Contactability score descending |
+| Most Proven | Historical success score descending |
 
 ---
 
@@ -132,7 +136,7 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 | `app/templates/partials/sourcing/result_row.html` | Added View button, "unknown" safety band |
 | `app/templates/partials/sourcing/results.html` | Added lead-detail-container, new filter pills, sort options |
 | `app/static/app.js` | Added "unknown" safety band to JS config |
-| `tests/test_sourcing_leads.py` | 22 tests (evidence spec compliance, source categories, corroboration, safety, dedup, duplicate candidates, verification_state, feedback loop, resync) |
+| `tests/test_sourcing_leads.py` | 24 tests (evidence spec compliance, source categories, corroboration, safety positive+caution signals, dedup (vendor card, domain, phone, email), duplicate candidates, verification_state, feedback loop, resync) |
 | `tests/test_htmx_sourcing.py` | 22 tests (lead detail, queue, filters, sorts) |
 
 ---
@@ -141,7 +145,7 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 
 1. **Legacy `sourcing_lead_engine.py`** still exists with 77 tests. It's unused by production code but retained for safety. Can be removed when confident the persisted lead system covers all cases.
 2. **Contact enrichment** is basic — `contact_email`/`contact_phone` come from VendorCard but aren't always populated. Enrichment pipeline improvements are a separate effort.
-3. **Deduplication** handles vendor name suffix normalization and duplicate_candidate flagging (via shared vendor card or domain match). Phone-based dedup (per handoff spec) is not yet implemented.
+3. **Deduplication** handles vendor name suffix normalization and duplicate_candidate flagging via shared vendor card, domain match, phone match, and email domain match. All four dedup signal types from the handoff spec are implemented.
 4. **Corroboration** now requires evidence from 2+ distinct source **categories** (api, marketplace, salesforce_history, etc.), not just 2+ connector names. This matches the handoff spec's cross-source intent.
 5. **Verification state** transitions from `raw` → `buyer_confirmed` (has_stock) or `raw` → `rejected` (bad_lead/do_not_contact). The `inferred` state is not yet used — would require automated quality checks.
 

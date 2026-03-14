@@ -377,6 +377,10 @@ def _filter_results(results: list, filter_value: str) -> list:
         return [r for r in results if r.get("vendor_safety_band") in ("low_risk", None)]
     if filter_value == "has_lead":
         return [r for r in results if r.get("lead_id") is not None]
+    if filter_value == "contactable":
+        return [r for r in results if r.get("contactability_score", 0) and r.get("contactability_score", 0) >= 50]
+    if filter_value == "corroborated":
+        return [r for r in results if r.get("corroborated") is True]
     return results
 
 
@@ -392,6 +396,10 @@ def _sort_results(results: list, sort_by: str) -> list:
         return sorted(results, key=lambda r: (r.get("vendor_safety_score") is None, -(r.get("vendor_safety_score") or 0)))
     elif sort_by == "freshest":
         return sorted(results, key=lambda r: (r.get("score", 0)), reverse=True)
+    elif sort_by == "easiest_to_contact":
+        return sorted(results, key=lambda r: (r.get("contactability_score") is None, -(r.get("contactability_score") or 0)))
+    elif sort_by == "most_proven":
+        return sorted(results, key=lambda r: (r.get("historical_success_score") is None, -(r.get("historical_success_score") or 0)))
     # Default: confidence descending
     return sorted(results, key=lambda r: (r.get("confidence_pct", 0), r.get("score", 0)), reverse=True)
 

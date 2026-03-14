@@ -426,5 +426,33 @@ class TestFilterAndSort:
         html = resp.text
         assert "High Confidence" in html
         assert "Safe Vendors" in html
+        assert "Contactable" in html
+        assert "Corroborated" in html
         assert "Best Overall" in html
         assert "Safest" in html
+        assert "Easiest to Contact" in html
+        assert "Most Proven" in html
+
+    def test_sort_easiest_to_contact(self, htmx_client, sourcing_data):
+        """Easiest to contact sort option returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?sort_by=easiest_to_contact")
+        assert resp.status_code == 200
+
+    def test_sort_most_proven(self, htmx_client, sourcing_data):
+        """Most proven sort option returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?sort_by=most_proven")
+        assert resp.status_code == 200
+
+    def test_filter_contactable(self, htmx_client, sourcing_data):
+        """Contactable filter returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?filter=contactable")
+        assert resp.status_code == 200
+
+    def test_filter_corroborated(self, htmx_client, sourcing_data):
+        """Corroborated filter returns 200."""
+        req_row_id = sourcing_data["requirement"].id
+        resp = htmx_client.get(f"/views/sourcing/{req_row_id}/results?filter=corroborated")
+        assert resp.status_code == 200

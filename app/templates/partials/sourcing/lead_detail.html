@@ -131,10 +131,35 @@
             {% endif %}
 
             {% if lead.vendor_safety_flags %}
-                <div style="font-size:0.85em;color:#64748b;margin-bottom:4px;">Signals:</div>
+                {% set positive_flags = [] %}
+                {% set caution_flags = [] %}
                 {% for flag in lead.vendor_safety_flags %}
-                    <div style="font-size:0.9em;padding:2px 0;">{{ flag }}</div>
+                    {% if flag.startswith('positive:') %}
+                        {% set _ = positive_flags.append(flag[9:].replace('_', ' ').capitalize()) %}
+                    {% else %}
+                        {% set _ = caution_flags.append(flag.replace('_', ' ').capitalize()) %}
+                    {% endif %}
                 {% endfor %}
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px;">
+                    {% if positive_flags %}
+                    <div>
+                        <div style="font-weight:600;font-size:0.9em;margin-bottom:6px;">Positive signals</div>
+                        {% for flag in positive_flags %}
+                            <div style="font-size:0.85em;padding:4px 8px;margin-bottom:4px;background:#dcfce7;color:#166534;border-radius:4px;">{{ flag }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+
+                    {% if caution_flags %}
+                    <div>
+                        <div style="font-weight:600;font-size:0.9em;margin-bottom:6px;">Caution signals</div>
+                        {% for flag in caution_flags %}
+                            <div style="font-size:0.85em;padding:4px 8px;margin-bottom:4px;background:#fef3c7;color:#92400e;border-radius:4px;">{{ flag }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
             {% endif %}
         </div>
 

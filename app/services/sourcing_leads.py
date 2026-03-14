@@ -69,6 +69,13 @@ def normalize_mpn(mpn: str | None) -> str:
     )
 
 
+def _normalize_phone(phone: str | None) -> str:
+    """Strip a phone number to digits only for dedup comparison."""
+    if not phone:
+        return ""
+    return "".join(c for c in phone if c.isdigit())
+
+
 
 def _clamp(value: float, minimum: float = 0.0, maximum: float = 100.0) -> float:
     return max(minimum, min(maximum, value))
@@ -229,13 +236,27 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
             score -= 8
             flags.append("high_cancellation_rate")
 
-        # Positive signals — boost score
+        # Positive signals — boost score and record as positive: prefixed flags
         if has_legal and has_address and has_website:
-            score += 8  # strong business footprint
+            score += 8
+            flags.append("positive:verified_business_footprint")
+        if has_website and has_domain:
+            flags.append("positive:business_website_exists")
+        if has_emails and has_domain and has_website:
+            domain = getattr(vendor_card, "domain", "") or ""
+            email_list = getattr(vendor_card, "emails", []) or []
+            if email_list and domain and any(domain in (e or "") for e in email_list):
+                flags.append("positive:email_domain_matches_website")
+        if has_emails or has_phones:
+            flags.append("positive:contact_channels_present")
         if getattr(vendor_card, "relationship_months", None) and vendor_card.relationship_months >= 6:
-            score += 5  # established relationship
+            score += 5
+            flags.append("positive:established_relationship")
         if getattr(vendor_card, "total_wins", 0) and vendor_card.total_wins >= 3:
-            score += 5  # proven success
+            score += 5
+            flags.append("positive:proven_success_history")
+        if getattr(vendor_card, "sighting_count", 0) and vendor_card.sighting_count >= 5:
+            flags.append("positive:marketplace_listing_found")
     else:
         flags.append("no_internal_vendor_profile")
         flags.append("marketplace_trust_unknown")
@@ -517,14 +538,46 @@ def _check_duplicate_candidates(
 
     # Check domain overlap via vendor card
     if vendor_card and getattr(vendor_card, "domain", None):
+        lead_domain = (vendor_card.domain or "").strip().lower()
         for other in other_leads:
             if not other.vendor_card_id:
                 continue
             other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
-            if other_card and getattr(other_card, "domain", None) == vendor_card.domain:
+            if other_card and (getattr(other_card, "domain", None) or "").strip().lower() == lead_domain:
                 _add_risk_flag(lead, "duplicate_candidate")
                 _add_risk_flag(other, "duplicate_candidate")
                 return
+
+    # Check phone overlap via vendor card
+    if vendor_card and getattr(vendor_card, "phones", None):
+        lead_phones = {_normalize_phone(p) for p in (vendor_card.phones or []) if p}
+        if lead_phones:
+            for other in other_leads:
+                if not other.vendor_card_id:
+                    continue
+                other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
+                if other_card and getattr(other_card, "phones", None):
+                    other_phones = {_normalize_phone(p) for p in (other_card.phones or []) if p}
+                    if lead_phones & other_phones:
+                        _add_risk_flag(lead, "duplicate_candidate")
+                        _add_risk_flag(other, "duplicate_candidate")
+                        return
+
+    # Check email domain overlap via vendor card
+    if vendor_card and getattr(vendor_card, "emails", None):
+        lead_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (vendor_card.emails or []) if e and "@" in e}
+        lead_email_domains.discard("")
+        if lead_email_domains:
+            for other in other_leads:
+                if not other.vendor_card_id:
+                    continue
+                other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
+                if other_card and getattr(other_card, "emails", None):
+                    other_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (other_card.emails or []) if e and "@" in e}
+                    if lead_email_domains & other_email_domains:
+                        _add_risk_flag(lead, "duplicate_candidate")
+                        _add_risk_flag(other, "duplicate_candidate")
+                        return
 
 
 def _add_risk_flag(lead: SourcingLead, flag: str) -> None:
@@ -649,6 +702,9 @@ def attach_lead_metadata_to_results(db: Session, results_by_requirement: dict[in
             row["suggested_next_action"] = lead.suggested_next_action
             row["risk_flags"] = lead.risk_flags or []
             row["lead_reason_summary"] = lead.reason_summary
+            row["contactability_score"] = lead.contactability_score
+            row["historical_success_score"] = lead.historical_success_score
+            row["corroborated"] = lead.corroborated
 
 
 def get_requisition_leads(db: Session, requisition_id: int, statuses: list[str] | None = None) -> list[SourcingLead]:
