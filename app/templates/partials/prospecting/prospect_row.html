@@ -1,0 +1,27 @@
+{#
+  prospect_row.html — Single table row for a prospect in the pool list.
+  Receives: prospect object with id, name, industry, region, fit_score, status.
+  Called by: list.html loop, views.py prospecting_rows endpoint.
+  Depends on: HTMX (hx-get for detail drawer, hx-post for claim), enrich_button.html.
+#}
+<tr id="prospect-{{ prospect.id }}" class="clickable-row"
+    hx-get="/views/prospecting/{{ prospect.id }}" hx-target="#prospect-detail-drawer" hx-swap="innerHTML">
+    <td>{{ prospect.name }}</td>
+    <td>{{ prospect.industry or '-' }}</td>
+    <td>{{ prospect.region or '-' }}</td>
+    <td>{{ prospect.fit_score or 0 }}/100</td>
+    <td><span class="badge badge-{{ prospect.status or 'suggested' }}">{{ prospect.status or 'suggested' }}</span></td>
+    <td class="action-cell" @click.stop>
+        {% if prospect.status != 'claimed' %}
+        <button class="btn btn-sm"
+                hx-post="/views/prospecting/{{ prospect.id }}/claim"
+                hx-target="#prospect-{{ prospect.id }}"
+                hx-swap="outerHTML">
+            Claim
+        </button>
+        {% endif %}
+        {% with entity_type="prospect", entity_id=prospect.id %}
+            {% include "partials/shared/enrich_button.html" %}
+        {% endwith %}
+    </td>
+</tr>

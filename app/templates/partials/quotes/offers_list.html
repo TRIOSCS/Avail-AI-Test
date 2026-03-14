@@ -1,0 +1,29 @@
+{# offers_list.html — Offers gallery page with search and filter.
+   Called by: GET /views/offers (views.py)
+   Depends on: offer_card.html, offer objects #}
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+  <h2>Offers</h2>
+</div>
+
+{# Search input #}
+<div style="margin-bottom:1rem;">
+  <input type="search" name="q" value="{{ q }}"
+         placeholder="Search offers by vendor or MPN..."
+         hx-get="/views/offers"
+         hx-target="#main-content"
+         hx-trigger="input changed delay:300ms, search"
+         style="width:100%; max-width:400px; padding:0.5rem;">
+</div>
+
+<div id="offers-list">
+  {% if offers %}
+    {% for offer in offers %}
+      {% include "partials/quotes/offer_card.html" %}
+    {% endfor %}
+  {% else %}
+    <div style="text-align:center; padding:3rem; color:#94a3b8;">
+      No offers found.
+    </div>
+  {% endif %}
+</div>

@@ -1,0 +1,44 @@
+{#
+  sidebar.html — Main sidebar navigation for the app shell.
+  Displays nav links for all major sections with hx-boost for SPA-like transitions.
+  Uses Alpine.js x-data for collapsed/expanded state.
+  Called by: app/templates/base.html (via include)
+  Depends on: Alpine.js, HTMX, $store.sidebar.active for active item highlighting
+#}
+<nav x-data="{ collapsed: false }" class="sidebar" :class="{ 'sidebar-collapsed': collapsed }">
+    <div class="sidebar-header">
+        <a href="/app" class="sidebar-logo" hx-boost="true">
+            <span class="logo-text" x-show="!collapsed">AvailAI</span>
+            <span class="logo-icon" x-show="collapsed">A</span>
+        </a>
+        <button @click="collapsed = !collapsed" class="sidebar-toggle" aria-label="Toggle sidebar">
+            <svg x-show="!collapsed" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+            <svg x-show="collapsed" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+    </div>
+    <ul class="sidebar-nav">
+        {% set nav_items = [
+            ('requisitions', 'Requisitions', '/requisitions', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+            ('companies', 'Companies', '/companies', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
+            ('vendors', 'Vendors', '/vendors', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+            ('quotes', 'Quotes', '/quotes', 'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
+            ('buy-plans', 'Buy Plans', '/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+            ('prospecting', 'Prospecting', '/prospecting', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+            ('settings', 'Settings', '/settings', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'),
+        ] %}
+        {% for id, label, href, icon_path in nav_items %}
+        <li>
+            <a href="{{ href }}" hx-boost="true" hx-target="#main-content" hx-push-url="true"
+               class="sidebar-link"
+               :class="{ 'active': $store.sidebar.active === '{{ id }}' }"
+               @click="$store.sidebar.active = '{{ id }}'">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="{{ icon_path }}"/>
+                </svg>
+                <span x-show="!collapsed" class="sidebar-label">{{ label }}</span>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+</nav>

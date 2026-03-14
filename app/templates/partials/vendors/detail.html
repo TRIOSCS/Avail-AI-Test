@@ -1,0 +1,58 @@
+{#
+  detail.html — Vendor detail drawer with tabbed content area.
+  Receives: vendor (ORM object), contact_count (int), user.
+  Called by: views.py vendor_detail endpoint.
+  Depends on: Alpine.js (tab switching, close), HTMX (tab lazy-loading, enrich).
+#}
+<div class="drawer" x-data="{ tab: 'overview' }" @close-drawer.window="$el.innerHTML = ''">
+    <div class="drawer-header">
+        <h2>{{ vendor.display_name }}</h2>
+        <div class="drawer-meta">
+            {% if vendor.vendor_score is not none %}
+            <span class="badge" title="Vendor Score">Score: {{ vendor.vendor_score | round(1) }}</span>
+            {% endif %}
+            {% if vendor.is_blacklisted %}
+            <span class="badge badge-danger">Blacklisted</span>
+            {% endif %}
+            {% if vendor.industry %}
+            <span class="meta-item">{{ vendor.industry }}</span>
+            {% endif %}
+        </div>
+        <div class="drawer-actions">
+            <button class="btn btn-sm"
+                    hx-post="/api/enrich/vendor/{{ vendor.id }}"
+                    hx-target="#enrich-results"
+                    hx-indicator="#enrich-spinner">
+                Enrich
+            </button>
+            <span id="enrich-spinner" class="htmx-indicator">Loading...</span>
+            {% if vendor.phones %}
+            <a href="tel:{{ vendor.phones[0] }}" class="btn btn-sm">Call</a>
+            {% endif %}
+            <button class="btn btn-sm" @click="$dispatch('close-drawer')">Close</button>
+        </div>
+    </div>
+
+    <div id="enrich-results"></div>
+
+    {# Tab bar #}
+    <nav class="tab-bar">
+        {% for tab_key, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('analytics', 'Analytics'), ('offers', 'Offers')] %}
+        <button class="tab-btn"
+                :class="{ 'active': tab === '{{ tab_key }}' }"
+                @click="tab = '{{ tab_key }}'"
+                hx-get="/views/vendors/{{ vendor.id }}/tab/{{ tab_key }}"
+                hx-target="#vendor-tab-content"
+                hx-swap="innerHTML">
+            {{ tab_label }}
+        </button>
+        {% endfor %}
+    </nav>
+
+    {# Tab content — loads overview on open #}
+    <div id="vendor-tab-content"
+         hx-get="/views/vendors/{{ vendor.id }}/tab/overview"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+</div>

@@ -285,10 +285,10 @@ class TestQuotedOfferBadge:
 
 
 class TestBuyPlanQuoteLineItems:
-    """V1 buy plan submission is permanently disabled — POST returns 410."""
+    """V1 buy plan submission is deprecated and always returns 410."""
 
     def test_buy_plan_submit_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
-        """V1 submit_buy_plan always returns 410 (V1 disabled)."""
+        """V1 submit_buy_plan always returns 410."""
         from app.models import Company, CustomerSite
 
         co = Company(name="BP Test Co", is_active=True, created_at=datetime.now(timezone.utc))
@@ -329,6 +329,38 @@ class TestBuyPlanQuoteLineItems:
                 "offer_ids": [test_offer.id],
                 "salesperson_notes": "Rush order",
             },
+        )
+        assert resp.status_code == 410
+
+    def test_buy_plan_fallback_returns_410(self, client, test_requisition, test_offer, db_session, test_user):
+        """V1 submit_buy_plan always returns 410 regardless of quote line_items."""
+        from app.models import Company, CustomerSite
+
+        co = Company(name="BP Fallback Co", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email="x@fb.com")
+        db_session.add(site)
+        db_session.flush()
+
+        q = Quote(
+            requisition_id=test_requisition.id,
+            customer_site_id=site.id,
+            quote_number="Q-2026-0101",
+            status="sent",
+            line_items=[],
+            subtotal=1000.00,
+            total_cost=500.00,
+            total_margin_pct=50.00,
+            created_by_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/quotes/{q.id}/buy-plan",
+            json={"offer_ids": [test_offer.id], "salesperson_notes": ""},
         )
         assert resp.status_code == 410
 

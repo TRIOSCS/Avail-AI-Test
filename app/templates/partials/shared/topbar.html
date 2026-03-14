@@ -1,0 +1,62 @@
+{#
+  topbar.html — Top bar with breadcrumb, global search, user menu, and notification bell.
+  Global search uses hx-get with debounce to return results as an HTML partial.
+  Called by: app/templates/base.html (via include)
+  Depends on: Alpine.js, HTMX, app/routers/views.py (GET /search endpoint)
+#}
+<header class="topbar" x-data="{ userMenuOpen: false, searchFocused: false }">
+    <div class="topbar-left">
+        <nav class="breadcrumb" aria-label="Breadcrumb">
+            <ol>
+                <li><a href="/app" hx-boost="true">Home</a></li>
+                {% block breadcrumb %}{% endblock %}
+            </ol>
+        </nav>
+    </div>
+
+    <div class="topbar-center">
+        <div class="global-search" :class="{ 'focused': searchFocused }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <input type="search"
+                   name="q"
+                   placeholder="Search requisitions, companies, vendors..."
+                   autocomplete="off"
+                   class="search-input"
+                   hx-get="/search"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-target="#search-results"
+                   @focus="searchFocused = true"
+                   @blur="setTimeout(() => searchFocused = false, 200)"
+                   @keydown.escape="$el.blur(); searchFocused = false">
+            <div id="search-results" class="search-results-dropdown" x-show="searchFocused"></div>
+        </div>
+    </div>
+
+    <div class="topbar-right">
+        <button class="topbar-icon-btn notification-bell" aria-label="Notifications">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 01-3.46 0"/>
+            </svg>
+        </button>
+
+        <div class="user-menu" x-data="{ open: false }">
+            <button @click="open = !open" class="user-menu-trigger" aria-label="User menu">
+                <span class="user-avatar">{{ user.name[0] if user and user.name else 'U' }}</span>
+                <span class="user-name">{{ user.name if user else 'User' }}</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+                     fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M6 9l6 6 6-6"/>
+                </svg>
+            </button>
+            <div x-show="open" @click.outside="open = false" x-transition class="user-dropdown">
+                <a href="/settings" hx-boost="true" hx-target="#main-content" class="dropdown-item">Settings</a>
+                <a href="/auth/logout" class="dropdown-item">Sign Out</a>
+            </div>
+        </div>
+    </div>
+</header>

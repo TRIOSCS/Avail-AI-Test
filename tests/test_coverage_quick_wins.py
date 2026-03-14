@@ -12,10 +12,12 @@ Covers:
 8. requisitions.py:72 — parse_substitutes non-list/non-str input
 9. search_service.py:293-298 — search cache HIT
 10. customer_analysis_service.py:73-74,76 — duplicate sighting & parts_list >= 200
-11. ownership_service.py:378 — days_inactive=999 when no created_at
-12. ownership_service.py:517 — status="red" in get_my_sites
-13. ownership_service.py:557 — days_inactive=999 in get_sites_at_risk
-14. vite.py:76-77,85-86 — vite_app_url/vite_crm_url fallback
+11. deep_enrichment_service.py:233-234,236,240,246,271 — _apply_contact_creation edges
+12. deep_enrichment_service.py:618,620 — contact confidence by source
+13. ownership_service.py:378 — days_inactive=999 when no created_at
+14. ownership_service.py:517 — status="red" in get_my_sites
+15. ownership_service.py:557 — days_inactive=999 in get_sites_at_risk
+16. vite.py:76-77,85-86 — vite_app_url/vite_crm_url fallback
 
 Called by: pytest
 Depends on: conftest.py fixtures
@@ -139,60 +141,9 @@ class TestAdminVendorMergeFKException:
 
 
 class TestBuyPlanMissingOffer:
-    def test_submit_buy_plan_returns_410(self, client, db_session, test_user):
-        """V1 buy plan submission always returns 410 (V1 permanently disabled)."""
-        co = Company(name="BPlan Corp", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-
-        site = CustomerSite(company_id=co.id, site_name="BPlan HQ", is_active=True)
-        db_session.add(site)
-        db_session.flush()
-
-        req = Requisition(
-            name="BP-REQ-001",
-            customer_site_id=site.id,
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        q = Quote(
-            requisition_id=req.id,
-            customer_site_id=site.id,
-            quote_number="Q-BP-001",
-            status="sent",
-            line_items=[],
-            subtotal=500.00,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.flush()
-
-        o = Offer(
-            requisition_id=req.id,
-            vendor_name="Test Vendor",
-            mpn="LM317T",
-            qty_available=100,
-            unit_price=0.50,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(o)
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{q.id}/buy-plan",
-            json={
-                "offer_ids": [o.id, 99999],
-                "salesperson_notes": "Test notes",
-                "plan_qtys": {},
-            },
-        )
+    def test_v1_submit_returns_410(self, client, test_quote):
+        """V1 buy plan submit endpoint now returns 410 (use V3 endpoints)."""
+        resp = client.post(f"/api/quotes/{test_quote.id}/buy-plan")
         assert resp.status_code == 410
 
 

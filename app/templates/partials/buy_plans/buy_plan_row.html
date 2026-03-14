@@ -1,0 +1,16 @@
+{#
+  buy_plan_row.html — Single table row for a buy plan in the list view.
+  Receives: bp (namespace with id, name, customer_name, line_count, total_cost, status, created_at, submitted_by_name).
+  Called by: list.html loop, views.py buy_plans_rows endpoint.
+  Depends on: HTMX (hx-get for detail click).
+#}
+<tr id="bp-{{ bp.id }}" class="clickable-row"
+    hx-get="/views/buy-plans/{{ bp.id }}" hx-target="#main-content" hx-push-url="true">
+    <td data-label="Name">{{ bp.name }}</td>
+    <td data-label="Customer">{{ bp.customer_name }}</td>
+    <td data-label="Lines">{{ bp.line_count }} lines</td>
+    <td data-label="Total">${{ '%.2f' | format(bp.total_cost or 0) }}</td>
+    <td data-label="Status"><span class="badge badge-{{ bp.status }}">{{ bp.status }}</span></td>
+    <td data-label="Submitted By">{{ bp.submitted_by_name or '-' }}</td>
+    <td data-label="Date">{{ bp.created_at.strftime('%b %d') }}</td>
+</tr>

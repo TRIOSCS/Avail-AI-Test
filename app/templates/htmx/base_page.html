@@ -1,0 +1,15 @@
+{% extends "htmx/base.html" %}
+
+{% block content %}
+{# Initial content loaded via HTMX on page load #}
+<div hx-get="{{ partial_url }}"
+     hx-target="#main-content"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+  <div class="flex items-center justify-center py-20">
+    <svg class="h-8 w-8 text-gray-400 spinner" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
+    </svg>
+  </div>
+</div>
+{% endblock %}

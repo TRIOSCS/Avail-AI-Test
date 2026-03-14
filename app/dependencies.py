@@ -20,6 +20,7 @@ Depends on: models, database, config
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, selectinload
@@ -163,3 +164,16 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(401, "Session expired — please log in again")
 
     return token
+
+
+# ── HTMX Detection Utilities ────────────────────────────────────────
+
+
+def wants_html(request: Request) -> bool:
+    """Return True if the client wants an HTML partial (HTMX request)."""
+    return request.headers.get("HX-Request") == "true"
+
+
+def is_htmx_boosted(request: Request) -> bool:
+    """Return True if this is an hx-boost navigation (needs full page shell)."""
+    return request.headers.get("HX-Boosted") == "true"

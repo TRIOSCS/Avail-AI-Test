@@ -58,11 +58,24 @@ async def _job_poll_8x8_cdrs():
 
 
 def _process_cdrs(db, settings) -> dict:
-    """Core CDR processing logic. Returns stats dict."""
-    from ..models import User
+    """Core CDR processing logic with CRM reverse lookup.
+
+    After fetching CDRs, runs reverse_lookup_phone() on each external phone.
+    If a match is found, sets company_id/vendor_card_id and contact_name
+    on the ActivityLog entry. Also links to open requisitions when the
+    matched company has active reqs.
+
+    Returns stats dict with processed, matched, skipped counts.
+    """
+    from ..models import Requisition, User
     from ..models.config import SystemConfig
     from ..services.activity_service import log_call_activity
-    from ..services.eight_by_eight_service import get_access_token, get_cdrs, normalize_cdr
+    from ..services.eight_by_eight_service import (
+        get_access_token,
+        get_cdrs,
+        normalize_cdr,
+        reverse_lookup_phone,
+    )
 
     # Load watermark
     watermark_row = db.query(SystemConfig).filter(SystemConfig.key == "8x8_last_poll").first()
@@ -121,22 +134,65 @@ def _process_cdrs(db, settings) -> dict:
         # Map 8x8 direction to activity_service direction
         direction = "outbound" if norm["direction"] == "Outgoing" else "inbound"
 
+        # Reverse lookup: try to match the external phone to a CRM entity
+        crm_match = reverse_lookup_phone(external_phone, db)
+
+        # Use CRM contact_name if CDR didn't provide one
+        effective_contact_name = contact_name if contact_name and contact_name != "." else None
+        if not effective_contact_name and crm_match and crm_match.get("contact_name"):
+            effective_contact_name = crm_match["contact_name"]
+
         record = log_call_activity(
             user_id=user.id,
             direction=direction,
             phone=external_phone,
             duration_seconds=norm["duration_seconds"],
             external_id=norm["external_id"],
-            contact_name=contact_name if contact_name and contact_name != "." else None,
+            contact_name=effective_contact_name,
             db=db,
         )
 
         if record is None:
             skipped += 1
-        else:
-            processed += 1
-            if record.company_id or record.vendor_card_id:
-                matched += 1
+            continue
+
+        processed += 1
+
+        # Apply CRM linking from reverse lookup (overrides activity_service match)
+        if crm_match:
+            if crm_match["entity_type"] in ("contact", "company"):
+                record.company_id = crm_match["company_id"]
+                if crm_match.get("site_id"):
+                    record.customer_site_id = crm_match["site_id"]
+                if crm_match.get("entity_type") == "contact":
+                    record.site_contact_id = crm_match["entity_id"]
+                # Link to open requisition if company has one
+                from ..models import CustomerSite
+
+                open_req = (
+                    db.query(Requisition)
+                    .join(CustomerSite, Requisition.customer_site_id == CustomerSite.id)
+                    .filter(
+                        CustomerSite.company_id == crm_match["company_id"],
+                        Requisition.status.in_(["active", "open", "in_progress"]),
+                    )
+                    .first()
+                )
+                if open_req:
+                    record.requisition_id = open_req.id
+                    logger.debug(
+                        f"CDR linked to open req {open_req.id} for company {crm_match['company_name']}"
+                    )
+            elif crm_match["entity_type"] == "vendor":
+                record.vendor_card_id = crm_match["vendor_card_id"]
+            matched += 1
+            db.flush()
+            logger.info(
+                f"CDR reverse-linked: {crm_match['entity_type']} "
+                f"'{crm_match.get('company_name')}' for phone {external_phone}"
+            )
+        elif record.company_id or record.vendor_card_id:
+            matched += 1
 
     _update_watermark(db, watermark_row, until)
     return {"processed": processed, "matched": matched, "skipped": skipped}

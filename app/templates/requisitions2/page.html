@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Requisitions — AvailAI</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <style>
+    /* Requisitions 2 page styles — scoped to #rq2all-page */
+    #rq2all-page { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+    .rq2-nav { margin-bottom: 1rem; font-size: 0.875rem; color: #6b7280; }
+    .rq2-nav a { color: #3b82f6; text-decoration: none; }
+    .rq2-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 1rem; }
+    .rq2-filters input, .rq2-filters select { padding: 0.375rem 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem; }
+    .rq2-filters input[type="search"] { min-width: 200px; }
+    .rq2-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .rq2-table th, .rq2-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+    .rq2-table th { background: #f9fafb; font-weight: 600; color: #374151; white-space: nowrap; }
+    .rq2-table th a { color: inherit; text-decoration: none; cursor: pointer; }
+    .rq2-table th a:hover { color: #3b82f6; }
+    .rq2-table tr:hover { background: #f3f4f6; }
+    .rq2-row a { color: #3b82f6; text-decoration: none; font-weight: 500; }
+    .rq2-row a:hover { text-decoration: underline; }
+    .rq2-urgent { border-left: 3px solid #ef4444; }
+    .rq2-empty { text-align: center; padding: 2rem; color: #9ca3af; }
+    .badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 500; }
+    .badge-active { background: #dbeafe; color: #1d4ed8; }
+    .badge-draft { background: #f3f4f6; color: #6b7280; }
+    .badge-sourcing { background: #fef3c7; color: #92400e; }
+    .badge-archived { background: #f3f4f6; color: #6b7280; }
+    .badge-won { background: #d1fae5; color: #065f46; }
+    .badge-lost { background: #fee2e2; color: #991b1b; }
+    .badge-hot { background: #fef3c7; color: #92400e; }
+    .badge-critical { background: #fee2e2; color: #991b1b; }
+    .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; border: 1px solid #d1d5db; border-radius: 0.25rem; background: white; cursor: pointer; }
+    .btn-sm:hover { background: #f3f4f6; }
+    .btn-primary { background: #3b82f6; color: white; border-color: #3b82f6; }
+    .btn-primary:hover { background: #2563eb; }
+    .rq2-actions { white-space: nowrap; }
+    .rq2-actions .btn-sm { margin-right: 0.25rem; }
+    .rq2-pagination { display: flex; align-items: center; gap: 1rem; padding: 0.75rem 0; font-size: 0.875rem; }
+    .rq2-pagination a { color: #3b82f6; text-decoration: none; cursor: pointer; }
+    .rq2-pagination a:hover { text-decoration: underline; }
+    .rq2-bulk-bar { display: flex; gap: 0.5rem; align-items: center; padding: 0.5rem 0.75rem; background: #eff6ff; border-radius: 0.375rem; margin-bottom: 0.5rem; font-size: 0.875rem; }
+    /* Loading states (htmx-ext-loading-states) */
+    [data-loading] { display: none; }
+    .rq2-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #d1d5db; border-top-color: #3b82f6; border-radius: 50%; animation: rq2-spin 0.6s linear infinite; }
+    @keyframes rq2-spin { to { transform: rotate(360deg); } }
+    .rq2-loading { opacity: 0.5; pointer-events: none; transition: opacity 0.2s; }
+    .btn-sm[data-loading-aria-busy] { position: relative; }
+    /* HTMX swap transitions */
+    .htmx-settling tr { opacity: 0; }
+    #rq2-table tr { transition: opacity 0.15s ease-in; }
+    .htmx-added { opacity: 0; }
+    .htmx-added.htmx-settling { opacity: 1; }
+    /* Skeleton placeholder for table loading */
+    .rq2-skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 50%, #f3f4f6 75%); background-size: 200% 100%; animation: rq2-shimmer 1.5s infinite; border-radius: 0.25rem; height: 1rem; }
+    @keyframes rq2-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    /* Focus trap overlay (Alpine @focus) */
+    .rq2-modal-overlay:focus { outline: none; }
+    /* Error response target */
+    .rq2-error { padding: 0.75rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 0.375rem; color: #991b1b; font-size: 0.875rem; margin-bottom: 0.5rem; }
+    .rq2-error:empty { display: none; }
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator, .htmx-request.htmx-indicator { display: inline-block; }
+    .rq2-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .rq2-modal-content { background: white; border-radius: 0.5rem; max-width: 700px; width: 95%; max-height: 85vh; overflow-y: auto; }
+    .rq2-modal-header { display: flex; align-items: center; gap: 0.75rem; padding: 1rem 1.25rem; border-bottom: 1px solid #e5e7eb; }
+    .rq2-modal-header h2 { margin: 0; font-size: 1.125rem; flex: 1; }
+    .rq2-modal-body { padding: 1rem 1.25rem; }
+    .rq2-modal-body dl { display: grid; grid-template-columns: 120px 1fr; gap: 0.25rem 1rem; }
+    .rq2-modal-body dt { font-weight: 600; color: #6b7280; font-size: 0.875rem; }
+    .rq2-modal-body dd { margin: 0; font-size: 0.875rem; }
+    .rq2-modal-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; text-align: right; }
+    .rq2-modal-error { padding: 2rem; text-align: center; color: #991b1b; }
+    .btn-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #6b7280; }
+    .rq2-mini-table { width: 100%; margin-top: 0.75rem; }
+    .rq2-mini-table th, .rq2-mini-table td { padding: 0.25rem 0.5rem; font-size: 0.8125rem; }
+    .toast { position: fixed; bottom: 1rem; right: 1rem; background: #1f2937; color: white; padding: 0.75rem 1rem; border-radius: 0.375rem; font-size: 0.875rem; z-index: 2000; animation: slideIn 0.3s ease; }
+    @keyframes slideIn { from { transform: translateY(1rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .dropdown-menu { position: absolute; background: white; border: 1px solid #d1d5db; border-radius: 0.375rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); z-index: 10; min-width: 160px; }
+    .dropdown-item { display: block; width: 100%; padding: 0.375rem 0.75rem; border: none; background: none; text-align: left; cursor: pointer; font-size: 0.875rem; }
+    .dropdown-item:hover { background: #f3f4f6; }
+    .rq2-assign-dropdown { position: relative; }
+    /* Inline editing */
+    .rq2-editable { cursor: default; }
+    .rq2-editable:hover { background: #eff6ff; cursor: cell; }
+    .rq2-inline-input { width: 100%; padding: 0.25rem 0.375rem; border: 1px solid #3b82f6; border-radius: 0.25rem; font-size: 0.875rem; outline: none; }
+    .rq2-inline-select { padding: 0.25rem 0.375rem; border: 1px solid #3b82f6; border-radius: 0.25rem; font-size: 0.875rem; outline: none; }
+    .rq2-edit-hint { color: #d1d5db; }
+    /* Live indicator */
+    .rq2-live-dot { display: inline-block; width: 8px; height: 8px; background: #22c55e; border-radius: 50%; margin-left: 0.5rem; animation: rq2-pulse 2s infinite; }
+    @keyframes rq2-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    [x-cloak] { display: none !important; }
+  </style>
+  <script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+  <!-- HTMX extensions: Tier 1 -->
+  <script src="https://unpkg.com/htmx-ext-response-targets@2.0.2/response-targets.js"></script>
+  <script src="https://unpkg.com/htmx-ext-loading-states@2.0.0/loading-states.js"></script>
+  <!-- HTMX extensions: Tier 2 -->
+  <script src="https://unpkg.com/htmx-ext-preload@2.1.1/preload.js"></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  <!-- Alpine.js plugins (must load BEFORE Alpine core) -->
+  <script defer src="https://unpkg.com/@alpinejs/focus@3.14.8/dist/cdn.min.js"></script>
+  <script defer src="https://unpkg.com/@alpinejs/collapse@3.14.8/dist/cdn.min.js"></script>
+  <script defer src="https://unpkg.com/@alpinejs/persist@3.14.8/dist/cdn.min.js"></script>
+  <!-- Alpine.js core -->
+  <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  <script src="/static/js/requisitions2.js" defer></script>
+</head>
+<body>
+  <div id="rq2all-page"
+       hx-ext="response-targets, loading-states, preload, sse"
+       x-data="rq2Page()"
+       x-on:htmx:after-swap.window="onTableSwap($event)"
+       x-on:clear-selection.window="clearSelection()"
+       x-on:show-toast.window="showToast($event)">
+
+    <nav class="rq2-nav">
+      <a href="/">Home</a> / <span>Requisitions</span>
+      <span id="rq2-live-dot" class="rq2-live-dot" title="Live updates active"></span>
+    </nav>
+
+    {% include "requisitions2/_filters.html" %}
+
+    <div id="rq2-error" class="rq2-error"></div>
+
+    {% include "requisitions2/_bulk_bar.html" %}
+
+    <div id="rq2-sse-source"
+         sse-connect="/requisitions2/stream"
+         hx-trigger="sse:table-refresh"
+         hx-get="/requisitions2/table"
+         hx-target="#rq2-table"
+         hx-include="#rq2-filters"
+         hx-swap="innerHTML"></div>
+
+    <div id="rq2-table">
+      {% include "requisitions2/_table.html" %}
+    </div>
+
+    <div id="rq2-modal"></div>
+
+    <template x-for="(msg, idx) in toasts" :key="idx">
+      <div class="toast" x-text="msg" x-init="setTimeout(() => toasts.splice(toasts.indexOf(msg), 1), 3000)"></div>
+    </template>
+  </div>
+</body>
+</html>

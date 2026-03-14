@@ -1,0 +1,18 @@
+{#
+  search_progress.html — Progress indicator showing which sources have completed.
+  Receives: sources (list of dicts with 'name', 'done', 'count' keys).
+  Called by: views.py sourcing_stream endpoint (SSE event), sourcing_results endpoint.
+  Depends on: Alpine.js for reactivity.
+#}
+<div id="search-progress" class="search-progress">
+    {% for source in sources %}
+    <span class="source-pill {{ 'done' if source.done else 'pending' }}">
+        {{ source.name }}
+        {% if source.done %}
+            ({{ source.count }})
+        {% else %}
+            <span class="spinner-dots">...</span>
+        {% endif %}
+    </span>
+    {% endfor %}
+</div>
