@@ -109,7 +109,7 @@ def create_entry_endpoint(
     return _entry_to_response(entry)
 
 
-@router.put("/{entry_id}")
+@router.put("/{entry_id:int}")
 def update_entry_endpoint(
     entry_id: int,
     payload: KnowledgeEntryUpdate,
@@ -129,7 +129,7 @@ def update_entry_endpoint(
     return _entry_to_response(entry)
 
 
-@router.delete("/{entry_id}")
+@router.delete("/{entry_id:int}")
 def delete_entry_endpoint(
     entry_id: int,
     db: Session = Depends(get_db),

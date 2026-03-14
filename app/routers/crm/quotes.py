@@ -548,16 +548,12 @@ async def pricing_history(mpn: str, user: User = Depends(require_user), db: Sess
     card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
 
     mpn_upper = mpn.upper().strip()
-    quotes = (
-        db.query(Quote)
-        .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
-        .filter(Quote.status.in_(_PRICED_STATUSES))
-        .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
-        .limit(500)
+    quotes = db.query(Quote).options(joinedload(Quote.customer_site).joinedload(CustomerSite.company)).filter(
+        Quote.status.in_(_PRICED_STATUSES)
     )
     if user.role == "sales":
         quotes = quotes.join(Requisition, Quote.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
-    quotes = quotes.all()
+    quotes = quotes.order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc()).limit(500).all()
     history = []
     card_id = card.id if card else None
     for q in quotes:

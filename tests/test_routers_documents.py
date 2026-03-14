@@ -33,9 +33,9 @@ def test_rfq_pdf_not_found(mock_gen, client):
 
 
 @patch("app.services.document_service.generate_rfq_summary_pdf", side_effect=RuntimeError("render failed"))
-def test_rfq_pdf_generation_error(mock_gen, client):
+def test_rfq_pdf_generation_error(mock_gen, client, test_requisition):
     """Service throws RuntimeError -> 500."""
-    resp = client.get("/api/requisitions/1/pdf")
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/pdf")
     assert resp.status_code == 500
     assert "PDF generation failed" in resp.json()["error"]
 
@@ -60,9 +60,9 @@ def test_quote_pdf_not_found(mock_gen, client):
 
 
 @patch("app.services.document_service.generate_quote_report_pdf", side_effect=RuntimeError("render failed"))
-def test_quote_pdf_generation_error(mock_gen, client):
+def test_quote_pdf_generation_error(mock_gen, client, test_quote):
     """Service throws RuntimeError -> 500."""
-    resp = client.get("/api/quotes/1/pdf")
+    resp = client.get(f"/api/quotes/{test_quote.id}/pdf")
     assert resp.status_code == 500
 
 

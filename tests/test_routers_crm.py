@@ -3757,4 +3757,4 @@ def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
         resp = c.get("/api/pricing-history/LM317T")
     app.dependency_overrides.clear()
     assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["history"] == []

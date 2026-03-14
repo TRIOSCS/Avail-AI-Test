@@ -153,7 +153,7 @@ def test_clone_requisition_duplicate_mpn_preserves_offer_mapping(db_session, tes
     db_session.add_all([o1, o2])
     db_session.commit()
 
-    cloned = clone_requisition(src.id, test_user.id, db_session)
+    cloned = clone_requisition(db_session, src, test_user.id)
     cloned_offers = db_session.query(Offer).filter(Offer.requisition_id == cloned.id).all()
 
     assert len(cloned_offers) == 2
