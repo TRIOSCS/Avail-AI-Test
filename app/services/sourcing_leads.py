@@ -343,7 +343,7 @@ def _reliability_band(score: float) -> str:
     return "low"
 
 
-def _match_type_for_parts(requested: str, matched: str) -> str:
+def _match_type_for_parts(requested: str, matched: str, substitutes: list | None = None) -> str:
     """Determine match_type per lead.schema.yaml enum: exact/normalized/fuzzy/cross_ref."""
     if not requested or not matched:
         return "exact"
@@ -353,6 +353,17 @@ def _match_type_for_parts(requested: str, matched: str) -> str:
         return "exact"
     if req_norm and match_norm and (req_norm in match_norm or match_norm in req_norm):
         return "normalized"
+    # Check if matched part is a known substitute / cross-reference
+    if substitutes:
+        sub_norms = set()
+        for sub in substitutes:
+            if isinstance(sub, str):
+                sub_norms.add(normalize_mpn(sub))
+            elif isinstance(sub, dict):
+                sub_norms.add(normalize_mpn(sub.get("mpn") or sub.get("part_number") or ""))
+        sub_norms.discard("")
+        if match_norm in sub_norms:
+            return "cross_ref"
     return "fuzzy"
 
 
@@ -427,7 +438,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
             requisition_id=requirement.requisition_id,
             part_number_requested=requested_part,
             part_number_matched=matched_part_norm,
-            match_type=_match_type_for_parts(requested_part, matched_part),
+            match_type=_match_type_for_parts(requested_part, matched_part, getattr(requirement, "substitutes", None)),
             vendor_name=vendor_name,
             vendor_name_normalized=vendor_normalized,
             vendor_card_id=vendor_card.id if vendor_card else None,
@@ -499,18 +510,108 @@ def _build_lead_risk_flags(
     return flags
 
 
+def _auto_merge_leads(db: Session, survivor: SourcingLead, duplicate: SourcingLead) -> None:
+    """Merge a duplicate lead into the survivor by moving evidence and events.
+
+    Only merges if the duplicate has not been acted on by a buyer (status = 'new').
+    Preserves all source attribution per the dedup spec guardrails.
+    """
+    if duplicate.buyer_status != "new":
+        # Buyer has already acted on this lead — flag instead of merging
+        _add_risk_flag(survivor, "duplicate_candidate")
+        _add_risk_flag(duplicate, "duplicate_candidate")
+        return
+
+    # Move evidence rows from duplicate to survivor
+    db.query(LeadEvidence).filter(LeadEvidence.lead_id == duplicate.id).update(
+        {"lead_id": survivor.id}
+    )
+
+    # Move feedback events from duplicate to survivor (if any)
+    db.query(LeadFeedbackEvent).filter(LeadFeedbackEvent.lead_id == duplicate.id).update(
+        {"lead_id": survivor.id}
+    )
+
+    # Delete the duplicate lead
+    db.delete(duplicate)
+    db.flush()
+
+    # Refresh survivor rollups with the merged evidence
+    _refresh_lead_evidence_rollups(db, survivor)
+    logger.info(
+        "Auto-merged duplicate lead {} into survivor {} for requirement {}",
+        duplicate.lead_id, survivor.lead_id, survivor.requirement_id,
+    )
+
+
+def _count_dedup_signals(
+    db: Session,
+    lead: SourcingLead,
+    other: SourcingLead,
+    vendor_card: VendorCard | None,
+) -> int:
+    """Count how many dedup signals match between two leads.
+
+    Returns count of matching signals:
+    - vendor_card_id match = 2 (strong — counts as exact duplicate per spec)
+    - domain match = 1
+    - phone match = 1
+    - email domain match = 1
+    """
+    signals = 0
+
+    if vendor_card and vendor_card.id and other.vendor_card_id == vendor_card.id:
+        signals += 2  # exact duplicate per spec
+
+    if not other.vendor_card_id:
+        return signals
+
+    other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
+    if not other_card:
+        return signals
+
+    # Domain match
+    if vendor_card and getattr(vendor_card, "domain", None):
+        lead_domain = (vendor_card.domain or "").strip().lower()
+        other_domain = (getattr(other_card, "domain", None) or "").strip().lower()
+        if lead_domain and other_domain and lead_domain == other_domain:
+            signals += 1
+
+    # Phone match
+    if vendor_card and getattr(vendor_card, "phones", None):
+        lead_phones = {_normalize_phone(p) for p in (vendor_card.phones or []) if p}
+        other_phones = {_normalize_phone(p) for p in (getattr(other_card, "phones", None) or []) if p}
+        lead_phones.discard("")
+        other_phones.discard("")
+        if lead_phones & other_phones:
+            signals += 1
+
+    # Email domain match
+    if vendor_card and getattr(vendor_card, "emails", None):
+        lead_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (vendor_card.emails or []) if e and "@" in e}
+        other_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (getattr(other_card, "emails", None) or []) if e and "@" in e}
+        lead_email_domains.discard("")
+        other_email_domains.discard("")
+        if lead_email_domains & other_email_domains:
+            signals += 1
+
+    return signals
+
+
 def _check_duplicate_candidates(
     db: Session,
     lead: SourcingLead,
     vendor_card: VendorCard | None,
 ) -> None:
-    """Flag leads that may be duplicates of other leads for the same part.
+    """Detect and handle duplicate leads for the same part.
 
-    Per the handoff dedup spec, possible duplicates should be flagged as
-    duplicate_candidate without auto-merging. Checks domain overlap and
-    vendor card sharing as signals.
+    Per the handoff dedup spec:
+    - Exact duplicate (vendor_card_id/domain/phone match): auto-merge
+    - Strong likely duplicate (2+ medium signals agree): auto-merge
+    - Possible duplicate (1 signal): flag as duplicate_candidate, no merge
 
-    Conservative: only flags, never merges.
+    Auto-merge only happens when the weaker lead is still in 'new' status
+    (buyer has not acted on it). Otherwise, flags both as duplicate_candidate.
     """
     if not lead.requirement_id:
         return
@@ -527,57 +628,21 @@ def _check_duplicate_candidates(
     if not other_leads:
         return
 
-    # Check if any other lead shares the same vendor_card_id (strong dedup signal)
-    if vendor_card and vendor_card.id:
-        for other in other_leads:
-            if other.vendor_card_id == vendor_card.id and other.id != lead.id:
-                # Same vendor card = likely same vendor, flag both
-                _add_risk_flag(lead, "duplicate_candidate")
-                _add_risk_flag(other, "duplicate_candidate")
-                return
+    for other in other_leads:
+        signals = _count_dedup_signals(db, lead, other, vendor_card)
 
-    # Check domain overlap via vendor card
-    if vendor_card and getattr(vendor_card, "domain", None):
-        lead_domain = (vendor_card.domain or "").strip().lower()
-        for other in other_leads:
-            if not other.vendor_card_id:
-                continue
-            other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
-            if other_card and (getattr(other_card, "domain", None) or "").strip().lower() == lead_domain:
-                _add_risk_flag(lead, "duplicate_candidate")
-                _add_risk_flag(other, "duplicate_candidate")
-                return
-
-    # Check phone overlap via vendor card
-    if vendor_card and getattr(vendor_card, "phones", None):
-        lead_phones = {_normalize_phone(p) for p in (vendor_card.phones or []) if p}
-        if lead_phones:
-            for other in other_leads:
-                if not other.vendor_card_id:
-                    continue
-                other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
-                if other_card and getattr(other_card, "phones", None):
-                    other_phones = {_normalize_phone(p) for p in (other_card.phones or []) if p}
-                    if lead_phones & other_phones:
-                        _add_risk_flag(lead, "duplicate_candidate")
-                        _add_risk_flag(other, "duplicate_candidate")
-                        return
-
-    # Check email domain overlap via vendor card
-    if vendor_card and getattr(vendor_card, "emails", None):
-        lead_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (vendor_card.emails or []) if e and "@" in e}
-        lead_email_domains.discard("")
-        if lead_email_domains:
-            for other in other_leads:
-                if not other.vendor_card_id:
-                    continue
-                other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
-                if other_card and getattr(other_card, "emails", None):
-                    other_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (other_card.emails or []) if e and "@" in e}
-                    if lead_email_domains & other_email_domains:
-                        _add_risk_flag(lead, "duplicate_candidate")
-                        _add_risk_flag(other, "duplicate_candidate")
-                        return
+        if signals >= 2:
+            # Exact or strong likely duplicate — auto-merge
+            # Survivor = lead with higher confidence or more evidence
+            if (lead.confidence_score or 0) >= (other.confidence_score or 0):
+                _auto_merge_leads(db, lead, other)
+            else:
+                _auto_merge_leads(db, other, lead)
+            return
+        elif signals == 1:
+            # Possible duplicate — flag only
+            _add_risk_flag(lead, "duplicate_candidate")
+            _add_risk_flag(other, "duplicate_candidate")
 
 
 def _add_risk_flag(lead: SourcingLead, flag: str) -> None:
@@ -646,6 +711,11 @@ def _refresh_lead_evidence_rollups(db: Session, lead: SourcingLead) -> None:
     if lead.corroborated and lead.confidence_score is not None:
         lead.confidence_score = _clamp(float(lead.confidence_score) + 5.0)
         lead.confidence_band = _confidence_band(float(lead.confidence_score))
+        # Promote raw evidence to inferred when corroborated by multiple source categories
+        db.query(LeadEvidence).filter(
+            LeadEvidence.lead_id == lead.id,
+            LeadEvidence.verification_state == "raw",
+        ).update({"verification_state": "inferred"})
 
 
 def sync_leads_for_sightings(db: Session, requirement: Requirement, sightings: list[Sighting]) -> int:

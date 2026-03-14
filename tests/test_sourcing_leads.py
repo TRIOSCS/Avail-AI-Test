@@ -373,8 +373,8 @@ def test_vendor_dedup_strips_suffixes(db_session, test_requisition):
     assert leads[0].corroborated is True
 
 
-def test_duplicate_candidate_flagged_for_shared_vendor_card(db_session, test_requisition):
-    """Two leads with the same vendor_card_id get flagged as duplicate_candidate."""
+def test_duplicate_auto_merged_for_shared_vendor_card(db_session, test_requisition):
+    """Two leads with same vendor_card_id (strong signal) get auto-merged into one."""
     from app.vendor_utils import normalize_vendor_name
 
     requirement = test_requisition.requirements[0]
@@ -416,8 +416,9 @@ def test_duplicate_candidate_flagged_for_shared_vendor_card(db_session, test_req
         SourcingLead.requirement_id == requirement.id
     ).all()
 
-    flagged = [l for l in leads if "duplicate_candidate" in (l.risk_flags or [])]
-    assert len(flagged) >= 1, "Leads sharing a vendor card should be flagged as duplicate_candidate"
+    # Strong signal (shared vendor_card_id) triggers auto-merge → 1 lead remains
+    assert len(leads) == 1, f"Auto-merge should reduce to 1 lead, got {len(leads)}"
+    assert leads[0].evidence_count >= 2, "Merged lead should have combined evidence"
 
 
 def test_no_duplicate_flag_for_distinct_vendors(db_session, test_requisition):
@@ -522,3 +523,114 @@ def test_no_positive_signals_for_bare_card(db_session):
 
     assert len(positive) == 0, f"Bare card should have no positive signals, got {positive}"
     assert len(caution) >= 2, f"Bare card should have caution flags, got {caution}"
+
+
+def test_cross_ref_match_type_with_substitutes():
+    """cross_ref match_type returned when matched part is in substitutes list."""
+    assert _match_type_for_parts("LM317T", "LM317AHVT", substitutes=["LM317AHVT"]) == "cross_ref"
+    assert _match_type_for_parts("LM317T", "LM317AHVT", substitutes=[{"mpn": "LM317AHVT"}]) == "cross_ref"
+    # Not in substitutes → fuzzy
+    assert _match_type_for_parts("LM317T", "XYZ999", substitutes=["ABC123"]) == "fuzzy"
+    # No substitutes → fuzzy
+    assert _match_type_for_parts("LM317T", "XYZ999") == "fuzzy"
+
+
+def test_inferred_verification_state_on_corroboration(db_session, test_requisition):
+    """Corroborated evidence (2+ source categories) promotes verification_state to inferred."""
+    requirement = test_requisition.requirements[0]
+    # digikey (api) + brokerbin (marketplace) = corroborated
+    s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Infer Test Vendor")
+    s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Infer Test Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s1, s2])
+
+    lead = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).first()
+    assert lead is not None
+    assert lead.corroborated is True
+
+    evidence = db_session.query(LeadEvidence).filter(LeadEvidence.lead_id == lead.id).all()
+    for ev in evidence:
+        assert ev.verification_state == "inferred", f"Corroborated evidence should be inferred, got {ev.verification_state}"
+
+
+def test_auto_merge_on_strong_duplicate_signal(db_session, test_requisition):
+    """Two leads with same vendor_card_id (2 signals) get auto-merged."""
+    from app.vendor_utils import normalize_vendor_name
+
+    requirement = test_requisition.requirements[0]
+
+    # Create two vendor cards with same domain (will count as 1 signal each for vendor_card + domain = 2)
+    card = VendorCard(
+        normalized_name=normalize_vendor_name("Merge Test Vendor"),
+        display_name="Merge Test Vendor",
+        domain="mergetest.com",
+        vendor_score=50.0,
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    # First sighting creates lead 1
+    s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Merge Test Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s1])
+
+    # Second sighting with different vendor name creates lead 2
+    s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Merge Other Name")
+    sync_leads_for_sightings(db_session, requirement, [s2])
+
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
+    assert len(leads) == 2, "Should have 2 leads before merge"
+
+    # Assign both leads to the same vendor card to trigger strong signal
+    for lead in leads:
+        lead.vendor_card_id = card.id
+    db_session.commit()
+
+    # Re-sync to trigger duplicate check with shared vendor card
+    s3 = _make_sighting(db_session, requirement.id, source_type="nexar", vendor="Merge Test Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s3])
+
+    db_session.expire_all()
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
+    assert len(leads) == 1, f"Auto-merge should reduce to 1 lead, got {len(leads)}"
+    # Survivor should have all evidence combined
+    assert leads[0].evidence_count >= 2
+
+
+def test_no_auto_merge_when_buyer_acted(db_session, test_requisition):
+    """Auto-merge does not happen if the duplicate lead has been acted on by buyer."""
+    from app.vendor_utils import normalize_vendor_name
+
+    requirement = test_requisition.requirements[0]
+
+    card = VendorCard(
+        normalized_name=normalize_vendor_name("No Merge Vendor"),
+        display_name="No Merge Vendor",
+        domain="nomerge.com",
+        vendor_score=50.0,
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="No Merge Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s1])
+
+    s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="No Merge Alt")
+    sync_leads_for_sightings(db_session, requirement, [s2])
+
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
+    assert len(leads) == 2
+
+    # Mark second lead as contacted by buyer
+    for lead in leads:
+        lead.vendor_card_id = card.id
+    leads[1].buyer_status = "contacted"
+    db_session.commit()
+
+    # Re-sync — should flag, not merge, because buyer acted on one lead
+    s3 = _make_sighting(db_session, requirement.id, source_type="nexar", vendor="No Merge Vendor")
+    sync_leads_for_sightings(db_session, requirement, [s3])
+
+    db_session.expire_all()
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
+    assert len(leads) == 2, "Should NOT auto-merge when buyer has acted on a lead"
+    flagged = [l for l in leads if "duplicate_candidate" in (l.risk_flags or [])]
+    assert len(flagged) >= 1, "Should flag as duplicate_candidate instead of merging"

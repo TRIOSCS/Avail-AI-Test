@@ -10,13 +10,13 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 ### Test Files and What They Cover
 | Test File | Tests | What It Verifies |
 |---|---|---|
-| `test_sourcing_leads.py` | 24 | Lead upsert, evidence fields (signal_type, match_type, reliability_band), source categories, corroboration (distinct categories), buyer status, safety flags (positive + caution), dedup (vendor card, domain, phone, email), feedback loop, duplicate candidate flagging, verification_state lifecycle |
+| `test_sourcing_leads.py` | 28 | Lead upsert, evidence fields (signal_type, match_type, reliability_band), source categories, corroboration (distinct categories), buyer status, safety flags (positive + caution), dedup (auto-merge on strong signals, flag on weak), cross_ref match type via substitutes, inferred verification_state on corroboration, feedback loop, verification_state lifecycle |
 | `test_htmx_sourcing.py` | 26 | Results partial, filters (live, historical, affinity, confidence, safety, contactable, corroborated, has_lead), sorts (confidence, safest, freshest, price, qty, easiest_to_contact, most_proven), lead detail view, follow-up queue |
 | `test_e2e_sourcing_flow.py` | 10 | End-to-end search+lead flow |
 | `test_sourcing_lead_engine.py` | 3 | Legacy in-memory engine (retained for safety) |
 | `test_services_sourcing_score.py` | 11 | Requisition scoring |
 
-**Total: 137 sourcing tests, all passing.**
+**Total: 141 sourcing tests, all passing.**
 
 ---
 
@@ -127,7 +127,7 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 
 | File | Change |
 |---|---|
-| `app/services/sourcing_leads.py` | Fixed scoring bands, enhanced safety, dedup via vendor_utils, feedback loop, handoff-spec evidence fields (signal_type, match_type, reliability_band, source_category), cross-category corroboration, duplicate candidate flagging, verification_state lifecycle |
+| `app/services/sourcing_leads.py` | Fixed scoring bands, enhanced safety, dedup via vendor_utils (auto-merge on strong signals, flag on weak), feedback loop, handoff-spec evidence fields (signal_type, match_type incl. cross_ref, reliability_band, source_category), cross-category corroboration, inferred verification_state promotion, verification_state lifecycle |
 | `app/routers/requisitions/requirements.py` | Fixed NameError, added lead detail/queue/feedback endpoints |
 | `app/routers/views.py` | Added lead detail view, follow-up queue view routes |
 | `app/schemas/sourcing_leads.py` | Expanded to 30+ field LeadOut, added EvidenceOut, FeedbackEventOut |
@@ -136,7 +136,7 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 | `app/templates/partials/sourcing/result_row.html` | Added View button, "unknown" safety band |
 | `app/templates/partials/sourcing/results.html` | Added lead-detail-container, new filter pills, sort options |
 | `app/static/app.js` | Added "unknown" safety band to JS config |
-| `tests/test_sourcing_leads.py` | 24 tests (evidence spec compliance, source categories, corroboration, safety positive+caution signals, dedup (vendor card, domain, phone, email), duplicate candidates, verification_state, feedback loop, resync) |
+| `tests/test_sourcing_leads.py` | 28 tests (evidence spec compliance, source categories, corroboration, safety positive+caution signals, dedup auto-merge + flagging, cross_ref match type, inferred verification_state, feedback loop, resync) |
 | `tests/test_htmx_sourcing.py` | 22 tests (lead detail, queue, filters, sorts) |
 
 ---
@@ -145,9 +145,9 @@ pytest tests/test_sourcing_leads.py tests/test_htmx_sourcing.py tests/test_sourc
 
 1. **Legacy `sourcing_lead_engine.py`** still exists with 77 tests. It's unused by production code but retained for safety. Can be removed when confident the persisted lead system covers all cases.
 2. **Contact enrichment** is basic — `contact_email`/`contact_phone` come from VendorCard but aren't always populated. Enrichment pipeline improvements are a separate effort.
-3. **Deduplication** handles vendor name suffix normalization and duplicate_candidate flagging via shared vendor card, domain match, phone match, and email domain match. All four dedup signal types from the handoff spec are implemented.
+3. **Deduplication** implements all three spec levels: exact duplicates (shared vendor_card_id) auto-merge, strong likely duplicates (2+ medium signals: domain + phone, etc.) auto-merge, possible duplicates (1 signal) flag as duplicate_candidate. Auto-merge is safe: only merges leads still in "new" status; buyer-acted leads are flagged instead.
 4. **Corroboration** now requires evidence from 2+ distinct source **categories** (api, marketplace, salesforce_history, etc.), not just 2+ connector names. This matches the handoff spec's cross-source intent.
-5. **Verification state** transitions from `raw` → `buyer_confirmed` (has_stock) or `raw` → `rejected` (bad_lead/do_not_contact). The `inferred` state is not yet used — would require automated quality checks.
+5. **Verification state** transitions: `raw` → `buyer_confirmed` (has_stock), `raw` → `rejected` (bad_lead/do_not_contact), `raw` → `inferred` (when lead becomes corroborated by 2+ source categories). All four states from the spec are implemented.
 
 ---
 
