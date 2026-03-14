@@ -2815,7 +2815,7 @@ function completeBuyPlan() { /* V1 removed */ }
 function cancelBuyPlan() { /* V1 removed */ }
 /* resubmitBuyPlan defined below in Buy Plan section */
 function verifyBuyPlanPOs() { /* V1 removed */ }
-var _debouncedUpdateBpTotals = function() {};
+/* _debouncedUpdateBpTotals defined at top of file */
 
 
 // ── Buy Plan (Quote Detail Inline View) ──────────────────────────────
