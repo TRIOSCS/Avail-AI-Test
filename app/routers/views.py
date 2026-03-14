@@ -54,15 +54,94 @@ async def app_shell(request: Request, user=Depends(require_user)):
 
 
 @router.get("/search")
-async def global_search(request: Request, q: str = "", user=Depends(require_user)):
-    """Return search results partial for top bar global search.
+async def global_search(
+    request: Request,
+    q: str = "",
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return search results partial for the top-bar global search.
 
-    Accepts a query string and returns an HTML partial with matching results
-    grouped by type (requisitions, companies, vendors). Used by the topbar
-    search input via hx-get with debounce.
+    Searches requisitions, companies, and vendors in parallel (up to 5 each),
+    returning a unified list grouped by type. Used by the topbar search input
+    via hx-get with a debounce.
     """
-    results = []  # TODO: aggregate search across requisitions, companies, vendors
-    logger.debug("Global search query='{}' by user={}", q, user.email if user else "unknown")
+    results: list[dict] = []
+
+    q_clean = q.strip()
+    if len(q_clean) >= 2:
+        safe_q = escape_like(q_clean)
+        pattern = f"%{safe_q}%"
+
+        reqs = (
+            db.query(Requisition)
+            .filter(
+                or_(
+                    Requisition.name.ilike(pattern),
+                    Requisition.customer_name.ilike(pattern),
+                ),
+                Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+            )
+            .order_by(Requisition.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        for r in reqs:
+            results.append(
+                {
+                    "type": "requisition",
+                    "label": r.name,
+                    "sublabel": r.customer_name or "",
+                    "url": f"/views/requisitions/{r.id}",
+                }
+            )
+
+        companies = (
+            db.query(Company)
+            .filter(
+                or_(
+                    Company.name.ilike(pattern),
+                    Company.industry.ilike(pattern),
+                ),
+                Company.is_active.is_(True),
+            )
+            .order_by(Company.name)
+            .limit(5)
+            .all()
+        )
+        for c in companies:
+            results.append(
+                {
+                    "type": "company",
+                    "label": c.name,
+                    "sublabel": c.industry or "",
+                    "url": f"/views/companies/{c.id}",
+                }
+            )
+
+        vendors = (
+            db.query(VendorCard)
+            .filter(
+                or_(
+                    VendorCard.display_name.ilike(pattern),
+                    VendorCard.domain.ilike(pattern),
+                )
+            )
+            .order_by(VendorCard.display_name)
+            .limit(5)
+            .all()
+        )
+        for v in vendors:
+            results.append(
+                {
+                    "type": "vendor",
+                    "label": v.display_name,
+                    "sublabel": v.domain or "",
+                    "url": f"/views/vendors/{v.id}",
+                }
+            )
+
+    logger.debug("Global search query='{}' → {} results by user={}", q_clean, len(results), user.email)
     return templates.TemplateResponse(
         "partials/shared/search_results.html",
         {"request": request, "results": results, "query": q},
@@ -772,6 +851,8 @@ def _query_quotes(db: Session, q: str, status: str, sort: str, page: int):
 
     Returns (quotes_list, page, total_pages) where each item is a
     lightweight namespace suitable for the list template.
+
+    Line counts are fetched in a single GROUP BY subquery to avoid N+1 queries.
     """
     base = (
         db.query(Quote, CustomerSite.site_name)
@@ -808,24 +889,31 @@ def _query_quotes(db: Session, q: str, status: str, sort: str, page: int):
 
     rows = base.order_by(sort_expr).offset(offset).limit(PER_PAGE).all()
 
-    quotes = []
-    for qobj, site_name in rows:
-        line_count = (
-            db.query(sqlfunc.count(QuoteLine.id))
-            .filter(QuoteLine.quote_id == qobj.id)
-            .scalar()
-        ) or 0
-        quotes.append(
-            type("Q", (), {
-                "id": qobj.id,
-                "quote_number": qobj.quote_number,
-                "customer_name": site_name or "",
-                "line_count": line_count,
-                "total": float(qobj.subtotal) if qobj.subtotal else 0,
-                "status": qobj.status or "draft",
-                "created_at": qobj.created_at,
-            })
-        )
+    if not rows:
+        return [], page, total_pages
+
+    # Fetch all line counts in one query (avoids N+1 — one COUNT per quote row)
+    quote_ids = [qobj.id for qobj, _ in rows]
+    line_counts_raw = (
+        db.query(QuoteLine.quote_id, sqlfunc.count(QuoteLine.id))
+        .filter(QuoteLine.quote_id.in_(quote_ids))
+        .group_by(QuoteLine.quote_id)
+        .all()
+    )
+    line_count_map = {qid: cnt for qid, cnt in line_counts_raw}
+
+    quotes = [
+        type("Q", (), {
+            "id": qobj.id,
+            "quote_number": qobj.quote_number,
+            "customer_name": site_name or "",
+            "line_count": line_count_map.get(qobj.id, 0),
+            "total": float(qobj.subtotal) if qobj.subtotal else 0,
+            "status": qobj.status or "draft",
+            "created_at": qobj.created_at,
+        })
+        for qobj, site_name in rows
+    ]
     return quotes, page, total_pages
 
 

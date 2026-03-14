@@ -136,6 +136,9 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     user = get_user(request, db)
     if not user:
         raise HTTPException(401, "Not authenticated — please log in")
+    if not getattr(user, "is_active", True):
+        request.session.clear()
+        raise HTTPException(403, "Account deactivated — contact admin")
 
     token = user.access_token
     if not token:

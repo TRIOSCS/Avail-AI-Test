@@ -120,11 +120,13 @@ class TestCreateDefaultUser:
 
 
 class TestSeedVinodUser:
-    """Lines 102, 112-114, 117: _seed_vinod_user logic."""
+    """_seed_vinod_user: now driven by SEED_ADMIN_EMAIL env var (no hardcoded email)."""
 
     @patch("app.startup.SessionLocal")
-    def test_creates_vinod_user(self, mock_sl, db_session):
-        """Creates Vinod admin user when not present."""
+    def test_creates_seed_admin_user(self, mock_sl, db_session, monkeypatch):
+        """Creates admin user from SEED_ADMIN_EMAIL when not present."""
+        monkeypatch.setenv("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
+        monkeypatch.setenv("SEED_ADMIN_NAME", "Vinod")
         from app.startup import _seed_vinod_user
 
         mock_sl.return_value = db_session
@@ -137,8 +139,10 @@ class TestSeedVinodUser:
         assert u.role == "admin"
 
     @patch("app.startup.SessionLocal")
-    def test_skips_existing_vinod(self, mock_sl, db_session):
-        """Does not duplicate Vinod user."""
+    def test_skips_existing_seed_user(self, mock_sl, db_session, monkeypatch):
+        """Does not duplicate the seed user."""
+        monkeypatch.setenv("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
+        monkeypatch.setenv("SEED_ADMIN_NAME", "Vinod")
         from app.models.auth import User
         from app.startup import _seed_vinod_user
 
@@ -151,8 +155,10 @@ class TestSeedVinodUser:
         count = db_session.query(User).filter_by(email="vinod@trioscs.com").count()
         assert count == 1
 
-    def test_seed_vinod_with_passed_db(self, db_session):
+    def test_seed_vinod_with_passed_db(self, db_session, monkeypatch):
         """When db is passed directly, does not create/close own session."""
+        monkeypatch.setenv("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
+        monkeypatch.setenv("SEED_ADMIN_NAME", "Vinod")
         from app.startup import _seed_vinod_user
 
         _seed_vinod_user(db=db_session)
@@ -162,9 +168,21 @@ class TestSeedVinodUser:
         u = db_session.query(User).filter_by(email="vinod@trioscs.com").first()
         assert u is not None
 
+    def test_noop_when_env_not_set(self, db_session, monkeypatch):
+        """Is a no-op when SEED_ADMIN_EMAIL is not configured."""
+        monkeypatch.delenv("SEED_ADMIN_EMAIL", raising=False)
+        from app.startup import _seed_vinod_user
+
+        _seed_vinod_user(db=db_session)
+
+        from app.models.auth import User
+
+        assert db_session.query(User).count() == 0
+
     @patch("app.startup.SessionLocal")
-    def test_seed_vinod_handles_error(self, mock_sl):
-        """Handles DB error gracefully (lines 112-114)."""
+    def test_seed_vinod_handles_error(self, mock_sl, monkeypatch):
+        """Handles DB error gracefully."""
+        monkeypatch.setenv("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
         from app.startup import _seed_vinod_user
 
         mock_db = MagicMock()

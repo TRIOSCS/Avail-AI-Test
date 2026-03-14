@@ -173,16 +173,16 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
     """Execute the parts summary query (extracted for caching)."""
     q = q.strip().lower()
 
-    # Combine sightings and material_vendor_history into a unified parts summary
-    params: dict = {"norm": norm, "off": offset, "lim": limit}
-    mpn_filter = ""
+    # Combine sightings and material_vendor_history into a unified parts summary.
+    # The MPN filter uses a parameterized NULL check (`:mpn_pattern IS NULL OR ...`)
+    # instead of f-string SQL fragments to keep all user input in bind parameters.
+    params: dict = {"norm": norm, "off": offset, "lim": limit, "mpn_pattern": None}
     if q:
-        mpn_filter = "AND LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\'"
         safe_q = escape_like(q)
         params["mpn_pattern"] = f"%{safe_q}%"
 
     rows = db.execute(
-        sqltext(f"""
+        sqltext("""
         SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
         FROM (
             SELECT
@@ -210,7 +210,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) combined
-        WHERE mpn != '' {mpn_filter}
+        WHERE mpn != ''
+          AND (:mpn_pattern IS NULL OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
         ORDER BY last_seen DESC NULLS LAST
         OFFSET :off LIMIT :lim
     """),
@@ -218,12 +219,10 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
     ).fetchall()
 
     # Get total count
-    count_params: dict = {"norm": norm}
-    if q:
-        count_params["mpn_pattern"] = params["mpn_pattern"]
+    count_params: dict = {"norm": norm, "mpn_pattern": params["mpn_pattern"]}
     total = (
         db.execute(
-            sqltext(f"""
+            sqltext("""
         SELECT COUNT(*) FROM (
             SELECT DISTINCT COALESCE(mpn_matched, '') as mpn FROM sightings
             WHERE vendor_name_normalized = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
@@ -232,7 +231,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) all_mpns
-        WHERE mpn != '' {mpn_filter}
+        WHERE mpn != ''
+          AND (:mpn_pattern IS NULL OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
     """),
             count_params,
         ).scalar()

@@ -5,6 +5,7 @@ from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -335,10 +336,6 @@ async def csp_middleware(request: Request, call_next):
 # L1: Request/response middleware — request ID, timing, structured logging
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    import time
-
-    from loguru import logger
-
     req_id = str(uuid.uuid4())[:8]
     request.state.request_id = req_id
     start = time.perf_counter()
