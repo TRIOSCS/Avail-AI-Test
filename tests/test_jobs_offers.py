@@ -1,7 +1,7 @@
 """test_jobs_offers.py — Tests for offer-related background jobs
 
-Covers: _job_proactive_matching, _job_performance_tracking,
-_job_proactive_offer_expiry, _job_flag_stale_offers.
+Covers: _job_proactive_matching, _job_proactive_offer_expiry,
+_job_flag_stale_offers.
 
 All jobs use SessionLocal() internally, so we patch app.database.SessionLocal
 to return the test DB session with close() disabled.
@@ -125,72 +125,6 @@ def test_proactive_matching_expired_branch(scheduler_db):
         from app.jobs.offers_jobs import _job_proactive_matching
 
         asyncio.run(_job_proactive_matching())
-
-
-# ── _job_performance_tracking() ───────────────────────────────────────
-
-
-def test_performance_tracking_calls_services(scheduler_db):
-    """Performance tracking computes vendor scorecards and buyer leaderboard."""
-    with (
-        patch("app.services.performance_service.compute_all_vendor_scorecards") as mock_vs,
-        patch("app.services.performance_service.compute_buyer_leaderboard") as mock_bl,
-    ):
-        mock_vs.return_value = {"updated": 5, "skipped_cold_start": 2}
-        mock_bl.return_value = {"entries": 3}
-        from app.jobs.offers_jobs import _job_performance_tracking
-
-        asyncio.run(_job_performance_tracking())
-        mock_vs.assert_called_once_with(scheduler_db)
-        assert mock_bl.call_count >= 1
-
-
-def test_performance_tracking_recomputes_previous_month_in_grace_period(scheduler_db):
-    """During the first 7 days of a month, previous month is also recomputed."""
-    frozen_now = datetime(2026, 3, 3, 10, 0, 0, tzinfo=timezone.utc)
-
-    with (
-        patch("app.services.performance_service.compute_all_vendor_scorecards") as mock_vs,
-        patch("app.services.performance_service.compute_buyer_leaderboard") as mock_bl,
-        patch("app.jobs.offers_jobs.datetime") as mock_dt,
-    ):
-        mock_dt.now.return_value = frozen_now
-        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-        mock_vs.return_value = {"updated": 5, "skipped_cold_start": 2}
-        mock_bl.return_value = {"entries": 3}
-        from app.jobs.offers_jobs import _job_performance_tracking
-
-        asyncio.run(_job_performance_tracking())
-        assert mock_bl.call_count == 2
-
-
-def test_performance_tracking_error_handling(scheduler_db):
-    """Performance tracking handles errors gracefully without propagating."""
-    with patch("app.services.performance_service.compute_all_vendor_scorecards") as mock_vs:
-        mock_vs.side_effect = Exception("DB error")
-        from app.jobs.offers_jobs import _job_performance_tracking
-
-        asyncio.run(_job_performance_tracking())
-
-
-def test_performance_tracking_timeout(scheduler_db):
-    """Performance tracking handles timeout gracefully."""
-
-    async def _mock_wait_for(coro, timeout=None):
-        try:
-            coro.close()
-        except Exception:
-            pass
-        raise asyncio.TimeoutError()
-
-    with (
-        patch("app.services.performance_service.compute_all_vendor_scorecards"),
-        patch("app.services.performance_service.compute_buyer_leaderboard"),
-        patch("asyncio.wait_for", side_effect=_mock_wait_for),
-    ):
-        from app.jobs.offers_jobs import _job_performance_tracking
-
-        asyncio.run(_job_performance_tracking())
 
 
 # ── _job_proactive_offer_expiry() ─────────────────────────────────────

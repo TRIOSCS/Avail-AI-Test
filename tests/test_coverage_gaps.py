@@ -126,42 +126,6 @@ class TestAdminTeamsChannels:
         assert len(resp.json()["channels"]) == 1
 
 
-class TestAdminTeamsTestPost:
-    def test_teams_test_post_no_channel(self, admin_client, db_session):
-        with patch("app.services.teams._get_teams_config", return_value=(None, None, False)):
-            resp = admin_client.post("/api/admin/teams/test")
-        assert resp.status_code == 400
-
-    def test_teams_test_post_no_token(self, admin_client, db_session):
-        with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None),
-        ):
-            resp = admin_client.post("/api/admin/teams/test")
-        assert resp.status_code == 400
-
-    def test_teams_test_post_failure(self, admin_client, db_session, admin_user):
-        with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
-            patch("app.services.teams._make_card", return_value={"type": "AdaptiveCard"}),
-            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=False),
-        ):
-            resp = admin_client.post("/api/admin/teams/test")
-        assert resp.status_code == 502
-
-    def test_teams_test_post_success(self, admin_client, db_session, admin_user):
-        with (
-            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
-            patch("app.services.teams._make_card", return_value={"type": "AdaptiveCard"}),
-            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
-        ):
-            resp = admin_client.post("/api/admin/teams/test")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "sent"
-
-
 class TestAdminUpsertConfig:
     def test_upsert_config_creates_new_row(self, admin_client, db_session, admin_user):
         resp = admin_client.post(
@@ -231,8 +195,6 @@ class TestCrmCompanyAutoEnrich:
                 return_value=("NoCred", "nocred.com"),
             ),
             patch("app.routers.crm.companies.get_credential_cached", return_value=None),
-            patch("app.config.settings.apollo_api_key", ""),
-            patch("app.config.settings.hunter_api_key", ""),
             patch("app.config.settings.do_gradient_api_key", ""),
         ):
             resp = client.post("/api/companies", json={"name": "NoCred", "domain": "nocred.com"})
@@ -296,10 +258,7 @@ class TestCrmCompetitiveQuoteAlert:
         test_requisition.status = "active"
         db_session.commit()
 
-        with (
-            patch("app.routers.crm.offers.get_credential_cached", return_value=None),
-            patch("app.services.teams.send_competitive_quote_alert", new_callable=AsyncMock),
-        ):
+        with patch("app.routers.crm.offers.get_credential_cached", return_value=None):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/offers",
                 json={
@@ -331,14 +290,7 @@ class TestCrmCompetitiveQuoteAlert:
         test_requisition.status = "active"
         db_session.commit()
 
-        with (
-            patch("app.routers.crm.offers.get_credential_cached", return_value=None),
-            patch(
-                "app.services.teams.send_competitive_quote_alert",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("Teams down"),
-            ),
-        ):
+        with patch("app.routers.crm.offers.get_credential_cached", return_value=None):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/offers",
                 json={

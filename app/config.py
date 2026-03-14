@@ -106,33 +106,10 @@ class Settings(BaseSettings):
     explorium_api_key: str = ""
     explorium_api_base_url: str = "https://api.explorium.ai"
 
-    # --- Apollo ---
-    apollo_api_key: str = ""
-    apollo_rate_limit_per_min: int = 5
-    apollo_monthly_credit_limit: int = 10000
-
-    # --- Deep Enrichment APIs ---
-    hunter_api_key: str = ""
-    hunter_monthly_search_limit: int = 500
-    hunter_monthly_verify_limit: int = 500
-    rocketreach_api_key: str = ""
-    clearbit_api_key: str = ""
-    lusha_api_key: str = ""
-    lusha_monthly_credit_limit: int = 6400
-    lusha_phone_credit_limit: int = 4480
-    lusha_discovery_credit_limit: int = 1920
-
     # --- Customer enrichment ---
     customer_enrichment_enabled: bool = True
     customer_enrichment_cooldown_days: int = 90
     customer_enrichment_contacts_per_account: int = 5
-
-    # --- Deep Enrichment feature flags ---
-    deep_enrichment_enabled: bool = False
-    deep_email_mining_enabled: bool = False
-    deep_enrichment_auto_apply_threshold: float = 0.8
-    deep_enrichment_review_threshold: float = 0.5
-    deep_enrichment_stale_days: int = 30
 
     # --- Material card AI enrichment ---
     material_enrichment_enabled: bool = True
@@ -155,12 +132,6 @@ class Settings(BaseSettings):
 
     # --- Admin (CSV string, parsed to list in model_post_init) ---
     admin_emails: str = ""
-
-    # --- Microsoft Teams ---
-    teams_team_id: str = ""
-    teams_channel_id: str = ""
-    teams_hot_threshold: float = 10000
-    teams_card_action_token_ttl_seconds: int = 604800
 
     # --- RFQ ---
     follow_up_days: int = 3
@@ -204,9 +175,6 @@ class Settings(BaseSettings):
 
     # --- Search ---
     search_concurrency_limit: int = 10
-
-    # --- Buy Plan V1 deprecation ---
-    buy_plan_v1_enabled: bool = False
 
     # --- Contact intelligence ---
     contact_scoring_enabled: bool = True
@@ -259,7 +227,7 @@ class Settings(BaseSettings):
             raise ValueError("Sample rate must be between 0.0 and 1.0")
         return v
 
-    @field_validator("deep_enrichment_auto_apply_threshold", "deep_enrichment_review_threshold", "min_tag_confidence")
+    @field_validator("min_tag_confidence")
     @classmethod
     def validate_confidence(cls, v: float) -> float:
         if not 0.0 <= v <= 1.0:

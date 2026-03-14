@@ -6,11 +6,11 @@ company intelligence cards, and smart RFQ drafts.
 
 Business Rules:
 - AI features gated by settings.ai_features_enabled (off/mike_only/all)
-- Contact enrichment uses Apollo → Claude web search fallback
+- Contact enrichment uses Claude web search
 - Response parsing confidence thresholds: 80%+ auto, 50-80% review, <50% raw
 
 Called by: main.py (router mount)
-Depends on: services/ai_service.py, services/response_parser.py, connectors/apollo_client.py
+Depends on: services/ai_service.py, services/response_parser.py
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -113,7 +113,7 @@ async def ai_find_contacts(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Find contacts at a company or vendor using Apollo + web search fallback."""
+    """Find contacts at a company or vendor using AI web search."""
     if not _ai_enabled(user):
         raise HTTPException(403, "AI features not enabled")
 
@@ -146,19 +146,13 @@ async def ai_find_contacts(
     if not company_name:
         raise HTTPException(400, "company_name or entity_id required")
 
-    from app.connectors.apollo_client import search_contacts as apollo_search
+    from app.services.ai_service import enrich_contacts_websearch
 
-    apollo_results = await apollo_search(company_name, domain, title_keywords, limit=5)
-
-    web_results = []
-    if len(apollo_results) < 3:
-        from app.services.ai_service import enrich_contacts_websearch
-
-        web_results = await enrich_contacts_websearch(company_name, domain, title_keywords, limit=5)
+    web_results = await enrich_contacts_websearch(company_name, domain, title_keywords, limit=10)
 
     seen_emails: set[str] = set()
     merged = []
-    for c in apollo_results + web_results:
+    for c in web_results:
         email = (c.get("email") or "").lower()
         key = email if email else c.get("full_name", "").lower()
         if key and key not in seen_emails:
@@ -187,38 +181,6 @@ async def ai_find_contacts(
     db.commit()
     return {"contacts": merged, "total": len(merged), "saved_ids": saved_ids}
 
-
-@router.post("/api/ai/enrich-person")
-@limiter.limit("20/minute")
-async def ai_enrich_person(
-    payload: dict,
-    request: Request,
-    user: User = Depends(require_user),
-):
-    """Enrich a person via Apollo people/match.
-
-    Accepts any combination of: first_name, last_name, name, email,
-    domain, organization_name, linkedin_url.
-    """
-    if not _ai_enabled(user):
-        raise HTTPException(403, "AI features not enabled")
-
-    from app.connectors.apollo_client import enrich_person
-
-    result = await enrich_person(
-        first_name=payload.get("first_name"),
-        last_name=payload.get("last_name"),
-        name=payload.get("name"),
-        email=payload.get("email"),
-        domain=payload.get("domain"),
-        organization_name=payload.get("organization_name"),
-        linkedin_url=payload.get("linkedin_url"),
-    )
-
-    if not result:
-        raise HTTPException(404, "No match found — try adding more details (name + domain, email, or LinkedIn URL)")
-
-    return result
 
 
 @router.get("/api/ai/prospect-contacts")

@@ -440,35 +440,7 @@ async def _download_and_import_stock_list(
         logger.error(f"Auto-create sightings from stock list failed: {e}")
         db.rollback()
 
-    # Teams: check if imported MPNs match any open requirements
-    try:
-        from sqlalchemy import func as sa_func
-
-        from app.models import Requirement, Requisition
-        from app.services.teams import send_stock_match_alert
-
-        imported_mpns = [item["display_mpn"] for item in imported_for_matching if item.get("display_mpn")]
-        if imported_mpns:
-            matches = (
-                db.query(Requirement.id, Requirement.primary_mpn, Requirement.requisition_id)
-                .join(Requisition, Requirement.requisition_id == Requisition.id)
-                .filter(
-                    Requisition.status.in_(["active", "sourcing", "offers"]),
-                    sa_func.upper(Requirement.primary_mpn).in_(imported_mpns),
-                )
-                .all()
-            )
-            if matches:
-                match_list = [
-                    {"mpn": m.primary_mpn, "requirement_id": m.id, "requisition_id": m.requisition_id} for m in matches
-                ]
-                await send_stock_match_alert(
-                    matches=match_list,
-                    filename=filename,
-                    vendor_name=vendor_name,
-                )
-    except Exception as e:
-        logger.debug(f"Teams stock match check skipped: {e}")
+    logger.debug("Teams stock match notification skipped (removed)")
 
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:

@@ -1,16 +1,14 @@
-"""Customer Enrichment Service — waterfall: Apollo → Lusha (fallback) → Hunter → Lusha phones.
+"""Customer Enrichment Service — contact enrichment for customer accounts.
 
-Enriches customer accounts with verified contacts. Apollo is the primary
-contact discovery source (names, emails, titles). When Apollo doesn't
-fill the target, Lusha fills gaps as a secondary discovery source.
-Hunter verifies all emails. Lusha then enriches phone numbers (direct
-dials) for contacts still missing them. Credit-budget-aware, respects
-cooldown periods, and enforces data quality.
+Enriches customer accounts with verified contacts. Currently a placeholder
+after the removal of Apollo, Hunter, and Lusha connector integrations.
+Utility functions (contact classification, dedup, gap detection) remain
+available for future enrichment providers.
 
 Priority: Assigned accounts first, then unassigned accounts.
 
 Called by: enrichment router endpoints, batch scheduler.
-Depends on: lusha_client, hunter_client, apollo_client, credit_manager.
+Depends on: credit_manager.py, enrichment_utils.py, contact_quality.py.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -20,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models.crm import Company, CustomerSite, SiteContact
-from .credit_manager import can_use_credits, record_credit_usage
 
 # Title keywords for classifying contact roles
 _BUYER_TITLES = {"buyer", "purchasing", "procurement", "sourcing", "supply chain", "commodity"}
@@ -148,174 +145,15 @@ def _save_contact(db: Session, site: CustomerSite, contact: dict, source: str) -
     return sc
 
 
-async def _step_lusha_phones(db: Session, contacts: list[dict], domain: str) -> list[dict]:
-    """Step 3: Enrich contacts with Lusha phone data (direct dials only).
-
-    Skips contacts that already have a direct_dial or mobile phone.
-    Calls find_person per contact, merges phone into contact dict.
-    Records 1 credit per find_person call (even if no result).
-    Stops early if credits are exhausted.
-    """
-    from ..connectors.lusha_client import find_person
-
-    enriched = []
-    for contact in contacts:
-        # Skip only if already has a direct dial or mobile phone
-        if contact.get("phone_type") in ("direct_dial", "mobile"):
-            enriched.append(contact)
-            continue
-
-        if not can_use_credits(db, "lusha_phone", 1):
-            logger.info("Lusha credits exhausted during phone enrichment, stopping")
-            enriched.append(contact)
-            continue
-
-        try:
-            email = contact.get("email")
-            full_name = contact.get("full_name") or ""
-            parts = full_name.split(None, 1)
-            first_name = parts[0] if parts else None
-            last_name = parts[1] if len(parts) > 1 else None
-
-            result = await find_person(
-                email=email,
-                first_name=first_name,
-                last_name=last_name,
-                company_domain=domain,
-            )
-            record_credit_usage(db, "lusha_phone", 1)
-
-            if result and result.get("phone"):
-                contact["phone"] = result["phone"]
-                contact["phone_type"] = result.get("phone_type", "direct_dial")
-                fs = contact.get("enrichment_field_sources") or {}
-                fs["phone"] = "lusha"
-                contact["enrichment_field_sources"] = fs
-                logger.debug("Lusha phone enriched %s → %s", email, result["phone"])
-        except Exception as e:
-            logger.debug("Lusha phone lookup failed for %s: %s", contact.get("email"), e)
-
-        enriched.append(contact)
-
-    return enriched
-
-
-async def _step_lusha_discovery(db: Session, domain: str, company_name: str, needed: int) -> list[dict]:
-    """Fallback contact discovery via Lusha when Apollo didn't fill the target.
-
-    Uses search_contacts to find new contacts at the company domain.
-    Only runs if Lusha credits are available and we still need contacts.
-    """
-    if needed <= 0 or not can_use_credits(db, "lusha_discovery", 1):
-        logger.info("Lusha discovery skipped — needed=%d or credits exhausted", needed)
-        return []
-
-    try:
-        from ..connectors.lusha_client import search_contacts
-
-        contacts = await search_contacts(
-            company_domain=domain,
-            titles=["buyer", "procurement", "purchasing", "sourcing", "director", "vp", "engineer"],
-            limit=needed,
-        )
-        if contacts:
-            record_credit_usage(db, "lusha_discovery", 1)
-        return contacts
-    except Exception as e:
-        logger.debug("Lusha discovery failed for %s: %s", domain, e)
-        return []
-
-
-async def _step_hunter_verify(db: Session, contacts: list[dict]) -> list[dict]:
-    """Step 3: Verify all contact emails via Hunter, reject non-deliverable."""
-    from ..connectors.hunter_client import verify_email
-
-    verified = []
-    for contact in contacts:
-        email = contact.get("email")
-        if not email:
-            continue
-
-        if not can_use_credits(db, "hunter_verify", 1):
-            logger.info("Hunter verify credits exhausted, keeping remaining unverified")
-            contact["email_verified"] = False
-            contact["email_verification_status"] = "unverified"
-            verified.append(contact)
-            continue
-
-        result = await verify_email(email)
-        record_credit_usage(db, "hunter_verify", 1)
-
-        if result:
-            status = result.get("status", "unknown")
-            contact["email_verification_status"] = status
-            if status in ("valid", "accept_all"):
-                contact["email_verified"] = True
-                verified.append(contact)
-            else:
-                logger.debug("Rejected email %s — status=%s", email, status)
-        else:
-            contact["email_verified"] = False
-            contact["email_verification_status"] = "unknown"
-            verified.append(contact)
-
-    return verified
-
-
-async def _step_apollo(db: Session, domain: str, company_name: str, needed: int) -> list[dict]:
-    """Step 1: Primary contact discovery via Apollo."""
-    if not can_use_credits(db, "apollo", 1):
-        logger.info("Apollo credits exhausted, skipping")
-        return []
-
-    try:
-        from ..connectors.apollo_client import search_contacts as apollo_search
-
-        raw = await apollo_search(
-            company_name=company_name,
-            domain=domain,
-            limit=needed,
-        )
-        if raw:
-            record_credit_usage(db, "apollo", 1)
-            return [
-                {
-                    "full_name": c.get("full_name"),
-                    "title": c.get("title"),
-                    "email": c.get("email"),
-                    "phone": c.get("phone"),
-                    "phone_type": c.get("phone_type"),
-                    "linkedin_url": c.get("linkedin_url"),
-                    "source": "apollo",
-                    "confidence": c.get("confidence", "medium"),
-                    "enrichment_field_sources": {
-                        "email": "apollo",
-                        "name": "apollo",
-                        "phone": "apollo" if c.get("phone") else None,
-                    },
-                }
-                for c in raw
-            ]
-    except Exception as e:
-        logger.debug("Apollo contact search failed: %s", e)
-    return []
-
-
 async def enrich_customer_account(
     company_id: int,
     db: Session,
     force: bool = False,
 ) -> dict:
-    """Run the full waterfall enrichment for a customer account.
+    """Run contact enrichment for a customer account.
 
-    Steps:
-    1. Apollo — primary contact discovery (names, emails, titles)
-    2. Lusha discovery — fallback contact discovery when Apollo doesn't fill target
-    3. Hunter — verify all emails, reject non-deliverable
-    4. Lusha phones — enrich direct dials for contacts still missing them
-    5. Dedup by email, validate quality, update company status
-
-    Returns summary dict with contacts_added, contacts_verified, sources_used.
+    Previously used Apollo, Hunter, and Lusha connectors (now removed).
+    Returns a stub result until new enrichment providers are configured.
     """
     if not settings.customer_enrichment_enabled:
         return {"error": "Customer enrichment is disabled", "contacts_added": 0}
@@ -347,103 +185,18 @@ async def enrich_customer_account(
         db.flush()
         return {"ok": True, "contacts_added": 0, "status": "already_complete"}
 
-    site = _ensure_site(db, company)
-    all_contacts = []
-    sources_used = []
-
-    # Step 1: Apollo (primary contact discovery)
-    try:
-        apollo_contacts = await _step_apollo(db, domain, company.name, needed)
-    except Exception as e:
-        logger.warning("Apollo step failed: %s", e)
-        apollo_contacts = []
-
-    if apollo_contacts:
-        all_contacts.extend(apollo_contacts)
-        sources_used.append("apollo")
-        logger.info("Apollo returned %d contacts for %s", len(apollo_contacts), company.name)
-
-    # Step 2: Lusha discovery (fallback when Apollo didn't fill target)
-    still_needed = max(0, needed - len(all_contacts))
-    if still_needed > 0:
-        try:
-            lusha_contacts = await _step_lusha_discovery(db, domain, company.name, still_needed)
-        except Exception as e:
-            logger.warning("Lusha discovery failed: %s", e)
-            lusha_contacts = []
-
-        if lusha_contacts:
-            all_contacts.extend(lusha_contacts)
-            sources_used.append("lusha")
-            logger.info("Lusha returned %d contacts for %s", len(lusha_contacts), company.name)
-
-    # Dedup before verification
-    all_contacts = _dedup_contacts(all_contacts)
-
-    # Step 3: Hunter email verification
-    if all_contacts:
-        all_contacts = await _step_hunter_verify(db, all_contacts)
-        sources_used.append("hunter_verify")
-
-    # Step 4: Lusha phone enrichment (only contacts missing direct dials)
-    if all_contacts:
-        all_contacts = await _step_lusha_phones(db, all_contacts, domain)
-        if any((c.get("enrichment_field_sources") or {}).get("phone") == "lusha" for c in all_contacts):
-            sources_used.append("lusha_phones")
-
-    # Final dedup
-    all_contacts = _dedup_contacts(all_contacts)
-
-    # Validate contacts before saving
-    from .contact_quality import validate_contact
-
-    validated = []
-    for contact in all_contacts:
-        is_valid, issues = validate_contact(contact)
-        if is_valid:
-            validated.append(contact)
-        else:
-            logger.debug("Skipping invalid contact: %s (%s)", contact.get("email"), issues)
-    all_contacts = validated
-
-    # Save contacts
-    saved_count = 0
-    for contact in all_contacts[:target]:
-        source = contact.get("source", "unknown")
-        sc = _save_contact(db, site, contact, source)
-        if sc:
-            if contact.get("email_verified"):
-                sc.email_verified = True
-                sc.email_verified_at = datetime.now(timezone.utc)
-                sc.email_verification_status = contact.get("email_verification_status", "valid")
-            saved_count += 1
-
-    # Update company status
-    company.customer_enrichment_at = datetime.now(timezone.utc)
-    final_needed = _contacts_needed(db, company_id, target)
-    if final_needed <= 0:
-        company.customer_enrichment_status = "complete"
-    elif saved_count > 0:
-        company.customer_enrichment_status = "partial"
-    else:
-        company.customer_enrichment_status = "missing"
-
-    db.flush()
+    # No enrichment providers currently configured (Apollo/Hunter/Lusha removed)
     logger.info(
-        "Customer enrichment for %s: %d contacts saved, sources=%s, status=%s",
+        "Customer enrichment for %s: no providers configured, skipping",
         company.name,
-        saved_count,
-        sources_used,
-        company.customer_enrichment_status,
     )
-
     return {
         "ok": True,
         "company_id": company_id,
-        "contacts_added": saved_count,
-        "contacts_verified": sum(1 for c in all_contacts if c.get("email_verified")),
-        "sources_used": sources_used,
-        "status": company.customer_enrichment_status,
+        "contacts_added": 0,
+        "contacts_verified": 0,
+        "sources_used": [],
+        "status": "no_providers",
     }
 
 

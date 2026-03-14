@@ -224,41 +224,6 @@ class TestSchedulerMaterialEnrichment:
                 asyncio.get_event_loop().run_until_complete(_job_material_enrichment())
 
 
-class TestSchedulerMonthlyEnrichment:
-    def test_skips_if_running(self):
-        mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter.return_value.first.return_value = SimpleNamespace(id=99)
-        mock_db.query.return_value = mock_query
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
-
-            asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
-        mock_db.close.assert_called_once()
-
-    def test_runs_backfill(self):
-        mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter.return_value.first.return_value = None
-        mock_db.query.return_value = mock_query
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            with patch("app.cache.intel_cache.flush_enrichment_cache", return_value=5):
-                with patch(
-                    "app.services.deep_enrichment_service.run_backfill_job", new_callable=AsyncMock, return_value=42
-                ):
-                    from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
-
-                    asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
-
-    def test_exception_handled(self):
-        mock_db = MagicMock()
-        mock_db.query.side_effect = Exception("db error")
-        with patch("app.database.SessionLocal", return_value=mock_db):
-            from app.jobs.enrichment_jobs import _job_monthly_enrichment_refresh
-
-            asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
-
-
 # ── Performance Router ───────────────────────────────────────────────
 
 

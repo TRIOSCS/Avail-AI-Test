@@ -153,10 +153,9 @@ class TestEnrichmentServicePhoneMerge:
         with patch("app.enrichment_service.asyncio.gather", side_effect=mock_gather):
             result = asyncio.get_event_loop().run_until_complete(find_suggested_contacts("acme.com", "Acme"))
 
-        # Apollo contact should win dedup, but get Lusha's phone merged in
+        # Apollo contact should win dedup (Lusha provider removed, phone merge disabled)
         johns = [c for c in result if c.get("full_name") == "John Smith"]
         assert len(johns) == 1
-        assert johns[0]["phone"] == "+1-555-0100"
         assert johns[0]["source"] == "apollo"  # Apollo won dedup
 
 
@@ -540,65 +539,6 @@ class TestMultiplierSalesPath:
         # No avail snapshot -> avail_score=0 -> not qualified (0 < 50)
         assert results[0]["qualified"] is False
         assert results[0]["rank"] == 1
-
-
-# ══════════════════════════════════════════════════════════════════════
-#  6. prospect_contacts.py — Lines 315, 381
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestProspectContactsPatterns:
-    """Test email pattern detection and contact handling."""
-
-    def test_firstlast_pattern_detected(self):
-        """Line 315: local == first+last -> pattern {first}{last}."""
-        from app.services.prospect_contacts import get_domain_pattern_hunter
-
-        contacts = [
-            {"email": "johnsmith@acme.com", "first_name": "John", "last_name": "Smith"},
-            {"email": "janedoe@acme.com", "first_name": "Jane", "last_name": "Doe"},
-        ]
-
-        with patch("app.connectors.hunter_client.find_domain_emails", new_callable=AsyncMock, return_value=contacts):
-            pattern = asyncio.get_event_loop().run_until_complete(get_domain_pattern_hunter("acme.com"))
-
-        assert pattern == "{first}{last}"
-
-    def test_contact_without_email_skipped(self):
-        """Line 381: contact with no email is skipped (continue)."""
-        from app.models.prospect_account import ProspectAccount
-        from app.services.prospect_contacts import enrich_prospect_contacts
-
-        mock_db = MagicMock()
-        prospect = MagicMock(spec=ProspectAccount)
-        prospect.domain = "nomail.com"
-        prospect.enrichment_data = {}
-        mock_db.get.return_value = prospect
-
-        contacts_with_missing_email = [
-            {"full_name": "John Smith", "email": None, "title": "VP"},
-            {"full_name": "Jane Doe", "email": "jane@nomail.com", "title": "Director"},
-        ]
-
-        tracker = MagicMock()
-        tracker.can_use_apollo.return_value = True
-        tracker.can_use_hunter_verify.return_value = True
-
-        with (
-            patch(
-                "app.services.prospect_contacts.search_contacts_apollo",
-                new_callable=AsyncMock,
-                return_value=contacts_with_missing_email,
-            ),
-            patch("app.services.prospect_contacts.verify_email_hunter", new_callable=AsyncMock) as mock_verify,
-        ):
-            result = asyncio.get_event_loop().run_until_complete(
-                enrich_prospect_contacts(1, mock_db, credit_tracker=tracker)
-            )
-
-        # verify_email_hunter should only be called for jane (john has no email)
-        assert mock_verify.call_count == 1
-        assert result["total_found"] == 2
 
 
 # ══════════════════════════════════════════════════════════════════════

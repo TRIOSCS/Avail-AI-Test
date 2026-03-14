@@ -145,10 +145,8 @@ def get_quota(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
-    """Get the user's daily question quota."""
-    from app.services.teams_qa_service import check_question_quota
-
-    return check_question_quota(db, user.id)
+    """Get the user's daily question quota (Teams removed — returns unlimited)."""
+    return {"allowed": True, "used": 0, "limit": 999, "remaining": 999}
 
 
 @router.get("/config")

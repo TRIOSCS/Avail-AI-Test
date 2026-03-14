@@ -185,33 +185,14 @@ class TestTypeCoercion:
         assert isinstance(s.follow_up_days, int)
 
     def test_float_from_string(self):
-        with patch.dict(os.environ, {"TEAMS_HOT_THRESHOLD": "25000.50"}, clear=True):
+        with patch.dict(os.environ, {"PROACTIVE_MIN_MARGIN_PCT": "25.5"}, clear=True):
             s = _make()
-        assert s.teams_hot_threshold == 25000.50
+        assert s.proactive_min_margin_pct == 25.5
 
     def test_invalid_int_raises(self):
         with patch.dict(os.environ, {"FOLLOW_UP_DAYS": "not-a-number"}, clear=True):
             with pytest.raises(ValidationError):
                 _make()
-
-
-class TestMvpMode:
-    """MVP_MODE flag controls feature availability."""
-
-    def test_mvp_mode_default_true(self):
-        with patch.dict(os.environ, {}, clear=True):
-            s = _make()
-        assert s.mvp_mode is True
-
-    def test_mvp_mode_disabled(self):
-        with patch.dict(os.environ, {"MVP_MODE": "false"}, clear=True):
-            s = _make()
-        assert s.mvp_mode is False
-
-    def test_mvp_mode_enabled_explicitly(self):
-        with patch.dict(os.environ, {"MVP_MODE": "true"}, clear=True):
-            s = _make()
-        assert s.mvp_mode is True
 
 
 class TestSecretKeyFallback:
