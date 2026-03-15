@@ -1,0 +1,30 @@
+# React UI Acceptance Checklist
+
+The React sourcing UI is acceptable when:
+
+## Results View
+- Buyers can see ranked leads for a part.
+- Each lead shows vendor, reason, confidence, safety, source badges, freshness, contact preview, status, and next action.
+- Filters and sorting work.
+- Empty and partial-failure states are handled.
+
+## Detail View
+- Buyers can inspect why a lead was shown.
+- Evidence is readable and grouped.
+- Safety review is visible and understandable.
+- Contact information is easy to find.
+- Buyer status actions are available.
+
+## Workflow
+- Buyer can mark Contacted, Replied, Has Stock, No Stock, Bad Lead, Do Not Contact.
+- Optional notes/feedback can be added.
+- Status updates refresh the UI correctly.
+
+## Trust
+- Confidence and safety are not conflated.
+- Source attribution is visible.
+- Risk language is caution-oriented, not accusatory.
+
+## Operational Usability
+- Buyers can work through a queue of leads efficiently.
+- The UI supports quick follow-up without forcing deep navigation for every action.
