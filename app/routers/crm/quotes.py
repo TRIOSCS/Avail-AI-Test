@@ -411,6 +411,15 @@ async def send_quote(
     old_status = req.status if req else None
     if req and req.status not in ("won", "lost", "archived"):
         req.status = "quoted"
+
+    # Auto-close "Send quote" task now that it's sent
+    try:
+        from ...services.task_service import auto_close_task
+
+        auto_close_task(db, quote.requisition_id, f"quote:{quote.id}")
+    except Exception:
+        pass  # Non-critical
+
     db.commit()
     return {
         "ok": True,
@@ -443,6 +452,15 @@ async def quote_result(
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = payload.result
+
+    # Auto-close quote-related tasks now that result is set
+    try:
+        from ...services.task_service import auto_close_task
+
+        auto_close_task(db, quote.requisition_id, f"expiry:{quote.id}")
+        auto_close_task(db, quote.requisition_id, f"quote:{quote.id}")
+    except Exception:
+        pass  # Non-critical
 
     # CPH hook: record purchase history when quote is won
     if payload.result == "won":
