@@ -366,6 +366,7 @@ class TestEbayConnector:
 
         c = EbayConnector(client_id="ebay-id", client_secret="ebay-secret")
         c._token = "cached-token"
+        c._token_expires_at = time.monotonic() + 3600  # valid for 1 hour
         return c
 
     def test_parse_items(self):

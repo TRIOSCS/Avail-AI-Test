@@ -829,9 +829,19 @@ async def rfq_compose(
             if c.vendor_name_normalized:
                 sent_vendor_names.add(c.vendor_name_normalized)
 
+        # Batch-load all vendor contacts in one query (avoids N+1)
+        vendor_ids = [v.id for v in vendor_rows]
+        all_contacts = (
+            db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(vendor_ids)).all()
+            if vendor_ids
+            else []
+        )
+        contacts_by_vendor: dict[int, list] = {}
+        for c in all_contacts:
+            contacts_by_vendor.setdefault(c.vendor_card_id, []).append(c)
+
         for v in vendor_rows:
-            # Get contacts for this vendor
-            v_contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == v.id).limit(5).all()
+            v_contacts = contacts_by_vendor.get(v.id, [])[:5]
             vendors.append(
                 {
                     "id": v.id,

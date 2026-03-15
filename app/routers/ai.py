@@ -13,6 +13,7 @@ Depends on: services/ai_service.py, services/response_parser.py
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -61,7 +62,9 @@ def _ai_enabled(user: User) -> bool:
         return True
     if flag == "mike_only":
         allowed = {str(e).strip().lower() for e in (settings.admin_emails or []) if str(e).strip()}
-        allowed.add("mike@trioscs.com")
+        if not allowed:
+            logger.warning("ai_features_enabled='mike_only' but admin_emails is empty — denying access")
+            return False
         return (user.email or "").strip().lower() in allowed
     return False
 
@@ -266,6 +269,7 @@ async def delete_prospect_contact(
     return {"ok": True}
 
 
+# TODO: Extract promote logic to prospect_contact_service.py
 @router.post("/api/ai/prospect-contacts/{contact_id}/promote")
 async def promote_prospect_contact(
     contact_id: int,
@@ -480,6 +484,7 @@ async def ai_parse_response(
     }
 
 
+# TODO: Extract save_parsed_offers to ai_offer_service.py
 @router.post("/api/ai/save-parsed-offers")
 async def save_parsed_offers(
     payload: SaveDraftOffersRequest,
@@ -662,6 +667,7 @@ async def ai_parse_freeform_offer(
     return {"parsed": True, "template": result}
 
 
+# TODO: Extract apply_freeform_rfq to service layer
 @router.post("/api/ai/apply-freeform-rfq")
 @limiter.limit("5/minute")
 async def ai_apply_freeform_rfq(
@@ -698,7 +704,8 @@ async def ai_apply_freeform_rfq(
     for item in payload.requirements[:50]:
         try:
             parsed = RequirementCreate.model_validate(item)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
+            logger.warning("Skipping invalid requirement item: {} — {}", item, exc)
             continue
         mat_card = resolve_material_card(parsed.primary_mpn, db) if parsed.primary_mpn else None
         r = Requirement(

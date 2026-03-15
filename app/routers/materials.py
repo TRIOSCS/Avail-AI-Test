@@ -37,13 +37,18 @@ from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
 
+MIN_MPN_PREFIX_LENGTH = 6  # Minimum prefix length for manufacturer inference
+MIN_TAG_CONFIDENCE = 0.70  # Minimum confidence for material tag display
+
 
 # -- Manufacturer Enrichment Helpers ------------------------------------------
+# TODO: Extract _infer_manufacturer_from_prefix and backfill_missing_manufacturers
+#       to a service layer (see CLAUDE.md thin-router pattern)
 
 
 def _infer_manufacturer_from_prefix(db: Session, mpn: str) -> str | None:
     """Walk from longest to shortest prefix to find a known manufacturer."""
-    for length in range(len(mpn) - 1, 6, -1):  # minimum 7-char prefix
+    for length in range(len(mpn) - 1, MIN_MPN_PREFIX_LENGTH, -1):
         prefix = mpn[:length]
         match = (
             db.query(MaterialCard)
@@ -77,6 +82,7 @@ def backfill_missing_manufacturers(db: Session) -> int:
 
 
 # -- Material Card Serialization -----------------------------------------------
+# TODO: Extract material_card_to_dict to a service/serializer module
 
 
 def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
@@ -123,7 +129,7 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
     tag_rows = (
         db.query(Tag.name, Tag.tag_type, MaterialTag.confidence, MaterialTag.source)
         .join(MaterialTag, MaterialTag.tag_id == Tag.id)
-        .filter(MaterialTag.material_card_id == card.id, MaterialTag.confidence >= 0.70)
+        .filter(MaterialTag.material_card_id == card.id, MaterialTag.confidence >= MIN_TAG_CONFIDENCE)
         .order_by(MaterialTag.confidence.desc())
         .all()
     )
@@ -212,6 +218,7 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
             .order_by(MaterialCard.last_searched_at.desc())
         )
         if q:
+            # TODO: Add minimum length validation (e.g., 2 chars) to prevent broad queries
             safe_q = escape_like(q)
             query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
         total = query.count()
@@ -470,6 +477,7 @@ async def restore_material(card_id: int, user: User = Depends(require_admin), db
 
 
 # -- Material Card Merge -------------------------------------------------------
+# TODO: Extract merge logic to material_merge_service.py
 
 
 @router.post("/api/materials/merge")

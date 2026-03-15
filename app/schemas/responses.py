@@ -25,6 +25,7 @@ class OkResponse(BaseModel):
 
 
 # ── Search / Sightings ─────────────────────────────────────────────────
+# TODO: Audit extra="allow" on response models for potential data leakage
 
 
 class SightingItem(BaseModel, extra="allow"):
