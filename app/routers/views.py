@@ -377,6 +377,10 @@ def _filter_results(results: list, filter_value: str) -> list:
         return [r for r in results if r.get("vendor_safety_band") in ("low_risk", None)]
     if filter_value == "has_lead":
         return [r for r in results if r.get("lead_id") is not None]
+    if filter_value == "contactable":
+        return [r for r in results if r.get("contactability_score", 0) and r.get("contactability_score", 0) >= 50]
+    if filter_value == "corroborated":
+        return [r for r in results if r.get("corroborated") is True]
     return results
 
 
@@ -392,6 +396,10 @@ def _sort_results(results: list, sort_by: str) -> list:
         return sorted(results, key=lambda r: (r.get("vendor_safety_score") is None, -(r.get("vendor_safety_score") or 0)))
     elif sort_by == "freshest":
         return sorted(results, key=lambda r: (r.get("score", 0)), reverse=True)
+    elif sort_by == "easiest_to_contact":
+        return sorted(results, key=lambda r: (r.get("contactability_score") is None, -(r.get("contactability_score") or 0)))
+    elif sort_by == "most_proven":
+        return sorted(results, key=lambda r: (r.get("historical_success_score") is None, -(r.get("historical_success_score") or 0)))
     # Default: confidence descending
     return sorted(results, key=lambda r: (r.get("confidence_pct", 0), r.get("score", 0)), reverse=True)
 
@@ -603,6 +611,146 @@ async def sourcing_stream(
     return templates.TemplateResponse(
         "partials/sourcing/search_progress.html",
         {"request": request, "sources": sources},
+    )
+
+
+# ── Task Manager views ───────────────────────────────────────────
+
+
+def _query_tasks_for_view(db: Session, user, tab: str, type_filter: str, sort_by: str):
+    """Build filtered, sorted task list for the task manager page.
+
+    Returns list of RequisitionTask objects with relationships loaded.
+    """
+    from datetime import datetime, timezone as tz
+
+    base = db.query(RequisitionTask).options(
+        joinedload(RequisitionTask.assignee),
+        joinedload(RequisitionTask.creator),
+        joinedload(RequisitionTask.requisition),
+    )
+
+    # Tab filtering
+    if tab == "my_tasks":
+        base = base.filter(
+            RequisitionTask.assigned_to_id == user.id,
+            RequisitionTask.status != "done",
+        )
+    elif tab == "waiting_on":
+        base = base.filter(
+            RequisitionTask.created_by == user.id,
+            RequisitionTask.assigned_to_id != user.id,
+            RequisitionTask.status != "done",
+        )
+    elif tab == "done":
+        base = base.filter(RequisitionTask.status == "done")
+    else:  # "all"
+        base = base.filter(RequisitionTask.status != "done")
+
+    # Type filter
+    if type_filter and type_filter in ("sourcing", "sales", "general"):
+        base = base.filter(RequisitionTask.task_type == type_filter)
+
+    # Special filters
+    if type_filter == "overdue":
+        now = datetime.now(tz.utc)
+        base = base.filter(
+            RequisitionTask.due_at < now,
+            RequisitionTask.status != "done",
+        )
+    elif type_filter == "high_priority":
+        base = base.filter(RequisitionTask.priority == 3)
+
+    # Sort
+    if sort_by == "due_date":
+        base = base.order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
+    elif sort_by == "created":
+        base = base.order_by(RequisitionTask.created_at.desc())
+    elif sort_by == "ai_score":
+        base = base.order_by(RequisitionTask.ai_priority_score.desc().nullslast(), RequisitionTask.created_at)
+    else:  # "priority" default
+        base = base.order_by(RequisitionTask.priority.desc(), RequisitionTask.due_at.asc().nullslast())
+
+    return base.limit(200).all()
+
+
+@router.get("/tasks")
+async def task_manager_page(
+    request: Request,
+    tab: str = "my_tasks",
+    type_filter: str = "",
+    sort_by: str = "priority",
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Task manager page — cross-requisition task list with filters and sorting."""
+    from app.services import task_service
+
+    tasks = _query_tasks_for_view(db, user, tab, type_filter, sort_by)
+
+    # Apply rule-based scoring to unscored tasks
+    unscored = [t for t in tasks if t.status != "done" and t.ai_priority_score is None]
+    if unscored:
+        task_service.apply_simple_scoring(db, unscored)
+
+    # Summary counts for tab badges
+    summary = task_service.get_my_tasks_summary(db, user.id)
+
+    # Users list for assignee dropdown in create form
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    # Active requisitions for create form
+    requisitions = (
+        db.query(Requisition)
+        .filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
+        .order_by(Requisition.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    return templates.TemplateResponse(
+        "partials/tasks/task_list.html",
+        {
+            "request": request,
+            "user": user,
+            "tasks": tasks,
+            "tab": tab,
+            "type_filter": type_filter,
+            "sort_by": sort_by,
+            "summary": summary,
+            "users": users,
+            "requisitions": requisitions,
+        },
+    )
+
+
+@router.get("/views/tasks/{task_id}")
+async def task_detail_view(
+    task_id: int,
+    request: Request,
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Task detail panel — loaded inline via HTMX."""
+    task = (
+        db.query(RequisitionTask)
+        .options(
+            joinedload(RequisitionTask.assignee),
+            joinedload(RequisitionTask.creator),
+            joinedload(RequisitionTask.requisition),
+        )
+        .filter(RequisitionTask.id == task_id)
+        .first()
+    )
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    # Users list for reassign dropdown
+    users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    return templates.TemplateResponse(
+        "partials/tasks/task_detail.html",
+        {"request": request, "task": task, "users": users},
     )
 
 

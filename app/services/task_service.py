@@ -479,7 +479,8 @@ def compute_simple_priority(task: RequisitionTask) -> float:
 
     # Due date urgency
     if task.due_at:
-        days_left = (task.due_at - now).total_seconds() / 86400
+        due = task.due_at if task.due_at.tzinfo else task.due_at.replace(tzinfo=timezone.utc)
+        days_left = (due - now).total_seconds() / 86400
         if days_left < 0:
             score += 0.4  # overdue
         elif days_left < 1:
@@ -499,11 +500,13 @@ def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
     now = datetime.now(timezone.utc)
     for t in tasks:
         t.ai_priority_score = compute_simple_priority(t)
-        # Simple risk flags
-        if t.due_at and t.due_at < now:
+        # Simple risk flags — handle naive datetimes from SQLite
+        due = t.due_at.replace(tzinfo=timezone.utc) if t.due_at and not t.due_at.tzinfo else t.due_at
+        created = t.created_at.replace(tzinfo=timezone.utc) if t.created_at and not t.created_at.tzinfo else t.created_at
+        if due and due < now:
             t.ai_risk_flag = "Overdue"
-        elif t.due_at and (t.due_at - now).days <= 1:
+        elif due and (due - now).days <= 1:
             t.ai_risk_flag = "Due today"
-        elif t.created_at and (now - t.created_at).days >= 3 and t.status == "todo":
+        elif created and (now - created).days >= 3 and t.status == "todo":
             t.ai_risk_flag = "No activity in 3+ days"
     db.commit()

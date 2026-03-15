@@ -25,7 +25,6 @@ import uuid
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.sourcing import Requirement, Sighting
@@ -68,6 +67,13 @@ def normalize_mpn(mpn: str | None) -> str:
         .replace("/", "")
         .replace(".", "")
     )
+
+
+def _normalize_phone(phone: str | None) -> str:
+    """Strip a phone number to digits only for dedup comparison."""
+    if not phone:
+        return ""
+    return "".join(c for c in phone if c.isdigit())
 
 
 
@@ -230,13 +236,27 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
             score -= 8
             flags.append("high_cancellation_rate")
 
-        # Positive signals — boost score
+        # Positive signals — boost score and record as positive: prefixed flags
         if has_legal and has_address and has_website:
-            score += 8  # strong business footprint
+            score += 8
+            flags.append("positive:verified_business_footprint")
+        if has_website and has_domain:
+            flags.append("positive:business_website_exists")
+        if has_emails and has_domain and has_website:
+            domain = getattr(vendor_card, "domain", "") or ""
+            email_list = getattr(vendor_card, "emails", []) or []
+            if email_list and domain and any(domain in (e or "") for e in email_list):
+                flags.append("positive:email_domain_matches_website")
+        if has_emails or has_phones:
+            flags.append("positive:contact_channels_present")
         if getattr(vendor_card, "relationship_months", None) and vendor_card.relationship_months >= 6:
-            score += 5  # established relationship
+            score += 5
+            flags.append("positive:established_relationship")
         if getattr(vendor_card, "total_wins", 0) and vendor_card.total_wins >= 3:
-            score += 5  # proven success
+            score += 5
+            flags.append("positive:proven_success_history")
+        if getattr(vendor_card, "sighting_count", 0) and vendor_card.sighting_count >= 5:
+            flags.append("positive:marketplace_listing_found")
     else:
         flags.append("no_internal_vendor_profile")
         flags.append("marketplace_trust_unknown")
@@ -259,6 +279,92 @@ def _compute_vendor_safety(vendor_card: VendorCard | None, contactability: float
     else:
         summary = "Lower risk based on current data, but always verify stock and terms in outreach."
     return score, flags, summary
+
+
+def _source_category(source_type: str) -> str:
+    """Map a connector source_type to a handoff-spec source category.
+
+    Per evidence.schema.yaml, source categories are:
+    api, marketplace, salesforce_history, avail_history, web_ai, safety_review, buyer_feedback.
+    This groups individual connectors into these categories for corroboration checks.
+    """
+    st = (source_type or "").lower()
+    if st in {"digikey", "mouser", "element14", "farnell", "nexar", "octopart"}:
+        return "api"
+    if st in {"brokerbin", "sourcengine", "oemsecrets", "ebay", "netcomponents", "icsource"}:
+        return "marketplace"
+    if st in {"salesforce", "salesforce_history"}:
+        return "salesforce_history"
+    if st in {"material_history", "sighting_history", "avail_history", "vendor_affinity"}:
+        return "avail_history"
+    if st in {"ai", "web", "ai_live_web", "web_ai"}:
+        return "web_ai"
+    if st in {"email_mining"}:
+        return "marketplace"  # email mining produces stock signals similar to marketplace
+    if st in {"safety_review"}:
+        return "safety_review"
+    if st in {"buyer_feedback"}:
+        return "buyer_feedback"
+    return "marketplace"
+
+
+def _signal_type_for_source(source_type: str) -> str:
+    """Map a connector source_type to a handoff-spec signal_type.
+
+    Per evidence.schema.yaml, signal_type describes what kind of evidence
+    this is (stock listing, vendor history, vendor affinity, etc.).
+    """
+    st = (source_type or "").lower()
+    if st in {"digikey", "mouser", "element14", "farnell", "nexar", "octopart", "brokerbin",
+              "sourcengine", "oemsecrets", "ebay", "netcomponents", "icsource"}:
+        return "stock_listing"
+    if st in {"salesforce", "salesforce_history"}:
+        return "vendor_history"
+    if st in {"vendor_affinity"}:
+        return "vendor_affinity"
+    if st in {"material_history", "sighting_history", "avail_history"}:
+        return "historical_activity"
+    if st in {"ai", "web", "ai_live_web", "web_ai"}:
+        return "web_discovery"
+    if st in {"email_mining"}:
+        return "email_signal"
+    return "stock_listing"
+
+
+def _reliability_band(score: float) -> str:
+    """Reliability band for evidence items per evidence.schema.yaml.
+
+    Separate from confidence_band — this rates the source itself, not the lead.
+    """
+    if score >= 75:
+        return "high"
+    if score >= 50:
+        return "medium"
+    return "low"
+
+
+def _match_type_for_parts(requested: str, matched: str, substitutes: list | None = None) -> str:
+    """Determine match_type per lead.schema.yaml enum: exact/normalized/fuzzy/cross_ref."""
+    if not requested or not matched:
+        return "exact"
+    req_norm = normalize_mpn(requested)
+    match_norm = normalize_mpn(matched)
+    if req_norm == match_norm:
+        return "exact"
+    if req_norm and match_norm and (req_norm in match_norm or match_norm in req_norm):
+        return "normalized"
+    # Check if matched part is a known substitute / cross-reference
+    if substitutes:
+        sub_norms = set()
+        for sub in substitutes:
+            if isinstance(sub, str):
+                sub_norms.add(normalize_mpn(sub))
+            elif isinstance(sub, dict):
+                sub_norms.add(normalize_mpn(sub.get("mpn") or sub.get("part_number") or ""))
+        sub_norms.discard("")
+        if match_norm in sub_norms:
+            return "cross_ref"
+    return "fuzzy"
 
 
 def _source_reference(sighting: Sighting) -> str:
@@ -332,7 +438,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
             requisition_id=requirement.requisition_id,
             part_number_requested=requested_part,
             part_number_matched=matched_part_norm,
-            match_type="exact" if matched_part_norm == normalize_mpn(requested_part) else "near",
+            match_type=_match_type_for_parts(requested_part, matched_part, getattr(requirement, "substitutes", None)),
             vendor_name=vendor_name,
             vendor_name_normalized=vendor_normalized,
             vendor_card_id=vendor_card.id if vendor_card else None,
@@ -404,6 +510,148 @@ def _build_lead_risk_flags(
     return flags
 
 
+def _auto_merge_leads(db: Session, survivor: SourcingLead, duplicate: SourcingLead) -> None:
+    """Merge a duplicate lead into the survivor by moving evidence and events.
+
+    Only merges if the duplicate has not been acted on by a buyer (status = 'new').
+    Preserves all source attribution per the dedup spec guardrails.
+    """
+    if duplicate.buyer_status != "new":
+        # Buyer has already acted on this lead — flag instead of merging
+        _add_risk_flag(survivor, "duplicate_candidate")
+        _add_risk_flag(duplicate, "duplicate_candidate")
+        return
+
+    # Move evidence rows from duplicate to survivor
+    db.query(LeadEvidence).filter(LeadEvidence.lead_id == duplicate.id).update(
+        {"lead_id": survivor.id}
+    )
+
+    # Move feedback events from duplicate to survivor (if any)
+    db.query(LeadFeedbackEvent).filter(LeadFeedbackEvent.lead_id == duplicate.id).update(
+        {"lead_id": survivor.id}
+    )
+
+    # Delete the duplicate lead
+    db.delete(duplicate)
+    db.flush()
+
+    # Refresh survivor rollups with the merged evidence
+    _refresh_lead_evidence_rollups(db, survivor)
+    logger.info(
+        "Auto-merged duplicate lead {} into survivor {} for requirement {}",
+        duplicate.lead_id, survivor.lead_id, survivor.requirement_id,
+    )
+
+
+def _count_dedup_signals(
+    db: Session,
+    lead: SourcingLead,
+    other: SourcingLead,
+    vendor_card: VendorCard | None,
+) -> int:
+    """Count how many dedup signals match between two leads.
+
+    Returns count of matching signals:
+    - vendor_card_id match = 2 (strong — counts as exact duplicate per spec)
+    - domain match = 1
+    - phone match = 1
+    - email domain match = 1
+    """
+    signals = 0
+
+    if vendor_card and vendor_card.id and other.vendor_card_id == vendor_card.id:
+        signals += 2  # exact duplicate per spec
+
+    if not other.vendor_card_id:
+        return signals
+
+    other_card = db.query(VendorCard).filter(VendorCard.id == other.vendor_card_id).first()
+    if not other_card:
+        return signals
+
+    # Domain match
+    if vendor_card and getattr(vendor_card, "domain", None):
+        lead_domain = (vendor_card.domain or "").strip().lower()
+        other_domain = (getattr(other_card, "domain", None) or "").strip().lower()
+        if lead_domain and other_domain and lead_domain == other_domain:
+            signals += 1
+
+    # Phone match
+    if vendor_card and getattr(vendor_card, "phones", None):
+        lead_phones = {_normalize_phone(p) for p in (vendor_card.phones or []) if p}
+        other_phones = {_normalize_phone(p) for p in (getattr(other_card, "phones", None) or []) if p}
+        lead_phones.discard("")
+        other_phones.discard("")
+        if lead_phones & other_phones:
+            signals += 1
+
+    # Email domain match
+    if vendor_card and getattr(vendor_card, "emails", None):
+        lead_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (vendor_card.emails or []) if e and "@" in e}
+        other_email_domains = {(e or "").split("@")[-1].strip().lower() for e in (getattr(other_card, "emails", None) or []) if e and "@" in e}
+        lead_email_domains.discard("")
+        other_email_domains.discard("")
+        if lead_email_domains & other_email_domains:
+            signals += 1
+
+    return signals
+
+
+def _check_duplicate_candidates(
+    db: Session,
+    lead: SourcingLead,
+    vendor_card: VendorCard | None,
+) -> None:
+    """Detect and handle duplicate leads for the same part.
+
+    Per the handoff dedup spec:
+    - Exact duplicate (vendor_card_id/domain/phone match): auto-merge
+    - Strong likely duplicate (2+ medium signals agree): auto-merge
+    - Possible duplicate (1 signal): flag as duplicate_candidate, no merge
+
+    Auto-merge only happens when the weaker lead is still in 'new' status
+    (buyer has not acted on it). Otherwise, flags both as duplicate_candidate.
+    """
+    if not lead.requirement_id:
+        return
+
+    other_leads = (
+        db.query(SourcingLead)
+        .filter(
+            SourcingLead.requirement_id == lead.requirement_id,
+            SourcingLead.part_number_matched == lead.part_number_matched,
+            SourcingLead.id != lead.id,
+        )
+        .all()
+    )
+    if not other_leads:
+        return
+
+    for other in other_leads:
+        signals = _count_dedup_signals(db, lead, other, vendor_card)
+
+        if signals >= 2:
+            # Exact or strong likely duplicate — auto-merge
+            # Survivor = lead with higher confidence or more evidence
+            if (lead.confidence_score or 0) >= (other.confidence_score or 0):
+                _auto_merge_leads(db, lead, other)
+            else:
+                _auto_merge_leads(db, other, lead)
+            return
+        elif signals == 1:
+            # Possible duplicate — flag only
+            _add_risk_flag(lead, "duplicate_candidate")
+            _add_risk_flag(other, "duplicate_candidate")
+
+
+def _add_risk_flag(lead: SourcingLead, flag: str) -> None:
+    """Add a risk flag to a lead if not already present."""
+    existing = lead.risk_flags or []
+    if flag not in existing:
+        lead.risk_flags = sorted(set(existing + [flag]))
+
+
 def append_evidence_from_sighting(db: Session, lead: SourcingLead, sighting: Sighting) -> None:
     source_ref = _source_reference(sighting)
     exists = (
@@ -424,37 +672,50 @@ def append_evidence_from_sighting(db: Session, lead: SourcingLead, sighting: Sig
         observed = _as_utc(sighting.created_at)
         freshness_days = max(((_now_utc() - observed).total_seconds() / 86400.0), 0.0)
 
+    src_type = sighting.source_type or "unknown"
+    src_reliability = _source_reliability(src_type, sighting.evidence_tier)
+
     evidence = LeadEvidence(
         evidence_id=f"ev_{uuid.uuid4().hex[:24]}",
         lead_id=lead.id,
-        signal_type="stock_listing",
-        source_type=sighting.source_type or "unknown",
-        source_name=_source_name(sighting.source_type or ""),
+        signal_type=_signal_type_for_source(src_type),
+        source_type=src_type,
+        source_name=_source_name(src_type),
         source_reference=source_ref,
         part_number_observed=(sighting.mpn_matched or sighting.mpn or ""),
         vendor_name_observed=sighting.vendor_name,
         observed_text=(sighting.raw_data or {}).get("description") or (sighting.raw_data or {}).get("evidence_note"),
         observed_at=sighting.created_at,
         freshness_age_days=freshness_days,
-        weight=lead.source_reliability_score,
-        confidence_impact=lead.confidence_score,
-        explanation=lead.reason_summary,
-        source_reliability_band=_confidence_band(lead.source_reliability_score or 0),
+        weight=src_reliability,
+        confidence_impact=round(src_reliability * 0.2, 1),  # this evidence's scoring contribution
+        explanation=f"{_source_name(src_type)} {_signal_type_for_source(src_type).replace('_', ' ')} for {sighting.vendor_name or 'vendor'}",
+        source_reliability_band=_reliability_band(src_reliability),
         verification_state="raw",
     )
     db.add(evidence)
 
 
 def _refresh_lead_evidence_rollups(db: Session, lead: SourcingLead) -> None:
-    evidence_count = db.query(func.count(LeadEvidence.id)).filter(LeadEvidence.lead_id == lead.id).scalar() or 0
-    source_count = (
-        db.query(func.count(func.distinct(LeadEvidence.source_type))).filter(LeadEvidence.lead_id == lead.id).scalar() or 0
+    evidence_rows = (
+        db.query(LeadEvidence.source_type)
+        .filter(LeadEvidence.lead_id == lead.id)
+        .all()
     )
-    lead.evidence_count = int(evidence_count)
-    lead.corroborated = source_count >= 2
+    evidence_count = len(evidence_rows)
+    # Corroboration requires evidence from 2+ distinct source CATEGORIES
+    # (e.g., api + marketplace), not just 2 different connectors within the same category
+    categories = {_source_category(row.source_type) for row in evidence_rows}
+    lead.evidence_count = evidence_count
+    lead.corroborated = len(categories) >= 2
     if lead.corroborated and lead.confidence_score is not None:
         lead.confidence_score = _clamp(float(lead.confidence_score) + 5.0)
         lead.confidence_band = _confidence_band(float(lead.confidence_score))
+        # Promote raw evidence to inferred when corroborated by multiple source categories
+        db.query(LeadEvidence).filter(
+            LeadEvidence.lead_id == lead.id,
+            LeadEvidence.verification_state == "raw",
+        ).update({"verification_state": "inferred"})
 
 
 def sync_leads_for_sightings(db: Session, requirement: Requirement, sightings: list[Sighting]) -> int:
@@ -469,6 +730,8 @@ def sync_leads_for_sightings(db: Session, requirement: Requirement, sightings: l
         append_evidence_from_sighting(db, lead, sighting)
         db.flush()
         _refresh_lead_evidence_rollups(db, lead)
+        vc = db.query(VendorCard).filter(VendorCard.id == lead.vendor_card_id).first() if lead.vendor_card_id else None
+        _check_duplicate_candidates(db, lead, vc)
         synced += 1
     try:
         db.commit()
@@ -509,6 +772,9 @@ def attach_lead_metadata_to_results(db: Session, results_by_requirement: dict[in
             row["suggested_next_action"] = lead.suggested_next_action
             row["risk_flags"] = lead.risk_flags or []
             row["lead_reason_summary"] = lead.reason_summary
+            row["contactability_score"] = lead.contactability_score
+            row["historical_success_score"] = lead.historical_success_score
+            row["corroborated"] = lead.corroborated
 
 
 def get_requisition_leads(db: Session, requisition_id: int, statuses: list[str] | None = None) -> list[SourcingLead]:
@@ -544,6 +810,25 @@ def _propagate_outcome_to_vendor(db: Session, lead: SourcingLead, status: str) -
         vendor_card.is_blacklisted = True
         if vendor_card.vendor_score is not None:
             vendor_card.vendor_score = max(0.0, vendor_card.vendor_score - 10.0)
+
+
+def _update_evidence_verification_state(db: Session, lead_id: int, buyer_status: str) -> None:
+    """Transition evidence verification_state based on buyer outcome.
+
+    Per evidence.schema.yaml: raw → buyer_confirmed (has_stock),
+    raw → rejected (bad_lead, do_not_contact).
+    """
+    target_state = None
+    if buyer_status == "has_stock":
+        target_state = "buyer_confirmed"
+    elif buyer_status in ("bad_lead", "do_not_contact"):
+        target_state = "rejected"
+
+    if target_state:
+        db.query(LeadEvidence).filter(
+            LeadEvidence.lead_id == lead_id,
+            LeadEvidence.verification_state == "raw",
+        ).update({"verification_state": target_state})
 
 
 def update_lead_status(
@@ -585,6 +870,9 @@ def update_lead_status(
     if lead.vendor_safety_score is not None:
         has_vendor_data = lead.vendor_card_id is not None
         lead.vendor_safety_band = _safety_band(float(lead.vendor_safety_score), has_vendor_data=has_vendor_data)
+
+    # Update evidence verification_state based on buyer outcome
+    _update_evidence_verification_state(db, lead.id, status)
 
     # Propagate buyer outcome to VendorCard for feedback loop
     _propagate_outcome_to_vendor(db, lead, status)

@@ -23,6 +23,8 @@
                 ('affinity', 'Vendor Affinity'),
                 ('high_confidence', 'High Confidence'),
                 ('safe_vendors', 'Safe Vendors'),
+                ('contactable', 'Contactable'),
+                ('corroborated', 'Corroborated'),
                 ('has_lead', 'Has Lead'),
             ] %}
             {% for val, label in filters %}
@@ -50,6 +52,8 @@
             <option value="price_asc" {{ 'selected' if sort_by == 'price_asc' }}>Price (low)</option>
             <option value="price_desc" {{ 'selected' if sort_by == 'price_desc' }}>Price (high)</option>
             <option value="qty_desc" {{ 'selected' if sort_by == 'qty_desc' }}>Qty (high)</option>
+            <option value="easiest_to_contact" {{ 'selected' if sort_by == 'easiest_to_contact' }}>Easiest to Contact</option>
+            <option value="most_proven" {{ 'selected' if sort_by == 'most_proven' }}>Most Proven</option>
         </select>
     </div>
 

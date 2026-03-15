@@ -423,6 +423,15 @@ async def add_requirements(
     except Exception:  # pragma: no cover
         logger.debug("Tag propagation failed for requirements", exc_info=True)
 
+    # Auto-generate sourcing tasks for new requirements
+    try:
+        from ...services.task_service import on_requirement_added
+
+        for r in created:
+            on_requirement_added(db, req_id, r.primary_mpn, assigned_to_id=req.created_by)
+    except Exception:
+        logger.debug("Task auto-gen for requirements failed", exc_info=True)
+
     # NC enqueue
     def _nc_enqueue_batch(requirement_ids: list[int]):
         from ...database import SessionLocal
