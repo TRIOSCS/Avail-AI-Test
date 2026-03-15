@@ -1,0 +1,74 @@
+{#
+  settings/sources.html — Sources/connectors tab with status, toggles, and health.
+  Receives: sources (list of ApiSource ORM objects).
+  Called by: htmx_views.py settings_sources_tab endpoint.
+  Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+
+<div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+  <div class="px-4 py-3 bg-gray-50 border-b">
+    <h2 class="text-lg font-semibold text-gray-900">Data Sources</h2>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Active</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Health</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% if sources %}
+        {% for source in sources %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ source.display_name or source.name }}</td>
+          <td class="px-4 py-3">
+            {% set src_status_colors = {
+              'live': 'bg-emerald-50 text-emerald-700',
+              'pending': 'bg-amber-50 text-amber-700',
+              'error': 'bg-rose-50 text-rose-700',
+              'disabled': 'bg-gray-100 text-gray-600',
+              'degraded': 'bg-amber-50 text-amber-700'
+            } %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ src_status_colors.get(source.status, 'bg-gray-100 text-gray-600') }}">
+              {{ source.status }}
+            </span>
+          </td>
+          <td class="px-4 py-3 text-center">
+            <input type="checkbox" {% if source.is_active %}checked{% endif %}
+                   class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 accent-brand-500"
+                   hx-put="/api/sources/{{ source.id }}/activate"
+                   hx-swap="none">
+          </td>
+          <td class="px-4 py-3 text-sm">
+            {% if source.last_success %}
+            <span class="text-gray-500">Last OK: {{ source.last_success.strftime('%b %d %H:%M') if source.last_success else '-' }}</span>
+            {% endif %}
+            {% if source.last_error %}
+            <span class="block text-xs text-rose-600 truncate max-w-[200px]">{{ source.last_error }}</span>
+            {% endif %}
+            {% if source.error_count_24h %}
+            <span class="inline-flex px-1.5 py-0.5 text-xs bg-rose-50 text-rose-700 rounded-full">{{ source.error_count_24h }} errors/24h</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-3">
+            <button hx-post="/api/sources/{{ source.id }}/test"
+                    hx-swap="none"
+                    class="px-2 py-1 text-xs bg-white border border-brand-200 text-brand-700 rounded hover:bg-brand-50">
+              Test
+            </button>
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="5" class="px-4 py-8 text-center text-sm text-gray-500">No sources configured.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>

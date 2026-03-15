@@ -1,0 +1,144 @@
+{#
+  quotes/list.html — Quotes list view with status filter pills and search.
+  Receives: quotes (list of Quote ORM objects), q (str), status (str),
+            total (int), limit (int), offset (int).
+  Called by: htmx_views.py quotes_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">Quotes</div>
+
+<div class="max-w-7xl mx-auto">
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">Quotes</span>
+    </div>
+    <span class="text-xs text-brand-300">{{ total }} total</span>
+  </div>
+
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Quotes</h1>
+    <span class="text-sm text-gray-500">{{ total }} total</span>
+  </div>
+
+  {# Search + filter bar #}
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
+    <div class="flex flex-wrap gap-3 items-end">
+      <div class="flex-1 min-w-[200px]">
+        <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
+        <input type="text" name="q" value="{{ q }}" placeholder="Quote number..."
+               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+               hx-get="/v2/partials/quotes"
+               hx-trigger="keyup changed delay:300ms"
+               hx-target="#main-content"
+               hx-include="[name='q']">
+      </div>
+    </div>
+  </div>
+
+  {# Status filter pills #}
+  <div class="flex flex-wrap gap-2 mb-4">
+    {% for val, label in [('', 'All'), ('draft', 'Draft'), ('sent', 'Sent'), ('won', 'Won'), ('lost', 'Lost')] %}
+    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+                   {% if status == val %}bg-brand-500 text-white{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+            hx-get="/v2/partials/quotes?status={{ val }}"
+            hx-target="#main-content"
+            hx-push-url="true">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  {# Table #}
+  <div class="bg-white rounded-lg shadow border border-brand-200 overflow-hidden">
+    {% if quotes %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quote #</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rev</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Requisition</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for quote in quotes %}
+          <tr class="hover:bg-gray-50 cursor-pointer"
+              hx-get="/v2/partials/quotes/{{ quote.id }}"
+              hx-target="#main-content"
+              hx-push-url="/v2/quotes/{{ quote.id }}">
+            <td class="px-4 py-3 text-sm font-mono font-medium text-brand-600">{{ quote.quote_number }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ quote.revision or 1 }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ quote.requisition.name if quote.requisition else '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">
+              {% if quote.customer_site and quote.customer_site.company %}
+                {{ quote.customer_site.company.name }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-right">
+              ${{ '{:,.2f}'.format(quote.subtotal|float) if quote.subtotal else '-' }}
+            </td>
+            <td class="px-4 py-3 text-sm text-right
+                        {% if (quote.total_margin_pct|float if quote.total_margin_pct else 0) >= 30 %}text-emerald-700
+                        {% elif (quote.total_margin_pct|float if quote.total_margin_pct else 0) >= 15 %}text-amber-700
+                        {% else %}text-rose-700{% endif %}">
+              {{ '{:.1f}'.format(quote.total_margin_pct|float) if quote.total_margin_pct else '-' }}%
+            </td>
+            <td class="px-4 py-3">
+              {% set status_colors = {
+                'draft': 'bg-brand-100 text-brand-600',
+                'sent': 'bg-amber-50 text-amber-700',
+                'won': 'bg-emerald-50 text-emerald-700',
+                'lost': 'bg-rose-50 text-rose-700'
+              } %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(quote.status, 'bg-gray-100 text-gray-700') }}">
+                {{ quote.status|capitalize }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-500">
+              {{ quote.created_at.strftime('%b %d, %Y') if quote.created_at else '-' }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="p-12 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/>
+      </svg>
+      <p class="mt-2 text-sm text-gray-500">No quotes found</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {# Pagination #}
+  {% if total > limit %}
+  <div class="mt-4 flex justify-center">
+    <nav class="flex gap-1">
+      {% if offset > 0 %}
+      <a hx-get="/v2/partials/quotes?offset={{ offset - limit }}&q={{ q }}&status={{ status }}"
+         hx-target="#main-content"
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
+      {% endif %}
+      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}</span>
+      {% if offset + limit < total %}
+      <a hx-get="/v2/partials/quotes?offset={{ offset + limit }}&q={{ q }}&status={{ status }}"
+         hx-target="#main-content"
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
+      {% endif %}
+    </nav>
+  </div>
+  {% endif %}
+</div>

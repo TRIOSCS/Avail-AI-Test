@@ -1,0 +1,114 @@
+{# rfq_compose.html — RFQ compose form with vendor selection and parts summary.
+   Receives: req (Requisition), parts (list[Requirement]), vendors (list[dict]).
+   Called by: rfq_compose route in htmx_views.py.
+   Depends on: HTMX, Alpine.js.
+#}
+<div class="space-y-4" x-data="{ selectedVendors: [] }">
+
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-gray-900">Send RFQ — {{ req.name }}</h2>
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
+            hx-target="#tab-content" hx-swap="innerHTML"
+            class="text-xs text-gray-500 hover:text-gray-700">
+      &larr; Back to Parts
+    </button>
+  </div>
+
+  {# ── Parts Summary ────────────────────────────────────── #}
+  <div class="bg-white rounded-lg border border-gray-200 p-4">
+    <h3 class="text-sm font-semibold text-gray-900 mb-2">Parts to Quote ({{ parts|length }})</h3>
+    <div class="flex flex-wrap gap-2">
+      {% for p in parts %}
+      <span class="inline-flex items-center px-2.5 py-1 text-xs font-mono font-medium bg-brand-50 text-brand-700 rounded-full border border-brand-200">
+        {{ p.primary_mpn }} {% if p.target_qty %}× {{ "{:,}".format(p.target_qty) }}{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ── Vendor Selection ──────────────────────────────────── #}
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/rfq-send"
+        hx-target="#tab-content" hx-swap="innerHTML">
+
+    <input type="hidden" name="parts_summary"
+           value="{{ parts|map(attribute='primary_mpn')|join(', ') }}">
+    <input type="hidden" name="subject"
+           value="RFQ - {{ parts|map(attribute='primary_mpn')|join(', ') }}">
+
+    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-gray-900">Select Vendors ({{ vendors|length }} available)</h3>
+        <label class="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+          <input type="checkbox"
+                 @change="selectedVendors = $event.target.checked ? {{ vendors|map(attribute='id')|list|tojson }} : []"
+                 class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+          Select All
+        </label>
+      </div>
+
+      {% if vendors %}
+      <div class="divide-y divide-gray-200">
+        {% for v in vendors %}
+        <div class="px-4 py-3 flex items-center gap-3 hover:bg-brand-50">
+          <input type="checkbox" value="{{ v.id }}"
+                 x-model.number="selectedVendors"
+                 class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <p class="text-sm font-medium text-gray-900">{{ v.display_name }}</p>
+              {% if v.already_asked %}
+              <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
+                Already Asked
+              </span>
+              {% endif %}
+              {% if v.domain %}
+              <span class="text-xs text-gray-400">{{ v.domain }}</span>
+              {% endif %}
+            </div>
+            {% if v.emails %}
+            <div class="mt-1 flex flex-wrap gap-1">
+              {% for email in v.emails[:3] %}
+              <span class="text-xs text-gray-500">{{ email }}</span>
+              {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-xs text-amber-500 mt-0.5">No email contacts found</p>
+            {% endif %}
+          </div>
+
+          {# Hidden inputs for selected vendors #}
+          <template x-if="selectedVendors.includes({{ v.id }})">
+            <div>
+              <input type="hidden" name="vendor_names" value="{{ v.display_name }}">
+              <input type="hidden" name="vendor_emails"
+                     value="{{ v.emails[0] if v.emails else '' }}">
+            </div>
+          </template>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="p-8 text-center">
+        <p class="text-sm text-gray-500">No vendors found with sightings for this requisition.</p>
+        <p class="text-xs text-gray-400 mt-1">Search for parts first to find vendors.</p>
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Send Button ─────────────────────────────────────── #}
+    {% if vendors %}
+    <div class="mt-4 flex items-center gap-3">
+      <button type="submit"
+              x-bind:disabled="selectedVendors.length === 0"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed">
+        <span x-text="'Send RFQ to ' + selectedVendors.length + ' vendor(s)'">Send RFQ</span>
+      </button>
+      <p class="text-xs text-gray-400" x-show="selectedVendors.length === 0">
+        Select at least one vendor to send.
+      </p>
+    </div>
+    {% endif %}
+  </form>
+
+</div>

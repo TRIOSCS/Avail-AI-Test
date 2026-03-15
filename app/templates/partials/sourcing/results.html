@@ -1,0 +1,205 @@
+{# Sourcing results view — lead cards grid with filter bar for a requirement.
+   Loaded via HTMX GET /v2/partials/sourcing/{requirement_id} into #main-content.
+   Called by: htmx_views.sourcing_results_partial
+   Depends on: partials/sourcing/lead_card.html, partials/shared/source_badge.html, partials/shared/pagination.html
+   Context vars: requirement, leads, lead_sighting_data, total, page, total_pages, per_page,
+                 f_confidence, f_safety, f_freshness, f_source, f_status, f_contactability, f_corroborated, f_sort #}
+
+{# OOB breadcrumb update #}
+<div id="breadcrumb" hx-swap-oob="true">
+  <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">Requisitions</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <a href="/v2/requisitions/{{ requirement.requisition_id }}"
+     hx-get="/v2/partials/requisitions/{{ requirement.requisition_id }}"
+     hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">{{ requirement.requisition.name if requirement.requisition else '' }}</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <span class="text-gray-900">Sourcing: {{ requirement.primary_mpn }}</span>
+</div>
+
+<div class="space-y-6">
+  {# Header #}
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">
+        <span class="font-mono">{{ requirement.primary_mpn }}</span>
+      </h1>
+      <p class="text-sm text-gray-500 mt-1">
+        {{ requirement.brand or '' }}
+        {% if requirement.brand %}&middot;{% endif %}
+        {{ total }} lead{{ 's' if total != 1 }} found
+      </p>
+    </div>
+    <button hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
+            hx-target="#main-content"
+            class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg
+                   hover:bg-brand-600 flex items-center gap-2">
+      Re-search
+    </button>
+  </div>
+
+  {# Filter bar #}
+  <div id="sourcing-filters" class="bg-white rounded-lg border border-brand-200 p-4 space-y-3"
+       x-data="{ showFilters: true }">
+    <div class="flex items-center justify-between">
+      <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filters</h3>
+      <button @click="showFilters = !showFilters" class="text-xs text-brand-500">
+        <span x-text="showFilters ? 'Hide' : 'Show'"></span>
+      </button>
+    </div>
+
+    <div x-show="showFilters" class="space-y-3">
+      {# Row 1: Confidence + Safety + Freshness #}
+      <div class="flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Confidence:</span>
+          {% for band, label in [('high', 'High'), ('medium', 'Medium'), ('low', 'Low')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ band }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if band == f_confidence else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Safety:</span>
+          {% for band, label in [('low_risk', 'Low Risk'), ('medium_risk', 'Medium'), ('high_risk', 'High Risk')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ band }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if band == f_safety else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Freshness:</span>
+          {% for val, label in [('24h', '24h'), ('7d', '7 days'), ('30d', '30 days'), ('all', 'All')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ val }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if val == f_freshness else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Row 2: Source checkboxes #}
+      <div class="flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Source:</span>
+          {% for src in ['brokerbin', 'nexar', 'digikey', 'mouser', 'oemsecrets', 'element14'] %}
+          <label class="flex items-center gap-1 text-xs cursor-pointer">
+            <input type="checkbox" name="source" value="{{ src }}"
+                   {{ 'checked' if src in f_source }}
+                   hx-get="/v2/partials/sourcing/{{ requirement.id }}"
+                   hx-target="#main-content" hx-push-url="true"
+                   hx-include="#sourcing-filters"
+                   class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+            {% with source_type=src %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Row 3: Status + Contactability + Corroborated #}
+      <div class="flex flex-wrap gap-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Status:</span>
+          {% for val, label in [('new', 'New'), ('contacted', 'Contacted'), ('has_stock', 'Has Stock'), ('bad_lead', 'Bad Lead'), ('', 'All')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ val }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if val == f_status else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Contact:</span>
+          {% for val, label in [('has_email', 'Has Email'), ('has_phone', 'Has Phone'), ('', 'Any')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ val }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if val == f_contactability else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-500 font-medium">Corroborated:</span>
+          {% for val, label in [('yes', 'Yes'), ('no', 'No'), ('', 'All')] %}
+          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ val }}&sort={{ f_sort }}"
+             hx-target="#main-content" hx-push-url="true"
+             class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
+               {{ 'bg-brand-500 text-white border-brand-500' if val == f_corroborated else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+            {{ label }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+
+      {# Sort dropdown #}
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-gray-500 font-medium">Sort:</span>
+        <select hx-get="/v2/partials/sourcing/{{ requirement.id }}"
+                hx-target="#main-content" hx-push-url="true"
+                hx-include="#sourcing-filters"
+                name="sort"
+                class="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-brand-500 focus:border-brand-500">
+          {% for val, label in [('best', 'Best Overall'), ('freshest', 'Freshest'), ('safest', 'Safest'), ('contact', 'Easiest to Contact'), ('proven', 'Most Proven')] %}
+          <option value="{{ val }}" {{ 'selected' if f_sort == val }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+  </div>
+
+  {# Warning: all leads are weak #}
+  {% if leads and leads|selectattr('confidence_band', 'equalto', 'low')|list|length == leads|length %}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+    <svg class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+    </svg>
+    <div>
+      <p class="text-sm font-medium text-amber-800">Only weak leads found</p>
+      <p class="text-xs text-amber-600 mt-0.5">All results have low confidence. Consider broadening your search or using additional sources.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Lead cards grid #}
+  {% if leads %}
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="lead-cards">
+    {% for lead in leads %}
+      {% include "partials/sourcing/lead_card.html" %}
+    {% endfor %}
+  </div>
+
+  {# Pagination #}
+  {% if total_pages > 1 %}
+    {% with target_id="main-content", url="/v2/partials/sourcing/" ~ requirement.id %}
+      {% include "partials/shared/pagination.html" %}
+    {% endwith %}
+  {% endif %}
+
+  {% else %}
+  {# Empty state #}
+  <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+    <svg class="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+    </svg>
+    <p class="mt-4 text-lg">No leads found for this part</p>
+    <p class="text-sm mt-1">Try broadening your search or check back after the next sourcing run</p>
+  </div>
+  {% endif %}
+</div>

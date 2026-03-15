@@ -5,7 +5,7 @@
   Depends on: HTMX (hx-post), Alpine.js (enriching state).
 #}
 <div x-data="{ enriching: false }">
-    <button class="btn btn-sm btn-enrich"
+    <button class="inline-flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 disabled:opacity-50 disabled:cursor-not-allowed"
             hx-post="/api/enrich/{{ entity_type }}/{{ entity_id }}"
             hx-target="#enrich-results-{{ entity_id }}"
             hx-swap="innerHTML"
@@ -14,6 +14,9 @@
             @htmx:after-request="enriching = false"
             :disabled="enriching">
         <span x-show="!enriching">Enrich</span>
-        <span x-show="enriching" id="enrich-spinner-{{ entity_id }}">Enriching...</span>
+        <span x-show="enriching" class="flex items-center gap-1">
+          <svg id="enrich-spinner-{{ entity_id }}" class="h-4 w-4 spinner" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Enriching...
+        </span>
     </button>
 </div>

@@ -1,0 +1,345 @@
+{# Lead detail view — full information for a single sourcing lead.
+   Shows summary card, evidence list, source attribution, contact info,
+   safety review (shared component), and buyer actions panel.
+   Called by: htmx_views.lead_detail_partial
+   Depends on: partials/shared/source_badge.html, partials/shared/safety_review.html
+   Context vars: lead, evidence, evidence_by_category, category_labels, requirement,
+                 vendor_card, best_sighting #}
+
+{# OOB breadcrumb #}
+<div id="breadcrumb" hx-swap-oob="true">
+  <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content"
+     hx-push-url="true" class="text-brand-500 hover:text-brand-600">Requisitions</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <a href="/v2/requisitions/{{ lead.requisition_id }}"
+     hx-get="/v2/partials/requisitions/{{ lead.requisition_id }}"
+     hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">
+    {{ requirement.requisition.name if requirement and requirement.requisition else '' }}
+  </a>
+  <span class="text-gray-400 mx-1">/</span>
+  <a href="/v2/sourcing/{{ lead.requirement_id }}"
+     hx-get="/v2/partials/sourcing/{{ lead.requirement_id }}"
+     hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">
+    {{ requirement.primary_mpn if requirement else '' }}
+  </a>
+  <span class="text-gray-400 mx-1">/</span>
+  <span class="text-gray-900">{{ lead.vendor_name }}</span>
+</div>
+
+<div class="space-y-6 max-w-4xl">
+
+  {# ===== Lead Summary Card ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-6">
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900">{{ lead.vendor_name }}</h1>
+        <p class="text-sm text-gray-500 mt-1">
+          <span class="font-mono">{{ lead.part_number_matched }}</span>
+          {% if lead.match_type != 'exact' %}
+          <span class="text-xs text-amber-600 ml-1">({{ lead.match_type }} match)</span>
+          {% endif %}
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        {# Confidence score #}
+        <div class="text-right">
+          <span class="text-2xl font-bold
+            {% if lead.confidence_score >= 70 %}text-emerald-600
+            {% elif lead.confidence_score >= 40 %}text-amber-600
+            {% else %}text-rose-600{% endif %}">
+            {{ '%.0f'|format(lead.confidence_score) }}%
+          </span>
+          <p class="text-xs text-gray-400">confidence</p>
+        </div>
+        {# Safety badge #}
+        {% set safety_badge = {
+          'low_risk': 'bg-emerald-50 text-emerald-700',
+          'medium_risk': 'bg-amber-50 text-amber-700',
+          'high_risk': 'bg-rose-50 text-rose-700',
+          'unknown': 'bg-gray-100 text-gray-600'
+        } %}
+        <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full
+                     {{ safety_badge.get(lead.vendor_safety_band, 'bg-gray-100 text-gray-600') }}">
+          {{ lead.vendor_safety_band|replace('_', ' ')|title if lead.vendor_safety_band else 'Unknown' }}
+        </span>
+        {# Buyer status badge #}
+        {% set status_colors = {
+          'new': 'bg-brand-100 text-brand-600',
+          'contacted': 'bg-amber-50 text-amber-700',
+          'has_stock': 'bg-emerald-50 text-emerald-700',
+          'no_stock': 'bg-gray-100 text-gray-600',
+          'bad_lead': 'bg-rose-50 text-rose-700',
+          'do_not_contact': 'bg-rose-50 text-rose-700'
+        } %}
+        <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full
+                     {{ status_colors.get(lead.buyer_status, 'bg-gray-100 text-gray-600') }}">
+          {{ lead.buyer_status|replace('_', ' ')|title }}
+        </span>
+      </div>
+    </div>
+
+    {# Sighting data: qty + price + lead time #}
+    {% if best_sighting %}
+    <div class="flex gap-6 mt-4 pt-4 border-t border-gray-100">
+      <div>
+        <span class="text-xs text-gray-400">Qty Available</span>
+        <p class="text-lg font-semibold text-gray-900">
+          {{ '{:,}'.format(best_sighting.qty_available) if best_sighting.qty_available else '--' }}
+        </p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Unit Price</span>
+        <p class="text-lg font-semibold text-gray-900">
+          {% if best_sighting.unit_price %}${{ '%.4f'|format(best_sighting.unit_price) }}{% else %}RFQ{% endif %}
+        </p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Lead Time</span>
+        <p class="text-lg font-semibold text-gray-900">
+          {{ best_sighting.lead_time or (best_sighting.lead_time_days|string ~ ' days' if best_sighting.lead_time_days else '--') }}
+        </p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ===== Evidence List ===== #}
+  <div class="bg-white rounded-lg border border-brand-200">
+    <div class="px-4 py-3 border-b border-brand-200">
+      <h2 class="text-sm font-semibold text-gray-900">Evidence ({{ evidence|length }})</h2>
+    </div>
+    {% if evidence %}
+    <div class="divide-y divide-gray-100">
+      {% for ev in evidence %}
+      <div class="px-4 py-3 flex items-start gap-4">
+        {# Signal type icon #}
+        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-brand-50 flex items-center justify-center">
+          {% if ev.signal_type == 'stock_listing' %}
+          <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+          </svg>
+          {% elif ev.signal_type == 'vendor_history' %}
+          <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {% elif ev.signal_type == 'web_discovery' %}
+          <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/>
+          </svg>
+          {% elif ev.signal_type == 'email_signal' %}
+          <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+          </svg>
+          {% else %}
+          <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          {% endif %}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            {% with source_type=ev.source_type %}
+              {% include "partials/shared/source_badge.html" %}
+            {% endwith %}
+            <span class="text-xs text-gray-400">{{ ev.signal_type|replace('_', ' ')|title }}</span>
+          </div>
+          <p class="text-sm text-gray-700 mt-1">{{ ev.explanation }}</p>
+          <div class="flex items-center gap-4 mt-1">
+            <span class="text-xs text-gray-400">
+              {% if ev.observed_at %}{{ ev.observed_at | timesince }}{% endif %}
+            </span>
+            {% if ev.confidence_impact %}
+            <span class="text-xs font-medium
+              {% if ev.confidence_impact > 0 %}text-emerald-600{% else %}text-rose-600{% endif %}">
+              {{ '+' if ev.confidence_impact > 0 }}{{ '%.1f'|format(ev.confidence_impact) }}%
+            </span>
+            {% endif %}
+            {% set verify_colors = {
+              'raw': 'bg-gray-100 text-gray-600',
+              'inferred': 'bg-brand-100 text-brand-600',
+              'buyer_confirmed': 'bg-emerald-50 text-emerald-700',
+              'rejected': 'bg-rose-50 text-rose-700'
+            } %}
+            <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded
+                         {{ verify_colors.get(ev.verification_state, 'bg-gray-100 text-gray-600') }}">
+              {{ ev.verification_state|replace('_', ' ')|title }}
+            </span>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center text-sm text-gray-400">No evidence records.</div>
+    {% endif %}
+  </div>
+
+  {# ===== Source Attribution Table ===== #}
+  <div class="bg-white rounded-lg border border-brand-200">
+    <div class="px-4 py-3 border-b border-brand-200">
+      <h2 class="text-sm font-semibold text-gray-900">Source Attribution</h2>
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for category, items in evidence_by_category.items() %}
+      <div class="px-4 py-3">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+          {{ category_labels.get(category, category|title) }}
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          {% for ev in items %}
+          <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-50 rounded text-xs">
+            {% with source_type=ev.source_type %}
+              {% include "partials/shared/source_badge.html" %}
+            {% endwith %}
+            <span class="text-gray-500">{{ ev.signal_type|replace('_', ' ') }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ===== Contact Information ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-4">
+    <h2 class="text-sm font-semibold text-gray-900 mb-3">Contact Information</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div>
+        <span class="text-xs text-gray-400">Email</span>
+        {% if lead.contact_email %}
+        <p class="text-sm text-gray-900">{{ lead.contact_email }}</p>
+        {% elif vendor_card and vendor_card.emails %}
+        {% for email in vendor_card.emails[:3] %}
+        <p class="text-sm text-gray-900">{{ email }}</p>
+        {% endfor %}
+        {% else %}
+        <p class="text-sm text-gray-400">Not available</p>
+        {% endif %}
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Phone</span>
+        {% if lead.contact_phone %}
+        <p class="text-sm text-gray-900">{{ lead.contact_phone }}</p>
+        {% elif vendor_card and vendor_card.phones %}
+        {% for phone in vendor_card.phones[:3] %}
+        <p class="text-sm text-gray-900">{{ phone }}</p>
+        {% endfor %}
+        {% else %}
+        <p class="text-sm text-gray-400">Not available</p>
+        {% endif %}
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Website</span>
+        {% if lead.contact_url %}
+        <a href="{{ lead.contact_url }}" target="_blank" rel="noopener"
+           class="text-sm text-brand-500 hover:text-brand-600 break-all">{{ lead.contact_url }}</a>
+        {% elif vendor_card and vendor_card.website %}
+        <a href="{{ vendor_card.website }}" target="_blank" rel="noopener"
+           class="text-sm text-brand-500 hover:text-brand-600 break-all">{{ vendor_card.website }}</a>
+        {% else %}
+        <p class="text-sm text-gray-400">Not available</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ===== Safety Review Block (shared component) ===== #}
+  {% with safety_band=lead.vendor_safety_band,
+          safety_score=lead.vendor_safety_score,
+          safety_summary=lead.vendor_safety_summary,
+          safety_flags=lead.vendor_safety_flags %}
+    {% include "partials/shared/safety_review.html" %}
+  {% endwith %}
+
+  {# ===== Buyer Actions Panel ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-4 space-y-4">
+    <h2 class="text-sm font-semibold text-gray-900">Buyer Actions</h2>
+
+    {# Status update form #}
+    <form hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+          hx-target="#main-content"
+          class="space-y-3">
+      <div class="flex gap-3">
+        <div class="flex-1">
+          <label class="text-xs text-gray-500">Status</label>
+          <select name="status"
+                  class="w-full mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2
+                         focus:ring-brand-500 focus:border-brand-500">
+            {% for val, label in [
+              ('new', 'New'),
+              ('contacted', 'Contacted'),
+              ('has_stock', 'Has Stock'),
+              ('no_stock', 'No Stock'),
+              ('bad_lead', 'Bad Lead'),
+              ('do_not_contact', 'Do Not Contact')
+            ] %}
+            <option value="{{ val }}" {{ 'selected' if lead.buyer_status == val }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex-1">
+          <label class="text-xs text-gray-500">Note (optional)</label>
+          <input type="text" name="note" placeholder="Add a note..."
+                 class="w-full mt-1 text-sm border border-gray-300 rounded-lg px-3 py-2
+                        focus:ring-brand-500 focus:border-brand-500">
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button type="submit"
+                class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg
+                       hover:bg-brand-600">
+          Update Status
+        </button>
+        {% if lead.contact_email %}
+        <button type="button"
+                class="px-4 py-2 bg-emerald-500 text-white text-sm font-medium rounded-lg
+                       hover:bg-emerald-600">
+          Send RFQ
+        </button>
+        {% endif %}
+        <button type="button"
+                hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+                hx-vals='{"status": "contacted"}'
+                hx-target="#main-content"
+                class="px-4 py-2 bg-brand-50 text-brand-600 text-sm font-medium rounded-lg
+                       hover:bg-brand-100 border border-brand-200">
+          Claim
+        </button>
+        <button type="button"
+                hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+                hx-vals='{"status": "bad_lead"}'
+                hx-target="#main-content"
+                class="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-lg
+                       hover:bg-gray-200 border border-gray-200">
+          Dismiss
+        </button>
+      </div>
+    </form>
+
+    {# Feedback history #}
+    {% if lead.feedback_events %}
+    <div class="mt-4 pt-4 border-t border-gray-100">
+      <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">History</h3>
+      <div class="space-y-2">
+        {% for event in lead.feedback_events|sort(attribute='created_at', reverse=True) %}
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+          <span>{{ event.created_at | timesince }}</span>
+          <span class="font-medium text-gray-700">{{ event.status|replace('_', ' ')|title }}</span>
+          {% if event.note %}
+          <span class="text-gray-400">-- {{ event.note }}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+</div>

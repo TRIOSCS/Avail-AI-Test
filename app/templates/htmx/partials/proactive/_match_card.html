@@ -1,0 +1,45 @@
+{#
+  proactive/_match_card.html — Individual proactive match card.
+  Receives: match (dict with id, mpn, manufacturer, vendor_name, qty, unit_price,
+            customer_purchase_count, customer_last_purchased_at, confidence, reason).
+  Called by: proactive/list.html loop.
+  Depends on: brand palette.
+#}
+
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+  <div class="flex items-start justify-between mb-2">
+    <div>
+      <p class="text-sm font-semibold text-gray-900 font-mono">{{ match.mpn | default('—') }}</p>
+      <p class="text-xs text-gray-500">{{ match.manufacturer | default('') }}</p>
+    </div>
+    {% set conf = match.confidence | default('medium') %}
+    <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
+      {{ 'bg-emerald-50 text-emerald-700' if conf == 'high' else
+         'bg-amber-50 text-amber-700' if conf == 'medium' else
+         'bg-gray-100 text-gray-600' }}">
+      {{ conf | upper }}
+    </span>
+  </div>
+
+  <div class="text-xs text-gray-600 space-y-1 mb-3">
+    <p><span class="text-gray-400">Vendor:</span> {{ match.vendor_name | default('—') }}</p>
+    <p><span class="text-gray-400">Qty:</span> {{ match.qty | default(0) | int }}
+       {% if match.unit_price %}<span class="ml-2 text-gray-400">Price:</span> ${{ '%.2f' | format(match.unit_price) }}{% endif %}</p>
+    {% if match.customer_purchase_count %}
+    <p><span class="text-gray-400">Customer bought:</span> {{ match.customer_purchase_count }}x
+       {% if match.customer_last_purchased_at %}(last {{ match.customer_last_purchased_at }}){% endif %}</p>
+    {% endif %}
+    {% if match.reason %}
+    <p class="text-gray-500 italic">{{ match.reason }}</p>
+    {% endif %}
+  </div>
+
+  <div class="flex gap-2">
+    <button hx-post="/v2/partials/proactive/{{ match.id }}/dismiss"
+            hx-target="#main-content"
+            hx-confirm="Dismiss this match?"
+            class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+      Dismiss
+    </button>
+  </div>
+</div>

@@ -1,0 +1,46 @@
+{# buy_plans.html — Buy Plans tab for requisition detail.
+   Receives: buy_plans (list of BuyPlan objects).
+   Called by: requisition tab route.
+#}
+<div>
+  {% if buy_plans %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Buy Plan #</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">SO#</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Lines</th>
+          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total Cost</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% for bp in buy_plans %}
+        <tr class="hover:bg-brand-50 cursor-pointer"
+            hx-get="/v2/partials/buy-plans/{{ bp.id }}"
+            hx-target="#main-content"
+            hx-push-url="/v2/buy-plans/{{ bp.id }}">
+          <td class="px-4 py-2 text-sm font-medium text-brand-500">#{{ bp.id }}</td>
+          <td class="px-4 py-2 text-sm text-gray-500">{{ bp.sales_order_number or "\u2014" }}</td>
+          <td class="px-4 py-2">
+            {% set bp_colors = {"draft": "bg-brand-100 text-brand-600", "pending_approval": "bg-amber-50 text-amber-700", "approved": "bg-emerald-50 text-emerald-700", "active": "bg-emerald-50 text-emerald-700", "completed": "bg-emerald-50 text-emerald-700", "cancelled": "bg-gray-100 text-gray-600"} %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ bp_colors.get(bp.status, 'bg-gray-100 text-gray-600') }}">
+              {{ (bp.status or 'unknown')|replace('_', ' ')|capitalize }}
+            </span>
+          </td>
+          <td class="px-4 py-2 text-sm text-gray-500 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
+          <td class="px-4 py-2 text-sm text-gray-500 text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "\u2014" }}</td>
+          <td class="px-4 py-2 text-sm text-gray-500">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "\u2014" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="p-8 text-center">
+    <p class="text-sm text-gray-500">No buy plans linked.</p>
+  </div>
+  {% endif %}
+</div>

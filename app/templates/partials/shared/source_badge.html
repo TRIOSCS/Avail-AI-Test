@@ -1,0 +1,22 @@
+{# Reusable source badge partial — renders a colored pill for each connector source.
+   Expects either `r.source_type` (from a result dict) or standalone `source_type` in context.
+   Called by: search/results.html, sourcing/lead_card.html, sourcing/lead_detail.html
+   Depends on: nothing (pure template) #}
+{% set st = (r.source_type if r is defined and r.source_type is defined else source_type|default(''))|lower %}
+{% if st == 'brokerbin' %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-sky-100 text-sky-700">BrokerBin</span>
+{% elif st in ('nexar', 'octopart') %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700">Nexar</span>
+{% elif st == 'digikey' %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-700">DigiKey</span>
+{% elif st == 'mouser' %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-teal-100 text-teal-700">Mouser</span>
+{% elif st == 'oemsecrets' %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-fuchsia-100 text-fuchsia-700">OEMSecrets</span>
+{% elif st in ('element14', 'farnell') %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-lime-100 text-lime-700">Element14</span>
+{% elif st == 'ebay' %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">eBay</span>
+{% else %}
+  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ st|title or 'Unknown' }}</span>
+{% endif %}

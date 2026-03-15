@@ -1,42 +1,67 @@
-{# Dashboard partial — loaded into #main-content on initial page load.
-   Shows summary stats and quick actions. #}
+{#
+  dashboard.html — Dashboard with logo, stats cards, and quick actions.
+  Receives: stats (dict with open_reqs, vendor_count, company_count), user_name (str).
+  Called by: htmx_views.py dashboard_partial endpoint.
+  Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">Dashboard</div>
 
 <div class="max-w-7xl mx-auto">
-  <h1 class="text-2xl font-bold text-gray-900 mb-6">Dashboard</h1>
+
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">Dashboard</span>
+    </div>
+  </div>
+
+  {# Welcome message #}
+  <h2 class="text-xl text-gray-900 text-center mb-8">Welcome back, {{ user_name }}</h2>
 
   {# Stats cards #}
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+    <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
+         hx-get="/v2/partials/requisitions"
+         hx-target="#main-content"
+         hx-push-url="/v2/requisitions">
       <p class="text-sm font-medium text-gray-500">Open Requisitions</p>
-      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.open_reqs }}</p>
+      <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.open_reqs }}</p>
     </div>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+    <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
+         hx-get="/v2/partials/vendors"
+         hx-target="#main-content"
+         hx-push-url="/v2/vendors">
       <p class="text-sm font-medium text-gray-500">Active Vendors</p>
-      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.vendor_count }}</p>
+      <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.vendor_count }}</p>
     </div>
-    <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+    <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
+         hx-get="/v2/partials/companies"
+         hx-target="#main-content"
+         hx-push-url="/v2/companies">
       <p class="text-sm font-medium text-gray-500">Companies</p>
-      <p class="mt-1 text-3xl font-bold text-gray-900">{{ stats.company_count }}</p>
+      <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.company_count }}</p>
     </div>
   </div>
 
   {# Quick actions #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
     <div class="flex flex-wrap gap-3">
-      <a href="/v2/requisitions"
-         hx-get="/v2/partials/requisitions/create-form"
-         hx-target="#main-content"
-         class="inline-flex items-center px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors">
+      <button class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors"
+              hx-get="/v2/partials/requisitions"
+              hx-target="#main-content"
+              hx-push-url="/v2/requisitions">
         + New Requisition
-      </a>
-      <a href="/v2/search"
-         hx-get="/v2/partials/search"
-         hx-target="#main-content"
-         hx-push-url="/v2/search"
-         class="inline-flex items-center px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
+      </button>
+      <button class="inline-flex items-center px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors"
+              hx-get="/v2/partials/search"
+              hx-target="#main-content"
+              hx-push-url="/v2/search">
         Search Parts
-      </a>
+      </button>
     </div>
   </div>
 </div>

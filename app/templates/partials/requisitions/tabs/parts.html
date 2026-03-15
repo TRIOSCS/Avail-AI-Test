@@ -1,0 +1,60 @@
+{# parts.html — Requirements table tab for requisition detail.
+   Receives: req (Requisition), requirements (list of Requirement with sighting_count).
+   Called by: requisition detail (inline on first load) and tab route.
+   Depends on: brand palette.
+#}
+<div>
+  {# Inline add requirement form #}
+  <div class="mb-4 p-4 bg-brand-50 rounded-lg border border-brand-200">
+    <form hx-post="/v2/partials/requisitions/{{ req.id }}/requirements"
+          hx-target="#parts-tbody"
+          hx-swap="afterbegin"
+          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
+          class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">MPN</label>
+        <input type="text" name="primary_mpn" required placeholder="Part number"
+               class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Qty</label>
+        <input type="number" name="target_qty" min="1" value="1" placeholder="Qty"
+               class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-24">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>
+        <input type="text" name="brand" placeholder="Brand"
+               class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-40">
+      </div>
+      <button type="submit" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">Add</button>
+    </form>
+  </div>
+
+  {# Requirements table #}
+  {% if requirements %}
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Brand</th>
+          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Target Price</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Sightings</th>
+          <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="parts-tbody" class="divide-y divide-gray-200">
+        {% for r in requirements %}
+          {% include "partials/requisitions/tabs/req_row.html" %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="p-8 text-center">
+    <p class="text-sm text-gray-500">No requirements yet. Add parts using the form above.</p>
+  </div>
+  {% endif %}
+</div>

@@ -34,3 +34,5 @@ beautifulsoup4==4.14.3
 patchright==1.58.2
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.13.1
+# SSE streaming for HTMX sourcing progress
+sse-starlette>=1.6.0

@@ -32,11 +32,23 @@ try {
   process.exit(1);
 }
 
+// Support both legacy (app.js + crm.js) and HTMX (htmx_app.js) builds
+const htmxEntry = manifest["app/static/htmx_app.js"] || manifest["htmx_app.js"];
 const appEntry = manifest["app.js"];
 const crmEntry = manifest["crm.js"];
 
+if (htmxEntry) {
+  // HTMX build — just verify the entry exists in the manifest
+  const stylesEntry = manifest["app/static/styles.css"] || manifest["styles.css"];
+  console.log("HTMX build detected:");
+  console.log(`  htmx_app: ${htmxEntry.file}`);
+  if (stylesEntry) console.log(`  styles: ${stylesEntry.file}`);
+  console.log("\nSMOKE TEST PASSED: HTMX bundle entries found in manifest.");
+  process.exit(0);
+}
+
 if (!appEntry || !crmEntry) {
-  console.error("SMOKE TEST FAILED: manifest missing app.js or crm.js entry");
+  console.error("SMOKE TEST FAILED: manifest missing app.js or crm.js entry (and no htmx_app.js found)");
   process.exit(1);
 }
 

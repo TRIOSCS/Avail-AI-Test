@@ -18,6 +18,7 @@ export default defineConfig({
       input: {
         htmx_app: resolve(__dirname, "app/static/htmx_app.js"),
         htmx_mobile: resolve(__dirname, "app/static/htmx_mobile.css"),
+        styles: resolve(__dirname, "app/static/styles.css"),
       },
     },
   },

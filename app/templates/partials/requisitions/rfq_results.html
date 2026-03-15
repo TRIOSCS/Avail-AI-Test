@@ -1,0 +1,59 @@
+{# rfq_results.html — Results summary after sending RFQs.
+   Receives: req (Requisition), sent_results (list[dict]), total_sent (int).
+   Called by: rfq_send route in htmx_views.py.
+   Depends on: HTMX.
+#}
+<div class="space-y-4">
+
+  {# ── Success Banner ────────────────────────────────────── #}
+  <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-start gap-3">
+    <svg class="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div>
+      <p class="text-sm font-medium text-emerald-800">RFQ sent to {{ total_sent }} vendor(s)</p>
+      <p class="text-xs text-emerald-600 mt-0.5">Contact records created. Check the Activity tab for status updates.</p>
+    </div>
+  </div>
+
+  {# ── Results Table ─────────────────────────────────────── #}
+  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% for r in sent_results %}
+        <tr class="hover:bg-brand-50">
+          <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ r.vendor }}</td>
+          <td class="px-4 py-2 text-sm text-gray-500">{{ r.email }}</td>
+          <td class="px-4 py-2">
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-blue-50 text-blue-700">
+              {{ r.status|capitalize }}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ── Back Button ───────────────────────────────────────── #}
+  <div class="flex gap-3">
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/activity"
+            hx-target="#tab-content" hx-swap="innerHTML"
+            class="px-4 py-2 text-sm font-medium text-brand-500 border border-brand-300 rounded-lg hover:bg-brand-50">
+      View Activity
+    </button>
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
+            hx-target="#tab-content" hx-swap="innerHTML"
+            class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+      Back to Parts
+    </button>
+  </div>
+
+</div>
