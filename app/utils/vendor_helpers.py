@@ -1,5 +1,4 @@
-"""
-utils/vendor_helpers.py — Shared helpers for vendor-related routes.
+"""utils/vendor_helpers.py — Shared helpers for vendor-related routes.
 
 Contains VendorCard creation/lookup, serialization, contact-cleaning utilities,
 website scraping, and merge logic used across vendor CRUD, contacts, materials,
@@ -72,13 +71,15 @@ _JUNK_DOMAINS = {
 
 
 def _extract_domain_from_name(name: str) -> str | None:
-    """Try to extract a likely domain from a vendor name (e.g. 'Digi-Key' -> 'digikey')."""
+    """Try to extract a likely domain from a vendor name (e.g. 'Digi-Key' ->
+    'digikey')."""
     cleaned = re.sub(r"[^a-z0-9]", "", name.lower())
     return cleaned if len(cleaned) >= 3 else None
 
 
 def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None) -> VendorCard:
-    """Find existing VendorCard by normalized name, domain, or fuzzy match, or create new.
+    """Find existing VendorCard by normalized name, domain, or fuzzy match, or create
+    new.
 
     1. Exact normalized match (fastest path)
     2. Domain match — if a domain is provided, merge into existing card with same domain
@@ -174,7 +175,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
 
 
 async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str):
-    """Fire-and-forget enrichment for a vendor card. Runs in background."""
+    """Fire-and-forget enrichment for a vendor card.
+
+    Runs in background.
+    """
     from ..database import SessionLocal
     from ..enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
@@ -425,8 +429,8 @@ def is_private_url(url: str) -> bool:
 async def scrape_website_contacts(url: str) -> dict:
     """Fetch vendor website homepage + /contact page, extract emails and phones.
 
-    Results are cached in IntelCache with a 7-day TTL keyed by domain to avoid
-    re-scraping the same vendor website on every page view.
+    Results are cached in IntelCache with a 7-day TTL keyed by domain to avoid re-
+    scraping the same vendor website on every page view.
     """
     from ..cache.intel_cache import get_cached, set_cached
 
@@ -499,7 +503,10 @@ def merge_contact_into_card(
     website: str = None,
     source: str = None,
 ) -> bool:
-    """Merge new contact data into vendor card. Returns True if anything changed."""
+    """Merge new contact data into vendor card.
+
+    Returns True if anything changed.
+    """
     from ..vendor_utils import merge_emails_into_card, merge_phones_into_card
 
     changed = False

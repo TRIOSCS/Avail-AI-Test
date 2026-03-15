@@ -1,4 +1,4 @@
-"""test_jobs_offers.py — Tests for offer-related background jobs
+"""test_jobs_offers.py — Tests for offer-related background jobs.
 
 Covers: _job_proactive_matching, _job_proactive_offer_expiry,
 _job_flag_stale_offers.

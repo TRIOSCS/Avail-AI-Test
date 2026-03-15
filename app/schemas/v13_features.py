@@ -1,5 +1,4 @@
-"""
-v13_features.py — Pydantic schemas for v1.3 feature endpoints.
+"""v13_features.py — Pydantic schemas for v1.3 feature endpoints.
 
 Covers phone call logging, strategic toggles, and activity attribution.
 

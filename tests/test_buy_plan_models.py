@@ -1,5 +1,4 @@
-"""
-test_buy_plan_models.py — Buy Plan Model Tests
+"""test_buy_plan_models.py — Buy Plan Model Tests.
 
 Covers model creation, ENUM values, relationships, split lines
 (multiple BuyPlanLine rows sharing the same requirement_id),
@@ -21,10 +20,10 @@ from app.models import (
 )
 from app.models.buy_plan import (
     AIFlagSeverity,
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
     LineIssueType,
     SOVerificationStatus,
     VerificationGroupMember,

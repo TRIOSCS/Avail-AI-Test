@@ -1,5 +1,4 @@
-"""
-test_cache_intel.py — Tests for app/cache/intel_cache.py
+"""test_cache_intel.py — Tests for app/cache/intel_cache.py.
 
 Tests Redis + PostgreSQL fallback caching for intel data.
 

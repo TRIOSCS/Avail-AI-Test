@@ -407,7 +407,8 @@ async def trigger_nexar_validate_all(batch_limit: int = 5000, _user=Depends(requ
 
 @router.post("/nexar-backfill-untagged")
 async def trigger_nexar_backfill_untagged(limit: int = 5000, _user=Depends(require_user)):
-    """Backfill untagged cards via Nexar for cards that survived prefix/sighting passes."""
+    """Backfill untagged cards via Nexar for cards that survived prefix/sighting
+    passes."""
 
     async def _run():
         from app.database import SessionLocal
@@ -483,7 +484,8 @@ async def trigger_cross_validate_all(
 
 @router.post("/purge-unknown")
 async def purge_unknown_tags(_user=Depends(require_user)):
-    """Purge 'Unknown' brand junk tags that block reprocessing (instant, no API calls)."""
+    """Purge 'Unknown' brand junk tags that block reprocessing (instant, no API
+    calls)."""
 
     def _run():
         from app.database import SessionLocal

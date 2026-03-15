@@ -1,5 +1,4 @@
-"""
-command_center.py — Command Center API endpoint
+"""command_center.py — Command Center API endpoint.
 
 Provides aggregated action items for the dashboard:
 - Stale vendor RFQs (no response after 48h)

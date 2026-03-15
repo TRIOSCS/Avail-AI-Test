@@ -1,4 +1,5 @@
-"""Maintenance background jobs — cache cleanup, dedup, connector reset, attribution, integrity.
+"""Maintenance background jobs — cache cleanup, dedup, connector reset, attribution,
+integrity.
 
 Called by: app/jobs/__init__.py via register_maintenance_jobs()
 Depends on: app.database, app.models, app.services.*

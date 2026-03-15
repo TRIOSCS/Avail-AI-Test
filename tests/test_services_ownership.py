@@ -1,5 +1,4 @@
-"""
-test_services_ownership.py — Tests for ownership_service.
+"""test_services_ownership.py — Tests for ownership_service.
 
 Tests account claiming, ownership sweep, at-risk detection,
 and open pool logic. Uses in-memory SQLite.

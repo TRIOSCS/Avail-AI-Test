@@ -1,5 +1,4 @@
-"""
-tests/test_routers_vendor_contacts.py — Tests for routers/vendor_contacts.py
+"""tests/test_routers_vendor_contacts.py — Tests for routers/vendor_contacts.py.
 
 Covers: contact lookup waterfall (tier 1-3), vendor contacts CRUD,
 bulk contacts, email metrics, add-email-to-card.
@@ -472,7 +471,8 @@ def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
 
 
 def test_lookup_creates_card_integrity_error(client, db_session, monkeypatch):
-    """lookup_vendor_contact handles IntegrityError on card creation (race condition)."""
+    """lookup_vendor_contact handles IntegrityError on card creation (race
+    condition)."""
     vc = VendorCard(
         normalized_name="race vendor",
         display_name="Race Vendor",
@@ -731,7 +731,8 @@ def test_add_email_business_domain(client, db_session, monkeypatch):
 
 
 def test_add_email_existing_contact(client, db_session, monkeypatch):
-    """add_email_to_card with existing contact does not create duplicate VendorContact."""
+    """add_email_to_card with existing contact does not create duplicate
+    VendorContact."""
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 

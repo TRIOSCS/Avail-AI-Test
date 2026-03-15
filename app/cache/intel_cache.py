@@ -23,7 +23,10 @@ _REDIS_PREFIX = "intel:"
 
 
 def _get_redis():
-    """Lazy-init Redis connection. Returns client or None if unavailable."""
+    """Lazy-init Redis connection.
+
+    Returns client or None if unavailable.
+    """
     global _redis_client, _redis_init_attempted
 
     if _redis_init_attempted:
@@ -60,7 +63,10 @@ def _get_redis():
 
 
 def get_cached(cache_key: str) -> dict | None:
-    """Retrieve cached data if not expired. Returns None on miss."""
+    """Retrieve cached data if not expired.
+
+    Returns None on miss.
+    """
     # Try Redis first
     r = _get_redis()
     if r:
@@ -155,8 +161,8 @@ def invalidate(cache_key: str) -> None:
 def flush_enrichment_cache() -> int:
     """Flush all enrichment cache entries to force re-query with fresh API credits.
 
-    Called monthly when provider credit limits reset (Apollo, etc.).
-    Removes all 'enrich:*' keys from both Redis and PostgreSQL.
+    Called monthly when provider credit limits reset (Apollo, etc.). Removes all
+    'enrich:*' keys from both Redis and PostgreSQL.
     """
     count = 0
 
@@ -194,8 +200,8 @@ def flush_enrichment_cache() -> int:
 def cleanup_expired() -> int:
     """Remove expired cache entries in batches. Returns count deleted.
 
-    Called periodically by the scheduler (e.g., daily).
-    Deletes in batches of 1000 to avoid locking the table.
+    Called periodically by the scheduler (e.g., daily). Deletes in batches of 1000 to
+    avoid locking the table.
     """
     count = 0
     BATCH_SIZE = 1000

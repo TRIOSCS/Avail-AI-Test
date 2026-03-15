@@ -1,5 +1,5 @@
-"""
-test_buyplan_builder_guards.py — Tests for Phase 4 validation guards in buyplan_builder.py
+"""test_buyplan_builder_guards.py — Tests for Phase 4 validation guards in
+buyplan_builder.py.
 
 Covers:
 - Quote status validation (must be won or sent)
@@ -16,7 +16,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
-from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, BuyPlan
+from app.models.buy_plan import BuyPlan, BuyPlanLineStatus, BuyPlanStatus
 from app.services.buyplan_builder import build_buy_plan, generate_ai_flags
 
 # ── Helpers ────────────────────────────────────────────────────────────

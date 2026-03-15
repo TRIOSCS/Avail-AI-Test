@@ -1,5 +1,5 @@
-"""
-routers/vendor_analytics.py — Vendor offer history, confirmed offers, parts summary, and AI analysis.
+"""routers/vendor_analytics.py — Vendor offer history, confirmed offers, parts summary,
+and AI analysis.
 
 Handles vendor-level analytics: offer history from MaterialVendorHistory,
 confirmed buyer-entered offers, parts sighting summaries, and on-demand
@@ -146,7 +146,8 @@ async def get_vendor_parts_summary(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Parts this vendor has been seen with, grouped by MPN with counts and date ranges."""
+    """Parts this vendor has been seen with, grouped by MPN with counts and date
+    ranges."""
     card = db.get(VendorCard, card_id)
     if not card:
         raise HTTPException(404, "Vendor not found")
@@ -262,7 +263,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
 
 @router.post("/api/vendors/{card_id}/analyze-materials")
 async def analyze_vendor_materials(card_id: int, user: User = Depends(require_buyer), db: Session = Depends(get_db)):
-    """On-demand AI analysis of vendor's material inventory to generate brand/commodity tags."""
+    """On-demand AI analysis of vendor's material inventory to generate brand/commodity
+    tags."""
     card = db.get(VendorCard, card_id)
     if not card:
         raise HTTPException(404, "Vendor not found")

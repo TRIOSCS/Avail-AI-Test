@@ -1,5 +1,4 @@
-"""
-schemas/tags.py — Pydantic response models for AI tagging endpoints.
+"""schemas/tags.py — Pydantic response models for AI tagging endpoints.
 
 Called by: app.routers.tags, app.routers.tagging_admin
 Depends on: pydantic

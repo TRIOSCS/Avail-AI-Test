@@ -1,5 +1,4 @@
-"""
-tests/test_admin_transfer.py — Tests for Mass Account Transfer endpoints
+"""tests/test_admin_transfer.py — Tests for Mass Account Transfer endpoints.
 
 Covers GET /api/admin/transfer/preview and POST /api/admin/transfer/execute.
 

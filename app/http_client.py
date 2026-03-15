@@ -34,7 +34,10 @@ http_redirect = httpx.AsyncClient(
 
 
 async def close_clients():
-    """Shut down both shared clients. Call from app lifespan shutdown."""
+    """Shut down both shared clients.
+
+    Call from app lifespan shutdown.
+    """
     try:
         await http.aclose()
     except RuntimeError:

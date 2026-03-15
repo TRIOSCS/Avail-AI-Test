@@ -1,5 +1,4 @@
-"""
-routers/vendor_contacts.py — Vendor contact lookup, CRUD, and email metrics.
+"""routers/vendor_contacts.py — Vendor contact lookup, CRUD, and email metrics.
 
 Handles the 3-tier vendor contact waterfall (cache -> scrape -> AI),
 structured VendorContact CRUD, email metrics, and the quick add-email
@@ -564,8 +563,8 @@ async def add_email_to_card(
 ):
     """Quick-add an email to a vendor card.
 
-    Also creates a VendorContact record, extracts domain for the card,
-    and triggers background enrichment if a business domain is found.
+    Also creates a VendorContact record, extracts domain for the card, and triggers
+    background enrichment if a business domain is found.
     """
     card = get_or_create_card(payload.vendor_name, db)
 

@@ -1,5 +1,4 @@
-"""
-env.py — Alembic Migration Environment for AVAIL AI
+"""env.py — Alembic Migration Environment for AVAIL AI.
 
 Loads DATABASE_URL from app config, imports all SQLAlchemy models
 so autogenerate can detect schema changes.

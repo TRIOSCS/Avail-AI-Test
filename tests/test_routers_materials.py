@@ -1,5 +1,4 @@
-"""
-tests/test_routers_materials.py — Tests for routers/materials.py
+"""tests/test_routers_materials.py — Tests for routers/materials.py.
 
 Covers: material_card_to_dict helper, MaterialCard CRUD, enrich,
 merge, import-stock, material enrichment fields.
@@ -622,7 +621,8 @@ def test_import_stock_update_existing_mvh(client, db_session, monkeypatch):
 
 
 def test_import_stock_enrichment_triggered(client, db_session, monkeypatch):
-    """POST /api/materials/import-stock triggers enrichment for new vendor with domain."""
+    """POST /api/materials/import-stock triggers enrichment for new vendor with
+    domain."""
     task_created = []
     monkeypatch.setattr("asyncio.create_task", lambda coro: (task_created.append(True), coro.close()))
     monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: "fake-key")

@@ -1,5 +1,4 @@
-"""
-test_role_permissions.py — Role-based access control tests
+"""test_role_permissions.py — Role-based access control tests.
 
 Tests that buyer cannot access sales-gated endpoints and that sales
 CAN access buyer-gated endpoints.

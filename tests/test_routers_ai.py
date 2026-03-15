@@ -1,5 +1,4 @@
-"""
-test_routers_ai.py — Tests for AI Intelligence Layer Router
+"""test_routers_ai.py — Tests for AI Intelligence Layer Router.
 
 Tests _ai_enabled gate, _build_vendor_history helper, contact enrichment,
 prospect management, response parsing, company intel, and RFQ drafting.
@@ -450,11 +449,10 @@ def test_parse_response_not_found(ai_client):
 
 def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_requisition):
     """Sales users cannot parse responses tied to foreign requisitions."""
-    from app.models import VendorResponse
-
     from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
+    from app.models import VendorResponse
 
     vr = VendorResponse(
         requisition_id=test_requisition.id,
@@ -988,7 +986,6 @@ def test_normalize_parts_success(ai_client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["count"] == 1
-
 
 
 def test_save_parsed_offers_with_mpn_matching(ai_client, db_session, ai_test_user):

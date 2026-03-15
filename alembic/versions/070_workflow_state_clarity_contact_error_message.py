@@ -1,4 +1,4 @@
-"""workflow state clarity — contact error_message
+"""Workflow state clarity — contact error_message.
 
 Add error_message column to contacts table for persisting RFQ send failures.
 

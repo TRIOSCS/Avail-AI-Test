@@ -90,7 +90,7 @@ async def test_extracts_lead_time_fact(mock_create_entry, mock_claude):
 @pytest.mark.asyncio
 @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
 async def test_skips_non_offer_emails(mock_claude):
-    """classification='general' -> no AI call, empty list."""
+    """Classification='general' -> no AI call, empty list."""
     db = _make_db_mock()
 
     result = await extract_durable_facts(
@@ -110,7 +110,7 @@ async def test_skips_non_offer_emails(mock_claude):
 @pytest.mark.asyncio
 @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
 async def test_skips_short_body(mock_claude):
-    """body < 50 chars -> no AI call, empty list."""
+    """Body < 50 chars -> no AI call, empty list."""
     db = _make_db_mock()
 
     result = await extract_durable_facts(

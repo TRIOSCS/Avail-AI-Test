@@ -86,8 +86,8 @@ class TestTransition:
         assert test_requisition.status == "active"
 
     def test_none_actor(self, db_session, test_requisition):
-        """Transition with actor=None: ActivityLog creation may fail (NOT NULL FK),
-        but the status transition still succeeds because the exception is caught."""
+        """Transition with actor=None: ActivityLog creation may fail (NOT NULL FK), but
+        the status transition still succeeds because the exception is caught."""
         test_requisition.status = "active"
         db_session.commit()
 

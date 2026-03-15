@@ -58,7 +58,10 @@ def _score_frequency(purchase_count: int) -> int:
 
 
 def _score_margin(customer_avg_price: float | None, our_cost: float | None) -> tuple[int, float | None]:
-    """Score 0-100 based on margin potential. Returns (score, margin_pct)."""
+    """Score 0-100 based on margin potential.
+
+    Returns (score, margin_pct).
+    """
     if not customer_avg_price or not our_cost or our_cost <= 0:
         return 50, None  # Unknown margin = neutral score
     margin_pct = (customer_avg_price - our_cost) / customer_avg_price * 100
@@ -373,7 +376,10 @@ def mark_match_sent(match_id: int, user_id: int, db: Session) -> None:
 
 
 def expire_old_matches(db: Session) -> int:
-    """Expire matches older than proactive_match_expiry_days. Returns count expired."""
+    """Expire matches older than proactive_match_expiry_days.
+
+    Returns count expired.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_match_expiry_days)
     expired = (
         db.query(ProactiveMatch)

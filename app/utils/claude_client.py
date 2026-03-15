@@ -37,7 +37,10 @@ MODELS = {
 
 
 def _headers(*, cache: bool = False) -> dict:
-    """Build API headers. Enable prompt caching when static prompts are reused."""
+    """Build API headers.
+
+    Enable prompt caching when static prompts are reused.
+    """
     h = {
         "x-api-key": get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"),
         "anthropic-version": API_VERSION,
@@ -265,8 +268,8 @@ async def claude_json(
 ) -> dict | list | None:
     """Call Claude expecting JSON in free-form text. Parses response.
 
-    Fallback for cases where structured outputs aren't suitable
-    (e.g., when using web_search tool alongside JSON extraction).
+    Fallback for cases where structured outputs aren't suitable (e.g., when using
+    web_search tool alongside JSON extraction).
     """
     text = await claude_text(
         prompt,

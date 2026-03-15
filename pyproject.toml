@@ -1,3 +1,36 @@
 [tool.bandit]
 exclude_dirs = ["tests", "alembic"]
 skips = ["B101"]  # allow assert in non-test code (used in type narrowing)
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+no_strict_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+exclude = ["alembic/", "tests/"]
+
+[[tool.mypy.overrides]]
+module = [
+    "app.routers.*",
+    "app.services.*",
+    "app.connectors.*",
+    "app.jobs.*",
+    "app.schemas.*",
+    "app.utils.claude_client",
+    "app.utils.llm_router",
+    "app.utils.vendor_helpers",
+    "app.enrichment_service",
+    "app.email_service",
+    "app.scoring",
+    "app.search_service",
+    "app.startup",
+]
+ignore_errors = true
+
+[tool.docformatter]
+wrap-summaries = 88
+wrap-descriptions = 88
+recursive = true

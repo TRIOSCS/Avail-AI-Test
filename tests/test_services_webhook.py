@@ -1,5 +1,4 @@
-"""
-test_services_webhook.py — Tests for Graph webhook service.
+"""test_services_webhook.py — Tests for Graph webhook service.
 
 Covers:
 - handle_notification() with various payloads (valid, invalid, missing fields)
@@ -1069,7 +1068,8 @@ class TestEnsureAllUsersSubscribed:
 
 
 class TestValidateNotifications:
-    """Tests for validate_notifications() — timing-safe comparison + replay protection."""
+    """Tests for validate_notifications() — timing-safe comparison + replay
+    protection."""
 
     def setup_method(self):
         """Clear the replay cache before each test."""

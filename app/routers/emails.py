@@ -1,5 +1,4 @@
-"""
-routers/emails.py — Email thread viewing and reply endpoints
+"""routers/emails.py — Email thread viewing and reply endpoints.
 
 Surfaces vendor email threads on requirement and vendor detail views.
 Uses Graph API to fetch threads on demand (never stores email bodies).

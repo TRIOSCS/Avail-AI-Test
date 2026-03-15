@@ -1,4 +1,5 @@
-"""Freeform text parser — AI extracts RFQ or Offer templates from pasted customer/vendor text.
+"""Freeform text parser — AI extracts RFQ or Offer templates from pasted customer/vendor
+text.
 
 Purpose:
   Sales and buyers paste free-form text from customers (RFQ) or vendors (offers).

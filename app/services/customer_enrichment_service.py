@@ -152,8 +152,8 @@ async def enrich_customer_account(
 ) -> dict:
     """Run contact enrichment for a customer account.
 
-    Previously used Apollo, Hunter, and Lusha connectors (now removed).
-    Returns a stub result until new enrichment providers are configured.
+    Previously used Apollo, Hunter, and Lusha connectors (now removed). Returns a stub
+    result until new enrichment providers are configured.
     """
     if not settings.customer_enrichment_enabled:
         return {"error": "Customer enrichment is disabled", "contacts_added": 0}

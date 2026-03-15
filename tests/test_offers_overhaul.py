@@ -1,5 +1,5 @@
-"""Tests for Offers Tab Overhaul — changelog, approval, inline edit,
-auto-parse, quoted badge, notifications, buy plan lead_time, PO validation."""
+"""Tests for Offers Tab Overhaul — changelog, approval, inline edit, auto-parse, quoted
+badge, notifications, buy plan lead_time, PO validation."""
 
 import os
 

@@ -1,5 +1,4 @@
-"""
-logging_config.py — Centralized Logging Configuration for AVAIL AI
+"""logging_config.py — Centralized Logging Configuration for AVAIL AI.
 
 Sets up Loguru as the single logging backend. Intercepts Python's stdlib
 logging module so all existing getLogger() calls automatically route

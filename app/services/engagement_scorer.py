@@ -317,7 +317,10 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 
 
 def compute_single_vendor_score(card, db: Session) -> float | None:
-    """Compute engagement score for a single VendorCard. Returns score or None."""
+    """Compute engagement score for a single VendorCard.
+
+    Returns score or None.
+    """
     from app.models import Contact, Offer, VendorResponse
 
     norm = card.normalized_name
@@ -371,8 +374,8 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
 def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
     """Apply outbound RFQ counts from scan_sent_items to VendorCards.
 
-    Called after EmailMiner.scan_sent_items() returns vendor domain → count.
-    Increments VendorCard.total_outreach for matching vendors.
+    Called after EmailMiner.scan_sent_items() returns vendor domain → count. Increments
+    VendorCard.total_outreach for matching vendors.
     """
     from app.models import VendorCard
 

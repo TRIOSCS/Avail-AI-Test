@@ -29,9 +29,9 @@ from .base import Base
 class UnifiedScoreSnapshot(Base):
     """Monthly unified score snapshot — cross-role normalized scoring.
 
-    Combines AvailScore metrics into 5 universal categories weighted to produce
-    a single 0-100 unified score. Traders average buyer + sales categories.
-    AI blurbs (strength + improvement) are cached with 2-hour TTL.
+    Combines AvailScore metrics into 5 universal categories weighted to produce a single
+    0-100 unified score. Traders average buyer + sales categories. AI blurbs (strength +
+    improvement) are cached with 2-hour TTL.
     """
 
     __tablename__ = "unified_score_snapshot"

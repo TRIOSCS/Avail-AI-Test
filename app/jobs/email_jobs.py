@@ -703,9 +703,9 @@ _AVAIL_TAG_RE = re.compile(r"\[AVAIL-(\d+)\]")
 async def _job_scan_sent_folders():
     """Scan sent folders for all connected users.
 
-    Runs every 30 minutes. For each user with email_scan_enabled (m365_connected),
-    uses delta query on SentItems to incrementally find outbound emails.
-    Stores delta token per user in SyncState for incremental scanning.
+    Runs every 30 minutes. For each user with email_scan_enabled (m365_connected), uses
+    delta query on SentItems to incrementally find outbound emails. Stores delta token
+    per user in SyncState for incremental scanning.
     """
     from ..database import SessionLocal
     from ..models import User
@@ -764,9 +764,7 @@ async def scan_sent_folder(user, db):
 
     # Load or initialize delta token for SentItems
     folder_key = "sent_items_scan"
-    sync_state = db.query(SyncState).filter(
-        SyncState.user_id == user.id, SyncState.folder == folder_key
-    ).first()
+    sync_state = db.query(SyncState).filter(SyncState.user_id == user.id, SyncState.folder == folder_key).first()
     delta_token = sync_state.delta_token if sync_state else None
 
     try:
@@ -800,12 +798,14 @@ async def scan_sent_folder(user, db):
             sync_state.delta_token = new_token
             sync_state.last_sync_at = datetime.now(timezone.utc)
         else:
-            db.add(SyncState(
-                user_id=user.id,
-                folder=folder_key,
-                delta_token=new_token,
-                last_sync_at=datetime.now(timezone.utc),
-            ))
+            db.add(
+                SyncState(
+                    user_id=user.id,
+                    folder=folder_key,
+                    delta_token=new_token,
+                    last_sync_at=datetime.now(timezone.utc),
+                )
+            )
         db.flush()
 
     # Process each sent message
@@ -817,10 +817,14 @@ async def scan_sent_folder(user, db):
         sent_dt = msg.get("sentDateTime")
 
         # Skip if we already logged this message (dedup by external_id)
-        existing = db.query(ActivityLog).filter(
-            ActivityLog.external_id == msg_id,
-            ActivityLog.user_id == user.id,
-        ).first()
+        existing = (
+            db.query(ActivityLog)
+            .filter(
+                ActivityLog.external_id == msg_id,
+                ActivityLog.user_id == user.id,
+            )
+            .first()
+        )
         if existing:
             continue
 
@@ -872,7 +876,9 @@ async def scan_sent_folder(user, db):
         if created_logs:
             logger.info(f"Sent folder scan [{user.email}]: {len(created_logs)} outbound emails logged")
         if attachment_queue:
-            logger.info(f"Sent folder scan [{user.email}]: {len(attachment_queue)} messages queued for attachment parsing")
+            logger.info(
+                f"Sent folder scan [{user.email}]: {len(attachment_queue)} messages queued for attachment parsing"
+            )
     except Exception as e:
         logger.error(f"Sent folder scan commit failed for {user.email}: {e}")
         db.rollback()
@@ -911,10 +917,12 @@ async def detect_attachments(gc, message_id: str) -> list[dict]:
         if is_inline and content_type.startswith("image/"):
             continue
 
-        file_attachments.append({
-            "name": att.get("name", ""),
-            "content_type": content_type,
-            "size": att.get("size", 0),
-        })
+        file_attachments.append(
+            {
+                "name": att.get("name", ""),
+                "content_type": content_type,
+                "size": att.get("size", 0),
+            }
+        )
 
     return file_attachments

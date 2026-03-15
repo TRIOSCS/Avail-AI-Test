@@ -1,5 +1,4 @@
-"""
-tests/test_rate_limiting.py — Tests for rate limiting behavior
+"""tests/test_rate_limiting.py — Tests for rate limiting behavior.
 
 Covers: slowapi rate limiter configuration, per-IP limiting on
 search endpoints, rate limit headers, and fallback behavior.

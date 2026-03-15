@@ -1,5 +1,4 @@
-"""
-startup.py — Runtime Database Operations (Idempotent)
+"""startup.py — Runtime Database Operations (Idempotent)
 
 Schema DDL (columns, indexes, constraints, extensions) lives in Alembic migrations.
 This file handles PostgreSQL-specific runtime operations that must run every boot:
@@ -27,7 +26,10 @@ def _norm_key(raw):
 
 
 def run_startup_migrations() -> None:
-    """Execute all idempotent startup operations. Safe to call on every app boot."""
+    """Execute all idempotent startup operations.
+
+    Safe to call on every app boot.
+    """
     import os
 
     if os.environ.get("TESTING"):
@@ -129,7 +131,8 @@ def _seed_vinod_user(db=None) -> None:
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
-    """Execute a single SQL statement (data fix / runtime operation) with rollback on failure."""
+    """Execute a single SQL statement (data fix / runtime operation) with rollback on
+    failure."""
     try:
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
@@ -142,7 +145,8 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
 
 
 def _create_fts_triggers(conn) -> None:
-    """Create trigger functions and triggers for FTS on vendor_cards and material_cards."""
+    """Create trigger functions and triggers for FTS on vendor_cards and
+    material_cards."""
     _exec(
         conn,
         """

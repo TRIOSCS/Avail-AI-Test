@@ -81,7 +81,10 @@ async def enrich_material_card(mpn: str, db: Session) -> dict | None:
 
 
 async def _try_connector_config(config: dict, mpn: str) -> dict | None:
-    """Try a single connector config. Returns enrichment data or None."""
+    """Try a single connector config.
+
+    Returns enrichment data or None.
+    """
     # Check credentials
     cred_values = []
     for source_name, env_var in config["creds"]:
@@ -373,7 +376,8 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
 
 
 async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
-    """Validate AI-classified tags via Nexar bulk GraphQL queries (fast, batch-friendly).
+    """Validate AI-classified tags via Nexar bulk GraphQL queries (fast, batch-
+    friendly).
 
     Nexar's aggregate query returns manufacturer for 20 MPNs at once, much faster
     than individual connector searches. Tags confirmed get 0.95 confidence.

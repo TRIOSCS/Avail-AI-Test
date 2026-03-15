@@ -385,7 +385,7 @@ class TestExtractRow:
         assert result["lead_time"] == "2 weeks"
 
     def test_extract_row_packaging(self):
-        """packaging field is normalized."""
+        """Packaging field is normalized."""
         mapping = {0: "mpn", 1: "packaging"}
         row = ["LM317T", "Reel"]
 
@@ -412,7 +412,7 @@ class TestExtractRow:
         assert "currency" in result
 
     def test_extract_row_moq(self):
-        """moq field is normalized."""
+        """Moq field is normalized."""
         mapping = {0: "mpn", 1: "moq"}
         row = ["LM317T", "100"]
 

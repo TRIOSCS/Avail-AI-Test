@@ -133,7 +133,7 @@ pytest -v
 
 ## 5. Migrations and one-time fixes
 
-**Correct migration sequence (single head):**  
+**Correct migration sequence (single head):**
 `… → 017_proactive_matches_cph → 018_missing_orm_cols → 019_activity_req_channel → 020 → … → 047`
 
 - **018** already adds `site_contacts.contact_status` (and other ORM columns). There is no separate “019 contact_status” migration in the repo.
@@ -156,7 +156,7 @@ pytest -v
    docker compose -f docker-compose.yml -f docker-compose.local.yml up --build
    ```
 
-Optional: run the same SQL from the script:  
+Optional: run the same SQL from the script:
 `docker compose -f docker-compose.yml -f docker-compose.local.yml exec -T db psql -U availai -d availai < scripts/fix_alembic_stuck_019.sql`
 
 ---
@@ -177,4 +177,3 @@ docker compose -f docker-compose.yml -f docker-compose.local.yml logs -f
 ```
 
 (Previously “Section 5” — renumbered to 6.)
-

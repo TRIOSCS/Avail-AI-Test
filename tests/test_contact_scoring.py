@@ -1,5 +1,4 @@
-"""
-test_contact_scoring.py — Tests for contact relationship scoring algorithm.
+"""test_contact_scoring.py — Tests for contact relationship scoring algorithm.
 
 Tests the pure scoring functions and trend computation.
 No DB needed for compute_contact_relationship_score (pure function).

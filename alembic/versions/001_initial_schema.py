@@ -21,8 +21,8 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Create all tables from SQLAlchemy models.
 
-    Uses metadata.create_all with checkfirst=True so it's safe to run
-    even if some tables already exist (idempotent).
+    Uses metadata.create_all with checkfirst=True so it's safe to run even if some
+    tables already exist (idempotent).
     """
     from app.models import Base
 
@@ -30,7 +30,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop all tables. ⚠️ DESTRUCTIVE — only for dev/test environments."""
+    """Drop all tables.
+
+    ⚠️ DESTRUCTIVE — only for dev/test environments.
+    """
     from app.models import Base
 
     Base.metadata.drop_all(bind=op.get_bind())

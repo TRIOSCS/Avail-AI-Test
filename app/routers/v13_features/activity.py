@@ -1,5 +1,4 @@
-"""
-activity.py — Activity-related v1.3.0 routes
+"""activity.py — Activity-related v1.3.0 routes.
 
 Graph webhooks, activity logging (email, call, note), unmatched queue,
 activity attribution/dismissal, and activity-status indicators.

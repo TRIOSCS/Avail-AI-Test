@@ -1,5 +1,5 @@
-"""
-test_vendor_email_lookup.py — Tests for vendor email lookup service and inquiry router.
+"""test_vendor_email_lookup.py — Tests for vendor email lookup service and inquiry
+router.
 
 Covers: find_vendors_for_parts, build_inquiry_groups, API endpoints.
 """

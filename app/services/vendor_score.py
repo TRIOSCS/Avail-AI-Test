@@ -74,7 +74,10 @@ def compute_vendor_score(
 
 
 def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
-    """Compute vendor score for one vendor. Returns same dict as compute_vendor_score."""
+    """Compute vendor score for one vendor.
+
+    Returns same dict as compute_vendor_score.
+    """
     from app.models import Offer, VendorCard, VendorReview
 
     card = db.get(VendorCard, vendor_card_id)

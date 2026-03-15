@@ -791,7 +791,8 @@ class TestRefreshBlurbs:
         assert snap.ai_blurb_improvement == "Keep this too"
 
     def test_generate_blurb_exception_caught(self, db_session, test_user):
-        """Verify _refresh_blurbs catches exception from _generate_blurb, snap unchanged."""
+        """Verify _refresh_blurbs catches exception from _generate_blurb, snap
+        unchanged."""
         from app.services.unified_score_service import _refresh_blurbs
 
         month = date(2026, 2, 1)

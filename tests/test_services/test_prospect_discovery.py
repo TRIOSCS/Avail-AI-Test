@@ -1,8 +1,7 @@
 """Tests for discovery services — Explorium and email mining.
 
 All external API calls are mocked. Tests cover normalization, dedup, scoring
-integration, rate limiting, batch orchestration, graceful degradation, and
-edge cases.
+integration, rate limiting, batch orchestration, graceful degradation, and edge cases.
 """
 
 import os
@@ -258,6 +257,7 @@ class TestExploriumBatch:
         assert all(isinstance(r, ProspectAccountCreate) for r in results)
         assert results[0].domain == "raytheon-sensors.com"
         assert results[0].discovery_source == "explorium"
+
 
 # ── Email Mining Tests ───────────────────────────────────────────────
 

@@ -42,8 +42,8 @@ _seen_notifications: dict[str, float] = {}  # key -> timestamp
 async def create_mail_subscription(user: User, db: Session) -> GraphSubscription | None:
     """Create a Graph webhook subscription for a user's mailbox.
 
-    Subscribes to /me/messages with changeType=created so we get notified
-    on both sent and received emails.
+    Subscribes to /me/messages with changeType=created so we get notified on both sent
+    and received emails.
     """
     from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient

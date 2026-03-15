@@ -28,7 +28,8 @@ from .base import Base
 
 
 class CustomerPartHistory(Base):
-    """One record per (company, material_card, source) — upserted on each transaction."""
+    """One record per (company, material_card, source) — upserted on each
+    transaction."""
 
     __tablename__ = "customer_part_history"
 

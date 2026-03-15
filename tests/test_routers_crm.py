@@ -1,5 +1,4 @@
-"""
-tests/test_routers_crm.py — Tests for CRM Router Helpers + Endpoints
+"""tests/test_routers_crm.py — Tests for CRM Router Helpers + Endpoints.
 
 Tests quote number generation, last-quoted-price lookup,
 quote serialization, margin calculation, and CRM endpoints.
@@ -600,7 +599,7 @@ class TestQuotes:
 class TestBuyPlans:
     def _make_v3_plan(self, db_session, test_requisition, test_quote, test_offer, test_user):
         """Create a BuyPlan + BuyPlanLine for read endpoint tests."""
-        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlan
+        from app.models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus
 
         plan = BuyPlan(
             requisition_id=test_requisition.id,
@@ -641,7 +640,7 @@ class TestBuyPlans:
     def test_submit_buy_plan_returns_404(self, client, db_session, test_requisition, test_customer_site, test_offer):
         """V1 buy plan submission is deprecated and always returns 404."""
         resp = client.post(
-            f"/api/quotes/1/buy-plan",
+            "/api/quotes/1/buy-plan",
             json={"offer_ids": [test_offer.id]},
         )
         assert resp.status_code == 404
@@ -651,9 +650,7 @@ class TestBuyPlans:
         resp = client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 200
 
-    def test_cancel_buy_plan_returns_404(
-        self, client, db_session, test_requisition, test_quote, test_offer, test_user
-    ):
+    def test_cancel_buy_plan_returns_404(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
         """V1 buy plan cancel is deprecated and always returns 404."""
         bp = self._make_v3_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
@@ -892,7 +889,8 @@ class TestCompaniesAdditional:
     def test_list_companies_revenue_90d_with_won_quote(
         self, client, db_session, test_company, test_customer_site, test_user
     ):
-        """revenue_90d reflects sum of Quote.subtotal for won requisitions in last 90 days."""
+        """revenue_90d reflects sum of Quote.subtotal for won requisitions in last 90
+        days."""
         req = Requisition(
             name="REQ-WON-1",
             customer_site_id=test_customer_site.id,
@@ -1202,7 +1200,8 @@ class TestSiteOwnershipGuard:
     def test_add_site_triggers_bg_enrich(self, client, db_session, test_company, monkeypatch):
         """Adding a site to a company with domain triggers background enrichment.
 
-        Captures the coroutine from create_task and runs it to cover the _bg_enrich body.
+        Captures the coroutine from create_task and runs it to cover the _bg_enrich
+        body.
         """
         import asyncio
 
@@ -2073,8 +2072,10 @@ class TestQuotesAdditional:
 @pytest.fixture(autouse=False)
 def naive_crm_datetime(monkeypatch):
     """Monkeypatch datetime in crm sub-modules to return naive UTC datetimes.
+
     SQLite strips timezone info, so comparisons with datetime.now(timezone.utc) fail.
-    This fixture makes datetime.now() return naive utcnow() instead."""
+    This fixture makes datetime.now() return naive utcnow() instead.
+    """
     from app.routers.crm import buy_plans, offers, quotes
 
     _real_datetime = datetime
@@ -2091,7 +2092,7 @@ def naive_crm_datetime(monkeypatch):
 class TestBuyPlansAdditional:
     def _make_bp(self, db_session, test_requisition, test_quote, test_offer, test_user, **kwargs):
         """Create a BuyPlan + BuyPlanLine for read endpoint tests."""
-        from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlan
+        from app.models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus
 
         # Map V1 status names to V3 for backwards compat in tests
         v1_to_v3 = {
@@ -2154,8 +2155,11 @@ class TestBuyPlansAdditional:
     def test_get_buy_plan_access_denied(
         self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, sales_user
     ):
-        """V4 get-single-plan doesn't restrict by submitter; sales filter only applies to list.
-        So fetching another user's plan returns 200."""
+        """V4 get-single-plan doesn't restrict by submitter; sales filter only applies
+        to list.
+
+        So fetching another user's plan returns 200.
+        """
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = sales_client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 200
@@ -2881,7 +2885,8 @@ class TestCustomerImportErrors:
         assert data["created_companies"] >= 1
 
     def test_import_row_exception_captured(self, admin_client, db_session):
-        """Exception during row processing -> error captured in errors list (lines 326-327)."""
+        """Exception during row processing -> error captured in errors list (lines
+        326-327)."""
         original_init = Company.__init__
 
         def _raising_init(self, *args, **kwargs):
@@ -2915,7 +2920,8 @@ class TestEnrichCustomerWaterfallException:
     def test_waterfall_exception_caught(
         self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, monkeypatch
     ):
-        """Customer waterfall enrichment exception is caught and doesn't break the request."""
+        """Customer waterfall enrichment exception is caught and doesn't break the
+        request."""
         from app.config import settings
 
         monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
@@ -3421,7 +3427,7 @@ class TestCompanyTags:
         assert comp["commodity_tags"] == ["Server"]
 
     def test_list_companies_tag_filter(self, client, db_session, test_company):
-        """tag query param filters companies by brand/commodity tags."""
+        """Tag query param filters companies by brand/commodity tags."""
         test_company.brand_tags = ["IBM", "HP"]
         test_company.commodity_tags = ["Server"]
         db_session.commit()
@@ -3433,7 +3439,7 @@ class TestCompanyTags:
         assert "Acme Electronics" in names
 
     def test_list_companies_tag_filter_no_match(self, client, db_session, test_company):
-        """tag filter with non-matching value returns empty."""
+        """Tag filter with non-matching value returns empty."""
         test_company.brand_tags = ["IBM"]
         db_session.commit()
 
@@ -3442,7 +3448,7 @@ class TestCompanyTags:
         assert resp.json()["items"] == []
 
     def test_list_companies_tag_filter_commodity(self, client, db_session, test_company):
-        """tag filter matches commodity_tags too."""
+        """Tag filter matches commodity_tags too."""
         test_company.commodity_tags = ["Networking"]
         db_session.commit()
 
@@ -3610,7 +3616,8 @@ class TestQuoteWonPurchaseHistory:
     def test_quote_won_purchase_history_exception(
         self, client, db_session, test_requisition, test_customer_site, test_offer, test_quote
     ):
-        """Exception in purchase history recording doesn't break quote result (lines 583-584)."""
+        """Exception in purchase history recording doesn't break quote result (lines
+        583-584)."""
         test_quote.requisition_id = test_requisition.id
         test_quote.customer_site_id = test_customer_site.id
         test_quote.status = "sent"
@@ -3630,7 +3637,8 @@ class TestQuoteWonPurchaseHistory:
         assert resp.status_code == 200
 
     def test_quote_won_no_customer_site(self, client, db_session, test_requisition, test_quote):
-        """Req with no customer_site_id -> early return in _record_quote_won_history (line 560-561)."""
+        """Req with no customer_site_id -> early return in _record_quote_won_history
+        (line 560-561)."""
         test_quote.requisition_id = test_requisition.id
         test_quote.status = "sent"
         test_requisition.customer_site_id = None
@@ -3650,7 +3658,8 @@ class TestOfferWonPurchaseHistory:
     def test_offer_status_update_purchase_history_error(
         self, client, db_session, test_offer, test_requisition, test_customer_site, test_material_card
     ):
-        """Exception in purchase history on offer won doesn't break status update (lines 796-797)."""
+        """Exception in purchase history on offer won doesn't break status update (lines
+        796-797)."""
         test_offer.requisition_id = test_requisition.id
         test_offer.material_card_id = test_material_card.id
         test_requisition.customer_site_id = test_customer_site.id
@@ -3685,7 +3694,8 @@ class TestOfferWonPurchaseHistory:
 
 class TestOfferCompetitiveNotif:
     def test_create_offer_competitive_updates_existing_notif(self, client, db_session, test_requisition, monkeypatch):
-        """Existing competitive_quote notification gets updated, not duplicated (lines 399-400)."""
+        """Existing competitive_quote notification gets updated, not duplicated (lines
+        399-400)."""
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         test_requisition.status = "active"
         db_session.commit()

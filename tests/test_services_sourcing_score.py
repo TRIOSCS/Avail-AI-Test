@@ -69,7 +69,7 @@ class TestSigmoid:
         assert result < 0.01
 
     def test_zero_input(self):
-        """x=0 with midpoint=2 should be below 0.5."""
+        """X=0 with midpoint=2 should be below 0.5."""
         result = _sigmoid(0.0, midpoint=2.0, steepness=1.0)
         expected = 1 / (1 + math.exp(-1.0 * (0.0 - 2.0)))
         assert result == pytest.approx(expected)
@@ -196,8 +196,8 @@ class TestScoreRequirement:
             assert len(parts[1]) <= 1
 
     def test_only_sightings_partial_score(self):
-        """Having only sightings (no offers, rfqs, etc.) gives a higher score
-        than zero activity but still below green threshold."""
+        """Having only sightings (no offers, rfqs, etc.) gives a higher score than zero
+        activity but still below green threshold."""
         sc_none = score_requirement(
             sighting_count=0,
             offer_count=0,
@@ -408,7 +408,7 @@ class TestBuildSignals:
         assert s["emails"]["val"] == 4
 
     def test_pct_values_are_integers(self):
-        """pct values should be rounded integers."""
+        """Pct values should be rounded integers."""
         s = _build_signals(
             sighting_count=2,
             offer_count=1,

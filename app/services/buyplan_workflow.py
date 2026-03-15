@@ -96,8 +96,8 @@ def approve_buy_plan(
 ) -> BuyPlan:
     """Manager approves or rejects a pending buy plan.
 
-    Approve → active (lines go to buyers). Reject → draft (back to salesperson).
-    Line overrides let manager swap vendors on specific lines.
+    Approve → active (lines go to buyers). Reject → draft (back to salesperson). Line
+    overrides let manager swap vendors on specific lines.
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
@@ -143,8 +143,8 @@ def verify_so(
 ) -> BuyPlan:
     """Ops verifies (or rejects/halts) the Sales Order in Acctivate.
 
-    Approve → so_status=approved. Reject → so_status=rejected.
-    Halt → plan.status=halted (stops everything).
+    Approve → so_status=approved. Reject → so_status=rejected. Halt → plan.status=halted
+    (stops everything).
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
@@ -231,8 +231,8 @@ def verify_po(
 ) -> BuyPlanLine:
     """Ops verifies a PO was properly entered.
 
-    Approve → line verified. Reject → back to awaiting_po.
-    After approval, checks if all lines are done → auto-complete.
+    Approve → line verified. Reject → back to awaiting_po. After approval, checks if all
+    lines are done → auto-complete.
     """
     plan = db.get(BuyPlan, plan_id)
     if not plan:
@@ -461,8 +461,8 @@ def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
 def _should_auto_approve(plan: BuyPlan) -> bool:
     """Decide whether a buy plan should be auto-approved.
 
-    Auto-approves when total cost < threshold AND no critical AI flags.
-    Used by both submit_buy_plan() and resubmit_buy_plan().
+    Auto-approves when total cost < threshold AND no critical AI flags. Used by both
+    submit_buy_plan() and resubmit_buy_plan().
     """
     total = float(plan.total_cost or 0)
     has_critical = any(
@@ -789,8 +789,8 @@ Generated: {now.strftime("%Y-%m-%d %H:%M UTC")}
 async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
     """Scan buyer's Outlook sent folder for PO emails matching each line.
 
-    For each line with a po_number, searches Graph API for emails containing
-    that PO number. Returns list of verification results per line.
+    For each line with a po_number, searches Graph API for emails containing that PO
+    number. Returns list of verification results per line.
     """
     from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient
@@ -803,13 +803,23 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
 
         # Get buyer's Graph token
         if not line.buyer_id:
-            results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "skipped": True, "reason": "no_buyer"})
+            results.append(
+                {"line_id": line.id, "po_number": line.po_number, "found": False, "skipped": True, "reason": "no_buyer"}
+            )
             continue
 
         try:
             token = await get_valid_token()
             if not token:
-                results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "skipped": True, "reason": "no_token"})
+                results.append(
+                    {
+                        "line_id": line.id,
+                        "po_number": line.po_number,
+                        "found": False,
+                        "skipped": True,
+                        "reason": "no_token",
+                    }
+                )
                 continue
 
             client = GraphClient(token)
@@ -824,19 +834,21 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
                 line.status = BuyPlanLineStatus.verified.value
                 line.po_verified_at = datetime.now(timezone.utc)
 
-            results.append({
-                "line_id": line.id,
-                "po_number": line.po_number,
-                "found": found,
-                "message_count": len(messages),
-            })
+            results.append(
+                {
+                    "line_id": line.id,
+                    "po_number": line.po_number,
+                    "found": found,
+                    "message_count": len(messages),
+                }
+            )
         except Exception as e:
             logger.error(f"PO verification failed for line {line.id}: {e}")
             results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
 
     # If all lines with POs are now verified, auto-complete the plan
-    po_lines = [l for l in plan.lines if l.po_number]
-    if po_lines and all(l.status == BuyPlanLineStatus.verified.value for l in po_lines):
+    po_lines = [line for line in plan.lines if line.po_number]
+    if po_lines and all(line.status == BuyPlanLineStatus.verified.value for line in po_lines):
         plan.status = BuyPlanStatus.completed.value
         plan.completed_at = datetime.now(timezone.utc)
 

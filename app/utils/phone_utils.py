@@ -14,8 +14,8 @@ import re
 def format_phone_e164(raw: str) -> str | None:
     """Normalize a phone string to E.164 format.
 
-    Returns None if unparseable (too short, letters, empty).
-    Assumes US (+1) for 10-digit numbers.
+    Returns None if unparseable (too short, letters, empty). Assumes US (+1) for
+    10-digit numbers.
     """
     if not raw:
         return None

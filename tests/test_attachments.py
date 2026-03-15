@@ -1,5 +1,4 @@
-"""
-tests/test_attachments.py — Tests for Requisition & Requirement Attachments
+"""tests/test_attachments.py — Tests for Requisition & Requirement Attachments.
 
 Covers: list, upload, delete, not-found, too-large, and OneDrive error handling.
 

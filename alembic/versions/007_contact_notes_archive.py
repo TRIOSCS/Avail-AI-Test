@@ -1,4 +1,5 @@
-"""Contact note log (site_contact_id on activity_log) + archive contacts (is_active on site_contacts).
+"""Contact note log (site_contact_id on activity_log) + archive contacts (is_active on
+site_contacts).
 
 Revision ID: 007_contact_notes_archive
 Revises: 006_offers_overhaul

@@ -1,4 +1,4 @@
-"""test_jobs_prospecting.py — Tests for prospecting background jobs
+"""test_jobs_prospecting.py — Tests for prospecting background jobs.
 
 Covers: _job_pool_health_report, _job_discover_prospects, _job_enrich_pool,
 _job_find_contacts, _job_refresh_scores, _job_expire_and_resurface.

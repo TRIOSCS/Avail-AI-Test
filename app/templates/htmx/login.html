@@ -20,6 +20,53 @@
         <svg class="h-5 w-5" viewBox="0 0 21 21"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>
         Sign in with Microsoft
       </a>
+
+      {% if password_login_enabled %}
+      <div class="mt-6 border-t border-gray-700 pt-6">
+        <p class="text-xs text-gray-500 text-center mb-4">Or sign in with email</p>
+        <form id="password-login-form" class="space-y-4">
+          <div>
+            <label for="email" class="block text-sm font-medium text-gray-300 mb-1">Email</label>
+            <input type="email" id="email" name="email" required
+                   class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="you@example.com">
+          </div>
+          <div>
+            <label for="password" class="block text-sm font-medium text-gray-300 mb-1">Password</label>
+            <input type="password" id="password" name="password" required
+                   class="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                   placeholder="Password">
+          </div>
+          <div id="login-error" class="hidden text-sm text-red-400 text-center"></div>
+          <button type="submit"
+                  class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-500 transition-colors">
+            Sign In
+          </button>
+        </form>
+      </div>
+      <script>
+        document.getElementById('password-login-form').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const errEl = document.getElementById('login-error');
+          errEl.classList.add('hidden');
+          const form = new FormData(e.target);
+          try {
+            const res = await fetch('/auth/login', { method: 'POST', body: form });
+            const data = await res.json();
+            if (data.ok) {
+              window.location.href = '/v2';
+            } else {
+              errEl.textContent = data.error || 'Invalid credentials';
+              errEl.classList.remove('hidden');
+            }
+          } catch {
+            errEl.textContent = 'Login failed. Please try again.';
+            errEl.classList.remove('hidden');
+          }
+        });
+      </script>
+      {% endif %}
+
       <p class="mt-4 text-xs text-gray-500 text-center">Trio Supply Chain Solutions</p>
     </div>
   </div>

@@ -1,5 +1,5 @@
-"""Unify error_reports into trouble_tickets — add columns for screenshot,
-browser context, AI prompt, admin notes, and source tracking.
+"""Unify error_reports into trouble_tickets — add columns for screenshot, browser
+context, AI prompt, admin notes, and source tracking.
 
 Migrates existing error_reports data into trouble_tickets. Keeps
 error_reports table for rollback safety (dropped in a future migration).

@@ -1,5 +1,4 @@
-"""
-test_schemas_sources.py — Tests for app/schemas/sources.py
+"""test_schemas_sources.py — Tests for app/schemas/sources.py.
 
 Called by: pytest
 Depends on: app/schemas/sources.py

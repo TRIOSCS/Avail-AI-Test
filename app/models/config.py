@@ -43,7 +43,10 @@ class ApiSource(Base):
 
 
 class SystemConfig(Base):
-    """Key-value runtime configuration. Survives restarts, auditable."""
+    """Key-value runtime configuration.
+
+    Survives restarts, auditable.
+    """
 
     __tablename__ = "system_config"
     id = Column(Integer, primary_key=True)

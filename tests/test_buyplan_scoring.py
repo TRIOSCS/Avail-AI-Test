@@ -81,7 +81,8 @@ class TestCountryToRegion:
         assert _country_to_region("") is None
 
     def test_known_country(self):
-        """If routing_maps.json has country mappings, a valid country returns its region."""
+        """If routing_maps.json has country mappings, a valid country returns its
+        region."""
         # This depends on actual routing maps data - just verify it doesn't crash
         result = _country_to_region("United States")
         # Result is either a region string or None depending on data

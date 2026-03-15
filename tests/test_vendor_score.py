@@ -1,5 +1,4 @@
-"""
-test_vendor_score.py — Tests for vendor_score.py
+"""test_vendor_score.py — Tests for vendor_score.py.
 
 Tests pure computation (compute_vendor_score, _calc_stage_points) and
 DB-backed scoring (compute_single_vendor_score).
@@ -383,8 +382,9 @@ def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
 
 def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
     """Create a BuyPlan with BuyPlanLine rows referencing offer_ids."""
-    v4_status = {"approved": "active", "po_confirmed": "active",
-                 "po_entered": "active", "complete": "completed"}.get(status, status)
+    v4_status = {"approved": "active", "po_confirmed": "active", "po_entered": "active", "complete": "completed"}.get(
+        status, status
+    )
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,

@@ -1,5 +1,4 @@
-"""
-schemas/rfq.py — Pydantic models for RFQ endpoints
+"""schemas/rfq.py — Pydantic models for RFQ endpoints.
 
 Validates batch RFQ sends, phone call logging, RFQ preparation,
 and follow-up email bodies.

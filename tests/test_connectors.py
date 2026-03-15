@@ -734,7 +734,8 @@ class TestOEMSecretsConnector:
         assert results == []
 
     def test_parse_v3_api_format(self):
-        """V3 API uses nested distributor dict with distributor_name, quantity_in_stock, prices dict."""
+        """V3 API uses nested distributor dict with distributor_name, quantity_in_stock,
+        prices dict."""
         c = self._make_connector()
         data = {
             "version": "3.0",

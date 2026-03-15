@@ -43,7 +43,8 @@ def register_knowledge_jobs(scheduler, settings):
 
 
 async def _job_refresh_insights():
-    """Re-generate insights for recently active reqs, vendors, companies, MPNs, and pipeline."""
+    """Re-generate insights for recently active reqs, vendors, companies, MPNs, and
+    pipeline."""
     from sqlalchemy import func
 
     from app.database import SessionLocal
@@ -168,7 +169,10 @@ async def _job_send_knowledge_digests():
 
 
 async def _job_expire_stale():
-    """Log count of expired entries for monitoring. Expiry is handled at query time."""
+    """Log count of expired entries for monitoring.
+
+    Expiry is handled at query time.
+    """
     from app.database import SessionLocal
     from app.models.knowledge import KnowledgeEntry
 

@@ -1,5 +1,4 @@
-"""
-tests/test_contract.py — OpenAPI contract tests via Schemathesis
+"""tests/test_contract.py — OpenAPI contract tests via Schemathesis.
 
 Validates that all API responses match their declared response_model schemas.
 Uses schemathesis.from_asgi() to auto-generate tests from the OpenAPI spec.

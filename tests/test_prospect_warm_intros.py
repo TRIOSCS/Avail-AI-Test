@@ -309,7 +309,8 @@ def test_warm_intro_sighting_only(db_session):
 
 
 def test_one_liner_warm_intro_hot_no_contacts(db_session):
-    """Hot warm intro with no contacts returns 'Active vendor relationship' one-liner."""
+    """Hot warm intro with no contacts returns 'Active vendor relationship' one-
+    liner."""
     p = _make_prospect(db_session)
     warm = {"has_warm_intro": True, "warmth": "hot", "contacts": []}
     result = generate_one_liner(p, warm)
@@ -348,7 +349,8 @@ def test_one_liner_warm_intro_internal_contacts(db_session):
 
 
 def test_one_liner_warm_intro_fallback_prior_email(db_session):
-    """Warm intro with no contacts, no sightings, no internal contacts returns fallback."""
+    """Warm intro with no contacts, no sightings, no internal contacts returns
+    fallback."""
     p = _make_prospect(db_session)
     warm = {
         "has_warm_intro": True,

@@ -1,4 +1,5 @@
-"""Tests for Phase 10 features — QuoteLine, ReactivationSignal, commodity routing, search dedup.
+"""Tests for Phase 10 features — QuoteLine, ReactivationSignal, commodity routing,
+search dedup.
 
 Covers:
 - QuoteLine creation alongside Quote JSON line_items

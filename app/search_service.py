@@ -72,7 +72,10 @@ _search_redis_attempted = False
 
 
 def _get_search_redis():
-    """Lazy-init Redis for search caching. Returns client or None."""
+    """Lazy-init Redis for search caching.
+
+    Returns client or None.
+    """
     global _search_redis, _search_redis_attempted
     if _search_redis_attempted:
         return _search_redis
@@ -176,9 +179,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
     fresh_task = _fetch_fresh(pns, db)
     affinity_task = _fetch_affinity()
-    (fresh, source_stats), affinity_matches = await asyncio.gather(
-        fresh_task, affinity_task
-    )
+    (fresh, source_stats), affinity_matches = await asyncio.gather(fresh_task, affinity_task)
 
     # 2. Score + save — only replace sightings from connectors that succeeded
     succeeded_sources = {stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")}
@@ -222,28 +223,31 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             continue
         live_vendors.add(vendor_lower)
         conf_pct = round(match.get("confidence", 0) * 100)
-        results.append({
-            "vendor_name": match.get("vendor_name", ""),
-            "vendor_id": match.get("vendor_id"),
-            "mpn": pns[0],
-            "mpn_matched": pns[0],
-            "source_type": "vendor_affinity",
-            "source_badge": "Vendor Match",
-            "is_historical": False,
-            "is_material_history": False,
-            "is_affinity": True,
-            "confidence_pct": conf_pct,
-            "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
-            "reasoning": match.get("reasoning", ""),
-            "qty_available": None,
-            "unit_price": None,
-            "score": max(5, match.get("confidence", 0) * 20),
-            "cross_references": [],
-        })
+        results.append(
+            {
+                "vendor_name": match.get("vendor_name", ""),
+                "vendor_id": match.get("vendor_id"),
+                "mpn": pns[0],
+                "mpn_matched": pns[0],
+                "source_type": "vendor_affinity",
+                "source_badge": "Vendor Match",
+                "is_historical": False,
+                "is_material_history": False,
+                "is_affinity": True,
+                "confidence_pct": conf_pct,
+                "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
+                "reasoning": match.get("reasoning", ""),
+                "qty_available": None,
+                "unit_price": None,
+                "score": max(5, match.get("confidence", 0) * 20),
+                "cross_references": [],
+            }
+        )
     if affinity_matches:
         kept = sum(1 for r in results if r.get("is_affinity"))
-        logger.info("Req {} ({}): merged {} affinity suggestions ({} after dedup)",
-                     req.id, pns[0], len(affinity_matches), kept)
+        logger.info(
+            "Req {} ({}): merged {} affinity suggestions ({} after dedup)", req.id, pns[0], len(affinity_matches), kept
+        )
 
     # 6. Cross-references: group results by material_card_id to show alternate MPNs
     card_mpns: dict[int, set[str]] = {}
@@ -278,7 +282,8 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     results = [
         r
         for r in results
-        if r.get("is_affinity") or not is_weak_lead(
+        if r.get("is_affinity")
+        or not is_weak_lead(
             score=r.get("score", 0),
             is_authorized=r.get("is_authorized", False),
             has_price=r.get("unit_price") is not None,
@@ -540,10 +545,9 @@ def should_trigger_ai_search(
 ) -> bool:
     """Decide whether to fire the AI web search connector.
 
-    Returns True when API results are thin, prices are above target,
-    the part is obsolete, sightings are stale, or the user asked explicitly.
-    This avoids wasting AI credits when conventional connectors already
-    returned rich, actionable data.
+    Returns True when API results are thin, prices are above target, the part is
+    obsolete, sightings are stale, or the user asked explicitly. This avoids wasting AI
+    credits when conventional connectors already returned rich, actionable data.
     """
     if manual_trigger:
         return True
@@ -562,8 +566,10 @@ def should_trigger_ai_search(
 
 
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
-    """Returns (results, source_stats) where source_stats is a list of
-    {"source": name, "results": count, "ms": elapsed, "error": str|None, "status": "ok"|"error"|"skipped"|"disabled"}.
+    """Returns (results, source_stats) where source_stats is a list of {"source": name,
+    "results": count, "ms": elapsed, "error": str|None, "status":
+
+    "ok"|"error"|"skipped"|"disabled"}.
     """
     # Check which sources are disabled by the user
     disabled_sources = set()
@@ -636,13 +642,19 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     ai_connector = None
     if "ai_live_web" in disabled_sources:
         source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web", "results": 0, "ms": 0,
-            "error": None, "status": "disabled",
+            "source": "ai_live_web",
+            "results": 0,
+            "ms": 0,
+            "error": None,
+            "status": "disabled",
         }
     elif not has_ai_live:
         source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web", "results": 0, "ms": 0,
-            "error": "No API key configured", "status": "skipped",
+            "source": "ai_live_web",
+            "results": 0,
+            "ms": 0,
+            "error": "No API key configured",
+            "status": "skipped",
         }
     else:
         ai_connector = AIWebSearchConnector(ai_key)
@@ -668,7 +680,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     stats_updates = []  # (source_name, hit_count, elapsed_ms, error_str|None)
 
     async def _run_one(conn, pn):
-        """Run a single connector for a single PN. No DB access here."""
+        """Run a single connector for a single PN.
+
+        No DB access here.
+        """
         source_name = _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__)
         start = time.time()
         try:
@@ -763,10 +778,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:
         api_result_count = len(out)
-        has_price_below_target = any(
-            r.get("unit_price") is not None and r["unit_price"] > 0
-            for r in out
-        )
+        has_price_below_target = any(r.get("unit_price") is not None and r["unit_price"] > 0 for r in out)
         # Check obsolete status from MaterialCard if available
         is_obsolete = False
         for pn in pns:
@@ -777,16 +789,13 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
         # Months since last sighting for primary PN
         months_since_last_sighting = None
-        latest_sighting = (
-            db.query(Sighting)
-            .filter(Sighting.mpn.in_(pns))
-            .order_by(Sighting.created_at.desc())
-            .first()
-        )
+        latest_sighting = db.query(Sighting).filter(Sighting.mpn.in_(pns)).order_by(Sighting.created_at.desc()).first()
         if latest_sighting and latest_sighting.created_at:
-            delta = datetime.now(timezone.utc) - latest_sighting.created_at.replace(
-                tzinfo=timezone.utc
-            ) if latest_sighting.created_at.tzinfo is None else datetime.now(timezone.utc) - latest_sighting.created_at
+            delta = (
+                datetime.now(timezone.utc) - latest_sighting.created_at.replace(tzinfo=timezone.utc)
+                if latest_sighting.created_at.tzinfo is None
+                else datetime.now(timezone.utc) - latest_sighting.created_at
+            )
             months_since_last_sighting = delta.days / 30.0
 
         trigger = should_trigger_ai_search(
@@ -834,8 +843,11 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 months_since_last_sighting,
             )
             source_stats_map["ai_live_web"] = {
-                "source": "ai_live_web", "results": 0, "ms": 0,
-                "error": None, "status": "skipped",
+                "source": "ai_live_web",
+                "results": 0,
+                "ms": 0,
+                "error": None,
+                "status": "skipped",
             }
 
     # Build source_stats from stats_updates (connectors that actually ran)
@@ -1129,7 +1141,8 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
 
 
 def _get_material_history(material_card_ids: list[int], fresh_vendors: set, db: Session) -> list[dict]:
-    """All vendor touchpoints from material cards, excluding vendors with fresh sightings."""
+    """All vendor touchpoints from material cards, excluding vendors with fresh
+    sightings."""
     if not material_card_ids:
         return []
 
@@ -1349,7 +1362,10 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
 
 
 def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: datetime) -> MaterialCard | None:
-    """Upsert material card + link sightings. Raises on error — caller handles rollback."""
+    """Upsert material card + link sightings.
+
+    Raises on error — caller handles rollback.
+    """
     norm = normalize_mpn_key(pn)
     if not norm:
         return None

@@ -27,7 +27,10 @@ WEAK_LEAD_THRESHOLD = 30.0
 
 
 def score_sighting(vendor_score: float | None, is_authorized: bool) -> float:
-    """Score a sighting based on the vendor's unified score. Returns 0-100."""
+    """Score a sighting based on the vendor's unified score.
+
+    Returns 0-100.
+    """
     if is_authorized:
         return 100.0
     if vendor_score is None:
@@ -50,10 +53,11 @@ def score_sighting_v2(
 ) -> tuple[float, dict]:
     """Multi-factor sighting score with explainable components.
 
-    Missing data is penalized (25/100) rather than treated as neutral (50),
-    because a buyer can't act on a lead without price or quantity info.
+    Missing data is penalized (25/100) rather than treated as neutral (50), because a
+    buyer can't act on a lead without price or quantity info.
 
-    Returns (total_score, {"trust": .., "price": .., "qty": .., "freshness": .., "completeness": ..}).
+    Returns (total_score, {"trust": .., "price": .., "qty": .., "freshness": ..,
+    "completeness": ..}).
     """
     if is_authorized:
         trust = 95.0
@@ -105,9 +109,9 @@ def classify_lead(
 ) -> str:
     """Classify a lead as 'strong', 'moderate', or 'weak' from a buyer's perspective.
 
-    Strong = buyer should act on this now (has actionable data).
-    Moderate = worth reviewing but missing something.
-    Weak = noise — unlikely to result in a successful purchase.
+    Strong = buyer should act on this now (has actionable data). Moderate = worth
+    reviewing but missing something. Weak = noise — unlikely to result in a successful
+    purchase.
     """
     if is_authorized and has_price:
         return "strong"
@@ -201,9 +205,8 @@ def is_weak_lead(
 ) -> bool:
     """True if this lead is too weak to show buyers. Prevents noise.
 
-    Authorized distributor results are never filtered out.
-    T1/T2 results are kept if they have any data.
-    Everything else needs to clear the score threshold.
+    Authorized distributor results are never filtered out. T1/T2 results are kept if
+    they have any data. Everything else needs to clear the score threshold.
     """
     if is_authorized:
         return False
@@ -222,6 +225,7 @@ def is_weak_lead(
 # ---------------------------------------------------------------------------
 # Unified confidence scoring
 # ---------------------------------------------------------------------------
+
 
 def confidence_color(pct: int) -> str:
     """Map a confidence percentage to a traffic-light color string.
@@ -303,7 +307,9 @@ def score_unified(
         pct = max(0, min(100, pct))
         logger.debug(
             "score_unified historical: base={} boost={} pct={}",
-            round(base, 1), boost, pct,
+            round(base, 1),
+            boost,
+            pct,
         )
         return {
             "score": round(raw, 1),

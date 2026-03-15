@@ -1,5 +1,5 @@
-"""
-Vendor Affinity Service — finds vendors likely to supply a given MPN.
+"""Vendor Affinity Service — finds vendors likely to supply a given MPN.
+
 What: Three-level affinity matching (L1: same manufacturer, L2: same commodity, L3: AI classification)
 Called by: app/search_service.py during search fan-out
 Depends on: app.models (MaterialCard, Sighting, MaterialVendorHistory, EntityTag, Tag, VendorCard), Claude API for L3
@@ -23,7 +23,8 @@ from app.models import (
 
 
 def find_affinity_vendors_l1(mpn: str, db: Session) -> list[dict]:
-    """Find vendors who supply other MPNs from the same manufacturer as the target MPN."""
+    """Find vendors who supply other MPNs from the same manufacturer as the target
+    MPN."""
     normalized = mpn.strip().lower()
     card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == normalized).first()
     if not card or not card.manufacturer:
@@ -73,9 +74,7 @@ def find_affinity_vendors_l1(mpn: str, db: Session) -> list[dict]:
     return results
 
 
-def find_affinity_vendors_l2(
-    mpn: str, db: Session, exclude_vendors: set[str] | None = None
-) -> list[dict]:
+def find_affinity_vendors_l2(mpn: str, db: Session, exclude_vendors: set[str] | None = None) -> list[dict]:
     """Find vendors that share commodity tags with the target MPN's vendor cards."""
     normalized = mpn.strip().lower()
     card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == normalized).first()
@@ -154,10 +153,9 @@ def find_affinity_vendors_l2(
     return results
 
 
-def find_affinity_vendors_l3(
-    mpn: str, manufacturer: str | None, db: Session
-) -> list[dict]:
-    """Use Claude to classify MPN into a category, then find vendors supplying that category."""
+def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) -> list[dict]:
+    """Use Claude to classify MPN into a category, then find vendors supplying that
+    category."""
     api_key = settings.anthropic_api_key
     if not api_key:
         logger.debug("L3: no anthropic_api_key configured, skipping")
@@ -234,7 +232,8 @@ def _classify_mpn(mpn: str, manufacturer: str | None, api_key: str) -> str | Non
 
 
 def score_affinity_matches(mpn: str, matches: list[dict]) -> list[dict]:
-    """Assign confidence scores and reasoning to affinity matches using deterministic scoring."""
+    """Assign confidence scores and reasoning to affinity matches using deterministic
+    scoring."""
     if not matches:
         return []
 
@@ -247,9 +246,7 @@ def score_affinity_matches(mpn: str, matches: list[dict]) -> list[dict]:
         if level == 1:
             confidence = 0.50 + 0.025 * extra
             confidence = min(confidence, 0.75)
-            reason = (
-                f"Vendor supplied {mpn_count} other MPN(s) from {match.get('manufacturer', 'same manufacturer')}"
-            )
+            reason = f"Vendor supplied {mpn_count} other MPN(s) from {match.get('manufacturer', 'same manufacturer')}"
         elif level == 2:
             confidence = 0.40 + 0.02 * extra
             confidence = min(confidence, 0.60)
@@ -277,9 +274,7 @@ def find_vendor_affinity(mpn: str, db: Session) -> list[dict]:
     combined = l1 + l2
 
     if len(combined) < 5:
-        card = db.query(MaterialCard).filter(
-            MaterialCard.normalized_mpn == mpn.strip().lower()
-        ).first()
+        card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == mpn.strip().lower()).first()
         manufacturer = card.manufacturer if card else None
         l3_exclude = {m["vendor_name"].lower() for m in combined}
         l3 = find_affinity_vendors_l3(mpn, manufacturer, db)

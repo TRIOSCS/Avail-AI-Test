@@ -1,5 +1,4 @@
-"""
-proactive.py — Proactive Offers API
+"""proactive.py — Proactive Offers API.
 
 Endpoints for viewing matches, sending proactive offer emails,
 converting wins, and viewing the scorecard.
@@ -104,7 +103,10 @@ async def add_do_not_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Permanently suppress MPNs for a customer company. Also auto-dismisses open matches."""
+    """Permanently suppress MPNs for a customer company.
+
+    Also auto-dismisses open matches.
+    """
     if not body.items:
         raise HTTPException(400, "No items provided")
 
@@ -294,7 +296,10 @@ async def proactive_scorecard(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Proactive offer scorecard. Admins can see all, sales see own."""
+    """Proactive offer scorecard.
+
+    Admins can see all, sales see own.
+    """
     from ..dependencies import is_admin as _is_admin
     from ..services.proactive_service import get_scorecard
 

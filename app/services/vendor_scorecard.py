@@ -45,10 +45,9 @@ def compute_vendor_scorecard(
 ) -> dict:
     """Compute all 6 metrics for a single vendor over the rolling window.
 
-    When called from compute_all_vendor_scorecards(), pre-loaded lookup sets
-    are passed in so we avoid re-querying all quotes/buy-plans per vendor.
-    When called individually (single vendor endpoint), the sets are loaded
-    on demand from the database.
+    When called from compute_all_vendor_scorecards(), pre-loaded lookup sets are passed
+    in so we avoid re-querying all quotes/buy-plans per vendor. When called individually
+    (single vendor endpoint), the sets are loaded on demand from the database.
     """
     vc = db.get(VendorCard, vendor_card_id)
     if not vc:

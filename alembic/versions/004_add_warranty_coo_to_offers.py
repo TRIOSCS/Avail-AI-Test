@@ -1,4 +1,4 @@
-"""Add warranty and country_of_origin columns to offers
+"""Add warranty and country_of_origin columns to offers.
 
 Revision ID: 004_warranty_coo
 Revises: 003_perf_fk_indexes

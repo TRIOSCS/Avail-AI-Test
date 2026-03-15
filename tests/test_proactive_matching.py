@@ -824,7 +824,8 @@ def test_find_matches_sighting_no_fallback_offer(db_session):
 
 
 def test_run_proactive_scan_dedup_and_sightings(db_session):
-    """Batch scan deduplicates same material_card_id across offers and scans sightings."""
+    """Batch scan deduplicates same material_card_id across offers and scans
+    sightings."""
     import app.services.proactive_matching as pm
 
     data = _setup_scenario(db_session)

@@ -1,7 +1,7 @@
 """Tests for company_merge_service.py — extracted company merge logic.
 
-Verifies that merge moves sites, combines tags/notes/fields, reassigns
-FK references, and deletes the removed company while preserving all data.
+Verifies that merge moves sites, combines tags/notes/fields, reassigns FK references,
+and deletes the removed company while preserving all data.
 """
 
 import pytest

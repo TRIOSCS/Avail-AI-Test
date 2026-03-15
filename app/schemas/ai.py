@@ -1,5 +1,4 @@
-"""
-schemas/ai.py — Pydantic models for AI-powered endpoints
+"""schemas/ai.py — Pydantic models for AI-powered endpoints.
 
 Validates prospect contact finder, offer saving, and RFQ drafting requests.
 

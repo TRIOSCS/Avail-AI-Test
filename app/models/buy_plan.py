@@ -1,5 +1,4 @@
-"""
-buy_plan.py — Buy Plan V4 Data Models (unified from V1 + V3)
+"""buy_plan.py — Buy Plan V4 Data Models (unified from V1 + V3)
 
 Purpose: Structured buy plan tables with per-line status tracking, split lines,
          buyer assignment, PO confirmation, and ops verification.
@@ -98,8 +97,8 @@ class AIFlagSeverity(str, enum.Enum):
 class BuyPlan(Base):
     """Buy plan with structured lines, dual approval tracks, and AI analysis.
 
-    Unified V4 model replacing both V1 (JSON line_items) and V3 (intermediate).
-    Table name kept as buy_plans_v3 for backward compatibility with existing data.
+    Unified V4 model replacing both V1 (JSON line_items) and V3 (intermediate). Table
+    name kept as buy_plans_v3 for backward compatibility with existing data.
     """
 
     __tablename__ = "buy_plans_v3"
@@ -278,8 +277,8 @@ class BuyPlanLine(Base):
 class VerificationGroupMember(Base):
     """Maps users to the ops verification group.
 
-    The verification group handles SO and PO verification.
-    First member to act wins — no double-verification needed.
+    The verification group handles SO and PO verification. First member to act wins — no
+    double-verification needed.
     """
 
     __tablename__ = "verification_group_members"

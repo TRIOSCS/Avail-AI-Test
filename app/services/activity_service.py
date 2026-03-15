@@ -24,8 +24,8 @@ from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     """Match an email address to a company or vendor card.
 
-    Returns {"type": "company"|"vendor", "id": int, "name": str} or None.
-    Checks customer sites first, then vendor contacts, then vendor card email lists.
+    Returns {"type": "company"|"vendor", "id": int, "name": str} or None. Checks
+    customer sites first, then vendor contacts, then vendor card email lists.
     """
     if not email_addr:
         return None
@@ -361,7 +361,10 @@ def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | No
 
 
 def days_since_last_activity(company_id: int, db: Session) -> int | None:
-    """Days since last activity on a company. None if no activity ever."""
+    """Days since last activity on a company.
+
+    None if no activity ever.
+    """
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
     if not latest:
         return None
@@ -621,7 +624,10 @@ def get_last_call(vendor_card_id: int, db: Session) -> dict | None:
 
 
 def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | None:
-    """Days since last activity on a vendor card. None if no activity ever."""
+    """Days since last activity on a vendor card.
+
+    None if no activity ever.
+    """
     latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.vendor_card_id == vendor_card_id).scalar()
     if not latest:
         return None
@@ -630,7 +636,8 @@ def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | N
 
 
 def _update_vendor_contact_stats(match: dict, db: Session):
-    """Increment interaction_count and set last_interaction_at on matched VendorContact."""
+    """Increment interaction_count and set last_interaction_at on matched
+    VendorContact."""
     vc_id = match.get("vendor_contact_id")
     if vc_id:
         _increment_vendor_contact(vc_id, db)

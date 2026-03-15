@@ -1,4 +1,5 @@
-"""AI Part Number Normalizer — Intelligently match variant part numbers to canonical form.
+"""AI Part Number Normalizer — Intelligently match variant part numbers to canonical
+form.
 
 Purpose:
   Use LLM knowledge of electronic component naming conventions to normalize
@@ -189,7 +190,10 @@ def _fallback(raw: str) -> dict:
 
 
 def clear_cache() -> int:
-    """Clear the normalization cache. Returns number of entries cleared."""
+    """Clear the normalization cache.
+
+    Returns number of entries cleared.
+    """
     count = len(_cache)
     _cache.clear()
     return count

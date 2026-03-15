@@ -30,7 +30,7 @@ _NOW_NAIVE = datetime(2026, 3, 1, 12, 0, 0)
 
 
 class _FakeDatetime(datetime):
-    """datetime subclass that returns a naive 'now' for the service."""
+    """Datetime subclass that returns a naive 'now' for the service."""
 
     @classmethod
     def now(cls, tz=None):
@@ -145,7 +145,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_minimal_company(self, mock_claude, db_session):
-        """Company with no sites/contacts/reqs/activities -> builds minimal prompt, calls claude_json."""
+        """Company with no sites/contacts/reqs/activities -> builds minimal prompt,
+        calls claude_json."""
         mock_claude.return_value = {
             "situation": "Minimal data",
             "development": "No pipeline",
@@ -286,7 +287,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_successful_summary(self, mock_claude, db_session):
-        """claude_json returns valid dict -> returns formatted result with str-coerced values."""
+        """claude_json returns valid dict -> returns formatted result with str-coerced
+        values."""
         mock_claude.return_value = {
             "situation": 123,  # non-string to test str() coercion
             "development": None,  # test str(None)
@@ -306,7 +308,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_successful_summary_missing_keys(self, mock_claude, db_session):
-        """claude_json returns dict with missing keys -> defaults to empty string/list."""
+        """claude_json returns dict with missing keys -> defaults to empty
+        string/list."""
         mock_claude.return_value = {"situation": "only this"}
         co = _make_company(db_session)
         db_session.commit()
@@ -356,7 +359,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_activities_with_no_created_at(self, mock_claude, db_session):
-        """Activity with created_at=None -> last_act.created_at branch skipped (line 164)."""
+        """Activity with created_at=None -> last_act.created_at branch skipped (line
+        164)."""
         mock_claude.return_value = {"situation": "ok", "development": "ok", "next_steps": []}
 
         owner = _make_user(db_session)
@@ -410,7 +414,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_contact_without_title_not_primary(self, mock_claude, db_session):
-        """Contact with no title and not primary -> name only, no parens or [PRIMARY]."""
+        """Contact with no title and not primary -> name only, no parens or
+        [PRIMARY]."""
         mock_claude.return_value = {"situation": "ok", "development": "ok", "next_steps": []}
 
         co = _make_company(db_session)
@@ -499,7 +504,8 @@ class TestAccountSummaryService:
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_no_brand_or_commodity_tags(self, mock_claude, db_session):
-        """Company with empty brand_tags/commodity_tags -> no 'Brand focus'/'Commodity focus' in prompt."""
+        """Company with empty brand_tags/commodity_tags -> no 'Brand focus'/'Commodity
+        focus' in prompt."""
         mock_claude.return_value = {"situation": "ok", "development": "ok", "next_steps": []}
 
         co = _make_company(db_session, brand_tags=[], commodity_tags=[])

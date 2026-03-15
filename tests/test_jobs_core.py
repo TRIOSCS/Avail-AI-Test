@@ -1,4 +1,5 @@
-"""test_jobs_core.py — Tests for core background jobs (auto-archive, token refresh, batch results, inbox scan, webhooks)
+"""test_jobs_core.py — Tests for core background jobs (auto-archive, token refresh,
+batch results, inbox scan, webhooks)
 
 Tests cover: _job_auto_archive, _job_token_refresh, _job_batch_results, _job_inbox_scan,
 _job_webhook_subscriptions, plus get_valid_token, refresh_user_token, and _refresh_access_token

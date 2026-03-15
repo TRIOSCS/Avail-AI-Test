@@ -1,5 +1,4 @@
-"""
-status_machine.py — State machine validation for domain entity status transitions.
+"""status_machine.py — State machine validation for domain entity status transitions.
 
 Purpose: Prevents invalid status transitions on offers, quotes, requisitions,
          and buy plans. Enforces valid state transitions and provides clear error

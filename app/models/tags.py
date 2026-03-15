@@ -73,7 +73,8 @@ class MaterialTag(Base):
 
 
 class EntityTag(Base):
-    """Propagated tag on a vendor/customer entity with interaction counts and visibility."""
+    """Propagated tag on a vendor/customer entity with interaction counts and
+    visibility."""
 
     __tablename__ = "entity_tags"
     id = Column(Integer, primary_key=True)

@@ -1,5 +1,4 @@
-"""
-test_routers_v13.py — Tests for v1.3 Feature Routes
+"""test_routers_v13.py — Tests for v1.3 Feature Routes.
 
 Step 1: _activity_to_dict serializer + Activity API endpoints
 Step 2-4: Sales/ownership, routing, buyer profiles (separate steps)
@@ -154,7 +153,8 @@ def test_get_user_activities(client, test_activity):
 
 
 def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
+    """Phone number that doesn't match any known contact — still logged (unmatched
+    queue)."""
     resp = client.post(
         "/api/activities/call",
         json={

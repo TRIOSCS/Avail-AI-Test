@@ -1,5 +1,4 @@
-"""
-test_routers_rfq.py — Tests for RFQ, Follow-ups & Vendor Enrichment Router
+"""test_routers_rfq.py — Tests for RFQ, Follow-ups & Vendor Enrichment Router.
 
 Tests the vendor card enrichment filtering logic: garbage vendor names,
 blacklisted vendors, and summary cache building.
@@ -162,8 +161,8 @@ def _make_contact(
 ):
     """Helper to create a Contact record.
 
-    Uses naive UTC datetimes for SQLite compatibility (SQLite strips tzinfo,
-    and the router does aware-vs-naive datetime subtraction).
+    Uses naive UTC datetimes for SQLite compatibility (SQLite strips tzinfo, and the
+    router does aware-vs-naive datetime subtraction).
     """
     c = Contact(
         requisition_id=requisition.id,
@@ -380,7 +379,7 @@ def test_update_vendor_response_status_rejects_invalid_status(client, db_session
 
 
 def test_rfq_prepare_vendor_data(client, db_session, test_requisition, test_vendor_card):
-    """rfq-prepare returns vendor card data for known vendors."""
+    """Rfq-prepare returns vendor card data for known vendors."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/rfq-prepare",
         json={"vendors": [{"vendor_name": "Arrow Electronics"}]},
@@ -396,7 +395,7 @@ def test_rfq_prepare_vendor_data(client, db_session, test_requisition, test_vend
 
 
 def test_rfq_prepare_unknown_vendor(client, test_requisition):
-    """rfq-prepare for unknown vendor returns needs_lookup=True."""
+    """Rfq-prepare for unknown vendor returns needs_lookup=True."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/rfq-prepare",
         json={"vendors": [{"vendor_name": "Never Heard Of Inc"}]},
@@ -1108,7 +1107,7 @@ def test_get_activity_contact_details_fields(
 
 
 def test_rfq_prepare_not_found(client):
-    """rfq-prepare returns 404 for nonexistent requisition."""
+    """Rfq-prepare returns 404 for nonexistent requisition."""
     resp = client.post(
         "/api/requisitions/99999/rfq-prepare",
         json={"vendors": [{"vendor_name": "Arrow"}]},
@@ -1117,7 +1116,7 @@ def test_rfq_prepare_not_found(client):
 
 
 def test_rfq_prepare_exhaustion_map(client, db_session, test_user, test_requisition, test_vendor_card):
-    """rfq-prepare shows already_asked parts from previous contacts."""
+    """Rfq-prepare shows already_asked parts from previous contacts."""
     _make_contact(
         db_session,
         test_requisition,
@@ -1140,7 +1139,7 @@ def test_rfq_prepare_exhaustion_map(client, db_session, test_user, test_requisit
 
 
 def test_rfq_prepare_returns_all_parts(client, test_requisition):
-    """rfq-prepare returns all parts from requisition requirements."""
+    """Rfq-prepare returns all parts from requisition requirements."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/rfq-prepare",
         json={"vendors": []},
@@ -1151,7 +1150,7 @@ def test_rfq_prepare_returns_all_parts(client, test_requisition):
 
 
 def test_rfq_prepare_auto_lookup(client, db_session, test_user, test_requisition):
-    """rfq-prepare auto-looks up contacts for vendors with needs_lookup=True."""
+    """Rfq-prepare auto-looks up contacts for vendors with needs_lookup=True."""
     mock_contacts = [
         {"email": "found@newvendor.com", "phone": "+1-555-9999", "source": "apollo"},
     ]
@@ -1176,7 +1175,7 @@ def test_rfq_prepare_auto_lookup(client, db_session, test_user, test_requisition
 
 
 def test_rfq_prepare_auto_lookup_failure(client, db_session, test_user, test_requisition):
-    """rfq-prepare handles auto-lookup failure gracefully."""
+    """Rfq-prepare handles auto-lookup failure gracefully."""
     with patch(
         "app.enrichment_service.find_suggested_contacts",
         new_callable=AsyncMock,
@@ -1194,7 +1193,7 @@ def test_rfq_prepare_auto_lookup_failure(client, db_session, test_user, test_req
 
 
 def test_rfq_prepare_empty_vendors(client, test_requisition):
-    """rfq-prepare with empty vendors list returns empty results."""
+    """Rfq-prepare with empty vendors list returns empty results."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/rfq-prepare",
         json={"vendors": []},
@@ -1205,7 +1204,7 @@ def test_rfq_prepare_empty_vendors(client, test_requisition):
 
 
 def test_rfq_prepare_vendor_without_emails(client, db_session, test_user, test_requisition):
-    """rfq-prepare for vendor card without emails shows needs_lookup=True."""
+    """Rfq-prepare for vendor card without emails shows needs_lookup=True."""
     card = VendorCard(
         normalized_name="no email vendor",
         display_name="No Email Vendor",
@@ -1238,7 +1237,7 @@ def test_rfq_prepare_vendor_without_emails(client, db_session, test_user, test_r
 
 
 def test_rfq_prepare_past_contact_emails(client, db_session, test_user, test_requisition):
-    """rfq-prepare uses emails from past RFQ contacts when VendorCard has no emails."""
+    """Rfq-prepare uses emails from past RFQ contacts when VendorCard has no emails."""
     # Create a second requisition with a contact for the same vendor
     other_req = Requisition(
         name="Other Req",
@@ -1278,7 +1277,8 @@ def test_rfq_prepare_past_contact_emails(client, db_session, test_user, test_req
 
 
 def test_rfq_prepare_past_contacts_exclude_current_req(client, db_session, test_user, test_requisition):
-    """rfq-prepare past_contacts does NOT include contacts from the current requisition."""
+    """Rfq-prepare past_contacts does NOT include contacts from the current
+    requisition."""
     # Contact on the CURRENT requisition — should be excluded from past_contacts
     _make_contact(
         db_session,
@@ -1310,7 +1310,8 @@ def test_rfq_prepare_past_contacts_exclude_current_req(client, db_session, test_
 
 
 def test_rfq_prepare_timeout_leaves_needs_lookup(client, db_session, test_user, test_requisition):
-    """rfq-prepare gracefully handles timeout — vendor left as needs_lookup for client."""
+    """Rfq-prepare gracefully handles timeout — vendor left as needs_lookup for
+    client."""
     import asyncio
 
     with patch(
@@ -1335,7 +1336,7 @@ def test_rfq_prepare_timeout_leaves_needs_lookup(client, db_session, test_user, 
 
 
 def test_cross_req_history_returned(client, db_session, test_user, test_requisition):
-    """rfq-prepare returns past_contacts from OTHER requisitions for context."""
+    """Rfq-prepare returns past_contacts from OTHER requisitions for context."""
     other_req = Requisition(
         name="Cross Req Test",
         created_by=test_user.id,
@@ -1377,7 +1378,7 @@ def test_cross_req_history_returned(client, db_session, test_user, test_requisit
 
 
 def test_cross_req_history_excludes_current_req(client, db_session, test_user, test_requisition):
-    """rfq-prepare past_contacts excludes contacts from the CURRENT requisition."""
+    """Rfq-prepare past_contacts excludes contacts from the CURRENT requisition."""
     # Only a contact on the current req — no cross-req history
     _make_contact(
         db_session,

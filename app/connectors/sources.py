@@ -160,6 +160,7 @@ def _parse_retry_after(response: httpx.Response) -> float:
     # No header or unparseable — default to 5s + jitter
     return 5.0 + random.uniform(0, 2)
 
+
 class NexarConnector(BaseConnector):
     """Nexar/Octopart API — full seller data via GraphQL or REST v4."""
 
@@ -264,8 +265,8 @@ class NexarConnector(BaseConnector):
     async def _rest_search(self, part_number: str) -> list[dict] | None:
         """Try Octopart REST v4 /parts/search — returns full seller data.
 
-        Returns None if the REST API key is missing or the endpoint fails,
-        so the caller can fall back to the aggregate GraphQL query.
+        Returns None if the REST API key is missing or the endpoint fails, so the caller
+        can fall back to the aggregate GraphQL query.
         """
         if not self.octopart_api_key:
             return None

@@ -850,8 +850,8 @@ async def browse_onedrive(
 def _record_offer_won_history(db: Session, offer: Offer) -> None:
     """Feed customer_part_history when an offer is marked as won.
 
-    Resolves the company via offer → requisition → customer_site → company.
-    Errors are logged but never block the offer update flow.
+    Resolves the company via offer → requisition → customer_site → company. Errors are
+    logged but never block the offer update flow.
     """
     if not offer.material_card_id:
         return

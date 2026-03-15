@@ -1,5 +1,4 @@
-"""
-test_v13_activities.py — Activity endpoint tests (v1.3.0)
+"""test_v13_activities.py — Activity endpoint tests (v1.3.0)
 
 Tests the 5 activity-related routes in v13_features router:
 GET /api/companies/{id}/activities

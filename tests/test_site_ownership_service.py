@@ -1,5 +1,4 @@
-"""
-tests/test_site_ownership_service.py — Site ownership service unit tests.
+"""tests/test_site_ownership_service.py — Site ownership service unit tests.
 
 Tests: get_open_pool_sites, claim_site, run_site_ownership_sweep, get_my_sites, get_sites_at_risk.
 """

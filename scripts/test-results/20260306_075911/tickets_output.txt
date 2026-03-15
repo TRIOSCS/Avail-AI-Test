@@ -1,4 +1,4 @@
-The browser keeps getting `SIGKILL`ed - another agent's MCP instance is killing our Chrome because they share the user data dir. Browser UI testing is not possible in this environment with another agent running concurrently. 
+The browser keeps getting `SIGKILL`ed - another agent's MCP instance is killing our Chrome because they share the user data dir. Browser UI testing is not possible in this environment with another agent running concurrently.
 
 Let me summarize the API-based test results.
 

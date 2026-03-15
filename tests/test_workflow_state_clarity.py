@@ -1,11 +1,12 @@
-"""Tests for workflow state clarity features — RFQ failures, retry endpoint, buy plan resubmission."""
+"""Tests for workflow state clarity features — RFQ failures, retry endpoint, buy plan
+resubmission."""
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models.buy_plan import BuyPlanStatus, BuyPlan
+from app.models.buy_plan import BuyPlan, BuyPlanStatus
 from app.models.offers import Contact
 
 

@@ -1,5 +1,4 @@
-"""
-test_free_text_parser.py — Tests for AI free-text RFQ/Offer parsing
+"""test_free_text_parser.py — Tests for AI free-text RFQ/Offer parsing.
 
 Tests the parsing service, schemas, and router endpoints for the
 free-text paste → AI parse → review → save flow.

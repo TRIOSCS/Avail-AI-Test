@@ -1,5 +1,4 @@
-"""
-tests/test_routers_vendor_analytics.py — Tests for routers/vendor_analytics.py
+"""tests/test_routers_vendor_analytics.py — Tests for routers/vendor_analytics.py.
 
 Covers: offer-history, confirmed-offers, parts-summary, analyze-materials,
 _vendor_parts_summary_query helper.

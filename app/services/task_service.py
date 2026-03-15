@@ -37,8 +37,8 @@ def create_task(
 ) -> RequisitionTask:
     """Create a task on a requisition.
 
-    For manual tasks, assigned_to_id and due_at are required and
-    due_at must be >= 24 hours from now (enforced by schema).
+    For manual tasks, assigned_to_id and due_at are required and due_at must be >= 24
+    hours from now (enforced by schema).
     """
     # Belt-and-suspenders 24h check for manual tasks (schema also validates)
     if source == "manual" and due_at:
@@ -145,7 +145,10 @@ def get_task(db: Session, task_id: int) -> RequisitionTask | None:
 
 
 def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
-    """Update task fields. Returns None if not found."""
+    """Update task fields.
+
+    Returns None if not found.
+    """
     task = db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
     if not task:
         return None
@@ -164,7 +167,10 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
 
 
 def update_task_status(db: Session, task_id: int, status: str) -> RequisitionTask | None:
-    """Quick status change (drag-drop). Returns None if not found."""
+    """Quick status change (drag-drop).
+
+    Returns None if not found.
+    """
     return update_task(db, task_id, status=status)
 
 
@@ -176,8 +182,8 @@ def complete_task(
 ) -> RequisitionTask | None:
     """Complete a task. Only the assignee can complete it.
 
-    Returns the updated task, or None if not found.
-    Raises PermissionError if the caller is not the assignee.
+    Returns the updated task, or None if not found. Raises PermissionError if the caller
+    is not the assignee.
     """
     task = db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
     if not task:
@@ -208,7 +214,10 @@ def get_waiting_on_tasks(db: Session, user_id: int) -> list[RequisitionTask]:
 
 
 def delete_task(db: Session, task_id: int) -> bool:
-    """Delete a task. Returns True if deleted."""
+    """Delete a task.
+
+    Returns True if deleted.
+    """
     task = db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
     if not task:
         return False
@@ -233,7 +242,8 @@ def auto_create_task(
     assigned_to_id: int | None = None,
     due_at: datetime | None = None,
 ) -> RequisitionTask | None:
-    """Create a system-generated task, skipping if a matching source_ref already exists."""
+    """Create a system-generated task, skipping if a matching source_ref already
+    exists."""
     existing = (
         db.query(RequisitionTask)
         .filter(
@@ -308,10 +318,9 @@ def on_offer_received(db: Session, requisition_id: int, vendor_name: str, mpn: s
     )
 
 
-def on_email_offer_parsed(
-    db: Session, requisition_id: int, vendor_name: str, mpn: str, offer_id: int
-):
-    """Auto-generate 'Review email offer' task when email intelligence parses an offer."""
+def on_email_offer_parsed(db: Session, requisition_id: int, vendor_name: str, mpn: str, offer_id: int):
+    """Auto-generate 'Review email offer' task when email intelligence parses an
+    offer."""
     auto_create_task(
         db,
         requisition_id=requisition_id,
@@ -342,9 +351,7 @@ def on_buy_plan_assigned(
     )
 
 
-def on_bid_due_soon(
-    db: Session, requisition_id: int, deadline: str, req_name: str
-):
+def on_bid_due_soon(db: Session, requisition_id: int, deadline: str, req_name: str):
     """Auto-generate 'Bid due' alert task for a requisition approaching deadline."""
     auto_create_task(
         db,
@@ -421,7 +428,10 @@ Return JSON array matching input order:
 
 
 async def score_tasks_with_ai(db: Session, tasks: list[RequisitionTask]) -> None:
-    """Use AI to score task priority and set risk flags. Updates DB in place."""
+    """Use AI to score task priority and set risk flags.
+
+    Updates DB in place.
+    """
     if not tasks:
         return
 
@@ -501,7 +511,9 @@ def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
         t.ai_priority_score = compute_simple_priority(t)
         # Simple risk flags — handle naive datetimes from SQLite
         due = t.due_at.replace(tzinfo=timezone.utc) if t.due_at and not t.due_at.tzinfo else t.due_at
-        created = t.created_at.replace(tzinfo=timezone.utc) if t.created_at and not t.created_at.tzinfo else t.created_at
+        created = (
+            t.created_at.replace(tzinfo=timezone.utc) if t.created_at and not t.created_at.tzinfo else t.created_at
+        )
         if due and due < now:
             t.ai_risk_flag = "Overdue"
         elif due and (due - now).days <= 1:

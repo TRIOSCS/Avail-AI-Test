@@ -37,8 +37,8 @@ def transition_requirement(
 ) -> bool:
     """Move a requirement to a new sourcing status.
 
-    Returns True if status changed, False if already at target status.
-    Raises ValueError for illegal transitions.
+    Returns True if status changed, False if already at target status. Raises ValueError
+    for illegal transitions.
     """
     old_status = requirement.sourcing_status or "open"
     new_val = new_status.value if isinstance(new_status, RequirementSourcingStatus) else new_status
@@ -127,8 +127,8 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
 def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> bool:
     """Buyer claims a requisition for sourcing.
 
-    Returns True if claim was set, False if already claimed by this buyer.
-    Raises ValueError if already claimed by someone else.
+    Returns True if claim was set, False if already claimed by this buyer. Raises
+    ValueError if already claimed by someone else.
     """
     if requisition.claimed_by_id == buyer.id:
         return False

@@ -1,5 +1,4 @@
-"""
-routers/sources.py — Data Source Management & Email Mining Intelligence
+"""routers/sources.py — Data Source Management & Email Mining Intelligence.
 
 Manages API source configuration (list, test, toggle) and email mining
 endpoints (inbox scan, outbound scan, engagement scoring, attachment parsing).
@@ -49,7 +48,9 @@ router = APIRouter()
 
 def _get_connector_for_source(name: str, db: Session = None):
     """Instantiate the right connector for a source name.
-    Checks DB credentials first, falls back to env vars."""
+
+    Checks DB credentials first, falls back to env vars.
+    """
     from ..connectors.digikey import DigiKeyConnector
     from ..connectors.ebay import EbayConnector
     from ..connectors.element14 import Element14Connector
@@ -531,7 +532,8 @@ async def health_summary(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Lightweight health check — returns active sources with errors/degraded (for 60s polling)."""
+    """Lightweight health check — returns active sources with errors/degraded (for 60s
+    polling)."""
     errored = (
         db.query(ApiSource)
         .filter(
@@ -561,8 +563,8 @@ async def system_alerts(
 ):
     """Active API alerts — sources in error or degraded state.
 
-    Polled by frontend every 60s for the warning banner.
-    Available to all authenticated users (not admin-only).
+    Polled by frontend every 60s for the warning banner. Available to all authenticated
+    users (not admin-only).
     """
     problem_sources = (
         db.query(ApiSource)
@@ -790,7 +792,9 @@ async def parse_response_attachments(
     db: Session = Depends(get_db),
 ):
     """Download and parse attachments from a vendor response email.
-    Creates Sightings for matched MPNs via AI-powered column mapping."""
+
+    Creates Sightings for matched MPNs via AI-powered column mapping.
+    """
     if not user.m365_connected or not user.access_token:
         raise HTTPException(400, "M365 not connected")
 

@@ -1,5 +1,4 @@
-"""
-test_schemas_ai.py — Tests for app/schemas/ai.py
+"""test_schemas_ai.py — Tests for app/schemas/ai.py.
 
 Called by: pytest
 Depends on: app/schemas/ai.py

@@ -1,5 +1,4 @@
-"""
-test_middleware.py — Tests for request/response middleware
+"""test_middleware.py — Tests for request/response middleware.
 
 Verifies request ID generation, timing headers, and structured logging
 for the observability middleware in main.py.

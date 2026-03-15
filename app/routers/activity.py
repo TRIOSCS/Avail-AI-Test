@@ -52,7 +52,10 @@ def call_initiated(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Log a click-to-call event. Must never visibly fail."""
+    """Log a click-to-call event.
+
+    Must never visibly fail.
+    """
     try:
         # Validate phone
         e164 = format_phone_e164(body.phone_number)

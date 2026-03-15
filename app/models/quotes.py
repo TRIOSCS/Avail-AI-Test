@@ -1,14 +1,17 @@
-"""Quote models. Buy Plan V1 model removed — use BuyPlan from models.buy_plan."""
+"""Quote models.
+
+Buy Plan V1 model removed — use BuyPlan from models.buy_plan.
+"""
 
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Column,
     DateTime,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     Numeric,
     String,
     Text,

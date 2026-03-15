@@ -18,8 +18,8 @@ from loguru import logger
 class SSEBroker:
     """Fan-out broker for SSE channels.
 
-    Each channel (e.g. 'requisitions') has a set of asyncio.Queue listeners.
-    publish() pushes to all queues; subscribe() yields from one queue.
+    Each channel (e.g. 'requisitions') has a set of asyncio.Queue listeners. publish()
+    pushes to all queues; subscribe() yields from one queue.
     """
 
     def __init__(self):

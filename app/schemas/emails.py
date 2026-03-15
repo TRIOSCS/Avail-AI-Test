@@ -1,5 +1,4 @@
-"""
-schemas/emails.py — Pydantic models for email thread endpoints
+"""schemas/emails.py — Pydantic models for email thread endpoints.
 
 Request/response models for surfacing vendor email threads on
 requirement and vendor detail views.

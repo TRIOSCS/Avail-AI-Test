@@ -1,5 +1,4 @@
-"""
-ai.py — AI Intelligence Layer Router
+"""ai.py — AI Intelligence Layer Router.
 
 AI-powered features: contact enrichment, vendor response parsing,
 company intelligence cards, and smart RFQ drafts.
@@ -185,7 +184,6 @@ async def ai_find_contacts(
 
     db.commit()
     return {"contacts": merged, "total": len(merged), "saved_ids": saved_ids}
-
 
 
 @router.get("/api/ai/prospect-contacts")
@@ -414,7 +412,10 @@ async def ai_parse_response(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Re-parse a vendor response with the upgraded parser. Returns draft offers."""
+    """Re-parse a vendor response with the upgraded parser.
+
+    Returns draft offers.
+    """
     if not _ai_enabled(user):
         raise HTTPException(403, "AI features not enabled")
 
@@ -559,7 +560,10 @@ async def get_company_intel(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Get intelligence brief for a company. Cached 7 days."""
+    """Get intelligence brief for a company.
+
+    Cached 7 days.
+    """
     if not _ai_enabled(user):
         raise HTTPException(403, "AI features not enabled")
     if not company_name:

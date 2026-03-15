@@ -1,5 +1,4 @@
-"""
-test_v13_activity_ownership.py — Activity Log & Ownership Endpoint Tests
+"""test_v13_activity_ownership.py — Activity Log & Ownership Endpoint Tests.
 
 Covers: company/vendor/user activity endpoints, phone call logging,
 activity status, sales ownership (my-accounts, at-risk, open-pool,
@@ -80,7 +79,8 @@ def test_get_user_activities(client, db_session, test_user, test_company):
 
 
 def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
+    """Phone number that doesn't match any known contact — still logged (unmatched
+    queue)."""
     resp = client.post(
         "/api/activities/call",
         json={

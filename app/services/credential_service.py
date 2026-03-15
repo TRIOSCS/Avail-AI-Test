@@ -1,5 +1,4 @@
-"""
-credential_service.py — Encrypted credential storage for API data sources.
+"""credential_service.py — Encrypted credential storage for API data sources.
 
 Credentials are encrypted at rest using Fernet (AES-128-CBC + HMAC-SHA256).
 The encryption key is derived from the app's SECRET_KEY via PBKDF2.
@@ -40,13 +39,19 @@ def _get_fernet() -> Fernet:
 
 
 def encrypt_value(plaintext: str) -> str:
-    """Encrypt a credential value. Returns a base64 Fernet token string."""
+    """Encrypt a credential value.
+
+    Returns a base64 Fernet token string.
+    """
     f = _get_fernet()
     return f.encrypt(plaintext.encode()).decode()
 
 
 def decrypt_value(ciphertext: str) -> str:
-    """Decrypt a credential value. Returns the original plaintext."""
+    """Decrypt a credential value.
+
+    Returns the original plaintext.
+    """
     f = _get_fernet()
     return f.decrypt(ciphertext.encode()).decode()
 
@@ -74,7 +79,10 @@ def get_credential(db: Session, source_name: str, env_var_name: str) -> str | No
 
 
 def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, str]:
-    """Get all decrypted credentials for a source. DB first, env var fallback."""
+    """Get all decrypted credentials for a source.
+
+    DB first, env var fallback.
+    """
     src = db.query(ApiSource).filter_by(name=source_name).first()
     if not src:
         return {}
@@ -111,7 +119,10 @@ _CACHE_TTL = 60  # seconds
 
 
 def get_credential_cached(source_name: str, env_var_name: str) -> str | None:
-    """Get credential with in-memory cache (60s TTL). Opens its own DB session."""
+    """Get credential with in-memory cache (60s TTL).
+
+    Opens its own DB session.
+    """
     key = (source_name, env_var_name)
     now = time.time()
     cached = _cred_cache.get(key)

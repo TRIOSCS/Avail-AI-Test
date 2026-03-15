@@ -1,5 +1,4 @@
-"""
-tests/test_circuit_breaker.py — Tests for circuit breaker on connectors
+"""tests/test_circuit_breaker.py — Tests for circuit breaker on connectors.
 
 Covers: breaker creation, state transitions (closed → open → half-open),
 and that open breakers skip API calls gracefully.

@@ -1,5 +1,4 @@
-"""
-test_buy_plan_schemas.py — Buy Plan Schema Validation Tests
+"""test_buy_plan_schemas.py — Buy Plan Schema Validation Tests.
 
 Covers request validation (required fields, blank rejection, enum constraints)
 and response schema structure for buy plan submit, approval, SO/PO verification,
@@ -17,11 +16,11 @@ from pydantic import ValidationError
 from app.schemas.buy_plan import (
     # Response schemas
     AIFlag,
+    BuyPlanApproval,
     BuyPlanLineEdit,
     BuyPlanLineIssue,
     BuyPlanLineOverride,
     BuyPlanLineResponse,
-    BuyPlanApproval,
     BuyPlanListItem,
     BuyPlanResponse,
     BuyPlanSubmit,
@@ -300,7 +299,7 @@ class TestResponseSchemas:
         assert pr.line_count == 2
 
     def test_plan_response_allows_extra_fields(self):
-        """extra='allow' prevents breaking frontends when new fields added."""
+        """Extra='allow' prevents breaking frontends when new fields added."""
         pr = BuyPlanResponse(
             id=1,
             quote_id=1,

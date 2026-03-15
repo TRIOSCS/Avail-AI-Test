@@ -1,5 +1,5 @@
-"""
-test_e2e_sourcing_flow.py — End-to-end smoke tests for the sourcing → buy plan workflow
+"""test_e2e_sourcing_flow.py — End-to-end smoke tests for the sourcing → buy plan
+workflow.
 
 Covers the full internal UAT path:
 1. Requisition/requirement lifecycle transitions
@@ -20,10 +20,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
 from app.models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )

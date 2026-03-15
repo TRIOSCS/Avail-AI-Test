@@ -1,7 +1,7 @@
 """Specialty detector — identifies vendor brand/commodity specialties.
 
-Uses keyword matching on email history, sighting data, and offer history
-to generate brand_tags and commodity_tags for vendor cards.
+Uses keyword matching on email history, sighting data, and offer history to generate
+brand_tags and commodity_tags for vendor cards.
 """
 
 import re
@@ -211,7 +211,10 @@ for category, keywords in COMMODITY_MAP.items():
 
 
 def detect_brands_from_text(text: str) -> list[str]:
-    """Scan text for brand mentions. Returns list of matched brand names."""
+    """Scan text for brand mentions.
+
+    Returns list of matched brand names.
+    """
     if not text:
         return []
 
@@ -223,7 +226,10 @@ def detect_brands_from_text(text: str) -> list[str]:
 
 
 def detect_commodities_from_text(text: str) -> list[str]:
-    """Scan text for commodity category signals. Returns unique category list."""
+    """Scan text for commodity category signals.
+
+    Returns unique category list.
+    """
     if not text:
         return []
 

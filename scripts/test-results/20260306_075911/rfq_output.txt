@@ -3,7 +3,7 @@ The Playwright MCP is completely broken now. I have enough data from the success
 ## RFQ Test Results
 
 ### Test 1: RFQ section loads - PASS
-- Page loaded successfully at `#rfqs` 
+- Page loaded successfully at `#rfqs`
 - Authenticated view shows full app with navigation, search bar, and requisitions table
 - 7 requisitions displayed with real data
 - Console errors: only 404s for `manifest.json`, `favicon.ico`, and service worker script (cosmetic/PWA-related, not functional)

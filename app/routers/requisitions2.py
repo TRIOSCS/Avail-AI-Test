@@ -18,10 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
-from loguru import logger
 from sqlalchemy.orm import Session
-
-from ..services.sse_broker import broker
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_user
@@ -38,6 +35,7 @@ from ..services.requisition_list_service import (
     get_team_users,
     list_requisitions,
 )
+from ..services.sse_broker import broker
 
 router = APIRouter(prefix="/requisitions2", tags=["requisitions2"])
 templates = Jinja2Templates(directory="app/templates")
@@ -81,7 +79,9 @@ async def requisitions_page(
     user: User = Depends(require_user),
 ):
     """Full page load — returns shell + filters + table.
-    If HTMX request, returns only the table fragment."""
+
+    If HTMX request, returns only the table fragment.
+    """
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
 
@@ -229,6 +229,7 @@ async def inline_save(
 
     elif field == "status":
         from ..services.requisition_state import transition
+
         try:
             transition(req, value, user, db)
             msg = f"Status changed to {value}"
@@ -255,7 +256,7 @@ async def inline_save(
     db.refresh(req)
 
     # Build single-row context and return full <tr>
-    from ..services.requisition_list_service import get_row_context
+
     row_ctx = get_row_context(db, req, user)
     row_ctx["request"] = request
     response = templates.TemplateResponse("requisitions2/_single_row.html", row_ctx)
@@ -285,6 +286,7 @@ async def row_action(
 
     if action_name == RowActionName.archive:
         from ..services.requisition_state import transition
+
         try:
             transition(req, "archived", user, db)
             msg = f"'{req.name}' archived"
@@ -293,6 +295,7 @@ async def row_action(
 
     elif action_name == RowActionName.activate:
         from ..services.requisition_state import transition
+
         try:
             transition(req, "active", user, db)
             msg = f"'{req.name}' activated"
@@ -301,6 +304,7 @@ async def row_action(
 
     elif action_name == RowActionName.claim:
         from ..services.requirement_status import claim_requisition
+
         try:
             claim_requisition(req, user, db)
             msg = f"Claimed '{req.name}'"
@@ -309,11 +313,13 @@ async def row_action(
 
     elif action_name == RowActionName.unclaim:
         from ..services.requirement_status import unclaim_requisition
+
         unclaim_requisition(req, db, actor=user)
         msg = f"Unclaimed '{req.name}'"
 
     elif action_name == RowActionName.won:
         from ..services.requisition_state import transition
+
         try:
             transition(req, "won", user, db)
             msg = f"'{req.name}' marked won"
@@ -322,6 +328,7 @@ async def row_action(
 
     elif action_name == RowActionName.lost:
         from ..services.requisition_state import transition
+
         try:
             transition(req, "lost", user, db)
             msg = f"'{req.name}' marked lost"
@@ -373,6 +380,7 @@ async def bulk_action(
     for req in reqs:
         if action_name == BulkActionName.archive:
             from ..services.requisition_state import transition
+
             try:
                 transition(req, "archived", user, db)
                 count += 1
@@ -380,6 +388,7 @@ async def bulk_action(
                 pass
         elif action_name == BulkActionName.activate:
             from ..services.requisition_state import transition
+
             try:
                 transition(req, "active", user, db)
                 count += 1
@@ -396,9 +405,11 @@ async def bulk_action(
     response = templates.TemplateResponse("requisitions2/_table.html", ctx)
     word = action_name.value + ("d" if action_name.value.endswith("e") else "ed")
     msg = f"{count} requisition{'s' if count != 1 else ''} {word}"
-    response.headers["HX-Trigger"] = json.dumps({
-        "showToast": {"message": msg},
-        "clearSelection": True,
-    })
+    response.headers["HX-Trigger"] = json.dumps(
+        {
+            "showToast": {"message": msg},
+            "clearSelection": True,
+        }
+    )
     await broker.publish("requisitions", "table-refresh", msg)
     return response

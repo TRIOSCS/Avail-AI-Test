@@ -134,7 +134,7 @@ def test_session_manager_ensure_session_healthy():
 
 
 def test_session_manager_stop():
-    """stop() cleans up state."""
+    """Stop() cleans up state."""
     cfg = NcConfig()
     mgr = NcSessionManager(cfg)
     mgr.is_logged_in = True

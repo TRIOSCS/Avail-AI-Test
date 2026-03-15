@@ -1,5 +1,4 @@
-"""
-tests/test_cache_decorator.py — Tests for the @cached_endpoint decorator
+"""tests/test_cache_decorator.py — Tests for the @cached_endpoint decorator.
 
 Verifies cache hit/miss behavior, key generation, and prefix invalidation.
 """

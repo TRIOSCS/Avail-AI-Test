@@ -1,6 +1,5 @@
-"""
-Phase 4 integration tests — end-to-end verification of all four search layers
-and the enrichment pipeline.
+"""Phase 4 integration tests — end-to-end verification of all four search layers and the
+enrichment pipeline.
 
 What: Tests that search results contain Live Stock, Historical, Vendor Match,
       and AI Found layers; that enrichment applies/rejects fields correctly;
@@ -11,13 +10,12 @@ Depends on: app.search_service, app.scoring, app.services.vendor_affinity_servic
             app.services.enrichment_orchestrator
 """
 
-import asyncio
 import os
 
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -28,7 +26,6 @@ from app.search_service import search_requirement
 from app.services.enrichment_orchestrator import (
     apply_confident_data,
     claude_merge,
-    fire_all_sources,
 )
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
@@ -172,13 +169,13 @@ MOCK_AI_RESULTS = [
 
 
 class TestSearchReturnsAllFourLayers:
-    """Verify that a full search produces results from Live Stock, Historical,
-    Vendor Match, and AI Found layers with proper scoring fields."""
+    """Verify that a full search produces results from Live Stock, Historical, Vendor
+    Match, and AI Found layers with proper scoring fields."""
 
     @pytest.mark.asyncio
     async def test_search_returns_all_four_layers(self, db_session):
-        """Mock all connectors + affinity + AI to produce results from all four
-        source types, then verify badges, sort order, and confidence colors."""
+        """Mock all connectors + affinity + AI to produce results from all four source
+        types, then verify badges, sort order, and confidence colors."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, mpn="LM317T")
@@ -217,9 +214,7 @@ class TestSearchReturnsAllFourLayers:
 
         # Verify sorted by confidence_pct descending
         pcts = [s.get("confidence_pct", 0) for s in sightings]
-        assert pcts == sorted(pcts, reverse=True), (
-            f"Results not sorted by confidence_pct descending: {pcts}"
-        )
+        assert pcts == sorted(pcts, reverse=True), f"Results not sorted by confidence_pct descending: {pcts}"
 
         # Every result must have confidence_color
         for s in sightings:
@@ -233,8 +228,8 @@ class TestSearchReturnsAllFourLayers:
 
 
 class TestEnrichCompanyPipeline:
-    """Verify the enrichment orchestrator fires sources, merges via Claude,
-    and applies high-confidence fields while rejecting low-confidence ones."""
+    """Verify the enrichment orchestrator fires sources, merges via Claude, and applies
+    high-confidence fields while rejecting low-confidence ones."""
 
     @pytest.mark.asyncio
     async def test_enrich_company_pipeline(self, db_session):
@@ -353,8 +348,8 @@ class TestEnrichCompanyPipeline:
 
 
 class TestSmartTriggerIntegration:
-    """Verify that when connectors return few results, the AI search fires
-    as a second pass and its results appear in the final output."""
+    """Verify that when connectors return few results, the AI search fires as a second
+    pass and its results appear in the final output."""
 
     @pytest.mark.asyncio
     async def test_smart_trigger_fires_with_few_results(self, db_session):
@@ -410,8 +405,8 @@ class TestSmartTriggerIntegration:
 
 
 class TestAffinityDedupInFullSearch:
-    """Verify that when affinity returns a vendor already in live results,
-    it does not appear as a duplicate."""
+    """Verify that when affinity returns a vendor already in live results, it does not
+    appear as a duplicate."""
 
     @pytest.mark.asyncio
     async def test_affinity_dedup_removes_duplicate_vendor(self, db_session):
@@ -444,9 +439,7 @@ class TestAffinityDedupInFullSearch:
 
         # Count Arrow occurrences — should be exactly 1 (from live, not affinity)
         arrow_results = [s for s in sightings if s.get("vendor_name", "").lower() == "arrow"]
-        assert len(arrow_results) == 1, (
-            f"Arrow should appear exactly once but found {len(arrow_results)}"
-        )
+        assert len(arrow_results) == 1, f"Arrow should appear exactly once but found {len(arrow_results)}"
         # The one Arrow result should be from live, not affinity
         assert arrow_results[0].get("source_type") == "nexar"
         assert arrow_results[0].get("is_affinity") is not True
@@ -507,7 +500,8 @@ class TestUnifiedScoringConsistency:
         assert result["confidence_color"] == "amber"
 
     def test_ai_live_web_scoring(self):
-        """AI research results produce all required scoring fields and are capped at 60."""
+        """AI research results produce all required scoring fields and are capped at
+        60."""
         result = score_unified(
             source_type="ai_live_web",
             claude_confidence=0.90,

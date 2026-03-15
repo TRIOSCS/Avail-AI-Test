@@ -9,7 +9,6 @@ Depends on: app/routers/requisitions2.py, conftest fixtures
 
 from datetime import datetime, timezone
 
-
 # ── Page load ────────────────────────────────────────────────────────
 
 
@@ -245,20 +244,21 @@ def test_bulk_empty_ids(client):
 
 def test_sales_role_sees_only_own(client, db_session, test_user, sales_user):
     """Sales role user sees only their own requisitions."""
-    from app.database import get_db
     from app.dependencies import require_user
     from app.main import app
     from app.models import Requisition
 
     # Create req owned by sales_user
     req_sales = Requisition(
-        name="SALES-REQ", status="active",
+        name="SALES-REQ",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create req owned by test_user (buyer)
     req_buyer = Requisition(
-        name="BUYER-REQ", status="active",
+        name="BUYER-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -363,6 +363,7 @@ def test_row_action_archive_invalid_state(client, test_requisition, db_session):
     assert resp.status_code == 200
     assert "HX-Trigger" in resp.headers
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "Invalid transition" in trigger["showToast"]["message"]
 
@@ -376,6 +377,7 @@ def test_row_action_activate_invalid_state(client, test_requisition, db_session)
     assert resp.status_code == 200
     assert "HX-Trigger" in resp.headers
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "Invalid transition" in trigger["showToast"]["message"]
 
@@ -388,6 +390,7 @@ def test_row_action_won_invalid_state(client, test_requisition, db_session):
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/won")
     assert resp.status_code == 200
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "Invalid transition" in trigger["showToast"]["message"]
 
@@ -400,6 +403,7 @@ def test_row_action_lost_invalid_state(client, test_requisition, db_session):
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/lost")
     assert resp.status_code == 200
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "Invalid transition" in trigger["showToast"]["message"]
 
@@ -483,6 +487,7 @@ def test_bulk_activate_invalid_state(client, test_requisition, db_session):
     assert resp.status_code == 200
     assert "HX-Trigger" in resp.headers
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "0 requisition" in trigger["showToast"]["message"]
 
@@ -498,6 +503,7 @@ def test_bulk_archive_invalid_state(client, test_requisition, db_session):
     )
     assert resp.status_code == 200
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "0 requisition" in trigger["showToast"]["message"]
 
@@ -513,6 +519,7 @@ def test_row_action_returns_toast_header(client, test_requisition, db_session):
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
     assert "HX-Trigger" in resp.headers
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "showToast" in trigger
     assert "message" in trigger["showToast"]
@@ -528,6 +535,7 @@ def test_bulk_action_returns_toast_and_clear(client, test_requisition, db_sessio
         data={"ids": str(test_requisition.id)},
     )
     import json
+
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "showToast" in trigger
     assert "clearSelection" in trigger
@@ -569,15 +577,13 @@ def test_filter_by_date_range(client, test_requisition, db_session):
     db_session.commit()
 
     # Future date range should exclude
-    resp = client.get("/requisitions2/table", params={
-        "status": "active", "date_from": "2099-01-01"
-    })
+    resp = client.get("/requisitions2/table", params={"status": "active", "date_from": "2099-01-01"})
     assert "REQ-TEST-001" not in resp.text
 
     # Past date range should include
-    resp2 = client.get("/requisitions2/table", params={
-        "status": "active", "date_from": "2020-01-01", "date_to": "2099-12-31"
-    })
+    resp2 = client.get(
+        "/requisitions2/table", params={"status": "active", "date_from": "2020-01-01", "date_to": "2099-12-31"}
+    )
     assert resp2.status_code == 200
 
 
@@ -610,9 +616,11 @@ def test_modal_with_customer_site(client, test_requisition, test_customer_site, 
 def test_pagination_shows_controls(client, db_session, test_user):
     """When there are enough items, pagination controls appear."""
     from app.models import Requisition
+
     for i in range(30):
         req = Requisition(
-            name=f"PAGINATE-{i:03d}", status="active",
+            name=f"PAGINATE-{i:03d}",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -740,6 +748,7 @@ def test_inline_save_not_found(client):
 def test_sse_broker_publish_subscribe():
     """SSE broker delivers events to subscribers."""
     import asyncio
+
     from app.services.sse_broker import SSEBroker
 
     async def _test():
@@ -758,6 +767,7 @@ def test_sse_broker_publish_subscribe():
 def test_sse_broker_no_subscribers():
     """Publishing with no subscribers does not raise."""
     import asyncio
+
     from app.services.sse_broker import SSEBroker
 
     async def _test():
@@ -770,6 +780,7 @@ def test_sse_broker_no_subscribers():
 def test_sse_broker_queue_is_bounded():
     """Slow subscribers should not accumulate unbounded queue growth."""
     import asyncio
+
     from app.services.sse_broker import SSEBroker
 
     async def _test():

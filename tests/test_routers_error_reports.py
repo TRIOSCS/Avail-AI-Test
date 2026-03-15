@@ -1,5 +1,5 @@
-"""
-test_routers_error_reports.py — Tests for the simplified error report / trouble ticket router.
+"""test_routers_error_reports.py — Tests for the simplified error report / trouble
+ticket router.
 
 The error_reports router provides basic ticket CRUD: submit, list, detail.
 No AI diagnosis, no admin-only gates, no status update or export endpoints.

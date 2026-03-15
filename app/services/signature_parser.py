@@ -1,7 +1,7 @@
 """Signature parser — extracts contact info from email signatures.
 
-Uses regex for fast extraction, falls back to Claude AI for complex signatures.
-Caches results in EmailSignatureExtract table to avoid re-parsing.
+Uses regex for fast extraction, falls back to Claude AI for complex signatures. Caches
+results in EmailSignatureExtract table to avoid re-parsing.
 """
 
 import re
@@ -82,7 +82,8 @@ _SIGNATURE_DELIMITERS = [
 
 
 def _extract_signature_block(body: str) -> str:
-    """Extract the signature portion of an email body (last ~15 lines after delimiter)."""
+    """Extract the signature portion of an email body (last ~15 lines after
+    delimiter)."""
     if not body:
         return ""
 

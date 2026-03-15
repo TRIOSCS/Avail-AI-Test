@@ -1,5 +1,4 @@
-"""
-test_proactive_service.py — Tests for app/services/proactive_service.py
+"""test_proactive_service.py — Tests for app/services/proactive_service.py.
 
 Covers: scan_new_offers_for_matches, send_proactive_offer,
         convert_proactive_to_win, get_scorecard, get_sent_offers.
@@ -44,8 +43,8 @@ from app.services.proactive_service import (
 
 
 def _reset_last_scan():
-    """Reset the module-level _last_proactive_scan to datetime.min so all
-    offers appear as 'new' to the scanner."""
+    """Reset the module-level _last_proactive_scan to datetime.min so all offers appear
+    as 'new' to the scanner."""
     import app.services.proactive_service as mod
 
     mod._last_proactive_scan = datetime.min.replace(tzinfo=timezone.utc)
@@ -53,7 +52,9 @@ def _reset_last_scan():
 
 def _register_btrim(db_session: Session):
     """Register a SQLite 'btrim' function so sqlfunc.btrim works in tests.
-    PostgreSQL has btrim natively; SQLite does not."""
+
+    PostgreSQL has btrim natively; SQLite does not.
+    """
     raw_conn = db_session.get_bind().raw_connection()
     raw_conn.create_function("btrim", 1, lambda s: s.strip() if s else s)
     raw_conn.close()
@@ -645,7 +646,8 @@ class TestConvertProactiveToWin:
         test_customer_site,
         test_offer,
     ):
-        """Conversion creates Requisition (status=won), Requirements, Offers, Quote, BuyPlan."""
+        """Conversion creates Requisition (status=won), Requirements, Offers, Quote,
+        BuyPlan."""
         # Build a ProactiveOffer with a real offer reference
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
@@ -950,7 +952,7 @@ class TestGetMatchesForUser:
         assert result["stats"]["total"] == 1
 
     def test_matches_all_statuses(self, db_session, test_user, test_company, test_customer_site, test_offer):
-        """status='' returns matches of any status."""
+        """Status='' returns matches of any status."""
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
@@ -972,7 +974,8 @@ class TestGetMatchesForUser:
     def test_match_with_offer_details_included(
         self, db_session, test_user, test_company, test_customer_site, test_offer
     ):
-        """Match with a valid offer includes offer details and CPH fields in the response."""
+        """Match with a valid offer includes offer details and CPH fields in the
+        response."""
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="DETAILS")
@@ -1248,7 +1251,8 @@ class TestScorecardPOCounts:
 
 
 class TestQtyCapping:
-    """Verify proactive offer totals use min(qty_available, target_qty) not raw qty_available."""
+    """Verify proactive offer totals use min(qty_available, target_qty) not raw
+    qty_available."""
 
     @pytest.mark.asyncio
     async def test_send_caps_qty_at_target(self, db_session, test_user, test_company, test_customer_site):

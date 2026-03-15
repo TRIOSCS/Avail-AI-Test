@@ -17,7 +17,6 @@ from app.schemas.requisitions2 import (
     SortOrder,
 )
 
-
 # ── ReqListFilters ───────────────────────────────────────────────────
 
 
@@ -134,6 +133,7 @@ def test_pagination_context():
 def test_inline_edit_field_values():
     """InlineEditField has the expected values."""
     from app.schemas.requisitions2 import InlineEditField
+
     assert InlineEditField.name.value == "name"
     assert InlineEditField.status.value == "status"
     assert InlineEditField.urgency.value == "urgency"
@@ -143,7 +143,9 @@ def test_inline_edit_field_values():
 
 def test_inline_edit_field_invalid():
     """Invalid field name raises ValueError."""
-    from app.schemas.requisitions2 import InlineEditField
     import pytest
+
+    from app.schemas.requisitions2 import InlineEditField
+
     with pytest.raises(ValueError):
         InlineEditField("invalid_field")

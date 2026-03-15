@@ -1,5 +1,4 @@
-"""
-data_cleanup_service.py — Production data remediation and quarantine service.
+"""data_cleanup_service.py — Production data remediation and quarantine service.
 
 Purpose: Identifies and quarantines polluted placeholder/test/security-payload
          records from production views without permanently deleting data.
@@ -46,9 +45,9 @@ def _is_test_data(text: str | None) -> bool:
 def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
     """Scan for test/junk/XSS data across core tables.
 
-    Returns a summary of flagged records. In dry_run mode, no changes are made.
-    When dry_run=False, flagged records are quarantined (status set to 'quarantined'
-    or notes prefixed with [QUARANTINED]).
+    Returns a summary of flagged records. In dry_run mode, no changes are made. When
+    dry_run=False, flagged records are quarantined (status set to 'quarantined' or notes
+    prefixed with [QUARANTINED]).
     """
     from app.models import Offer, Requisition, VendorCard
 

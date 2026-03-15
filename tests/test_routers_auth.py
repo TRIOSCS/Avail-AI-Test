@@ -334,7 +334,8 @@ class TestCallbackHTTPErrors:
 
     @patch("app.routers.auth.http")
     def test_callback_new_user_no_refresh_token(self, mock_http, auth_client, db_session):
-        """Token response without refresh_token -> user created but no refresh_token stored."""
+        """Token response without refresh_token -> user created but no refresh_token
+        stored."""
         state = _get_oauth_state(auth_client)
         token_resp = MagicMock()
         token_resp.status_code = 200
@@ -428,7 +429,8 @@ class TestAuthStatusExtended:
 
     @patch("app.routers.auth.get_user")
     def test_status_with_timestamps(self, mock_get_user, client, test_user, db_session):
-        """Auth status includes m365_last_healthy, last_inbox_scan, last_contacts_sync."""
+        """Auth status includes m365_last_healthy, last_inbox_scan,
+        last_contacts_sync."""
         now = datetime.now(timezone.utc)
         test_user.refresh_token = "test-refresh"
         test_user.m365_connected = True

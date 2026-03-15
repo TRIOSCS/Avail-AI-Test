@@ -1,5 +1,4 @@
-"""
-routers/materials.py — Material Card CRUD, enrichment, merge, and stock import.
+"""routers/materials.py — Material Card CRUD, enrichment, merge, and stock import.
 
 Handles material card listing, detail, update, enrichment, soft-delete/restore,
 merge operations, and standalone stock list import.
@@ -61,7 +60,8 @@ def _infer_manufacturer_from_prefix(db: Session, mpn: str) -> str | None:
 
 
 def backfill_missing_manufacturers(db: Session) -> int:
-    """Bulk-update all rows where manufacturer IS NULL/empty and a prefix-match donor exists."""
+    """Bulk-update all rows where manufacturer IS NULL/empty and a prefix-match donor
+    exists."""
     null_parts = (
         db.query(MaterialCard).filter((MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")).all()
     )
@@ -424,7 +424,10 @@ async def enrich_material(
 
 @router.delete("/api/materials/{card_id}")
 async def delete_material(card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """Soft-delete a material card. Sets deleted_at timestamp; records are preserved."""
+    """Soft-delete a material card.
+
+    Sets deleted_at timestamp; records are preserved.
+    """
     from ..services.audit_service import log_audit
 
     card = db.get(MaterialCard, card_id)
@@ -615,7 +618,8 @@ async def merge_material_cards(
 
 @router.post("/materials/backfill-manufacturers", tags=["admin"])
 async def backfill_manufacturers(user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    """One-time admin endpoint to enrich all material cards missing a manufacturer via prefix-match."""
+    """One-time admin endpoint to enrich all material cards missing a manufacturer via
+    prefix-match."""
     count = backfill_missing_manufacturers(db)
     return {"enriched_records": count}
 
@@ -627,7 +631,8 @@ async def backfill_manufacturers(user: User = Depends(require_admin), db: Sessio
 async def import_stock_list_standalone(
     request: Request, user: User = Depends(require_buyer), db: Session = Depends(get_db)
 ):
-    """Import a vendor stock list -- stores ALL rows as MaterialCard + MaterialVendorHistory."""
+    """Import a vendor stock list -- stores ALL rows as MaterialCard +
+    MaterialVendorHistory."""
     form = await request.form()
     file = form.get("file")
     if not file:

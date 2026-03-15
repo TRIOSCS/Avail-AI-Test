@@ -1,4 +1,5 @@
-"""Tests for tagging classification service — prefix lookup, waterfall, upsert, visibility.
+"""Tests for tagging classification service — prefix lookup, waterfall, upsert,
+visibility.
 
 Called by: pytest
 Depends on: app.services.tagging, app.services.prefix_lookup, app.models.tags
@@ -28,7 +29,8 @@ def _make_tag(db, name="Texas Instruments", tag_type="brand"):
 
 
 def _seed_thresholds(db):
-    """Seed default threshold config rows (entity_types match propagate_tags_to_entity)."""
+    """Seed default threshold config rows (entity_types match
+    propagate_tags_to_entity)."""
     for et, tt, mc, mp in [
         ("vendor_card", "brand", 2, 0.05),
         ("vendor_card", "commodity", 3, 0.05),

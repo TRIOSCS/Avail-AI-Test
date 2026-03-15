@@ -55,7 +55,10 @@ class NcSighting:
 
 
 def parse_quantity(text: str) -> int | None:
-    """Parse NC quantity string to int. Handles commas, '+' suffix, empty."""
+    """Parse NC quantity string to int.
+
+    Handles commas, '+' suffix, empty.
+    """
     if not text:
         return None
     cleaned = text.strip().rstrip("+").replace(",", "")
@@ -97,9 +100,9 @@ def parse_price_breaks(element) -> tuple[list[PriceBreak], str | None]:
 def parse_results_html(html: str) -> list[NcSighting]:
     """Parse NC results HTML into a list of NcSighting instances.
 
-    Uses the confirmed .div-table-float-reg.floating-block containers
-    with region headers and table.searchresultstable (excluding #trv_0
-    sticky header clone to avoid double-counting).
+    Uses the confirmed .div-table-float-reg.floating-block containers with region
+    headers and table.searchresultstable (excluding #trv_0 sticky header clone to avoid
+    double-counting).
     """
     from bs4 import BeautifulSoup
 

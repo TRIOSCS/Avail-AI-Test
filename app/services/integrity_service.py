@@ -98,11 +98,11 @@ def check_duplicate_cards(db: Session) -> int:
 
 
 def check_vendor_history_duplicates(db: Session) -> int:
-    """Count material cards that have vendor history entries which would
-    collide under normalized vendor names.
+    """Count material cards that have vendor history entries which would collide under
+    normalized vendor names.
 
-    E.g. card 42 has vendor_name="ARROW" and vendor_name="Arrow" — these
-    should be a single record.
+    E.g. card 42 has vendor_name="ARROW" and vendor_name="Arrow" — these should be a
+    single record.
     """
     from ..vendor_utils import normalize_vendor_name
 
@@ -241,8 +241,8 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
 def clear_dangling_fks(db: Session) -> dict:
     """Set material_card_id to NULL where the referenced card no longer exists.
 
-    These records will then be picked up by heal_orphaned_records on the next
-    cycle and re-linked to the correct (or a new) card.
+    These records will then be picked up by heal_orphaned_records on the next cycle and
+    re-linked to the correct (or a new) card.
     """
     cleared = {}
     for model, name in [

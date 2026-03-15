@@ -1,5 +1,4 @@
-"""
-test_email_intelligence_phase6.py — Email Intelligence & Mining Fixes
+"""test_email_intelligence_phase6.py — Email Intelligence & Mining Fixes.
 
 Tests for:
 - Fix 1: email_mining stores ALL classified emails (no regex gate)
@@ -35,8 +34,8 @@ def _fake_msg(msg_id="msg-1", body="Test body", subject="Test subject"):
 
 
 class TestScanInboxStoresRegexEmails:
-    """Verify that scan_inbox calls process_email_intelligence for ALL emails,
-    including those with 2+ regex matches (previously gated out)."""
+    """Verify that scan_inbox calls process_email_intelligence for ALL emails, including
+    those with 2+ regex matches (previously gated out)."""
 
     def _make_miner(self, db, user_id):
         """Create an EmailMiner with mocked GraphClient."""
@@ -145,8 +144,8 @@ class TestScanInboxStoresRegexEmails:
 
 
 class TestNeedsReviewLogic:
-    """Verify store_email_intelligence sets needs_review/auto_applied correctly
-    based on classification type and confidence."""
+    """Verify store_email_intelligence sets needs_review/auto_applied correctly based on
+    classification type and confidence."""
 
     def _store(self, db, cls_type, confidence, parsed_quotes=None):
         """Helper: call store_email_intelligence with given params."""
@@ -170,25 +169,25 @@ class TestNeedsReviewLogic:
         )
 
     def test_spam_high_confidence_no_review(self, db_session, test_user):
-        """spam at 0.9 → needs_review=False, auto_applied=False."""
+        """Spam at 0.9 → needs_review=False, auto_applied=False."""
         rec = self._store(db_session, "spam", 0.9)
         assert rec.needs_review is False
         assert rec.auto_applied is False
 
     def test_ooo_high_confidence_no_review(self, db_session, test_user):
-        """ooo at 0.8 → needs_review=False, auto_applied=False."""
+        """Ooo at 0.8 → needs_review=False, auto_applied=False."""
         rec = self._store(db_session, "ooo", 0.8)
         assert rec.needs_review is False
         assert rec.auto_applied is False
 
     def test_general_mid_confidence_no_review(self, db_session, test_user):
-        """general at 0.6 → needs_review=False, auto_applied=False."""
+        """General at 0.6 → needs_review=False, auto_applied=False."""
         rec = self._store(db_session, "general", 0.6)
         assert rec.needs_review is False
         assert rec.auto_applied is False
 
     def test_offer_high_with_quotes_auto_applied(self, db_session, test_user):
-        """offer at 0.85 + parsed_quotes → auto_applied=True, needs_review=False."""
+        """Offer at 0.85 + parsed_quotes → auto_applied=True, needs_review=False."""
         rec = self._store(
             db_session,
             "offer",
@@ -199,19 +198,19 @@ class TestNeedsReviewLogic:
         assert rec.needs_review is False
 
     def test_offer_high_without_quotes_informational(self, db_session, test_user):
-        """offer at 0.85 without parsed_quotes → both False."""
+        """Offer at 0.85 without parsed_quotes → both False."""
         rec = self._store(db_session, "offer", 0.85)
         assert rec.auto_applied is False
         assert rec.needs_review is False
 
     def test_offer_mid_confidence_needs_review(self, db_session, test_user):
-        """offer at 0.65 → needs_review=True."""
+        """Offer at 0.65 → needs_review=True."""
         rec = self._store(db_session, "offer", 0.65)
         assert rec.needs_review is True
         assert rec.auto_applied is False
 
     def test_offer_low_confidence_no_flags(self, db_session, test_user):
-        """offer at 0.3 → both False."""
+        """Offer at 0.3 → both False."""
         rec = self._store(db_session, "offer", 0.3)
         assert rec.needs_review is False
         assert rec.auto_applied is False

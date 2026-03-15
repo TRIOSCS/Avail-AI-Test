@@ -1,4 +1,4 @@
-"""Add indexes on columns used by search
+"""Add indexes on columns used by search.
 
 Revision ID: 002_search_indexes
 Revises: 001_initial

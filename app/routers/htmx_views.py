@@ -1,5 +1,4 @@
-"""
-routers/htmx_views.py — HTMX + Alpine.js MVP frontend views.
+"""routers/htmx_views.py — HTMX + Alpine.js MVP frontend views.
 
 Serves server-rendered HTML partials for the HTMX-based frontend.
 Full page loads render base.html; HTMX requests get just the partial.
@@ -9,6 +8,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, database, search_service
 """
 
+import os
 import time
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -24,7 +24,6 @@ from ..models import (
     BuyPlan,
     BuyPlanLine,
     Company,
-    CustomerSite,
     Requirement,
     Requisition,
     Sighting,
@@ -32,7 +31,7 @@ from ..models import (
     VendorCard,
     VerificationGroupMember,
 )
-from ..models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from ..models.buy_plan import BuyPlanStatus
 from ..models.vendors import VendorContact
 from ..utils.sql_helpers import escape_like
 
@@ -73,7 +72,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        password_login = os.getenv("TESTING") == "1" or os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
+        return templates.TemplateResponse(
+            "htmx/login.html",
+            {"request": request, "password_login_enabled": password_login},
+        )
 
     # Determine which view to load based on URL path
     path = request.url.path
@@ -131,10 +134,7 @@ async def requisitions_list_partial(
 
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(
-            Requisition.name.ilike(f"%{safe}%")
-            | Requisition.customer_name.ilike(f"%{safe}%")
-        )
+        query = query.filter(Requisition.name.ilike(f"%{safe}%") | Requisition.customer_name.ilike(f"%{safe}%"))
     if status:
         query = query.filter(Requisition.status == status)
 
@@ -263,7 +263,7 @@ async def add_requirement(
     html = f"""
     <tr class="hover:bg-gray-50">
       <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900">{r.primary_mpn}</td>
-      <td class="px-4 py-2 text-sm text-gray-600">{r.brand or '—'}</td>
+      <td class="px-4 py-2 text-sm text-gray-600">{r.brand or "—"}</td>
       <td class="px-4 py-2 text-sm text-gray-600">{r.target_qty:,}</td>
       <td class="px-4 py-2 text-sm text-gray-600">—</td>
       <td class="px-4 py-2"><span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700">Open</span></td>
@@ -303,8 +303,8 @@ async def search_run(
 ):
     """Run a part search and return results HTML.
 
-    If requirement_id is provided, searches for that requirement's MPN.
-    Otherwise uses the mpn form field.
+    If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
+    the mpn form field.
     """
     search_mpn = mpn.strip()
 
@@ -338,12 +338,14 @@ async def search_run(
     elapsed = time.time() - start
 
     ctx = _base_ctx(request, user, "search")
-    ctx.update({
-        "results": results,
-        "mpn": search_mpn,
-        "elapsed_seconds": elapsed,
-        "error": error,
-    })
+    ctx.update(
+        {
+            "results": results,
+            "mpn": search_mpn,
+            "elapsed_seconds": elapsed,
+            "error": error,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/search/results.html", ctx)
 
 
@@ -364,10 +366,7 @@ async def vendors_list_partial(
 
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(
-            VendorCard.display_name.ilike(f"%{safe}%")
-            | VendorCard.domain.ilike(f"%{safe}%")
-        )
+        query = query.filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.domain.ilike(f"%{safe}%"))
 
     total = query.count()
     vendors = query.order_by(VendorCard.sighting_count.desc().nullslast()).offset(offset).limit(limit).all()
@@ -471,9 +470,12 @@ async def dashboard_partial(
     db: Session = Depends(get_db),
 ):
     """Return dashboard stats partial."""
-    open_reqs = db.query(sqlfunc.count(Requisition.id)).filter(
-        Requisition.status.in_(["open", "active", "sourcing", "draft"])
-    ).scalar() or 0
+    open_reqs = (
+        db.query(sqlfunc.count(Requisition.id))
+        .filter(Requisition.status.in_(["open", "active", "sourcing", "draft"]))
+        .scalar()
+        or 0
+    )
     vendor_count = db.query(sqlfunc.count(VendorCard.id)).scalar() or 0
     company_count = db.query(sqlfunc.count(Company.id)).filter(Company.is_active.is_(True)).scalar() or 0
 
@@ -487,9 +489,7 @@ async def dashboard_partial(
 
 def _is_ops_member(user: User, db: Session) -> bool:
     """Check if user is in the ops verification group."""
-    return db.query(VerificationGroupMember).filter_by(
-        user_id=user.id, is_active=True
-    ).first() is not None
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
 
 
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
@@ -517,8 +517,7 @@ async def buy_plans_list_partial(
     if q.strip():
         safe = escape_like(q.strip())
         query = query.filter(
-            BuyPlan.sales_order_number.ilike(f"%{safe}%")
-            | BuyPlan.customer_po_number.ilike(f"%{safe}%")
+            BuyPlan.sales_order_number.ilike(f"%{safe}%") | BuyPlan.customer_po_number.ilike(f"%{safe}%")
         )
 
     # Sales users only see their own
@@ -536,30 +535,34 @@ async def buy_plans_list_partial(
             co = site.company if hasattr(site, "company") else None
             customer_name = co.name if co else getattr(site, "site_name", None)
 
-        buy_plans.append({
-            "id": p.id,
-            "quote_id": p.quote_id,
-            "quote_number": p.quote.quote_number if p.quote else None,
-            "customer_name": customer_name,
-            "sales_order_number": p.sales_order_number,
-            "status": p.status,
-            "so_status": p.so_status,
-            "total_cost": float(p.total_cost) if p.total_cost else 0,
-            "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
-            "line_count": len(p.lines) if p.lines else 0,
-            "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
-            "auto_approved": p.auto_approved or False,
-            "created_at": str(p.created_at) if p.created_at else None,
-        })
+        buy_plans.append(
+            {
+                "id": p.id,
+                "quote_id": p.quote_id,
+                "quote_number": p.quote.quote_number if p.quote else None,
+                "customer_name": customer_name,
+                "sales_order_number": p.sales_order_number,
+                "status": p.status,
+                "so_status": p.so_status,
+                "total_cost": float(p.total_cost) if p.total_cost else 0,
+                "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
+                "line_count": len(p.lines) if p.lines else 0,
+                "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
+                "auto_approved": p.auto_approved or False,
+                "created_at": str(p.created_at) if p.created_at else None,
+            }
+        )
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({
-        "buy_plans": buy_plans,
-        "q": q,
-        "status": status,
-        "mine": mine,
-        "total": len(buy_plans),
-    })
+    ctx.update(
+        {
+            "buy_plans": buy_plans,
+            "q": q,
+            "status": status,
+            "mine": mine,
+            "total": len(buy_plans),
+        }
+    )
     return templates.TemplateResponse("htmx/partials/buy_plans/list.html", ctx)
 
 
@@ -589,12 +592,14 @@ async def buy_plan_detail_partial(
         raise HTTPException(404, "Buy plan not found")
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({
-        "bp": bp,
-        "lines": bp.lines or [],
-        "is_ops_member": _is_ops_member(user, db),
-        "user": user,
-    })
+    ctx.update(
+        {
+            "bp": bp,
+            "lines": bp.lines or [],
+            "is_ops_member": _is_ops_member(user, db),
+            "user": user,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/buy_plans/detail.html", ctx)
 
 
@@ -606,12 +611,12 @@ async def buy_plan_submit_partial(
     db: Session = Depends(get_db),
 ):
     """Submit a draft buy plan with SO# — returns refreshed detail partial."""
-    from ..services.buyplan_workflow import submit_buy_plan
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_submitted,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import submit_buy_plan
 
     form = await request.form()
     so = form.get("sales_order_number", "").strip()
@@ -620,7 +625,10 @@ async def buy_plan_submit_partial(
 
     try:
         plan = submit_buy_plan(
-            plan_id, so, user, db,
+            plan_id,
+            so,
+            user,
+            db,
             customer_po_number=form.get("customer_po_number") or None,
             salesperson_notes=form.get("salesperson_notes") or None,
         )
@@ -643,12 +651,12 @@ async def buy_plan_approve_partial(
     db: Session = Depends(get_db),
 ):
     """Manager approves or rejects a pending buy plan — returns refreshed detail."""
-    from ..services.buyplan_workflow import approve_buy_plan
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_rejected,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import approve_buy_plan
 
     form = await request.form()
     action = form.get("action", "approve")
@@ -677,19 +685,22 @@ async def buy_plan_verify_so_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies SO — returns refreshed detail."""
-    from ..services.buyplan_workflow import verify_so
     from ..services.buyplan_notifications import (
         notify_so_rejected,
         notify_so_verified,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import verify_so
 
     form = await request.form()
     action = form.get("action", "approve")
 
     try:
         plan = verify_so(
-            plan_id, action, user, db,
+            plan_id,
+            action,
+            user,
+            db,
             rejection_note=form.get("rejection_note"),
         )
         db.commit()
@@ -713,8 +724,9 @@ async def buy_plan_confirm_po_partial(
 ):
     """Buyer confirms PO — returns refreshed detail."""
     from datetime import datetime
-    from ..services.buyplan_workflow import confirm_po
+
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
+    from ..services.buyplan_workflow import confirm_po
 
     form = await request.form()
     po_number = form.get("po_number", "").strip()
@@ -751,8 +763,8 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ..services.buyplan_workflow import check_completion, verify_po
     from ..services.buyplan_notifications import notify_completed, run_notify_bg
+    from ..services.buyplan_workflow import check_completion, verify_po
 
     form = await request.form()
     action = form.get("action", "approve")

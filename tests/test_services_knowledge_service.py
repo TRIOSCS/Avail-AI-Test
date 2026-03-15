@@ -14,7 +14,7 @@ from app.services.knowledge_service import create_entry
 
 
 def test_create_entry_commit_false_respects_caller_transaction(db_session, test_user):
-    """commit=False should allow caller rollback to remove the row."""
+    """Commit=False should allow caller rollback to remove the row."""
     entry = create_entry(
         db_session,
         user_id=test_user.id,
@@ -29,7 +29,7 @@ def test_create_entry_commit_false_respects_caller_transaction(db_session, test_
 
 
 def test_create_entry_commit_true_persists(db_session, test_user):
-    """commit=True should persist row immediately."""
+    """Commit=True should persist row immediately."""
     entry = create_entry(
         db_session,
         user_id=test_user.id,

@@ -1,5 +1,4 @@
-"""
-tests/test_routers_vendors.py — DEPRECATED: Split into domain-specific files
+"""tests/test_routers_vendors.py — DEPRECATED: Split into domain-specific files.
 
 All 197 tests have been moved to:
 - tests/test_routers_vendors_crud.py     (104 tests) — vendor CRUD, reviews, autocomplete, helpers

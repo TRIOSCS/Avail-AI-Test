@@ -1,5 +1,4 @@
-"""
-test_services_admin.py — Tests for admin_service.
+"""test_services_admin.py — Tests for admin_service.
 
 Tests user management, config CRUD, scoring weights, and system health.
 Uses in-memory SQLite via conftest fixtures.

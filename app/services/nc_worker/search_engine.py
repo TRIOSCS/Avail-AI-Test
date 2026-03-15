@@ -35,7 +35,8 @@ def build_search_url(mpn: str, search_logic: str = "Begins") -> str:
 def search_part(session_manager, part_number: str) -> dict:
     """Search for a part — tries HTTP first, falls back to browser.
 
-    Returns {"html": str, "url": str, "duration_ms": int, "status_code": int, "mode": str}.
+    Returns {"html": str, "url": str, "duration_ms": int, "status_code": int, "mode":
+    str}.
     """
     # Try HTTP first (fast path)
     result = _search_http(session_manager, part_number)

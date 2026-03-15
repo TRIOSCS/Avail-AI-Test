@@ -4,7 +4,7 @@
 - **Test 1: Vendor list loads** - PASS. 6,076 vendors load with proper columns (name, tier, score, response rate, POS sent, parts seen, last activity).
 - **Test 2: Search vendors** - PASS. Search filters correctly (e.g., "Digi" returns 4 matching vendors). Unicode search works. Edge cases (empty, special chars, very long input) handled properly. No SQL injection vulnerability.
 - **Test 3: Vendor detail view** - PASS. Detail endpoint returns complete vendor data including brands, contacts, tags.
-- **Test 4: Sighting counts** - PASS. All sighting counts are valid integers (no NaN, no negatives). 
+- **Test 4: Sighting counts** - PASS. All sighting counts are valid integers (no NaN, no negatives).
 - **Test 7: Scorecard data** - PASS. Performance/scorecard endpoint returns structured data with response_rate, quote_conversion, trend data.
 - **Test 9: Contact info** - PASS. Contacts return readable names, emails, phone numbers, titles. No ciphertext or encoded data.
 - **Test 12: Pagination** - PASS. Offset/limit pagination works correctly through the full 6,076 vendor list.

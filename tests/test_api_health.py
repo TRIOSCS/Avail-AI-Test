@@ -526,9 +526,8 @@ def admin_client(db_session, admin_user):
 def test_list_sources_does_not_auto_set_status(admin_client, db_session):
     """GET /api/sources must NOT change status based on credentials alone.
 
-    Previously, if env_vars were set, status was auto-set to 'live' even
-    if the API was actually unreachable. Status should only be set by
-    health checks.
+    Previously, if env_vars were set, status was auto-set to 'live' even if the API was
+    actually unreachable. Status should only be set by health checks.
     """
     src = ApiSource(
         name="broken_but_creds_set",

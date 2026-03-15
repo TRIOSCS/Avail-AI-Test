@@ -119,9 +119,9 @@ async def classify_parts_batch(parts: list[dict]) -> list[dict] | None:
 async def process_ai_gate(db: Session):
     """Process pending queue items through the AI classification gate.
 
-    Checks classification cache first, then batch-classifies uncached items.
-    Updates queue status to 'queued' (search) or 'gated_out' (skip).
-    Respects a 5-minute cooldown after API failures.
+    Checks classification cache first, then batch-classifies uncached items. Updates
+    queue status to 'queued' (search) or 'gated_out' (skip). Respects a 5-minute
+    cooldown after API failures.
     """
     global _last_api_failure
     if _last_api_failure and (time.monotonic() - _last_api_failure) < _GATE_COOLDOWN_SECONDS:

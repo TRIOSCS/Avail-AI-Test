@@ -4,13 +4,13 @@ from datetime import datetime, timezone
 
 from app.models import LeadEvidence, LeadFeedbackEvent, Sighting, SourcingLead, VendorCard
 from app.services.sourcing_leads import (
-    sync_leads_for_sightings,
-    update_lead_status,
     _compute_vendor_safety,
-    _signal_type_for_source,
     _match_type_for_parts,
     _reliability_band,
+    _signal_type_for_source,
     _source_category,
+    sync_leads_for_sightings,
+    update_lead_status,
 )
 
 
@@ -120,7 +120,9 @@ def test_source_category_mapping():
 
 def test_corroboration_requires_distinct_categories(db_session, test_requisition):
     """Two sightings from the same source category should NOT produce corroboration.
-    Two sightings from different categories SHOULD."""
+
+    Two sightings from different categories SHOULD.
+    """
     requirement = test_requisition.requirements[0]
 
     # digikey + mouser = both 'api' category → NOT corroborated
@@ -135,7 +137,7 @@ def test_corroboration_requires_distinct_categories(db_session, test_requisition
 
 
 def test_corroboration_with_distinct_categories(db_session, test_requisition):
-    """digikey (api) + brokerbin (marketplace) = different categories → corroborated."""
+    """Digikey (api) + brokerbin (marketplace) = different categories → corroborated."""
     requirement = test_requisition.requirements[0]
     s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Cross Cat Vendor")
     s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Cross Cat Vendor")
@@ -155,7 +157,9 @@ def test_update_lead_status_writes_feedback_event(db_session, test_requisition):
     assert lead is not None
 
     old_conf = lead.confidence_score
-    updated = update_lead_status(db_session, lead.id, "has_stock", note="Vendor confirmed 1,200 pcs", actor_user_id=None)
+    updated = update_lead_status(
+        db_session, lead.id, "has_stock", note="Vendor confirmed 1,200 pcs", actor_user_id=None
+    )
     assert updated is not None
     assert updated.buyer_status == "has_stock"
     assert updated.confidence_score >= old_conf
@@ -359,7 +363,8 @@ def test_bad_lead_reduces_vendor_score(db_session, test_requisition):
 
 
 def test_vendor_dedup_strips_suffixes(db_session, test_requisition):
-    """Sightings from 'Arrow Electronics Inc.' and 'Arrow Electronics' create one lead."""
+    """Sightings from 'Arrow Electronics Inc.' and 'Arrow Electronics' create one
+    lead."""
     requirement = test_requisition.requirements[0]
     s1 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Arrow Electronics Inc.")
     s2 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Arrow Electronics")
@@ -397,9 +402,7 @@ def test_duplicate_auto_merged_for_shared_vendor_card(db_session, test_requisiti
     s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Dup Other Vendor")
     sync_leads_for_sightings(db_session, requirement, [s2])
 
-    leads = db_session.query(SourcingLead).filter(
-        SourcingLead.requirement_id == requirement.id
-    ).all()
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
     assert len(leads) == 2, "Different vendor names should create separate leads"
 
     # Manually assign second lead to same vendor card to simulate domain-based match
@@ -412,9 +415,7 @@ def test_duplicate_auto_merged_for_shared_vendor_card(db_session, test_requisiti
     sync_leads_for_sightings(db_session, requirement, [s3])
 
     db_session.expire_all()
-    leads = db_session.query(SourcingLead).filter(
-        SourcingLead.requirement_id == requirement.id
-    ).all()
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
 
     # Strong signal (shared vendor_card_id) triggers auto-merge → 1 lead remains
     assert len(leads) == 1, f"Auto-merge should reduce to 1 lead, got {len(leads)}"
@@ -422,15 +423,14 @@ def test_duplicate_auto_merged_for_shared_vendor_card(db_session, test_requisiti
 
 
 def test_no_duplicate_flag_for_distinct_vendors(db_session, test_requisition):
-    """Leads with different vendor cards should NOT be flagged as duplicate_candidate."""
+    """Leads with different vendor cards should NOT be flagged as
+    duplicate_candidate."""
     requirement = test_requisition.requirements[0]
     s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Vendor Alpha")
     s2 = _make_sighting(db_session, requirement.id, source_type="brokerbin", vendor="Vendor Beta")
     sync_leads_for_sightings(db_session, requirement, [s1, s2])
 
-    leads = db_session.query(SourcingLead).filter(
-        SourcingLead.requirement_id == requirement.id
-    ).all()
+    leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
     assert len(leads) == 2
 
     for lead in leads:
@@ -439,7 +439,8 @@ def test_no_duplicate_flag_for_distinct_vendors(db_session, test_requisition):
 
 
 def test_has_stock_sets_evidence_buyer_confirmed(db_session, test_requisition):
-    """has_stock status transitions evidence verification_state from raw to buyer_confirmed."""
+    """has_stock status transitions evidence verification_state from raw to
+    buyer_confirmed."""
     requirement = test_requisition.requirements[0]
     s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Verify Test Vendor")
     sync_leads_for_sightings(db_session, requirement, [s1])
@@ -536,7 +537,8 @@ def test_cross_ref_match_type_with_substitutes():
 
 
 def test_inferred_verification_state_on_corroboration(db_session, test_requisition):
-    """Corroborated evidence (2+ source categories) promotes verification_state to inferred."""
+    """Corroborated evidence (2+ source categories) promotes verification_state to
+    inferred."""
     requirement = test_requisition.requirements[0]
     # digikey (api) + brokerbin (marketplace) = corroborated
     s1 = _make_sighting(db_session, requirement.id, source_type="digikey", vendor="Infer Test Vendor")
@@ -549,7 +551,9 @@ def test_inferred_verification_state_on_corroboration(db_session, test_requisiti
 
     evidence = db_session.query(LeadEvidence).filter(LeadEvidence.lead_id == lead.id).all()
     for ev in evidence:
-        assert ev.verification_state == "inferred", f"Corroborated evidence should be inferred, got {ev.verification_state}"
+        assert ev.verification_state == "inferred", (
+            f"Corroborated evidence should be inferred, got {ev.verification_state}"
+        )
 
 
 def test_auto_merge_on_strong_duplicate_signal(db_session, test_requisition):
@@ -632,5 +636,5 @@ def test_no_auto_merge_when_buyer_acted(db_session, test_requisition):
     db_session.expire_all()
     leads = db_session.query(SourcingLead).filter(SourcingLead.requirement_id == requirement.id).all()
     assert len(leads) == 2, "Should NOT auto-merge when buyer has acted on a lead"
-    flagged = [l for l in leads if "duplicate_candidate" in (l.risk_flags or [])]
+    flagged = [lead for lead in leads if "duplicate_candidate" in (lead.risk_flags or [])]
     assert len(flagged) >= 1, "Should flag as duplicate_candidate instead of merging"

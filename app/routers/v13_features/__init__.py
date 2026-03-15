@@ -1,5 +1,4 @@
-"""
-v13_features — v1.3.0 Feature Routes (package)
+"""v13_features — v1.3.0 Feature Routes (package)
 
 Graph webhooks, activity logging, sales dashboard (account ownership & open pool),
 and prospecting pool (site-level ownership).

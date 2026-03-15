@@ -555,7 +555,8 @@ class TestGetMaterialHistory:
         assert result == []
 
     def test_all_vendor_touchpoints_shown(self, db_session):
-        """Multiple vendor history entries for same vendor (across cards) are all shown."""
+        """Multiple vendor history entries for same vendor (across cards) are all
+        shown."""
         card1 = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         card2 = MaterialCard(normalized_mpn="lm7805", display_mpn="LM7805", search_count=1)
         db_session.add_all([card1, card2])
@@ -1062,7 +1063,8 @@ class TestSaveSightings:
         assert remaining[0].vendor_name == "NewVendor"
 
     def test_dedup_old_vs_fresh(self, db_session):
-        """Old sightings from non-succeeded sources get deleted if vendor+mpn matches fresh."""
+        """Old sightings from non-succeeded sources get deleted if vendor+mpn matches
+        fresh."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
@@ -1192,7 +1194,8 @@ class TestSaveSightings:
         assert result[0].confidence == 0.0
 
     def test_qty_fallback_for_positive_numeric(self, db_session):
-        """When normalize_quantity returns None but raw is positive int/float, keep it."""
+        """When normalize_quantity returns None but raw is positive int/float, keep
+        it."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
@@ -1228,7 +1231,8 @@ class TestSaveSightings:
         assert result[0].unit_price is not None
 
     def test_currency_fallback_to_usd(self, db_session):
-        """When currency is None, default to 'USD' instead of falling back to unit_price."""
+        """When currency is None, default to 'USD' instead of falling back to
+        unit_price."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)
@@ -1684,7 +1688,8 @@ class TestFetchFresh:
 
     @pytest.mark.asyncio
     async def test_dedup_integer_vendor_sku(self, db_session):
-        """Dedup handles integer vendor_sku without crashing (OEMSecrets returns int SKUs)."""
+        """Dedup handles integer vendor_sku without crashing (OEMSecrets returns int
+        SKUs)."""
         with (
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
@@ -1856,7 +1861,8 @@ class TestFetchFresh:
 
     @pytest.mark.asyncio
     async def test_source_stats_error_then_success(self, db_session):
-        """When a source errors for one PN and succeeds for another, aggregated status has error."""
+        """When a source errors for one PN and succeeds for another, aggregated status
+        has error."""
         _make_api_source(db_session, "nexar")
 
         call_count = [0]
@@ -2333,7 +2339,8 @@ class TestSearchRequirement:
 
     @pytest.mark.asyncio
     async def test_fresh_sightings_not_historical(self, db_session):
-        """Fresh sightings are marked is_historical=False and is_material_history=False."""
+        """Fresh sightings are marked is_historical=False and
+        is_material_history=False."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)

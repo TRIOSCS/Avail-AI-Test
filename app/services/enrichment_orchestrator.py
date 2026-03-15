@@ -1,5 +1,5 @@
-"""On-Demand Enrichment Orchestrator — fires all enrichment sources in parallel,
-uses Claude to merge conflicting data, and applies high-confidence fields.
+"""On-Demand Enrichment Orchestrator — fires all enrichment sources in parallel, uses
+Claude to merge conflicting data, and applies high-confidence fields.
 
 Called by: enrichment router (POST /api/enrich/{entity_type}/{entity_id})
 Depends on: enrichment_service.py provider functions, claude_client, SQLAlchemy models

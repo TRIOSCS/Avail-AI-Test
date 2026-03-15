@@ -1,4 +1,4 @@
-"""test_evidence_tiers.py — Tests for app/evidence_tiers.py
+"""test_evidence_tiers.py — Tests for app/evidence_tiers.py.
 
 Covers:
 - tier_for_sighting: maps source_type + is_authorized → T1–T7

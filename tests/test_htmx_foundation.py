@@ -1,14 +1,14 @@
-"""
-test_htmx_foundation.py — Tests for Phase 3 Task 1: HTMX + Alpine.js foundation.
+"""test_htmx_foundation.py — Tests for Phase 3 Task 1: HTMX + Alpine.js foundation.
+
 Verifies feature flag, HTMX detection utilities, base template rendering.
 Called by: pytest
 Depends on: app.config, app.dependencies
 """
 
-import pytest
 from unittest.mock import MagicMock
-from app.dependencies import wants_html, is_htmx_boosted
+
 from app.config import Settings
+from app.dependencies import is_htmx_boosted, wants_html
 
 
 class TestWantsHtml:
@@ -49,6 +49,7 @@ class TestUseHtmxFeatureFlag:
 
     def test_default_is_true(self):
         import os
+
         os.environ["TESTING"] = "1"
         os.environ["DATABASE_URL"] = "sqlite:///test.db"
         s = Settings(
@@ -59,6 +60,7 @@ class TestUseHtmxFeatureFlag:
 
     def test_can_disable(self):
         import os
+
         os.environ["TESTING"] = "1"
         os.environ["DATABASE_URL"] = "sqlite:///test.db"
         s = Settings(

@@ -46,7 +46,10 @@ def list_users(db: Session) -> list[dict]:
 
 
 def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> dict:
-    """Update a user's role or active status. Guards against self-modification."""
+    """Update a user's role or active status.
+
+    Guards against self-modification.
+    """
     target = db.get(User, user_id)
     if not target:
         return {"error": "User not found", "status": 404}
@@ -130,7 +133,10 @@ def get_all_config(db: Session) -> list[dict]:
 
 
 def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dict:
-    """Update a config value. Creates if missing."""
+    """Update a config value.
+
+    Creates if missing.
+    """
     row = db.query(SystemConfig).filter(SystemConfig.key == key).first()
     if not row:
         return {"error": f"Config key '{key}' not found", "status": 404}

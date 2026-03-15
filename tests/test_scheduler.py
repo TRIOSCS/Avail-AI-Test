@@ -1,4 +1,4 @@
-"""test_scheduler.py — Tests for APScheduler configuration and utilities
+"""test_scheduler.py — Tests for APScheduler configuration and utilities.
 
 Covers: _utc helper, configure_scheduler job registration, _traced_job wrapper,
 and scheduler configuration tests (conditional flags, job intervals).
@@ -127,7 +127,8 @@ def test_configure_scheduler_conditional_flags_on():
 
 
 def test_configure_scheduler_activity_tracking_jobs():
-    """Activity tracking flag controls webhook_subs; ownership_sweep needs its own flag."""
+    """Activity tracking flag controls webhook_subs; ownership_sweep needs its own
+    flag."""
     with patch("app.config.settings", _mock_settings(activity_tracking_enabled=True)):
         configure_scheduler()
 
@@ -210,7 +211,8 @@ def test_reset_connector_errors_registered():
 
 
 def test_gradient_ai_tagging_job_registered():
-    """Gradient AI tagging job is registered (replaced nexar_backfill + connector_enrichment)."""
+    """Gradient AI tagging job is registered (replaced nexar_backfill +
+    connector_enrichment)."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 

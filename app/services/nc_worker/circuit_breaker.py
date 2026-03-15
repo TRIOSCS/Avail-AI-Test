@@ -79,7 +79,8 @@ class CircuitBreaker:
         return "HEALTHY"
 
     def record_empty_results(self):
-        """Track consecutive empty results — many in a row may indicate shadow-blocking."""
+        """Track consecutive empty results — many in a row may indicate shadow-
+        blocking."""
         self.empty_results_streak += 1
         if self.empty_results_streak >= 10:
             self._trip("10 consecutive empty results — possible shadow-block")

@@ -111,7 +111,10 @@ def get_entry(db: Session, entry_id: int) -> KnowledgeEntry | None:
 
 
 def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> KnowledgeEntry | None:
-    """Update an entry. Only the creator can update."""
+    """Update an entry.
+
+    Only the creator can update.
+    """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return None
@@ -124,7 +127,10 @@ def update_entry(db: Session, entry_id: int, user_id: int, **kwargs) -> Knowledg
 
 
 def delete_entry(db: Session, entry_id: int, user_id: int) -> bool:
-    """Delete an entry. Returns True if deleted."""
+    """Delete an entry.
+
+    Returns True if deleted.
+    """
     entry = db.get(KnowledgeEntry, entry_id)
     if not entry:
         return False
@@ -172,7 +178,10 @@ def post_answer(
     content: str,
     answered_via: str = "web",
 ) -> KnowledgeEntry | None:
-    """Answer a question. Marks question resolved and notifies asker."""
+    """Answer a question.
+
+    Marks question resolved and notifies asker.
+    """
     question = db.get(KnowledgeEntry, question_id)
     if not question or question.entry_type != "question":
         return None

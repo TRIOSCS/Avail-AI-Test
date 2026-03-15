@@ -1,5 +1,4 @@
-"""
-test_http_client.py — Tests for app/http_client.py
+"""test_http_client.py — Tests for app/http_client.py.
 
 Covers uncovered lines:
 - close_clients when RuntimeError occurs (lines 40-41, 44-45)
@@ -17,7 +16,7 @@ from app.http_client import close_clients, http, http_redirect
 
 class TestClientConfig:
     def test_http_client_exists(self):
-        """http client is an AsyncClient instance."""
+        """Http client is an AsyncClient instance."""
         import httpx
 
         assert isinstance(http, httpx.AsyncClient)

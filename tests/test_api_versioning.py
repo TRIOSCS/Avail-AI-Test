@@ -1,5 +1,4 @@
-"""
-test_api_versioning.py — Tests for API version prefix middleware.
+"""test_api_versioning.py — Tests for API version prefix middleware.
 
 Verifies that /api/v1/... paths are rewritten to /api/... internally,
 old /api/... paths still work, and X-API-Version header is set.
@@ -26,7 +25,8 @@ class TestApiVersionMiddleware:
         assert resp.headers.get("X-API-Version") == "v1"
 
     def test_v1_prefix_rewrites_to_api(self, client: TestClient):
-        """GET /api/v1/admin/health should reach the same endpoint as /api/admin/health."""
+        """GET /api/v1/admin/health should reach the same endpoint as
+        /api/admin/health."""
         resp = client.get("/api/v1/admin/health")
         assert resp.status_code in (200, 401, 403)
         assert resp.headers.get("X-API-Version") == "v1"

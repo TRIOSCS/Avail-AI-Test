@@ -42,15 +42,10 @@ async def _job_po_verification():
         from ..services.buyplan_workflow import verify_po_sent
 
         # Find active plans that have lines in pending_verify status
-        plans = (
-            db.query(BuyPlan)
-            .filter(BuyPlan.status == BuyPlanStatus.active.value)
-            .all()
-        )
+        plans = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.active.value).all()
         # Filter to plans with at least one pending_verify line
         plans_to_verify = [
-            p for p in plans
-            if any(l.status == BuyPlanLineStatus.pending_verify.value for l in p.lines)
+            p for p in plans if any(line.status == BuyPlanLineStatus.pending_verify.value for line in p.lines)
         ]
 
         async def _safe_verify(plan):
@@ -464,7 +459,8 @@ async def _download_and_import_stock_list(
 
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
-    """Parse a stock list file (CSV/XLSX) into rows with mpn, qty, price, manufacturer."""
+    """Parse a stock list file (CSV/XLSX) into rows with mpn, qty, price,
+    manufacturer."""
     from ..file_utils import normalize_stock_row, parse_tabular_file
 
     raw_rows = parse_tabular_file(file_bytes, filename)

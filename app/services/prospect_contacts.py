@@ -12,8 +12,6 @@ Depends on: nothing (pure utility module)
 import re
 from datetime import datetime, timezone
 
-from loguru import logger
-
 # ── Personal Email Filter ────────────────────────────────────────────
 
 PERSONAL_DOMAINS = {
@@ -151,4 +149,3 @@ def _is_new_hire(started_at: str | None) -> bool:
         return start_date >= six_months_ago
     except (ValueError, TypeError):
         return False
-

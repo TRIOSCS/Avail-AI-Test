@@ -189,7 +189,8 @@ class TestQuoteWonCPHHook:
         assert cph.purchase_count == 2
 
     def test_quote_won_req_no_site_graceful(self, client, db_session, test_user, test_customer_site):
-        """Quote won where requisition has no customer_site_id → CPH hook skips gracefully."""
+        """Quote won where requisition has no customer_site_id → CPH hook skips
+        gracefully."""
         req = Requisition(
             name="REQ-NO-SITE",
             status="active",

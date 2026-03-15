@@ -1,4 +1,5 @@
-"""Tests for app.vendor_utils — vendor name normalization, merging, and fuzzy matching."""
+"""Tests for app.vendor_utils — vendor name normalization, merging, and fuzzy
+matching."""
 
 from unittest.mock import MagicMock
 

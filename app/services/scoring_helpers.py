@@ -13,8 +13,8 @@ from datetime import date, datetime, timezone
 def month_range(month: date) -> tuple[datetime, datetime]:
     """Return (start_dt, end_dt) as UTC-aware datetimes for the given month.
 
-    start_dt is midnight on the 1st of the month.
-    end_dt is midnight on the 1st of the next month.
+    start_dt is midnight on the 1st of the month. end_dt is midnight on the 1st of the
+    next month.
     """
     month_start = month.replace(day=1)
     if month_start.month == 12:

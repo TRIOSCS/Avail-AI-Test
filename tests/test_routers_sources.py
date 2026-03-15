@@ -1,5 +1,4 @@
-"""
-tests/test_routers_sources.py — Tests for Sources & Email Mining Router
+"""tests/test_routers_sources.py — Tests for Sources & Email Mining Router.
 
 Tests connector factory, sighting creation from attachments,
 email mining test connector, source management endpoints,
@@ -651,7 +650,8 @@ def test_parse_response_attachments_success(
     db_session: Session,
     _vendor_response: VendorResponse,
 ):
-    """Response with attachment; mock parse_attachment returns rows that create sightings."""
+    """Response with attachment; mock parse_attachment returns rows that create
+    sightings."""
     import base64
 
     test_user.m365_connected = True
@@ -801,7 +801,7 @@ def test_get_connector_brokerbin():
 
 
 def test_get_connector_ebay():
-    """eBay source returns EbayConnector when key is set."""
+    """EBay source returns EbayConnector when key is set."""
     creds = {
         "NEXAR_CLIENT_ID": None,
         "NEXAR_CLIENT_SECRET": None,
@@ -1406,7 +1406,8 @@ def test_test_source_no_connector(sources_client: TestClient, _api_source: ApiSo
 
 
 def test_test_source_no_results(sources_client: TestClient, _api_source: ApiSource):
-    """POST /api/sources/{id}/test with connector returning empty list returns no_results."""
+    """POST /api/sources/{id}/test with connector returning empty list returns
+    no_results."""
     mock_connector = MagicMock()
     mock_connector.search = AsyncMock(return_value=[])
 
@@ -1421,7 +1422,8 @@ def test_test_source_no_results(sources_client: TestClient, _api_source: ApiSour
 
 
 def test_test_source_no_env_vars(sources_client: TestClient, db_session: Session):
-    """POST /api/sources/{id}/test for source with no env_vars does not change status on error."""
+    """POST /api/sources/{id}/test for source with no env_vars does not change status on
+    error."""
     src = ApiSource(
         name="no_env_src",
         display_name="No Env",
@@ -1449,7 +1451,8 @@ def test_test_source_no_env_vars(sources_client: TestClient, db_session: Session
 
 
 def test_test_source_success_no_env_vars(sources_client: TestClient, db_session: Session):
-    """POST /api/sources/{id}/test for source with no env_vars does not change status on success."""
+    """POST /api/sources/{id}/test for source with no env_vars does not change status on
+    success."""
     src = ApiSource(
         name="no_env_success",
         display_name="No Env Success",
@@ -1700,7 +1703,8 @@ def test_scan_inbox_empty_contacts(
 
 
 def test_scan_inbox_no_email_mining_source(sources_client: TestClient, db_session: Session):
-    """POST /api/email-mining/scan works even if email_mining source row doesn't exist."""
+    """POST /api/email-mining/scan works even if email_mining source row doesn't
+    exist."""
     mock_miner = MagicMock()
     mock_miner.scan_inbox = AsyncMock(
         return_value={

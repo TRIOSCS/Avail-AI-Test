@@ -205,8 +205,11 @@ async def companies_typeahead(
     db: Session = Depends(get_db),
 ):
     """Lightweight endpoint returning all active companies + site IDs for the
-    requisition creation typeahead. No limit, minimal payload.
-    Cached for 2 hours — invalidated when companies/sites change."""
+    requisition creation typeahead.
+
+    No limit, minimal payload. Cached for 2 hours — invalidated when companies/sites
+    change.
+    """
 
     @cached_endpoint(prefix="companies_typeahead", ttl_hours=2, key_params=[])
     def _fetch(db):
@@ -237,8 +240,8 @@ async def check_company_duplicate(
 ):
     """Check if a company name is a near-duplicate of an existing company.
 
-    Normalizes to lowercase, strips suffixes (Inc, LLC, Ltd, Corp, etc.),
-    and compares for matches.
+    Normalizes to lowercase, strips suffixes (Inc, LLC, Ltd, Corp, etc.), and compares
+    for matches.
     """
     _suffixes = re.compile(
         r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
@@ -406,9 +409,9 @@ async def create_company(
 ):
     """Create a new company with auto-enrichment and default HQ site.
 
-    When force=False (default), checks for duplicate companies first.
-    Returns 409 with duplicate list if near-matches are found.
-    Pass force=True to skip the duplicate check and create anyway.
+    When force=False (default), checks for duplicate companies first. Returns 409 with
+    duplicate list if near-matches are found. Pass force=True to skip the duplicate
+    check and create anyway.
     """
     from ...enrichment_service import normalize_company_input
 
@@ -579,7 +582,8 @@ async def analyze_company_tags(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger AI analysis of customer's requisition history to generate brand/commodity tags."""
+    """Trigger AI analysis of customer's requisition history to generate brand/commodity
+    tags."""
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")

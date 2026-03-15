@@ -1,7 +1,7 @@
 """Tests for Avail Score Service — behavior + outcome scoring.
 
-Tests the 10-metric scoring system for buyers and sales,
-ranking, bonus assignment, and API endpoints.
+Tests the 10-metric scoring system for buyers and sales, ranking, bonus assignment, and
+API endpoints.
 """
 
 import os
@@ -824,6 +824,7 @@ class TestAvailScoreCoverageGaps:
         db_session.add(bp)
         db_session.flush()
         from app.models.buy_plan import BuyPlanLine
+
         line = BuyPlanLine(
             buy_plan_id=bp.id,
             offer_id=offer.id,

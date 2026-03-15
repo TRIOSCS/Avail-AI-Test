@@ -1,5 +1,4 @@
-"""
-E2E test fixtures — Playwright against the live Docker app.
+"""E2E test fixtures — Playwright against the live Docker app.
 
 Creates a signed Starlette session cookie for user_id=1 (admin)
 so tests can skip the Azure OAuth flow.

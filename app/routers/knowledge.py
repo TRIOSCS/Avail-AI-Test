@@ -167,7 +167,10 @@ def update_knowledge_config(
     db: Session = Depends(get_db),
     user=Depends(require_admin),
 ):
-    """Update knowledge config (admin only). Body: {key: value, ...}."""
+    """Update knowledge config (admin only).
+
+    Body: {key: value, ...}.
+    """
     from app.models.knowledge import KnowledgeConfig
 
     for key, value in payload.items():

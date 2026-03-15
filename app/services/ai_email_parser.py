@@ -207,8 +207,8 @@ def should_flag_review(result: dict) -> bool:
 def _clean_email_body(body: str) -> str:
     """Strip HTML, excessive whitespace, and email disclaimers.
 
-    Preserves newlines so tabular data and list formatting survive intact —
-    the LLM needs structure to parse tables accurately.
+    Preserves newlines so tabular data and list formatting survive intact — the LLM
+    needs structure to parse tables accurately.
     """
     if not body:
         return ""

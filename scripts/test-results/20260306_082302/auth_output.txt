@@ -1,4 +1,4 @@
-I'm blocked on Playwright browser permissions. Please approve the Playwright MCP tools so I can complete the visual/interactive browser tests (Tests 1-7, 10). 
+I'm blocked on Playwright browser permissions. Please approve the Playwright MCP tools so I can complete the visual/interactive browser tests (Tests 1-7, 10).
 
 Here's what I've completed so far via curl:
 

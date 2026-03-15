@@ -1,5 +1,4 @@
-"""
-schemas/errors.py — Structured error response model
+"""schemas/errors.py — Structured error response model.
 
 Shared by HTTPException and RequestValidationError handlers in main.py.
 """

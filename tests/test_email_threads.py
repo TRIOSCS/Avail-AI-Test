@@ -1,5 +1,4 @@
-"""
-test_email_threads.py — Tests for email thread service and endpoints
+"""test_email_threads.py — Tests for email thread service and endpoints.
 
 Tests thread attribution (all 4 matching tiers), cache behavior,
 needs_response detection, internal email filtering, empty results,

@@ -72,7 +72,8 @@ def _salesperson_metrics_batch(
 ) -> dict[int, dict]:
     """Compute all 12 metrics for multiple users over a date range in batch.
 
-    Returns {user_id: metrics_dict} — replaces N×12 individual queries with 6 batch queries.
+    Returns {user_id: metrics_dict} — replaces N×12 individual queries with 6 batch
+    queries.
     """
     # Initialize results for all users
     results = {

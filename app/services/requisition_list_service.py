@@ -9,7 +9,6 @@ Depends on: app/models/sourcing.py, app/models/offers.py, SQLAlchemy
 
 from typing import Any
 
-from loguru import logger
 from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
@@ -365,57 +364,77 @@ def list_requisitions(
     # ── Build response dicts ─────────────────────────────────────────
     requisitions = []
     for (
-        r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new,
-        latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv,
-        q_status, q_sent, q_total, q_won, offer_cnt, best_price,
-        await_cnt, pm_cnt, call_cnt, email_act_cnt, latest_rfq_sent,
+        r,
+        req_cnt,
+        con_cnt,
+        reply_cnt,
+        latest_reply,
+        has_new,
+        latest_offer,
+        sourced_cnt,
+        rfq_sent,
+        needs_rev,
+        ttv,
+        q_status,
+        q_sent,
+        q_total,
+        q_won,
+        offer_cnt,
+        best_price,
+        await_cnt,
+        pm_cnt,
+        call_cnt,
+        email_act_cnt,
+        latest_rfq_sent,
     ) in rows:
         _sc, _sc_color, _sc_signals = _compute_sourcing_score(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
-        requisitions.append({
-            "id": r.id,
-            "name": r.name,
-            "status": r.status,
-            "customer_site_id": r.customer_site_id,
-            "company_id": (r.customer_site.company_id if r.customer_site else None),
-            "customer_display": (
-                f"{r.customer_site.company.name} — {r.customer_site.site_name}"
-                if r.customer_site and r.customer_site.company
-                else r.customer_name or ""
-            ),
-            "requirement_count": req_cnt or 0,
-            "contact_count": con_cnt or 0,
-            "reply_count": reply_cnt or 0,
-            "latest_reply_at": latest_reply,
-            "has_new_offers": bool(has_new),
-            "latest_offer_at": latest_offer,
-            "created_by": r.created_by,
-            "created_by_name": creator_names.get(r.created_by, ""),
-            "created_at": r.created_at,
-            "last_searched_at": r.last_searched_at,
-            "sourced_count": sourced_cnt or 0,
-            "rfq_sent_count": rfq_sent or 0,
-            "latest_rfq_sent_at": latest_rfq_sent,
-            "cloned_from_id": r.cloned_from_id,
-            "deadline": r.deadline,
-            "needs_review_count": needs_rev or 0,
-            "total_target_value": float(ttv or 0),
-            "quote_status": q_status,
-            "quote_sent_at": q_sent,
-            "quote_total": float(q_total) if q_total else None,
-            "quote_won_value": float(q_won) if q_won else None,
-            "offer_count": offer_cnt or 0,
-            "best_offer_price": float(best_price) if best_price else None,
-            "awaiting_reply_count": await_cnt or 0,
-            "proactive_match_count": pm_cnt or 0,
-            "claimed_by_id": r.claimed_by_id,
-            "urgency": r.urgency or "normal",
-            "opportunity_value": float(r.opportunity_value) if r.opportunity_value else None,
-            "sourcing_score": _sc,
-            "sourcing_color": _sc_color,
-            "sourcing_signals": _sc_signals,
-        })
+        requisitions.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "status": r.status,
+                "customer_site_id": r.customer_site_id,
+                "company_id": (r.customer_site.company_id if r.customer_site else None),
+                "customer_display": (
+                    f"{r.customer_site.company.name} — {r.customer_site.site_name}"
+                    if r.customer_site and r.customer_site.company
+                    else r.customer_name or ""
+                ),
+                "requirement_count": req_cnt or 0,
+                "contact_count": con_cnt or 0,
+                "reply_count": reply_cnt or 0,
+                "latest_reply_at": latest_reply,
+                "has_new_offers": bool(has_new),
+                "latest_offer_at": latest_offer,
+                "created_by": r.created_by,
+                "created_by_name": creator_names.get(r.created_by, ""),
+                "created_at": r.created_at,
+                "last_searched_at": r.last_searched_at,
+                "sourced_count": sourced_cnt or 0,
+                "rfq_sent_count": rfq_sent or 0,
+                "latest_rfq_sent_at": latest_rfq_sent,
+                "cloned_from_id": r.cloned_from_id,
+                "deadline": r.deadline,
+                "needs_review_count": needs_rev or 0,
+                "total_target_value": float(ttv or 0),
+                "quote_status": q_status,
+                "quote_sent_at": q_sent,
+                "quote_total": float(q_total) if q_total else None,
+                "quote_won_value": float(q_won) if q_won else None,
+                "offer_count": offer_cnt or 0,
+                "best_offer_price": float(best_price) if best_price else None,
+                "awaiting_reply_count": await_cnt or 0,
+                "proactive_match_count": pm_cnt or 0,
+                "claimed_by_id": r.claimed_by_id,
+                "urgency": r.urgency or "normal",
+                "opportunity_value": float(r.opportunity_value) if r.opportunity_value else None,
+                "sourcing_score": _sc,
+                "sourcing_color": _sc_color,
+                "sourcing_signals": _sc_signals,
+            }
+        )
 
     pagination = _build_pagination(filters.page, filters.per_page, total)
 
@@ -457,12 +476,7 @@ def get_requisition_detail(
         if creator:
             creator_name = creator.name or creator.email.split("@")[0]
 
-    requirements = (
-        db.query(Requirement)
-        .filter(Requirement.requisition_id == req_id)
-        .order_by(Requirement.id)
-        .all()
-    )
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).order_by(Requirement.id).all()
 
     return {
         "req": {
@@ -489,22 +503,16 @@ def get_row_context(db: Session, req: Requisition, user) -> dict:
     Depends on: Requisition model, User model
     """
     # Requirement count
-    req_cnt = db.query(sqlfunc.count(Requirement.id)).filter(
-        Requirement.requisition_id == req.id
-    ).scalar() or 0
+    req_cnt = db.query(sqlfunc.count(Requirement.id)).filter(Requirement.requisition_id == req.id).scalar() or 0
     # Offer count
-    offer_cnt = db.query(sqlfunc.count(Offer.id)).filter(
-        Offer.requisition_id == req.id
-    ).scalar() or 0
+    offer_cnt = db.query(sqlfunc.count(Offer.id)).filter(Offer.requisition_id == req.id).scalar() or 0
     # Creator name
     creator = db.query(User).filter(User.id == req.created_by).first()
     creator_name = creator.name or creator.email if creator else ""
     # Customer display
     customer_display = req.customer_name or ""
     if req.customer_site_id:
-        site = db.query(CustomerSite).filter(
-            CustomerSite.id == req.customer_site_id
-        ).first()
+        site = db.query(CustomerSite).filter(CustomerSite.id == req.customer_site_id).first()
         if site and site.company:
             customer_display = f"{site.company.name} — {site.site_name}"
     return {

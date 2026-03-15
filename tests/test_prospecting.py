@@ -1,5 +1,4 @@
-"""
-tests/test_prospecting.py — Prospecting Pool API endpoint tests.
+"""tests/test_prospecting.py — Prospecting Pool API endpoint tests.
 
 Tests: pool listing, claim, my-sites, at-risk, admin assign, ownership guard on site update.
 """

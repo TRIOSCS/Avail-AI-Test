@@ -1,4 +1,4 @@
-"""test_jobs_inventory.py — Tests for inventory/stock background jobs
+"""test_jobs_inventory.py — Tests for inventory/stock background jobs.
 
 Covers: _job_po_verification, _job_stock_autocomplete, _parse_stock_file,
 _scan_stock_list_attachments, _download_and_import_stock_list.
@@ -576,7 +576,8 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
 
 
 def test_download_and_import_stock_list_hyphenated_mpn_no_duplicate(scheduler_db, test_user):
-    """MPN with hyphens should normalize to canonical key, not create duplicate cards."""
+    """MPN with hyphens should normalize to canonical key, not create duplicate
+    cards."""
     import base64
 
     from app.models import MaterialCard

@@ -1,5 +1,4 @@
-"""
-services/vendor_email_lookup.py — Find vendor emails for specific part numbers.
+"""services/vendor_email_lookup.py — Find vendor emails for specific part numbers.
 
 Queries all internal data sources (sightings, vendor cards, contacts, email
 intelligence, material vendor history) then enriches via external providers

@@ -1,5 +1,4 @@
-"""
-test_schemas_v13_features.py — Tests for v1.3 feature schemas.
+"""test_schemas_v13_features.py — Tests for v1.3 feature schemas.
 
 Validates PhoneCallLog and StrategicToggle schemas.
 

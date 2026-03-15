@@ -110,7 +110,8 @@ async def _job_proactive_matching():
 
 @_traced_job
 async def _job_performance_tracking():
-    """Compute vendor scorecards, buyer leaderboard, Avail Scores, and other scoring metrics."""
+    """Compute vendor scorecards, buyer leaderboard, Avail Scores, and other scoring
+    metrics."""
     from ..database import SessionLocal
 
     db = SessionLocal()
@@ -195,9 +196,8 @@ async def _job_performance_tracking():
 async def _job_proactive_offer_expiry():
     """Daily — expire proactive offers with status='sent' that are older than 14 days.
 
-    Proactive offers that never got a customer response should not linger
-    indefinitely. After 14 days, mark them as 'expired' so they don't
-    clutter the active pipeline.
+    Proactive offers that never got a customer response should not linger indefinitely.
+    After 14 days, mark them as 'expired' so they don't clutter the active pipeline.
     """
     from ..database import SessionLocal
     from ..models.intelligence import ProactiveOffer
@@ -227,8 +227,8 @@ async def _job_proactive_offer_expiry():
 async def _job_flag_stale_offers():
     """Daily — flag active offers older than 14 days as is_stale.
 
-    Display-only metadata. Stale offers remain fully visible everywhere.
-    "Leave no stone unturned" — we never hide or filter by is_stale.
+    Display-only metadata. Stale offers remain fully visible everywhere. "Leave no stone
+    unturned" — we never hide or filter by is_stale.
     """
     from ..database import SessionLocal
     from ..models.offers import Offer

@@ -362,7 +362,8 @@ def purge_unknown_tags(db: Session, batch_size: int = 1000) -> dict:
 
 
 def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:
-    """Analyze untagged MPNs to discover common prefixes not in the current lookup table.
+    """Analyze untagged MPNs to discover common prefixes not in the current lookup
+    table.
 
     Returns top_n prefix groups with counts, sorted by frequency.
     Called by: app.routers.tagging_admin

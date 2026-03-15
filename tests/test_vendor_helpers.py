@@ -1,5 +1,5 @@
-"""Tests for app/utils/vendor_helpers.py — vendor card CRUD, contact cleaning,
-SSRF protection, website scraping, merge logic, and entity tag loading.
+"""Tests for app/utils/vendor_helpers.py — vendor card CRUD, contact cleaning, SSRF
+protection, website scraping, merge logic, and entity tag loading.
 
 Achieves 100% coverage of vendor_helpers.py by testing:
 - clean_emails: dedup, junk local parts, junk domains, file-extension emails, overlength
@@ -230,7 +230,8 @@ class TestGetOrCreateCard:
         assert result.phones == []
 
     def test_fuzzy_match_merges_alternate_name(self, db_session):
-        """When thefuzz scores >= 90, existing card is returned with alternate name added."""
+        """When thefuzz scores >= 90, existing card is returned with alternate name
+        added."""
         card = VendorCard(
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
@@ -256,7 +257,8 @@ class TestGetOrCreateCard:
         assert "Arrow Elecctronics" in (result.alternate_names or [])
 
     def test_fuzzy_match_same_display_name_no_duplicate_alt(self, db_session):
-        """When fuzzy-matched vendor_name equals display_name, don't add to alternates."""
+        """When fuzzy-matched vendor_name equals display_name, don't add to
+        alternates."""
         card = VendorCard(
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",

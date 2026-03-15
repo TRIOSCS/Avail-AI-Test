@@ -1,4 +1,4 @@
-"""element14 / Newark Search API connector.
+"""Element14 / Newark Search API connector.
 
 Searches the element14 product catalog (Newark US store) by manufacturer
 part number. REST API with simple API key auth. Falls back to keyword
@@ -18,7 +18,7 @@ from .sources import BaseConnector
 
 
 class Element14Connector(BaseConnector):
-    """element14 Product Search — API key auth, Newark US store."""
+    """Element14 Product Search — API key auth, Newark US store."""
 
     SEARCH_URL = "https://api.element14.com/catalog/products"
 

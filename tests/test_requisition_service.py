@@ -131,7 +131,8 @@ class TestSafeCommit:
 
 
 def test_clone_requisition_duplicate_mpn_preserves_offer_mapping(db_session, test_user):
-    """Clone keeps offers mapped to distinct cloned requirement rows even with duplicate MPNs."""
+    """Clone keeps offers mapped to distinct cloned requirement rows even with duplicate
+    MPNs."""
     from app.models import Offer, Requirement, Requisition
 
     src = Requisition(

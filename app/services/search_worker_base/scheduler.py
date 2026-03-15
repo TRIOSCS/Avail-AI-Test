@@ -63,8 +63,8 @@ class SearchScheduler:
     def next_delay(self) -> float:
         """Generate a realistic delay between searches using log-normal distribution.
 
-        Most delays cluster around the typical_delay.
-        Occasional longer pauses simulate checking email, coffee, etc.
+        Most delays cluster around the typical_delay. Occasional longer pauses simulate
+        checking email, coffee, etc.
         """
         mu = math.log(self._attr("TYPICAL_DELAY_SECONDS"))
         sigma = 0.4

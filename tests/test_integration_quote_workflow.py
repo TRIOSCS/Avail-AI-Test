@@ -1,5 +1,4 @@
-"""
-test_integration_quote_workflow.py — Integration tests for the full quote lifecycle.
+"""test_integration_quote_workflow.py — Integration tests for the full quote lifecycle.
 
 Tests the complete workflow: create requisition → link to customer site → add
 requirements → log offers → build quote → update quote lines → mark result.
@@ -17,7 +16,10 @@ pytestmark = pytest.mark.slow
 
 
 def _setup_req_with_offers(client):
-    """Create a requisition linked to a customer site with offers. Returns (req_id, offer_ids)."""
+    """Create a requisition linked to a customer site with offers.
+
+    Returns (req_id, offer_ids).
+    """
     # Create company + site
     co = client.post("/api/companies", json={"name": "QuoteTest Corp"}).json()
     site = client.post(

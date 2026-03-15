@@ -4,6 +4,6 @@ I'm unable to proceed because both Playwright MCP servers are blocked:
 
 Could you either:
 1. **Approve the `mcp__playwright__` tool permissions** when prompted, or
-2. **Kill the existing browser process** so the plugin Playwright server can use it: `pkill -f mcp-chrome` 
+2. **Kill the existing browser process** so the plugin Playwright server can use it: `pkill -f mcp-chrome`
 
 Without browser access, I can't perform the upload testing.

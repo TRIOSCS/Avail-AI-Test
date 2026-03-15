@@ -182,7 +182,8 @@ class TestResultParser:
         assert isinstance(sightings, list)
 
     def test_sponsor_badge_detected(self):
-        """Sponsor detected when cell 13 has non-empty text (14 cells via flat parser)."""
+        """Sponsor detected when cell 13 has non-empty text (14 cells via flat
+        parser)."""
         html = """
         <table>
           <tr>
@@ -1136,7 +1137,8 @@ class TestAiGate:
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
-        """process_ai_gate handles when model doesn't return a classification for an MPN."""
+        """process_ai_gate handles when model doesn't return a classification for an
+        MPN."""
         from app.services.nc_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -1175,7 +1177,7 @@ class TestAiGate:
 
 class TestSessionManager:
     def test_start_success(self):
-        """start() loads homepage and checks session health via HTTP."""
+        """Start() loads homepage and checks session health via HTTP."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1233,7 +1235,7 @@ class TestSessionManager:
         assert result is False
 
     def test_login_no_credentials(self):
-        """login() returns False when credentials are not configured."""
+        """Login() returns False when credentials are not configured."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1246,7 +1248,7 @@ class TestSessionManager:
         assert result is False
 
     def test_login_success(self):
-        """login() posts credentials and returns True on success."""
+        """Login() posts credentials and returns True on success."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1274,7 +1276,7 @@ class TestSessionManager:
         assert session.is_logged_in is True
 
     def test_login_failure(self):
-        """login() returns False when session not authorized after submit."""
+        """Login() returns False when session not authorized after submit."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1300,7 +1302,7 @@ class TestSessionManager:
         assert session.is_logged_in is False
 
     def test_login_exception(self):
-        """login() handles exceptions gracefully."""
+        """Login() handles exceptions gracefully."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1342,7 +1344,7 @@ class TestSessionManager:
         assert result is True
 
     def test_stop(self):
-        """stop() closes HTTP session."""
+        """Stop() closes HTTP session."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1353,7 +1355,7 @@ class TestSessionManager:
         assert session.is_logged_in is False
 
     def test_stop_none_context(self):
-        """stop() with no active session doesn't crash."""
+        """Stop() with no active session doesn't crash."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1577,7 +1579,7 @@ class TestQueueManagerEdge:
 
 class TestSessionManagerNotLoggedIn:
     def test_start_not_logged_in(self):
-        """start() sets is_logged_in=False when session is not authorized."""
+        """Start() sets is_logged_in=False when session is not authorized."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1602,8 +1604,8 @@ class TestSessionManagerNotLoggedIn:
 class TestWorkerMainLoop:
     """Tests for worker.main() — patches at source modules since imports are lazy.
 
-    worker.main() is a sync function using time.sleep(), so tests patch
-    time.sleep (not asyncio.sleep) and call main() directly (no await).
+    worker.main() is a sync function using time.sleep(), so tests patch time.sleep (not
+    asyncio.sleep) and call main() directly (no await).
     """
 
     # Patch targets: lazy imports inside main() resolve from source modules
@@ -1623,13 +1625,14 @@ class TestWorkerMainLoop:
     _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
 
     def _make_mock_db(self, db_session):
-        """Create a mock SessionLocal that returns a proxy session that won't actually close."""
+        """Create a mock SessionLocal that returns a proxy session that won't actually
+        close."""
         mock_session = MagicMock(wraps=db_session)
         mock_session.close = MagicMock()  # Prevent actual close
         return MagicMock(return_value=mock_session)
 
     def test_main_shutdown_requested(self, db_session):
-        """main() exits immediately when shutdown is requested."""
+        """Main() exits immediately when shutdown is requested."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1655,7 +1658,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_browser_start_fails(self, db_session):
-        """main() exits when browser session fails to start."""
+        """Main() exits when browser session fails to start."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1674,7 +1677,7 @@ class TestWorkerMainLoop:
         assert ws.is_running is False
 
     def test_main_login_fails(self, db_session):
-        """main() exits when initial login fails."""
+        """Main() exits when initial login fails."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1697,7 +1700,7 @@ class TestWorkerMainLoop:
         assert ws.is_running is False
 
     def test_main_outside_business_hours(self, db_session):
-        """main() sleeps when outside business hours then shuts down."""
+        """Main() sleeps when outside business hours then shuts down."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1735,7 +1738,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_daily_limit_reached(self, db_session):
-        """main() sleeps when daily limit is reached."""
+        """Main() sleeps when daily limit is reached."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1773,7 +1776,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_circuit_breaker_open(self, db_session):
-        """main() sleeps when circuit breaker is open."""
+        """Main() sleeps when circuit breaker is open."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1812,7 +1815,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_break_time(self, db_session):
-        """main() takes a break when scheduler says it's time."""
+        """Main() takes a break when scheduler says it's time."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1854,7 +1857,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_empty_queue(self, db_session):
-        """main() sleeps when queue is empty."""
+        """Main() sleeps when queue is empty."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1895,7 +1898,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_search_success(self, db_session, test_requisition):
-        """main() performs a full search cycle."""
+        """Main() performs a full search cycle."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -1969,7 +1972,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_session_reauth_fails(self, db_session, test_requisition):
-        """main() handles session re-auth failure."""
+        """Main() handles session re-auth failure."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2024,7 +2027,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_session_expired_during_search(self, db_session, test_requisition):
-        """main() re-queues item when health check returns SESSION_EXPIRED."""
+        """Main() re-queues item when health check returns SESSION_EXPIRED."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2088,7 +2091,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_search_exception(self, db_session, test_requisition):
-        """main() marks item failed on search exception."""
+        """Main() marks item failed on search exception."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2145,7 +2148,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_ai_gate_error(self, db_session):
-        """main() continues after AI gate error."""
+        """Main() continues after AI gate error."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2186,7 +2189,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_daily_reset(self, db_session):
-        """main() resets daily stats on date change."""
+        """Main() resets daily stats on date change."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2228,7 +2231,7 @@ class TestWorkerMainLoop:
             worker_mod._shutdown_requested = original_shutdown
 
     def test_main_breaker_trips_during_search(self, db_session, test_requisition):
-        """main() marks item failed when breaker trips after health check."""
+        """Main() marks item failed when breaker trips after health check."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -2379,7 +2382,7 @@ class TestCircuitBreakerGaps:
         assert "trip_reason" in info
 
     def test_reset(self):
-        """reset() clears all state."""
+        """Reset() clears all state."""
         breaker = CircuitBreaker()
         breaker.is_open = True
         breaker.trip_reason = "test"
@@ -2639,7 +2642,8 @@ class TestNcSearchEngineFull:
         assert "results after timeout" in result["html"]
 
     def test_search_part_browser_fallback_success(self):
-        """search_part uses browser fallback when HTTP returns no results (line 52-53)."""
+        """search_part uses browser fallback when HTTP returns no results (line
+        52-53)."""
         mock_resp = MagicMock()
         mock_resp.text = "<html>No results</html>"
         mock_resp.status_code = 200
@@ -2675,7 +2679,8 @@ class TestNcSearchEngineFull:
 
 class TestNcResultParserFull:
     def test_floating_block_parse(self):
-        """Parse results with proper .div-table-float-reg.floating-block structure (lines 118-197)."""
+        """Parse results with proper .div-table-float-reg.floating-block structure
+        (lines 118-197)."""
         html = """
         <div class="div-table-float-reg floating-block">
             <div class="region-header">The Americas</div>
@@ -2798,7 +2803,7 @@ class TestNcResultParserFull:
         assert len(sightings) == 0
 
     def test_floating_block_nctd_fallback(self):
-        """nctd selector falls back to row-level (lines 160-162)."""
+        """Nctd selector falls back to row-level (lines 160-162)."""
         html = """
         <div class="div-table-float-reg floating-block">
             <div class="region-header">The Americas</div>
@@ -2818,7 +2823,7 @@ class TestNcResultParserFull:
         assert len(sightings) == 1
 
     def test_floating_block_ncprc_fallback(self):
-        """ncprc selector falls back to row-level (lines 166-167)."""
+        """Ncprc selector falls back to row-level (lines 166-167)."""
         html = """
         <div class="div-table-float-reg floating-block">
             <div class="region-header">The Americas</div>
@@ -2966,7 +2971,7 @@ class TestNcSessionManagerFull:
         assert sm.has_browser is False
 
     def test_page_property(self):
-        """page property returns None when not started (line 48)."""
+        """Page property returns None when not started (line 48)."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -2974,7 +2979,7 @@ class TestNcSessionManagerFull:
         assert sm.page is None
 
     def test_start_exception(self):
-        """start() raises on network error (lines 64-66)."""
+        """Start() raises on network error (lines 64-66)."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -3039,7 +3044,7 @@ class TestNcSessionManagerFull:
         await sm.start_browser()  # Should return immediately
 
     def test_login_no_csrf_token(self):
-        """login() returns False when CSRF token not found (lines 128-129)."""
+        """Login() returns False when CSRF token not found (lines 128-129)."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -3182,7 +3187,7 @@ class TestNcSessionManagerFull:
         assert result is True
 
     def test_stop_with_exception(self):
-        """stop() handles exception on close (lines 222-223)."""
+        """Stop() handles exception on close (lines 222-223)."""
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -3272,7 +3277,8 @@ class TestNcSightingWriterGaps:
         assert count2 == 0
 
     def test_price_breaks_in_sighting(self, db_session, test_requisition):
-        """save_nc_sightings extracts unit_price and includes price_breaks in raw_data (lines 73, 86)."""
+        """save_nc_sightings extracts unit_price and includes price_breaks in raw_data
+        (lines 73, 86)."""
         from app.services.nc_worker.result_parser import PriceBreak
 
         req = test_requisition.requirements[0]
@@ -3341,7 +3347,7 @@ class TestNcWorkerGaps:
             mock_gate.assert_called_once_with(db_session)
 
     def test_main_daily_stats_reset_with_summary(self, db_session):
-        """main() logs daily summary and resets stats on date change (lines 139-156)."""
+        """Main() logs daily summary and resets stats on date change (lines 139-156)."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3396,7 +3402,7 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_search_with_sightings(self, db_session, test_requisition):
-        """main() records sightings and empty results correctly (line 253)."""
+        """Main() records sightings and empty results correctly (line 253)."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3468,7 +3474,7 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_mark_status_fails_in_except(self, db_session, test_requisition):
-        """main() handles mark_status failure in except handler (lines 295-296)."""
+        """Main() handles mark_status failure in except handler (lines 295-296)."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3526,7 +3532,7 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_has_browser_stop(self, db_session):
-        """main() calls stop_browser when has_browser is True (line 316)."""
+        """Main() calls stop_browser when has_browser is True (line 316)."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)
@@ -3556,7 +3562,7 @@ class TestNcWorkerGaps:
             worker_mod._shutdown_requested = original
 
     def test_main_outer_exception(self, db_session):
-        """main() handles unexpected outer exception (line 305-307)."""
+        """Main() handles unexpected outer exception (line 305-307)."""
         import app.services.nc_worker.worker as worker_mod
 
         ws = NcWorkerStatus(id=1, is_running=False)

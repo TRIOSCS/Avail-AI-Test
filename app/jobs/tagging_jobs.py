@@ -14,9 +14,10 @@ from ..scheduler import _traced_job
 def register_tagging_jobs(scheduler, settings):
     """Register tagging jobs with the scheduler.
 
-    NOTE (2026-03-05): Paid API jobs DISABLED (Nexar/DigiKey/Mouser/Element14/OEMSecrets).
-    Gradient AI is FREE — runs every 30min to classify untagged cards aggressively.
-    Prefix/sighting/boost run frequently to maximize non-API coverage.
+    NOTE (2026-03-05): Paid API jobs DISABLED
+    (Nexar/DigiKey/Mouser/Element14/OEMSecrets). Gradient AI is FREE — runs every 30min
+    to classify untagged cards aggressively. Prefix/sighting/boost run frequently to
+    maximize non-API coverage.
     """
     # DISABLED — consumes DigiKey/Mouser/Element14/OEMSecrets/Nexar API quota
     # scheduler.add_job(
@@ -73,7 +74,10 @@ def register_tagging_jobs(scheduler, settings):
 
 @_traced_job
 async def _job_connector_enrichment():  # pragma: no cover
-    """Enrich untagged material cards via API connectors (0.95 confidence). DISABLED."""
+    """Enrich untagged material cards via API connectors (0.95 confidence).
+
+    DISABLED.
+    """
     from ..database import SessionLocal
     from ..models.intelligence import MaterialCard
     from ..models.tags import MaterialTag, Tag
@@ -120,7 +124,10 @@ async def _job_connector_enrichment():  # pragma: no cover
 
 @_traced_job
 async def _job_internal_boost():
-    """Cross-check and boost tag confidence using internal data (no API calls). Every 4h."""
+    """Cross-check and boost tag confidence using internal data (no API calls).
+
+    Every 4h.
+    """
     import asyncio
 
     from ..database import SessionLocal
@@ -139,7 +146,10 @@ async def _job_internal_boost():
 
 @_traced_job
 async def _job_prefix_backfill():
-    """Run prefix lookup on untagged cards. Every 2h."""
+    """Run prefix lookup on untagged cards.
+
+    Every 2h.
+    """
     import asyncio
 
     from ..database import SessionLocal
@@ -158,7 +168,10 @@ async def _job_prefix_backfill():
 
 @_traced_job
 async def _job_sighting_mining():
-    """Mine sighting manufacturer data for untagged cards. Every 2h."""
+    """Mine sighting manufacturer data for untagged cards.
+
+    Every 2h.
+    """
     import asyncio
 
     from ..database import SessionLocal
@@ -194,7 +207,8 @@ async def _job_nexar_backfill():
 
 @_traced_job
 async def _job_gradient_ai_tagging():
-    """Classify untagged material cards via Gradient AI (FREE). Every 30 min, 500 cards/batch.
+    """Classify untagged material cards via Gradient AI (FREE). Every 30 min, 500
+    cards/batch.
 
     Waterfall: prefix_backfill + sighting_mining first (instant), then Gradient AI for remainder.
     Uses Sonnet via Gradient for fast, accurate classification at zero cost.
@@ -277,7 +291,8 @@ async def _job_gradient_ai_tagging():
 
 
 async def _job_material_enrichment():
-    """Every 2h — AI-enrich material cards missing descriptions/categories via Gradient."""
+    """Every 2h — AI-enrich material cards missing descriptions/categories via
+    Gradient."""
     from ..config import settings
     from ..database import SessionLocal
 

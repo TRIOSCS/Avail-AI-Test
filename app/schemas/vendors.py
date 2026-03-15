@@ -1,5 +1,4 @@
-"""
-schemas/vendors.py — Pydantic models for Vendor & Material endpoints
+"""schemas/vendors.py — Pydantic models for Vendor & Material endpoints.
 
 Validates VendorCard updates, reviews, contacts, and MaterialCard edits.
 

@@ -1,7 +1,7 @@
 """Purchase history upsert service.
 
-Provides upsert_purchase() — called by offer/quote won hooks
-and future import scripts to maintain the customer_part_history table.
+Provides upsert_purchase() — called by offer/quote won hooks and future import scripts
+to maintain the customer_part_history table.
 """
 
 from datetime import datetime, timezone

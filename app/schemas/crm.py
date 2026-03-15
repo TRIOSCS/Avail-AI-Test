@@ -1,5 +1,4 @@
-"""
-schemas/crm.py — Pydantic models for CRM endpoints
+"""schemas/crm.py — Pydantic models for CRM endpoints.
 
 Validates Companies, CustomerSites, Offers, and Quotes.
 
@@ -552,7 +551,6 @@ class CustomerImportRow(BaseModel):
         if not v:
             raise ValueError("company_name is required")
         return v
-
 
 
 # ── Misc Request Bodies ─────────────────────────────────────────────

@@ -1,4 +1,4 @@
-"""eBay Browse API connector — searches electronic components on eBay."""
+"""EBay Browse API connector — searches electronic components on eBay."""
 
 import base64
 
@@ -10,7 +10,7 @@ from .sources import BaseConnector
 
 
 class EbayConnector(BaseConnector):
-    """eBay Browse API — OAuth client credentials flow."""
+    """EBay Browse API — OAuth client credentials flow."""
 
     TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
     SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"

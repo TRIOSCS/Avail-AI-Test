@@ -110,8 +110,8 @@ async def run_ownership_sweep(db: Session) -> dict:
 def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> bool:
     """Check if a company is in the open pool. If so, assign ownership to user.
 
-    Called automatically after an activity is logged against a company.
-    Returns True if ownership was claimed.
+    Called automatically after an activity is logged against a company. Returns True if
+    ownership was claimed.
     """
     company = db.get(Company, company_id)
     if not company:
@@ -145,8 +145,8 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
 def get_accounts_at_risk(db: Session) -> list[dict]:
     """Get all owned accounts approaching the warning zone.
 
-    Returns accounts where days_inactive >= warning_day.
-    Sorted by days remaining (most urgent first).
+    Returns accounts where days_inactive >= warning_day. Sorted by days remaining (most
+    urgent first).
     """
     now = datetime.now(timezone.utc)
     owned = (
@@ -429,7 +429,10 @@ def get_open_pool_sites(db: Session) -> list[dict]:
 
 
 def claim_site(site_id: int, user_id: int, db: Session) -> bool:
-    """Claim an unowned site. Sales/trader roles only. Concurrency-safe."""
+    """Claim an unowned site.
+
+    Sales/trader roles only. Concurrency-safe.
+    """
     user = db.get(User, user_id)
     if not user or user.role not in ("sales", "trader"):
         return False

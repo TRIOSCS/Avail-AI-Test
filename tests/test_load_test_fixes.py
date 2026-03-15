@@ -163,7 +163,9 @@ class TestCompaniesTypeaheadCache:
 class TestOfferStatusUnchanged:
     def test_offer_stays_active_after_quote_create(self, client, db_session, test_user):
         """Offers must NEVER change status when included in a quote.
-        Same offer can be in 5 quotes simultaneously."""
+
+        Same offer can be in 5 quotes simultaneously.
+        """
         co, site = _make_company_and_site(db_session)
         req = _make_req(db_session, test_user)
         req.customer_site_id = site.id

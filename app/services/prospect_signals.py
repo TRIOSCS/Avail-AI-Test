@@ -105,8 +105,8 @@ def _recalculate_readiness(prospect: ProspectAccount) -> None:
 async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
     """Check if prospect has signal data; if not, call Explorium to backfill.
 
-    Primarily serves email-mined and manually-added prospects.
-    Explorium-discovered prospects will already have signals and be skipped.
+    Primarily serves email-mined and manually-added prospects. Explorium-discovered
+    prospects will already have signals and be skipped.
 
     Returns True if new signals were added, False if already complete.
     """
@@ -588,8 +588,8 @@ def _template_fallback_writeup(prospect: ProspectAccount) -> str:
 async def generate_ai_writeup(prospect: ProspectAccount, db: Session) -> str:
     """Generate a 2-3 sentence sales-ready writeup using Claude Haiku.
 
-    Falls back to template-based writeup if Claude API is unavailable.
-    Stores result in prospect.ai_writeup field.
+    Falls back to template-based writeup if Claude API is unavailable. Stores result in
+    prospect.ai_writeup field.
     """
     # Build prompt with all available enrichment data
     prompt = _build_writeup_prompt(prospect)

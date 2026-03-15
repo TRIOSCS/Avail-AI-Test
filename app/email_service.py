@@ -37,8 +37,11 @@ async def send_batch_rfq(
     requisition_id: int,
     vendor_groups: list[dict],
 ) -> list[dict]:
-    """Send one RFQ email per vendor group. Each group: {vendor_name, vendor_email, parts, subject, body}.
-    Returns list of created Contact records as dicts."""
+    """Send one RFQ email per vendor group.
+
+    Each group: {vendor_name, vendor_email, parts, subject, body}.
+    Returns list of created Contact records as dicts.
+    """
     from app.utils.graph_client import GraphClient
 
     gc = GraphClient(token)
@@ -223,7 +226,8 @@ async def send_batch_rfq(
 async def _find_sent_message(gc, subject: str) -> dict | None:
     """Find the just-sent message in Sent Items to get its ID and conversationId.
 
-    Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation delays.
+    Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation
+    delays.
     """
     delays = [1, 2, 4]
     for delay in delays:
@@ -780,8 +784,8 @@ def _is_noise_email(email: str) -> bool:
 async def parse_response_ai(body: str, subject: str) -> dict | None:
     """Use Claude to parse vendor email response.
 
-    Delegates to claude_client for API calls. Kept as thin wrapper
-    for backward compatibility with poll_inbox().
+    Delegates to claude_client for API calls. Kept as thin wrapper for backward
+    compatibility with poll_inbox().
     """
     from app.services.response_parser import parse_vendor_response
 
@@ -960,7 +964,8 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                     from app.services.task_service import on_email_offer_parsed
 
                     on_email_offer_parsed(
-                        db, offer.requisition_id,
+                        db,
+                        offer.requisition_id,
                         offer.vendor_name or "Unknown",
                         offer.mpn or "?",
                         offer.id,

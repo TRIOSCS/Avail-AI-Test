@@ -60,10 +60,9 @@ async def _job_poll_8x8_cdrs():
 def _process_cdrs(db, settings) -> dict:
     """Core CDR processing logic with CRM reverse lookup.
 
-    After fetching CDRs, runs reverse_lookup_phone() on each external phone.
-    If a match is found, sets company_id/vendor_card_id and contact_name
-    on the ActivityLog entry. Also links to open requisitions when the
-    matched company has active reqs.
+    After fetching CDRs, runs reverse_lookup_phone() on each external phone. If a match
+    is found, sets company_id/vendor_card_id and contact_name on the ActivityLog entry.
+    Also links to open requisitions when the matched company has active reqs.
 
     Returns stats dict with processed, matched, skipped counts.
     """
@@ -180,9 +179,7 @@ def _process_cdrs(db, settings) -> dict:
                 )
                 if open_req:
                     record.requisition_id = open_req.id
-                    logger.debug(
-                        f"CDR linked to open req {open_req.id} for company {crm_match['company_name']}"
-                    )
+                    logger.debug(f"CDR linked to open req {open_req.id} for company {crm_match['company_name']}")
             elif crm_match["entity_type"] == "vendor":
                 record.vendor_card_id = crm_match["vendor_card_id"]
             matched += 1
@@ -259,16 +256,13 @@ def run_8x8_poll_dry_run(ext_map: dict | None = None):
         norm = normalize_cdr(cdr)
         user = None
         external_phone = ""
-        contact_name = ""
 
         if norm["direction"] == "Outgoing":
             user = ext_map.get(norm["caller_phone"])
             external_phone = norm["callee_phone"]
-            contact_name = norm["callee_name"]
         elif norm["direction"] == "Incoming":
             user = ext_map.get(norm["extension"])
             external_phone = norm["caller_phone"]
-            contact_name = norm["caller_name"]
 
         if user:
             direction = "outbound" if norm["direction"] == "Outgoing" else "inbound"

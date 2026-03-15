@@ -1,7 +1,7 @@
 """Tests for vendor_merge_service.py — extracted vendor card merge logic.
 
-Verifies that merge correctly combines array fields, reassigns FK references,
-sums sighting counts, and deletes the removed card.
+Verifies that merge correctly combines array fields, reassigns FK references, sums
+sighting counts, and deletes the removed card.
 """
 
 import pytest

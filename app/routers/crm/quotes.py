@@ -1,6 +1,5 @@
-"""
-routers/crm/quotes.py — Quote endpoints (create, update, send, result, revise, reopen)
-and pricing history.
+"""routers/crm/quotes.py — Quote endpoints (create, update, send, result, revise,
+reopen) and pricing history.
 
 Extracted from routers/crm.py.
 """
@@ -58,7 +57,8 @@ async def get_quote(req_id: int, user: User = Depends(require_user), db: Session
 
 @router.get("/api/quotes/recent-terms")
 async def recent_quote_terms(user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Return payment/shipping terms from the 5 most recent quotes for copy-from-quote UX."""
+    """Return payment/shipping terms from the 5 most recent quotes for copy-from-quote
+    UX."""
     quotes = (
         db.query(Quote)
         .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
@@ -307,7 +307,10 @@ async def delete_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a draft quote. Sent/won/lost quotes cannot be deleted."""
+    """Delete a draft quote.
+
+    Sent/won/lost quotes cannot be deleted.
+    """
     from ...dependencies import get_quote_for_user
 
     quote = get_quote_for_user(db, user, quote_id)
@@ -349,8 +352,7 @@ async def send_quote(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    from ...dependencies import require_fresh_token
-    from ...dependencies import get_quote_for_user
+    from ...dependencies import get_quote_for_user, require_fresh_token
 
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
@@ -549,11 +551,15 @@ async def pricing_history(mpn: str, user: User = Depends(require_user), db: Sess
     card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
 
     mpn_upper = mpn.upper().strip()
-    quotes = db.query(Quote).options(joinedload(Quote.customer_site).joinedload(CustomerSite.company)).filter(
-        Quote.status.in_(_PRICED_STATUSES)
+    quotes = (
+        db.query(Quote)
+        .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
+        .filter(Quote.status.in_(_PRICED_STATUSES))
     )
     if user.role == "sales":
-        quotes = quotes.join(Requisition, Quote.requisition_id == Requisition.id).filter(Requisition.created_by == user.id)
+        quotes = quotes.join(Requisition, Quote.requisition_id == Requisition.id).filter(
+            Requisition.created_by == user.id
+        )
     quotes = quotes.order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc()).limit(500).all()
     history = []
     card_id = card.id if card else None

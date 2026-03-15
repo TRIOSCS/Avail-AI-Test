@@ -120,8 +120,8 @@ def check_buyplan_status_mismatches(db, fix=False):
             continue
 
         terminal = {"verified", "cancelled"}
-        all_terminal = all(l.status in terminal for l in lines)
-        all_cancelled = all(l.status == "cancelled" for l in lines)
+        all_terminal = all(ln.status in terminal for ln in lines)
+        all_cancelled = all(ln.status == "cancelled" for ln in lines)
 
         if plan.status == BuyPlanStatus.active.value and all_cancelled:
             issues.append(
@@ -134,7 +134,7 @@ def check_buyplan_status_mismatches(db, fix=False):
             )
 
         if plan.status == BuyPlanStatus.completed.value and not all_terminal:
-            non_terminal = [l for l in lines if l.status not in terminal]
+            non_terminal = [ln for ln in lines if ln.status not in terminal]
             issues.append(
                 {
                     "plan_id": plan.id,
@@ -153,7 +153,7 @@ def check_orphan_buyplan_lines(db, fix=False):
 
     plan_ids = select(BuyPlan.id)
     orphans = db.query(BuyPlanLine).filter(not_(BuyPlanLine.buy_plan_id.in_(plan_ids))).all()
-    issues = [{"line_id": l.id, "buy_plan_id": l.buy_plan_id, "issue": "orphan_line"} for l in orphans]
+    issues = [{"line_id": ln.id, "buy_plan_id": ln.buy_plan_id, "issue": "orphan_line"} for ln in orphans]
     return issues
 
 

@@ -281,7 +281,10 @@ def get_buyer_leaderboard_months(db: Session) -> list[str]:
 
 
 def compute_stock_list_hash(rows: list[dict]) -> str:
-    """Normalize and hash stock list content. Sort MPNs, lowercase, SHA-256."""
+    """Normalize and hash stock list content.
+
+    Sort MPNs, lowercase, SHA-256.
+    """
     mpns = sorted(
         set(
             str(r.get("mpn") or r.get("part_number") or "").strip().upper()
