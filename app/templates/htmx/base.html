@@ -13,10 +13,8 @@
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline-block; }
     .htmx-request.htmx-indicator { display: inline-block; }
-    /* Smooth content transitions */
     .htmx-swapping { opacity: 0; transition: opacity 0.15s ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 0.15s ease-in; }
-    /* Spinner animation */
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin 0.6s linear infinite; }
   </style>
@@ -25,127 +23,199 @@
   {% block body %}
   <div class="min-h-full flex">
 
-    {# ── Sidebar ─────────────────────────────────────────────── #}
-    <aside class="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-gray-900">
+    {# ── Desktop Sidebar ──────────────────────────────────────── #}
+    <aside class="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 bg-brand-700 transition-all duration-200"
+           :class="$store.sidebar.collapsed ? 'lg:w-16' : 'lg:w-64'">
       {# Logo #}
-      <div class="flex items-center h-16 px-6 border-b border-gray-800">
-        <span class="text-xl font-bold text-white tracking-tight">Avail<span class="text-blue-400">AI</span></span>
+      <div class="flex items-center h-16 px-4 border-b border-brand-800">
+        <img src="/static/public/avail_logo.png" alt="AVAIL" class="h-10 w-auto"
+             x-show="!$store.sidebar.collapsed" x-cloak>
+        <span class="text-xl font-bold text-white" x-show="$store.sidebar.collapsed" x-cloak>A</span>
+        <button @click="$store.sidebar.collapsed = !$store.sidebar.collapsed"
+                class="ml-auto text-brand-300 hover:text-white" aria-label="Toggle sidebar">
+          <svg x-show="!$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          <svg x-show="$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
       </div>
 
       {# Navigation #}
-      <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        <a href="/v2/requisitions"
-           hx-get="/v2/partials/requisitions"
+      <nav class="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        {% set nav_items = [
+          ('requisitions', 'Requisitions', '/v2/requisitions', '/v2/partials/requisitions', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+          ('search', 'Part Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+          ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+        ] %}
+        {% for id, label, href, partial, icon in nav_items %}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
            hx-target="#main-content"
-           hx-push-url="/v2/requisitions"
-           @click="currentView = 'requisitions'"
-           :class="currentView === 'requisitions' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           hx-push-url="{{ href }}"
+           @click="currentView = '{{ id }}'"
+           :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
-          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-          Requisitions
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+          <span x-show="!$store.sidebar.collapsed">{{ label }}</span>
         </a>
+        {% endfor %}
 
-        <a href="/v2/search"
-           hx-get="/v2/partials/search"
+        <p class="px-3 pt-4 text-xs font-semibold text-brand-300 uppercase tracking-wider mb-2"
+           x-show="!$store.sidebar.collapsed">Relationships</p>
+        <div x-show="$store.sidebar.collapsed" class="border-t border-brand-800 my-2 mx-2"></div>
+
+        {% set rel_items = [
+          ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
+          ('companies', 'Companies', '/v2/companies', '/v2/partials/companies', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+          ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes', 'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
+          ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting', 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
+        ] %}
+        {% for id, label, href, partial, icon in rel_items %}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
            hx-target="#main-content"
-           hx-push-url="/v2/search"
-           @click="currentView = 'search'"
-           :class="currentView === 'search' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
+           hx-push-url="{{ href }}"
+           @click="currentView = '{{ id }}'"
+           :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
-          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-          Part Search
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+          <span x-show="!$store.sidebar.collapsed">{{ label }}</span>
         </a>
+        {% endfor %}
 
-        <a href="/v2/buy-plans"
-           hx-get="/v2/partials/buy-plans"
-           hx-target="#main-content"
-           hx-push-url="/v2/buy-plans"
-           @click="currentView = 'buy-plans'"
-           :class="currentView === 'buy-plans' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
-           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
-          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z"/></svg>
-          Buy Plans
-        </a>
-
-        <p class="px-3 pt-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Relationships</p>
-
-        <a href="/v2/vendors"
-           hx-get="/v2/partials/vendors"
-           hx-target="#main-content"
-           hx-push-url="/v2/vendors"
-           @click="currentView = 'vendors'"
-           :class="currentView === 'vendors' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
-           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
-          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-          Vendors
-        </a>
-
-        <a href="/v2/companies"
-           hx-get="/v2/partials/companies"
-           hx-target="#main-content"
-           hx-push-url="/v2/companies"
-           @click="currentView = 'companies'"
-           :class="currentView === 'companies' ? 'bg-gray-800 text-white' : 'text-gray-300 hover:bg-gray-800 hover:text-white'"
-           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
-          <svg class="mr-3 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          Companies
-        </a>
+        {# Settings at bottom of nav #}
+        <div class="pt-4">
+          <a href="/v2/settings"
+             hx-get="/v2/partials/settings"
+             hx-target="#main-content"
+             hx-push-url="/v2/settings"
+             @click="currentView = 'settings'"
+             :class="currentView === 'settings' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+            <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span x-show="!$store.sidebar.collapsed">Settings</span>
+          </a>
+        </div>
       </nav>
 
       {# User info #}
-      <div class="flex items-center px-4 py-3 border-t border-gray-800">
+      <div class="flex items-center px-4 py-3 border-t border-brand-800">
         <div class="flex-shrink-0">
-          <div class="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-medium">
+          <div class="h-8 w-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-medium">
             {{ user_name[0]|upper if user_name else "?" }}
           </div>
         </div>
-        <div class="ml-3 min-w-0 flex-1">
+        <div class="ml-3 min-w-0 flex-1" x-show="!$store.sidebar.collapsed">
           <p class="text-sm font-medium text-white truncate">{{ user_name }}</p>
-          <p class="text-xs text-gray-400 truncate">{{ user_email }}</p>
+          <p class="text-xs text-brand-300 truncate">{{ user_email }}</p>
         </div>
-        <a href="/auth/logout" class="ml-2 text-gray-400 hover:text-white">
+        <a href="/auth/logout" class="ml-2 text-brand-300 hover:text-white" x-show="!$store.sidebar.collapsed">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
         </a>
       </div>
     </aside>
 
     {# ── Mobile header ───────────────────────────────────────── #}
-    <div class="lg:hidden fixed top-0 inset-x-0 z-40 bg-gray-900 border-b border-gray-800 h-14 flex items-center px-4">
-      <button @click="sidebarOpen = !sidebarOpen" class="text-gray-300 hover:text-white">
+    <div class="lg:hidden fixed top-0 inset-x-0 z-40 bg-brand-700 border-b border-brand-800 h-14 flex items-center px-4">
+      <button @click="sidebarOpen = !sidebarOpen" class="text-brand-200 hover:text-white">
         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <span class="ml-3 text-lg font-bold text-white">Avail<span class="text-blue-400">AI</span></span>
+      <img src="/static/public/avail_logo.png" alt="AVAIL" class="ml-3 h-6 w-auto">
     </div>
 
     {# Mobile sidebar overlay #}
     <div x-show="sidebarOpen" x-cloak class="lg:hidden fixed inset-0 z-50" @click.self="sidebarOpen = false">
       <div class="fixed inset-0 bg-black/50"></div>
-      <aside class="fixed inset-y-0 left-0 w-64 bg-gray-900 shadow-xl z-50 overflow-y-auto">
-        <div class="flex items-center justify-between h-14 px-4 border-b border-gray-800">
-          <span class="text-lg font-bold text-white">Avail<span class="text-blue-400">AI</span></span>
-          <button @click="sidebarOpen = false" class="text-gray-400 hover:text-white">
+      <aside class="fixed inset-y-0 left-0 w-64 bg-brand-700 shadow-xl z-50 overflow-y-auto">
+        <div class="flex items-center justify-between h-14 px-4 border-b border-brand-800">
+          <img src="/static/public/avail_logo.png" alt="AVAIL" class="h-6 w-auto">
+          <button @click="sidebarOpen = false" class="text-brand-300 hover:text-white">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
         </div>
         <nav class="px-3 py-4 space-y-1">
-          <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions" @click="currentView = 'requisitions'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Requisitions</a>
-          <a href="/v2/search" hx-get="/v2/partials/search" hx-target="#main-content" hx-push-url="/v2/search" @click="currentView = 'search'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Part Search</a>
-          <a href="/v2/buy-plans" hx-get="/v2/partials/buy-plans" hx-target="#main-content" hx-push-url="/v2/buy-plans" @click="currentView = 'buy-plans'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Buy Plans</a>
-          <a href="/v2/vendors" hx-get="/v2/partials/vendors" hx-target="#main-content" hx-push-url="/v2/vendors" @click="currentView = 'vendors'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Vendors</a>
-          <a href="/v2/companies" hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies" @click="currentView = 'companies'; sidebarOpen = false" class="flex items-center px-3 py-2 text-sm font-medium text-gray-300 hover:bg-gray-800 hover:text-white rounded-md">Companies</a>
+          {% set mobile_items = [
+            ('requisitions', 'Requisitions', '/v2/requisitions', '/v2/partials/requisitions'),
+            ('search', 'Part Search', '/v2/search', '/v2/partials/search'),
+            ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans'),
+            ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors'),
+            ('companies', 'Companies', '/v2/companies', '/v2/partials/companies'),
+            ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes'),
+            ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting'),
+            ('settings', 'Settings', '/v2/settings', '/v2/partials/settings'),
+          ] %}
+          {% for id, label, href, partial in mobile_items %}
+          <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+             @click="currentView = '{{ id }}'; sidebarOpen = false"
+             :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="flex items-center px-3 py-2 text-sm font-medium rounded-md">{{ label }}</a>
+          {% endfor %}
         </nav>
       </aside>
     </div>
 
-    {# ── Main content ────────────────────────────────────────── #}
-    <main class="lg:pl-64 flex-1 min-h-screen pt-14 lg:pt-0">
-      <div id="main-content" class="p-4 lg:p-8">
-        {% block content %}{% endblock %}
-      </div>
-    </main>
+    {# ── Main content area ────────────────────────────────────── #}
+    <div class="flex-1 min-h-screen transition-all duration-200"
+         :class="$store.sidebar.collapsed ? 'lg:pl-16' : 'lg:pl-64'">
+
+      {# ── Topbar ───────────────────────────────────────────── #}
+      <header class="sticky top-0 z-30 bg-white border-b border-brand-200 px-4 lg:px-8 h-14 flex items-center justify-between hidden lg:flex">
+        <div id="breadcrumb" class="text-sm text-gray-500">
+          <span>Dashboard</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="relative" x-data="{ searchOpen: false }">
+            <input type="search" name="q" placeholder="Search..."
+                   class="w-64 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                   autocomplete="off"
+                   hx-get="/v2/partials/search/global"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-target="#global-search-results"
+                   @focus="searchOpen = true"
+                   @blur="setTimeout(() => searchOpen = false, 200)">
+            <div id="global-search-results" x-show="searchOpen" x-cloak
+                 class="absolute top-full mt-1 right-0 w-80 bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto">
+            </div>
+          </div>
+          <span class="text-sm text-gray-500">{{ user_name }}</span>
+        </div>
+      </header>
+
+      {# ── Page content ─────────────────────────────────────── #}
+      <main class="pt-14 lg:pt-0">
+        <div id="main-content" class="p-4 lg:p-8">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
+    </div>
 
   </div>
   {% endblock %}
+
+  {# ── Modal (global) ──────────────────────────────────────── #}
+  <div x-data="{ open: false }" x-show="open" x-cloak x-transition
+       @open-modal.window="open = true" @close-modal.window="open = false"
+       @keydown.escape.window="open = false"
+       class="fixed inset-0 z-50" style="display: none;">
+    <div class="fixed inset-0 bg-black/50" @click="open = false"></div>
+    <div class="fixed inset-0 flex items-center justify-center p-4">
+      <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" x-trap.noscroll="open">
+        <div id="modal-content"></div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Toast (global) ──────────────────────────────────────── #}
+  <div x-data x-show="$store.toast.show" x-cloak x-transition
+       @click="$store.toast.show = false"
+       x-init="$watch('$store.toast.show', v => v && setTimeout(() => $store.toast.show = false, 4000))"
+       class="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-sm"
+       :class="{
+         'bg-emerald-50 text-emerald-700 border border-emerald-200': $store.toast.type === 'success',
+         'bg-rose-50 text-rose-700 border border-rose-200': $store.toast.type === 'error',
+         'bg-brand-100 text-brand-600 border border-brand-200': $store.toast.type === 'info'
+       }"
+       style="display: none;">
+    <span x-text="$store.toast.message"></span>
+  </div>
 
   {# 401 handler and HTMX config are in htmx_app.js (Vite bundle) #}
 </body>
