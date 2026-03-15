@@ -118,8 +118,9 @@ def _make_quote(
 
 
 def _make_buyplan(db, req_id, quote_id, user_id, offers=None, status="approved"):
-    v4_status = {"approved": "active", "po_confirmed": "active",
-                 "po_entered": "active", "complete": "completed"}.get(status, status)
+    v4_status = {"approved": "active", "po_confirmed": "active", "po_entered": "active", "complete": "completed"}.get(
+        status, status
+    )
     bp = BuyPlan(
         requisition_id=req_id,
         quote_id=quote_id,
@@ -128,7 +129,7 @@ def _make_buyplan(db, req_id, quote_id, user_id, offers=None, status="approved")
     )
     db.add(bp)
     db.flush()
-    for o in (offers or []):
+    for o in offers or []:
         line_status = "awaiting_po"
         if status == "po_confirmed":
             line_status = "verified"
@@ -184,7 +185,10 @@ class TestBuyerMultiplierNonStacking:
         assert result["offers_po_count"] == 0
 
     def test_non_stacking_quoted(self, db_session):
-        """Quoted offers earn 3 pts (not 1+3=4). Non-stacking."""
+        """Quoted offers earn 3 pts (not 1+3=4).
+
+        Non-stacking.
+        """
         buyer = _make_user(db_session, "Quoted Buyer", "buyer", "quoted")
         co = Company(name="QCo", is_active=True)
         db_session.add(co)
@@ -350,7 +354,10 @@ class TestSalesMultiplier:
         assert result["quotes_won_count"] == 0
 
     def test_non_stacking_quotes_won(self, db_session):
-        """Won quotes earn 8 pts (not 2+8=10). Non-stacking."""
+        """Won quotes earn 8 pts (not 2+8=10).
+
+        Non-stacking.
+        """
         sales = _make_user(db_session, "Won Sales", "sales", "wonsales")
         co = Company(name="WCo", is_active=True)
         db_session.add(co)

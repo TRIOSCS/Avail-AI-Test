@@ -17,8 +17,8 @@ from app.services.credential_service import get_credential_cached
 async def post_teams_channel(message: str) -> None:
     """Post a message to the configured Teams channel via webhook.
 
-    Uses an Adaptive Card wrapper so the message renders with markdown
-    formatting in Teams. Silently skips if no webhook URL is configured.
+    Uses an Adaptive Card wrapper so the message renders with markdown formatting in
+    Teams. Silently skips if no webhook URL is configured.
     """
     webhook_url = get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
     if not webhook_url:

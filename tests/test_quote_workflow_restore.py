@@ -1,5 +1,4 @@
-"""
-test_quote_workflow_restore.py — Tests for the restored quote workflow.
+"""test_quote_workflow_restore.py — Tests for the restored quote workflow.
 
 Tests the new quote-summary endpoint, requisition-to-buy-plan bridge,
 risk flag model, input sanitization, and transaction safety.

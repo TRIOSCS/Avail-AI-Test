@@ -123,7 +123,7 @@ def test_nc_skip(client, db_session, test_requisition):
 
 
 def test_nc_force_search_not_found(client):
-    """force-search on nonexistent item returns 404."""
+    """Force-search on nonexistent item returns 404."""
     resp = client.post("/api/nc/queue/99999/force-search")
     assert resp.status_code == 404
 

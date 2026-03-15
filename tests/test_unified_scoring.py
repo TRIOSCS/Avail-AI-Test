@@ -9,8 +9,8 @@ Depends on: app.scoring
 
 from app.scoring import confidence_color, score_unified
 
-
 # -- confidence_color ------------------------------------------------------
+
 
 def test_confidence_color_green():
     assert confidence_color(75) == "green"
@@ -31,6 +31,7 @@ def test_confidence_color_red():
 
 
 # -- Live API scoring ------------------------------------------------------
+
 
 def test_live_api_authorized_high_score():
     """Authorized distributor with price + qty should score 90-95%."""
@@ -67,6 +68,7 @@ def test_live_api_unknown_low_score():
 
 
 # -- Historical scoring ----------------------------------------------------
+
 
 def test_historical_recent():
     """1 month old sighting should score around 75%."""
@@ -116,6 +118,7 @@ def test_historical_repeated_boost():
 
 # -- Vendor affinity scoring -----------------------------------------------
 
+
 def test_vendor_affinity_passthrough():
     """Vendor affinity uses claude_confidence directly."""
     result = score_unified(
@@ -138,6 +141,7 @@ def test_vendor_affinity_high():
 
 # -- AI research scoring ---------------------------------------------------
 
+
 def test_ai_research_capped():
     """AI research confidence is capped at 60%."""
     result = score_unified(
@@ -159,6 +163,7 @@ def test_ai_research_low():
 
 
 # -- Source badges ----------------------------------------------------------
+
 
 def test_source_badges():
     """Each source type gets the correct badge."""

@@ -1,5 +1,4 @@
-"""
-test_services_engagement.py — Tests for engagement_scorer service.
+"""test_services_engagement.py — Tests for engagement_scorer service.
 
 Tests the pure scoring function and threshold/boundary logic.
 No DB mocking needed for compute_engagement_score (pure function).
@@ -370,7 +369,8 @@ class TestComputeAllEngagementScores:
 
     @pytest.mark.asyncio
     async def test_compute_all_domain_matching(self, db_session, test_user):
-        """VendorResponse matched to VendorCard via email domain → correct response count."""
+        """VendorResponse matched to VendorCard via email domain → correct response
+        count."""
         card = _make_vendor_card(db_session, "globex", "Globex", domain="globex.com")
         req = _make_requisition(db_session, test_user.id)
 
@@ -393,7 +393,8 @@ class TestComputeAllEngagementScores:
 
     @pytest.mark.asyncio
     async def test_compute_all_velocity_calculation(self, db_session, test_user):
-        """Contact + linked VendorResponse with timestamps → computes avg_velocity_hours."""
+        """Contact + linked VendorResponse with timestamps → computes
+        avg_velocity_hours."""
         card = _make_vendor_card(db_session, "speedy parts", "Speedy Parts", domain="speedyparts.com")
         req = _make_requisition(db_session, test_user.id)
 
@@ -472,7 +473,8 @@ class TestComputeSingleVendorScore:
         assert score != 50
 
     def test_single_vendor_domain_aliases(self, db_session, test_user):
-        """VendorCard with domain_aliases → counts responses matching any alias domain."""
+        """VendorCard with domain_aliases → counts responses matching any alias
+        domain."""
         card = _make_vendor_card(
             db_session,
             "multi domain co",

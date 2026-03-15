@@ -22,8 +22,8 @@ from app.models.prospect_account import ProspectAccount
 async def enrich_from_sam_gov(prospect: ProspectAccount) -> dict | None:
     """Search SAM.gov for entity registration data.
 
-    SAM.gov public API (no key required for basic entity search).
-    Returns CAGE code, NAICS codes, entity status, gov contract eligibility.
+    SAM.gov public API (no key required for basic entity search). Returns CAGE code,
+    NAICS codes, entity status, gov contract eligibility.
 
     Returns None if no match or API error.
     """
@@ -271,8 +271,7 @@ async def run_free_enrichment(prospect_id: int) -> dict:
 async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
     """Run free enrichment across qualifying prospects.
 
-    Skips prospects already enriched with SAM.gov/news data.
-    Returns batch summary.
+    Skips prospects already enriched with SAM.gov/news data. Returns batch summary.
     """
     from app.database import SessionLocal
 

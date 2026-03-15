@@ -453,7 +453,6 @@ class TestCustomerImportRow:
             CustomerImportRow(company_name="   ")
 
 
-
 # ── Misc schemas ───────────────────────────────────────────────────
 
 

@@ -1,5 +1,4 @@
-"""
-test_schemas_rfq.py — Tests for app/schemas/rfq.py
+"""test_schemas_rfq.py — Tests for app/schemas/rfq.py.
 
 Validates PhoneCallLog, BatchRfqSend, RfqPrepare, FollowUpEmail
 schemas including required fields, defaults, and blank rejection.

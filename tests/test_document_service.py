@@ -1,8 +1,8 @@
 """Tests for app.services.document_service and app.routers.documents.
 
-WeasyPrint requires system libraries (pango, etc.) not available on the test
-host, so we inject a fake weasyprint module into sys.modules before any
-imports. Tests verify DB queries, template rendering, and router behaviour.
+WeasyPrint requires system libraries (pango, etc.) not available on the test host, so we
+inject a fake weasyprint module into sys.modules before any imports. Tests verify DB
+queries, template rendering, and router behaviour.
 """
 
 import sys

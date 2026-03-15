@@ -23,6 +23,12 @@ from app.services.buyplan_builder import (  # noqa: F401
     generate_ai_summary,
 )
 
+# ── Notifications ──────────────────────────────────────────────────
+from app.services.buyplan_notifications import (  # noqa: F401
+    log_buyplan_activity,
+    notify_stock_sale_approved,
+)
+
 # ── Scoring & Routing ────────────────────────────────────────────────
 from app.services.buyplan_scoring import (  # noqa: F401
     W_GEOGRAPHY,
@@ -35,12 +41,6 @@ from app.services.buyplan_scoring import (  # noqa: F401
     _parse_lead_time_days,
     assign_buyer,
     score_offer,
-)
-
-# ── Notifications ──────────────────────────────────────────────────
-from app.services.buyplan_notifications import (  # noqa: F401
-    log_buyplan_activity,
-    notify_stock_sale_approved,
 )
 
 # ── Workflow & Intelligence ─────────────────────────────────────────

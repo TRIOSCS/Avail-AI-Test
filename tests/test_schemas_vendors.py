@@ -1,5 +1,4 @@
-"""
-test_schemas_vendors.py — Tests for app/schemas/vendors.py
+"""test_schemas_vendors.py — Tests for app/schemas/vendors.py.
 
 Validates VendorCardUpdate, VendorBlacklistToggle, VendorReviewCreate,
 VendorContactLookup, VendorContactCreate, VendorEmailAdd, MaterialCardUpdate.

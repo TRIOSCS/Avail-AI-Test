@@ -1,8 +1,7 @@
 """Email history mining — discover prospect companies from inbox patterns.
 
-Scans Trio's inbox for domains that emailed the team but are not existing
-customers, vendors, or already-discovered prospects. Catches companies
-that Explorium might miss.
+Scans Trio's inbox for domains that emailed the team but are not existing customers,
+vendors, or already-discovered prospects. Catches companies that Explorium might miss.
 """
 
 from datetime import datetime, timedelta, timezone

@@ -1,5 +1,4 @@
-"""
-tests/test_data_sources.py — Tests for the Data Sources settings tab
+"""tests/test_data_sources.py — Tests for the Data Sources settings tab.
 
 Covers: source listing, credential CRUD, status toggling, test endpoint,
 and planned vs configurable source separation.
@@ -152,7 +151,8 @@ def test_list_sources_credential_masking(client, db_session, seed_sources):
 
 
 def test_list_sources_no_auto_promote_to_live(client, db_session, seed_sources):
-    """Setting credentials does NOT auto-promote to live — health checks are source of truth."""
+    """Setting credentials does NOT auto-promote to live — health checks are source of
+    truth."""
     from app.services.credential_service import encrypt_value
 
     mouser = db_session.query(ApiSource).filter_by(name="mouser").first()

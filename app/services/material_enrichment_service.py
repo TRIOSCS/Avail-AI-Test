@@ -68,7 +68,10 @@ async def enrich_material_cards(card_ids: list[int], db: Session, *, batch_size:
 
 
 async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> None:
-    """Enrich a single batch of cards. Primary: Gradient (free), fallback: Anthropic."""
+    """Enrich a single batch of cards.
+
+    Primary: Gradient (free), fallback: Anthropic.
+    """
     from ..services.gradient_service import gradient_json
 
     parts_list = []

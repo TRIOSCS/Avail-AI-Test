@@ -1,5 +1,4 @@
-"""
-schemas/buy_plan.py — Pydantic schemas for Buy Plan V4 (unified) API
+"""schemas/buy_plan.py — Pydantic schemas for Buy Plan V4 (unified) API.
 
 Request and response models for the structured buy plan system with
 split lines, dual approval tracks, and AI-powered vendor selection.
@@ -311,7 +310,8 @@ class OfferComparisonItem(BaseModel, extra="allow"):
 
 
 class OfferComparisonResponse(BaseModel, extra="allow"):
-    """All available offers for a requirement — used in manager and salesperson views."""
+    """All available offers for a requirement — used in manager and salesperson
+    views."""
 
     requirement_id: int
     mpn: str | None = None

@@ -1,5 +1,4 @@
-"""
-test_services_ai_intake_service.py — Tests for AI intake parser service.
+"""test_services_ai_intake_service.py — Tests for AI intake parser service.
 
 Tests normalization helpers, text cleaning, JSON coercion, document type
 backfill, requisition name generation, and the full parse pipeline.

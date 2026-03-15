@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 def test_update_knowledge_config_requires_admin(db_session, sales_user, monkeypatch):
     """Non-admin users receive 403 on config update."""
-    from app.database import get_db
     from app import dependencies
+    from app.database import get_db
     from app.main import app
 
     def _override_db():
@@ -31,8 +31,8 @@ def test_update_knowledge_config_requires_admin(db_session, sales_user, monkeypa
 
 def test_update_knowledge_config_admin_ok(db_session, admin_user, monkeypatch):
     """Admin users can update and read config successfully."""
-    from app.database import get_db
     from app import dependencies
+    from app.database import get_db
     from app.main import app
 
     def _override_db():

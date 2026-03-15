@@ -1,5 +1,4 @@
-"""
-test_strategic_vendors.py — Tests for Strategic Vendor assignments.
+"""test_strategic_vendors.py — Tests for Strategic Vendor assignments.
 
 Tests the 10-cap, 39-day TTL, claim/drop/replace flows, offer clock
 reset, expiry logic, and API endpoints.

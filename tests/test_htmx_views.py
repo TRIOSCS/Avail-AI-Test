@@ -1,5 +1,4 @@
-"""
-tests/test_htmx_views.py — Tests for the HTMX + Alpine.js MVP frontend views.
+"""tests/test_htmx_views.py — Tests for the HTMX + Alpine.js MVP frontend views.
 
 Covers full page loads, HTMX partial requests, requisition CRUD,
 vendor/company listing and detail, and search form rendering.
@@ -8,14 +7,10 @@ Called by: pytest
 Depends on: conftest.py fixtures (client, db_session, test_user, etc.)
 """
 
-from datetime import datetime, timezone
-
-import pytest
 from fastapi.testclient import TestClient
 
-from app.models import Company, CustomerSite, Requirement, Requisition, Sighting, User, VendorCard
+from app.models import Company, CustomerSite, Requisition, VendorCard
 from app.models.vendors import VendorContact
-
 
 # ── Full page loads ──────────────────────────────────────────────────────
 

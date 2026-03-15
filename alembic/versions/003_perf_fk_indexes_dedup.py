@@ -1,4 +1,4 @@
-"""Add missing FK indexes, drop duplicate indexes, tune for performance
+"""Add missing FK indexes, drop duplicate indexes, tune for performance.
 
 Revision ID: 003_perf_fk_indexes
 Revises: 002_search_indexes

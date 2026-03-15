@@ -273,8 +273,8 @@ async def draft_rfq(
 async def rephrase_rfq(body: str) -> str | None:
     """Rephrase an RFQ email body so each send sounds unique.
 
-    Keeps all part numbers, quantities, conditions, and requirements intact
-    but varies the wording, sentence structure, and tone slightly.
+    Keeps all part numbers, quantities, conditions, and requirements intact but varies
+    the wording, sentence structure, and tone slightly.
 
     Returns rephrased body or None on failure.
     """

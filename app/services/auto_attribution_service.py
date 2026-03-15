@@ -105,7 +105,8 @@ def run_auto_attribution(db: Session) -> dict:
 def _ai_match_batch(activities: list[ActivityLog], db: Session) -> dict:
     """Use Claude (fast tier) to match activities to known entities.
 
-    Returns {activity_id: {"entity_type": str, "entity_id": int, "confidence": float} | None}
+    Returns {activity_id: {"entity_type": str, "entity_id": int, "confidence": float} |
+    None}
     """
     import asyncio
 

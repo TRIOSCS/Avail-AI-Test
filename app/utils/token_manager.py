@@ -26,8 +26,8 @@ def _utc(dt):
 async def get_valid_token(user, db) -> str | None:
     """Get a valid Graph API token for user, refreshing if expired/near-expiry.
 
-    Use this before EVERY Graph API call (background or foreground).
-    Returns access_token string or None if refresh fails.
+    Use this before EVERY Graph API call (background or foreground). Returns
+    access_token string or None if refresh fails.
     """
     # Check if current token is still valid (with 5-min buffer)
     if user.access_token and user.token_expires_at:
@@ -47,7 +47,10 @@ async def get_valid_token(user, db) -> str | None:
 
 
 async def refresh_user_token(user, db) -> str | None:
-    """Refresh a single user's Azure token. Returns new access_token or None."""
+    """Refresh a single user's Azure token.
+
+    Returns new access_token or None.
+    """
     from ..config import settings
 
     if not user.refresh_token:

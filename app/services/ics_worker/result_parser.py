@@ -39,7 +39,10 @@ class IcsSighting:
 
 
 def parse_quantity(text: str) -> int | None:
-    """Parse ICS quantity string to int. Handles commas, '+' suffix, empty."""
+    """Parse ICS quantity string to int.
+
+    Handles commas, '+' suffix, empty.
+    """
     if not text:
         return None
     cleaned = text.strip().rstrip("+").replace(",", "")

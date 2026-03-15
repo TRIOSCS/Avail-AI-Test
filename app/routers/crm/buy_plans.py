@@ -1,5 +1,4 @@
-"""
-buy_plans.py — Buy Plan V4 (unified) API Endpoints
+"""buy_plans.py — Buy Plan V4 (unified) API Endpoints.
 
 Structured buy plan system with split lines, dual approval tracks,
 AI-powered vendor selection, and per-line PO tracking.
@@ -40,8 +39,8 @@ from ...models.buy_plan import (
     VerificationGroupMember,
 )
 from ...schemas.buy_plan import (
-    BuyPlanLineIssue,
     BuyPlanApproval,
+    BuyPlanLineIssue,
     BuyPlanSubmit,
     BuyPlanTokenApproval,
     BuyPlanTokenReject,
@@ -54,14 +53,22 @@ from ...services.buy_plan_service import (
     approve_buy_plan,
     build_buy_plan,
     check_completion,
-    confirm_po as svc_confirm_po,
     detect_favoritism,
-    flag_line_issue as svc_flag_line_issue,
     generate_case_report,
     reset_buy_plan_to_draft,
     resubmit_buy_plan,
     submit_buy_plan,
+)
+from ...services.buy_plan_service import (
+    confirm_po as svc_confirm_po,
+)
+from ...services.buy_plan_service import (
+    flag_line_issue as svc_flag_line_issue,
+)
+from ...services.buy_plan_service import (
     verify_po as svc_verify_po,
+)
+from ...services.buy_plan_service import (
     verify_so as svc_verify_so,
 )
 from ...services.buyplan_notifications import (
@@ -275,7 +282,10 @@ def _token_expired(expires_at) -> bool:
 
 @router.get("/api/buy-plans/token/{token}")
 async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
-    """Public endpoint — no auth required. Get plan details by approval token."""
+    """Public endpoint — no auth required.
+
+    Get plan details by approval token.
+    """
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
@@ -286,7 +296,10 @@ async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
 
 @router.put("/api/buy-plans/token/{token}/approve")
 async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session = Depends(get_db)):
-    """Public token-based approval. Sets SO number and activates plan."""
+    """Public token-based approval.
+
+    Sets SO number and activates plan.
+    """
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
@@ -310,7 +323,10 @@ async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session =
 
 @router.put("/api/buy-plans/token/{token}/reject")
 async def reject_by_token(token: str, body: BuyPlanTokenReject, db: Session = Depends(get_db)):
-    """Public token-based rejection. Resets plan to draft."""
+    """Public token-based rejection.
+
+    Resets plan to draft.
+    """
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid token")
@@ -381,8 +397,8 @@ async def build_plan(
 ):
     """AI-build a draft buy plan from a won quote.
 
-    Scores all offers, auto-splits where needed, assigns buyers.
-    Returns the unsaved draft for salesperson review before submit.
+    Scores all offers, auto-splits where needed, assigns buyers. Returns the unsaved
+    draft for salesperson review before submit.
     """
     try:
         plan = build_buy_plan(quote_id, db)
@@ -730,6 +746,7 @@ async def verify_po_scan(
     if not plan:
         raise HTTPException(404, "Plan not found")
     from ...services.buy_plan_service import verify_po_sent
+
     results = await verify_po_sent(plan, db)
     return {"plan_id": plan.id, "verifications": results}
 
@@ -744,7 +761,8 @@ async def offer_comparison(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Get all available offers for a requirement — used in manager/salesperson views."""
+    """Get all available offers for a requirement — used in manager/salesperson
+    views."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404, "Buy plan not found")

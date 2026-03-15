@@ -21,9 +21,9 @@ SEARCH_URL = "https://www.icsource.com/members/Search/NewSearch.aspx"
 async def search_part(page, part_number: str) -> dict:
     """Search for a part on ICsource using form-based search.
 
-    Navigates to the search page, fills the part number field, clicks
-    the search button, and waits for results to render.
-    Returns {"html": str, "total_count": int, "url": str, "duration_ms": int}.
+    Navigates to the search page, fills the part number field, clicks the search button,
+    and waits for results to render. Returns {"html": str, "total_count": int, "url":
+    str, "duration_ms": int}.
     """
     start = time.monotonic()
 

@@ -1,4 +1,4 @@
-"""test_jobs_maintenance.py — Tests for maintenance background jobs
+"""test_jobs_maintenance.py — Tests for maintenance background jobs.
 
 Covers: _job_cache_cleanup, _job_reset_connector_errors, _job_auto_attribute_activities,
 _job_auto_dedup, _job_integrity_check.

@@ -101,8 +101,8 @@ async def extract_pricing_intelligence(
 ) -> dict | None:
     """Extract structured pricing data from offer emails using Gradient Opus.
 
-    Only called for emails classified as offers with has_pricing=True.
-    Returns parsed quote data or None on failure.
+    Only called for emails classified as offers with has_pricing=True. Returns parsed
+    quote data or None on failure.
     """
     from app.services.ai_email_parser import parse_email
 

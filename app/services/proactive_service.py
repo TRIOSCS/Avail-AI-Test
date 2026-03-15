@@ -1,5 +1,4 @@
-"""
-proactive_service.py — Background matching engine and proactive offer logic.
+"""proactive_service.py — Background matching engine and proactive offer logic.
 
 Scans newly-logged offers against archived requisitions (closed 30+ days).
 Generates ProactiveMatch records for salespeople to review and send to customers.
@@ -297,7 +296,10 @@ def get_matches_for_user(
 
 
 def get_match_count(db: Session, user_id: int) -> int:
-    """Count new (unseen) matches for a salesperson. Used for nav badge."""
+    """Count new (unseen) matches for a salesperson.
+
+    Used for nav badge.
+    """
     return (
         db.query(ProactiveMatch)
         .filter(
@@ -322,7 +324,10 @@ async def send_proactive_offer(
     notes: str | None = None,
     email_html: str | None = None,
 ) -> dict:
-    """Send a proactive offer email to a customer. Returns the created ProactiveOffer dict."""
+    """Send a proactive offer email to a customer.
+
+    Returns the created ProactiveOffer dict.
+    """
     # Load and validate matches
     matches = (
         db.query(ProactiveMatch)
@@ -678,8 +683,8 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
 def _cap_outlier(value: float, cap: float = 500_000) -> float:
     """Cap unrealistic financial values to prevent test-data pollution.
 
-    Electronic component deals rarely exceed $10M per offer.
-    Values above the cap are replaced with 0 (treated as bad data).
+    Electronic component deals rarely exceed $10M per offer. Values above the cap are
+    replaced with 0 (treated as bad data).
     """
     if value > cap:
         return 0.0

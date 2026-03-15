@@ -54,7 +54,8 @@ def test_list_requirement_offers_with_data(client, test_requisition, db_session)
 
 
 def test_list_requirement_offers_includes_extended_fields(client, test_requisition, db_session):
-    """GET /api/requirements/{id}/offers returns country_of_origin, firmware, source, entered_by."""
+    """GET /api/requirements/{id}/offers returns country_of_origin, firmware, source,
+    entered_by."""
     from app.models import Offer, Requirement
 
     req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()

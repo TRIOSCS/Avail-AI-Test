@@ -1,5 +1,4 @@
-"""
-services/email_threads.py — Email thread fetching and attribution
+"""services/email_threads.py — Email thread fetching and attribution.
 
 Fetches vendor email threads from Microsoft Graph API and links them
 to requirements via conversationId, subject tokens, part numbers,
@@ -94,12 +93,14 @@ def group_by_thread(messages: list[dict]) -> list[dict]:
         references_raw = headers.get("references", "")
         ref_ids = [r.strip("<>").strip() for r in references_raw.split() if r.strip()]
 
-        parsed.append({
-            "message": msg,
-            "message_id": msg_id,
-            "in_reply_to": in_reply_to,
-            "references": ref_ids,
-        })
+        parsed.append(
+            {
+                "message": msg,
+                "message_id": msg_id,
+                "in_reply_to": in_reply_to,
+                "references": ref_ids,
+            }
+        )
 
     # Union-Find to group messages into threads
     parent_map: dict[str, str] = {}  # message_id -> root thread_id
@@ -158,22 +159,22 @@ def group_by_thread(messages: list[dict]) -> list[dict]:
     # Build thread result list
     threads = []
     for thread_id, msgs in thread_groups.items():
-        threads.append({
-            "thread_id": thread_id,
-            "messages": [
-                {
-                    "id": m.get("id", ""),
-                    "subject": m.get("subject", ""),
-                    "from": m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                    "date": m.get("receivedDateTime") or m.get("sentDateTime"),
-                    "direction": _extract_direction(
-                        m.get("from", {}).get("emailAddress", {}).get("address", "")
-                    ),
-                }
-                for m in msgs
-            ],
-            "message_count": len(msgs),
-        })
+        threads.append(
+            {
+                "thread_id": thread_id,
+                "messages": [
+                    {
+                        "id": m.get("id", ""),
+                        "subject": m.get("subject", ""),
+                        "from": m.get("from", {}).get("emailAddress", {}).get("address", ""),
+                        "date": m.get("receivedDateTime") or m.get("sentDateTime"),
+                        "direction": _extract_direction(m.get("from", {}).get("emailAddress", {}).get("address", "")),
+                    }
+                    for m in msgs
+                ],
+                "message_count": len(msgs),
+            }
+        )
 
     return threads
 

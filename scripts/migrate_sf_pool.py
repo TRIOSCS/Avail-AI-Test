@@ -29,7 +29,10 @@ from app.models.prospect_account import ProspectAccount
 
 
 def normalize_domain(raw: str | None) -> str | None:
-    """Lowercase, strip www. prefix, strip trailing slashes/spaces."""
+    """Lowercase, strip www.
+
+    prefix, strip trailing slashes/spaces.
+    """
     if not raw:
         return None
     d = raw.strip().lower()

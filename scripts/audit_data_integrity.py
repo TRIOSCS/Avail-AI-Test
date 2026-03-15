@@ -38,7 +38,10 @@ def get_engine():
 
 
 def audit(engine, fix: bool = False) -> dict:
-    """Run all checks and optionally fix issues. Returns a report dict."""
+    """Run all checks and optionally fix issues.
+
+    Returns a report dict.
+    """
     report = {"timestamp": datetime.now(timezone.utc).isoformat(), "checks": [], "fixed": 0}
 
     with engine.connect() as conn:

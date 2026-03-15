@@ -1,5 +1,5 @@
-"""
-Populate demo sightings, offers, quotes, activity, and tasks for a test requisition.
+"""Populate demo sightings, offers, quotes, activity, and tasks for a test requisition.
+
 Simulates a full sourcing workflow so the new UI can be demoed.
 Run: PYTHONPATH=/root/availai python scripts/simulate_demo_data.py --req-id 23433
 Depends on: app.models, app.database

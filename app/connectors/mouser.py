@@ -65,7 +65,6 @@ class MouserConnector(BaseConnector):
         errors = data.get("Errors") or []
         if errors:
             msg = errors[0].get("Message", "Unknown Mouser API error")
-            code = errors[0].get("Code", "")
             # Quota/rate errors in body — return empty instead of raising
             if "too many" in msg.lower() or "rate" in msg.lower() or "quota" in msg.lower():
                 logger.warning(f"Mouser: rate/quota error for {part_number}: {msg}")

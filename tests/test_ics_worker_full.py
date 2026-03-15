@@ -262,7 +262,7 @@ class TestResultParser:
         assert parse_results_html(html) == []
 
     def test_email_with_query_params(self):
-        """mailto links with ?subject= params are cleaned."""
+        """Mailto links with ?subject= params are cleaned."""
         html = """
         <div class="tblWTBPanel">
           <div class="flex">
@@ -979,7 +979,8 @@ class TestQueueManager:
         assert result.id == item.id
 
     def test_get_next_queued_prefers_high_priority_then_newest(self, db_session, test_user):
-        """Active-sourcing items (priority=1) come first, then newest-first within same priority."""
+        """Active-sourcing items (priority=1) come first, then newest-first within same
+        priority."""
         from app.models import Requisition
 
         # Create two requisitions
@@ -1492,7 +1493,8 @@ class TestWorker:
     _RECOVER = "app.services.ics_worker.queue_manager.recover_stale_searches"
 
     def _make_mock_db(self, db_session):
-        """Create a mock SessionLocal that returns a proxy session that won't actually close."""
+        """Create a mock SessionLocal that returns a proxy session that won't actually
+        close."""
         mock_session = MagicMock(wraps=db_session)
         mock_session.close = MagicMock()
         return MagicMock(return_value=mock_session)
@@ -1610,7 +1612,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_shutdown_immediate(self, db_session):
-        """main() exits immediately when shutdown flag is set."""
+        """Main() exits immediately when shutdown flag is set."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1637,7 +1639,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_outside_business_hours(self, db_session):
-        """main() sleeps when outside business hours."""
+        """Main() sleeps when outside business hours."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1670,7 +1672,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_daily_limit(self, db_session):
-        """main() sleeps when daily limit is reached."""
+        """Main() sleeps when daily limit is reached."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1707,7 +1709,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_circuit_breaker_open(self, db_session):
-        """main() sleeps when circuit breaker is open."""
+        """Main() sleeps when circuit breaker is open."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1745,7 +1747,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_break_time(self, db_session):
-        """main() takes a break when scheduler says so."""
+        """Main() takes a break when scheduler says so."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1786,7 +1788,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_empty_queue(self, db_session):
-        """main() sleeps when queue is empty."""
+        """Main() sleeps when queue is empty."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1826,7 +1828,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_search_success(self, db_session, test_requisition):
-        """main() performs a full search cycle with results."""
+        """Main() performs a full search cycle with results."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1901,7 +1903,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_session_expired_during_search(self, db_session, test_requisition):
-        """main() re-queues item when health check returns SESSION_EXPIRED."""
+        """Main() re-queues item when health check returns SESSION_EXPIRED."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -1965,7 +1967,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_breaker_trips_during_search(self, db_session, test_requisition):
-        """main() marks item failed when breaker trips after page health check."""
+        """Main() marks item failed when breaker trips after page health check."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2027,7 +2029,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_session_reauth_fails(self, db_session, test_requisition):
-        """main() handles session re-auth failure."""
+        """Main() handles session re-auth failure."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2081,7 +2083,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_search_exception(self, db_session, test_requisition):
-        """main() marks item failed on search exception."""
+        """Main() marks item failed on search exception."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2139,7 +2141,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_ai_gate_error(self, db_session):
-        """main() continues after AI gate error."""
+        """Main() continues after AI gate error."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2179,7 +2181,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_daily_stats_reset(self, db_session):
-        """main() resets daily stats at midnight (cover lines 134-158)."""
+        """Main() resets daily stats at midnight (cover lines 134-158)."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2216,7 +2218,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_unexpected_error(self, db_session):
-        """main() handles unexpected error in outer try (line 302-304)."""
+        """Main() handles unexpected error in outer try (line 302-304)."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2254,7 +2256,7 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_mark_status_exception_in_except(self, db_session, test_requisition):
-        """main() handles mark_status failure in exception handler (lines 292-293)."""
+        """Main() handles mark_status failure in exception handler (lines 292-293)."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2315,7 +2317,8 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_daily_stats_with_previous_date(self, db_session):
-        """main() logs daily summary when last_stats_date is not None (lines 136-155)."""
+        """Main() logs daily summary when last_stats_date is not None (lines
+        136-155)."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2371,7 +2374,8 @@ class TestIcsWorkerMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_search_with_results_record_results(self, db_session, test_requisition):
-        """main() calls breaker.record_results() when parse returns results (line 247)."""
+        """Main() calls breaker.record_results() when parse returns results (line
+        247)."""
         import app.services.ics_worker.worker as worker_mod
 
         ws = IcsWorkerStatus(id=1, is_running=False)
@@ -2549,7 +2553,8 @@ class TestAiGateFull:
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_missing_classification(self, db_session, test_requisition):
-        """process_ai_gate handles when model doesn't return a classification for an MPN."""
+        """process_ai_gate handles when model doesn't return a classification for an
+        MPN."""
         from app.services.ics_worker.ai_gate import clear_classification_cache, process_ai_gate
 
         clear_classification_cache()
@@ -2948,7 +2953,8 @@ class TestSearchEngineFull:
 
     @pytest.mark.asyncio
     async def test_search_part_strategy2_force_click_exception(self):
-        """Strategy 2 force-click raises exception, falls to Strategy 3 (lines 134-136)."""
+        """Strategy 2 force-click raises exception, falls to Strategy 3 (lines
+        134-136)."""
         page = AsyncMock()
         page.goto = AsyncMock()
         page.url = "https://www.icsource.com/search"
@@ -2999,7 +3005,7 @@ class TestSearchEngineFull:
 class TestSessionManagerFull:
     @pytest.mark.asyncio
     async def test_start_success(self):
-        """start() launches browser and checks health (lines 47-64)."""
+        """Start() launches browser and checks health (lines 47-64)."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3032,7 +3038,7 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_start_not_logged_in(self):
-        """start() sets is_logged_in=False when not already logged in."""
+        """Start() sets is_logged_in=False when not already logged in."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3078,7 +3084,8 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_check_session_health_redirect_to_home(self):
-        """check_session_health returns False when redirected to public home (line 86)."""
+        """check_session_health returns False when redirected to public home (line
+        86)."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3106,7 +3113,7 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_login_success(self):
-        """login() full success flow (lines 109-172)."""
+        """Login() full success flow (lines 109-172)."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3136,7 +3143,7 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_login_failed_after_submit(self):
-        """login() sets is_logged_in=False when health check fails after login."""
+        """Login() sets is_logged_in=False when health check fails after login."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3166,7 +3173,7 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_login_password_placeholder_fails(self):
-        """login() handles missing password placeholder gracefully (line 136-137)."""
+        """Login() handles missing password placeholder gracefully (line 136-137)."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()
@@ -3208,7 +3215,8 @@ class TestSessionManagerFull:
 
     @pytest.mark.asyncio
     async def test_login_fallback_button(self):
-        """login() uses fallback ASP.NET button when green button not found (lines 159-162)."""
+        """Login() uses fallback ASP.NET button when green button not found (lines
+        159-162)."""
         from app.services.ics_worker.session_manager import IcsSessionManager
 
         cfg = IcsConfig()

@@ -31,8 +31,8 @@ _extract_phones_from_site_name = _mod._extract_phones_from_site_name
 
 
 class _Row:
-    """Mock DB row supporting attribute access and iteration over values
-    (needed by ``sum(1 for v in c if v is not None)`` scoring in dedup)."""
+    """Mock DB row supporting attribute access and iteration over values (needed by
+    ``sum(1 for v in c if v is not None)`` scoring in dedup)."""
 
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -68,7 +68,8 @@ class TestDedupSiteContacts:
     """Tests for _dedup_site_contacts helper."""
 
     def test_merge_two_duplicates_fills_missing_fields(self):
-        """Two contacts with same email — best keeps its fields, gets missing ones from other."""
+        """Two contacts with same email — best keeps its fields, gets missing ones from
+        other."""
         c1 = _ns(
             id=1,
             customer_site_id=10,
@@ -282,7 +283,8 @@ class TestExtractPhonesFromSiteName:
         assert conn.execute.call_count == 1
 
     def test_cleans_site_name_after_extraction(self):
-        """Site name is cleaned up after phone extraction (extra spaces, dashes removed)."""
+        """Site name is cleaned up after phone extraction (extra spaces, dashes
+        removed)."""
         row = _ns(id=1, site_name="Acme Corp - (123) 456-7890 - Dallas", contact_phone=None, contact_phone_2=None)
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = [row]

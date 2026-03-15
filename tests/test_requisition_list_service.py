@@ -9,14 +9,13 @@ Depends on: app/services/requisition_list_service.py, conftest fixtures
 
 from datetime import datetime, timezone
 
-from app.models import Requisition, Requirement
+from app.models import Requisition
 from app.schemas.requisitions2 import ReqListFilters, ReqStatus, SortColumn, SortOrder
 from app.services.requisition_list_service import (
     get_requisition_detail,
     get_team_users,
     list_requisitions,
 )
-
 
 # ── list_requisitions ────────────────────────────────────────────────
 
@@ -68,7 +67,8 @@ def test_list_pagination_math(db_session, test_user):
     # Create 3 requisitions
     for i in range(3):
         req = Requisition(
-            name=f"PAGE-REQ-{i}", status="active",
+            name=f"PAGE-REQ-{i}",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -86,7 +86,8 @@ def test_list_pagination_page_2(db_session, test_user):
     """Page 2 returns remaining items."""
     for i in range(3):
         req = Requisition(
-            name=f"PAGE-REQ-{i}", status="active",
+            name=f"PAGE-REQ-{i}",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -101,12 +102,14 @@ def test_list_pagination_page_2(db_session, test_user):
 def test_list_sort_ascending(db_session, test_user):
     """Sort ascending by name orders A before Z."""
     req_a = Requisition(
-        name="AAA-REQ", status="active",
+        name="AAA-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_z = Requisition(
-        name="ZZZ-REQ", status="active",
+        name="ZZZ-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -123,12 +126,14 @@ def test_list_sort_ascending(db_session, test_user):
 def test_list_sort_descending(db_session, test_user):
     """Sort descending by name orders Z before A."""
     req_a = Requisition(
-        name="AAA-REQ", status="active",
+        name="AAA-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_z = Requisition(
-        name="ZZZ-REQ", status="active",
+        name="ZZZ-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -145,12 +150,14 @@ def test_list_sort_descending(db_session, test_user):
 def test_sales_role_filtering(db_session, test_user, sales_user):
     """Sales role only sees own requisitions."""
     req_buyer = Requisition(
-        name="BUYER-REQ", status="active",
+        name="BUYER-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_sales = Requisition(
-        name="SALES-REQ", status="active",
+        name="SALES-REQ",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -208,12 +215,14 @@ def test_detail_with_customer_site(db_session, test_user, test_requisition, test
 def test_list_filter_by_owner(db_session, test_user, sales_user):
     """Owner filter restricts to specific user."""
     req_buyer = Requisition(
-        name="BUYER-OWN", status="active",
+        name="BUYER-OWN",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_sales = Requisition(
-        name="SALES-OWN", status="active",
+        name="SALES-OWN",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -230,12 +239,16 @@ def test_list_filter_by_owner(db_session, test_user, sales_user):
 def test_list_filter_by_urgency(db_session, test_user):
     """Urgency filter restricts to matching requisitions."""
     req_hot = Requisition(
-        name="HOT-REQ", status="active", urgency="hot",
+        name="HOT-REQ",
+        status="active",
+        urgency="hot",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_normal = Requisition(
-        name="NORMAL-REQ", status="active", urgency="normal",
+        name="NORMAL-REQ",
+        status="active",
+        urgency="normal",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -243,6 +256,7 @@ def test_list_filter_by_urgency(db_session, test_user):
     db_session.commit()
 
     from app.schemas.requisitions2 import Urgency
+
     filters = ReqListFilters(status=ReqStatus.active, urgency=Urgency.hot)
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     names = [r["name"] for r in result["requisitions"]]
@@ -253,8 +267,10 @@ def test_list_filter_by_urgency(db_session, test_user):
 def test_list_filter_by_date_from(db_session, test_user):
     """date_from filter excludes older requisitions."""
     from datetime import date as date_type
+
     req = Requisition(
-        name="OLD-REQ", status="active",
+        name="OLD-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
     )
@@ -270,8 +286,10 @@ def test_list_filter_by_date_from(db_session, test_user):
 def test_list_filter_by_date_to(db_session, test_user):
     """date_to filter excludes newer requisitions."""
     from datetime import date as date_type
+
     req = Requisition(
-        name="NEW-REQ", status="active",
+        name="NEW-REQ",
+        status="active",
         created_by=test_user.id,
         created_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
     )
@@ -287,12 +305,14 @@ def test_list_filter_by_date_to(db_session, test_user):
 def test_list_status_all(db_session, test_user):
     """Status 'all' shows all requisitions regardless of status."""
     req_active = Requisition(
-        name="ALL-ACTIVE", status="active",
+        name="ALL-ACTIVE",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_archived = Requisition(
-        name="ALL-ARCHIVED", status="archived",
+        name="ALL-ARCHIVED",
+        status="archived",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -309,12 +329,14 @@ def test_list_status_all(db_session, test_user):
 def test_list_status_archived(db_session, test_user):
     """Status 'archived' shows only archived/won/lost/closed."""
     req_active = Requisition(
-        name="ARCH-ACTIVE", status="active",
+        name="ARCH-ACTIVE",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     req_archived = Requisition(
-        name="ARCH-ARCHIVED", status="archived",
+        name="ARCH-ARCHIVED",
+        status="archived",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

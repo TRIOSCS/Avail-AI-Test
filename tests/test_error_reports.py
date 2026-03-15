@@ -1,7 +1,5 @@
 """Tests for error_reports router — trouble ticket CRUD endpoints."""
 
-from tests.conftest import client  # noqa: F401
-
 
 def test_create_error_report(client):
     """POST /api/error-reports creates a trouble ticket."""

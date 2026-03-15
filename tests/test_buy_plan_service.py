@@ -1,5 +1,4 @@
-"""
-test_buy_plan_service_v3.py — Buy Plan V3 Service Layer Tests
+"""test_buy_plan_service_v3.py — Buy Plan V3 Service Layer Tests.
 
 Phase 3: Offer scoring, auto-split, buyer assignment, AI flags, summary.
 Phase 4: Submit, approve, verify SO/PO, flag issues, completion, resubmit.
@@ -17,10 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Offer, Quote, Requirement, Requisition, User, VendorCard
 from app.models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )
@@ -2263,8 +2262,6 @@ class TestCoverageGaps2:
 
     def test_country_to_region_empty(self):
         """Line 59: _country_to_region returns None for empty string."""
-        from app.services.buy_plan_service import _country_to_region
-
 
         assert _country_to_region("") is None
         assert _country_to_region(None) is None

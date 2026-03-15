@@ -1,5 +1,4 @@
-"""
-test_buyplan_workflow_bugs.py — Tests for Phase 1 bug fixes in buyplan_workflow.py
+"""test_buyplan_workflow_bugs.py — Tests for Phase 1 bug fixes in buyplan_workflow.py.
 
 Covers:
 - check_completion idempotency (no duplicate case reports)
@@ -17,10 +16,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, CustomerSite, Quote, Requirement, Requisition, User
 from app.models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
     SOVerificationStatus,
 )
 from app.services.buyplan_workflow import (
@@ -127,8 +126,8 @@ def _make_plan_with_lines(
 
 class TestCheckCompletionIdempotency:
     def test_already_completed_returns_early(self, db_session):
-        """Calling check_completion on an already-completed plan should not
-        regenerate the case report."""
+        """Calling check_completion on an already-completed plan should not regenerate
+        the case report."""
         plan, _ = _make_plan_with_lines(
             db_session,
             status=BuyPlanStatus.completed.value,

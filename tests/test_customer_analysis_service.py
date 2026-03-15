@@ -1,6 +1,5 @@
-"""
-tests/test_customer_analysis_service.py — Tests for customer material analysis service.
-"""
+"""tests/test_customer_analysis_service.py — Tests for customer material analysis
+service."""
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch

@@ -246,9 +246,8 @@ def compute_buyer_multiplier(
 def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     """Compute multiplier points for a salesperson in a given month.
 
-    Quote progression is non-stacking (won replaces sent).
-    Proactive conversion is non-stacking (converted replaces sent).
-    New account points are additive.
+    Quote progression is non-stacking (won replaces sent). Proactive conversion is non-
+    stacking (converted replaces sent). New account points are additive.
     """
     start_dt, end_dt = _month_range(month)
 
@@ -447,7 +446,10 @@ def _attach_avail_scores_and_rank(db: Session, results: list[dict], month: date,
 
 
 def _upsert_multiplier(db: Session, result: dict, month: date) -> int:
-    """Upsert a MultiplierScoreSnapshot row. Returns 1 if saved."""
+    """Upsert a MultiplierScoreSnapshot row.
+
+    Returns 1 if saved.
+    """
     month_start = month.replace(day=1)
     existing = (
         db.query(MultiplierScoreSnapshot)

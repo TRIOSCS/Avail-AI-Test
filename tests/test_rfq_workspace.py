@@ -1,5 +1,4 @@
-"""
-tests/test_rfq_workspace.py — Tests for the part-centric RFQ workspace endpoints.
+"""tests/test_rfq_workspace.py — Tests for the part-centric RFQ workspace endpoints.
 
 Covers: enhanced requirement offers listing (current + historical + flags),
 quote selection toggle, part-level task merging, requirement history timeline,

@@ -231,7 +231,10 @@ def api_set_credentials(
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
-    """Set credential values for a source. Body: {VAR_NAME: "plaintext_value", ...}"""
+    """Set credential values for a source.
+
+    Body: {VAR_NAME: "plaintext_value", ...}
+    """
     from . import encrypt_value
 
     src = db.get(ApiSource, source_id)

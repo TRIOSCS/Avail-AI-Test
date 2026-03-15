@@ -137,9 +137,9 @@ def _dedup_vendors(db: Session) -> int:
 def _dedup_companies(db: Session) -> int:
     """Find and merge duplicate companies using fuzzy matching.
 
-    Respects the business rule that duplicate companies are allowed when
-    different salespeople own sites — only merges when both companies have
-    the same owner (or neither has one).
+    Respects the business rule that duplicate companies are allowed when different
+    salespeople own sites — only merges when both companies have the same owner (or
+    neither has one).
     """
     from ..company_utils import find_company_dedup_candidates
     from ..models import Company

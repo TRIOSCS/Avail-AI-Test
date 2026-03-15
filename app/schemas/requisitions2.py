@@ -48,8 +48,7 @@ class SortOrder(str, Enum):
 class ReqListFilters(BaseModel):
     """Query parameters for the requisitions list page.
 
-    Used by GET /requisitions2, GET /requisitions2/table,
-    GET /requisitions2/table/rows.
+    Used by GET /requisitions2, GET /requisitions2/table, GET /requisitions2/table/rows.
     """
 
     q: str = ""

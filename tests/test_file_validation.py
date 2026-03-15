@@ -1,5 +1,4 @@
-"""
-test_file_validation.py — Tests for file validation utilities.
+"""test_file_validation.py — Tests for file validation utilities.
 
 Tests magic-byte detection, encoding detection, size limits,
 extension handling, and fingerprinting.

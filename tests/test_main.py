@@ -19,7 +19,8 @@ class TestLifespanSecretKey:
     """Cover lines 37-38: RuntimeError when secret_key is default and TESTING unset."""
 
     def test_default_secret_key_raises_in_non_testing(self):
-        """When TESTING is unset and secret_key is default, lifespan raises RuntimeError."""
+        """When TESTING is unset and secret_key is default, lifespan raises
+        RuntimeError."""
         from app.main import lifespan
 
         mock_app = MagicMock()
@@ -590,8 +591,8 @@ class TestSeedApiSourcesLiveStatus:
 class TestModuleLevelBranches:
     """Cover lines 117-120 and 191-195 which are module-level conditional branches.
 
-    These branches run at module-import time. To cover them we must reload
-    app.main with rate_limit_enabled=True and TESTING unset.
+    These branches run at module-import time. To cover them we must reload app.main with
+    rate_limit_enabled=True and TESTING unset.
     """
 
     def test_rate_limit_and_csrf_via_reload(self):

@@ -168,8 +168,8 @@ def merge_phones_into_card(card, new_phones: list[str]) -> int:
 def fuzzy_match_vendor(query: str, candidates: list[str], threshold: int = 80) -> list[dict]:
     """Fuzzy match a vendor name against a list of candidate names.
 
-    Returns list of {"name": str, "score": int} sorted by score descending.
-    Only returns matches at or above the threshold.
+    Returns list of {"name": str, "score": int} sorted by score descending. Only returns
+    matches at or above the threshold.
     """
     from thefuzz import fuzz
 

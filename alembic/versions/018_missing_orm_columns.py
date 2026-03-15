@@ -1,4 +1,5 @@
-"""Add ORM columns that may be missing when only Alembic runs (no startup _add_missing_columns).
+"""Add ORM columns that may be missing when only Alembic runs (no startup
+_add_missing_columns).
 
 list_quotes and other endpoints load Quote -> customer_site -> Company, site_contacts, User.
 If companies/customer_sites/users are missing columns the ORM expects, the query fails.

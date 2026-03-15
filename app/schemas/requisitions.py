@@ -1,5 +1,4 @@
-"""
-schemas/requisitions.py — Pydantic models for Requisition & Requirement endpoints
+"""schemas/requisitions.py — Pydantic models for Requisition & Requirement endpoints.
 
 Validates request bodies and documents response shapes for OpenAPI.
 
@@ -23,7 +22,8 @@ from app.utils.normalization import normalize_condition, normalize_mpn, normaliz
 
 
 def _validate_deadline(v: str | None) -> str | None:
-    """Validate that a deadline string is a real calendar date (rejects e.g. 2025-02-29)."""
+    """Validate that a deadline string is a real calendar date (rejects e.g.
+    2025-02-29)."""
     if v is None or v.strip() == "":
         return None
     v = v.strip()

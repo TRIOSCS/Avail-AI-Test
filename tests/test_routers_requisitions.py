@@ -1,5 +1,4 @@
-"""
-tests/test_routers_requisitions.py — Tests for routers/requisitions.py
+"""tests/test_routers_requisitions.py — Tests for routers/requisitions.py.
 
 Covers: CRUD for requisitions and requirements, archive/clone,
 search endpoints, sighting management, stock import, and access control.
@@ -591,7 +590,8 @@ def test_batch_archive_by_ids(client, db_session, test_user):
 
 
 def test_batch_assign(client, db_session, test_user):
-    """PUT /api/requisitions/batch-assign assigns owner to specific reqs (admin only)."""
+    """PUT /api/requisitions/batch-assign assigns owner to specific reqs (admin
+    only)."""
     from app.dependencies import require_admin
     from app.main import app
     from app.models import Requisition

@@ -1,5 +1,4 @@
-"""
-test_remediation_waves.py — Tests for remediation waves 2-10.
+"""test_remediation_waves.py — Tests for remediation waves 2-10.
 
 Tests API contract fixes, status machine validation, data cleanup,
 date formatting safety, and error response consistency.

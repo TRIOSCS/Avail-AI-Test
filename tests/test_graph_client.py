@@ -1,5 +1,4 @@
-"""
-test_graph_client.py — Tests for app/utils/graph_client.py
+"""test_graph_client.py — Tests for app/utils/graph_client.py.
 
 Mock HTTP calls and asyncio.sleep to test Graph API client retry,
 pagination, and delta query logic.

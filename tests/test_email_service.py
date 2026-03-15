@@ -1,5 +1,4 @@
-"""
-Comprehensive tests for app/email_service.py
+"""Comprehensive tests for app/email_service.py.
 
 Covers:
 - _build_html_body
@@ -415,7 +414,8 @@ class TestFindSentMessage:
 
     @pytest.mark.asyncio
     async def test_early_return_on_first_match(self):
-        """Verify function returns on first successful match without exhausting retries."""
+        """Verify function returns on first successful match without exhausting
+        retries."""
         gc = AsyncMock()
         gc.get_json.return_value = {
             "value": [{"id": "msg-1", "conversationId": "conv-1", "subject": "Quick Find"}],
@@ -677,7 +677,8 @@ class TestSendBatchRfq:
 
     @pytest.mark.asyncio
     async def test_ai_rephrase_exception_fallback(self, db_session, test_user, test_requisition):
-        """When AI rephrase import/call throws synchronously, original body is used (lines 52-53)."""
+        """When AI rephrase import/call throws synchronously, original body is used
+        (lines 52-53)."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
@@ -715,7 +716,8 @@ class TestSendBatchRfq:
 
     @pytest.mark.asyncio
     async def test_ai_rephrase_returns_exception_in_gather(self, db_session, test_user, test_requisition):
-        """When gather returns an exception for a rephrase task, original body is kept."""
+        """When gather returns an exception for a rephrase task, original body is
+        kept."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
@@ -1009,7 +1011,8 @@ class TestApplyParsedResult:
         assert vr.needs_action is True
 
     def test_with_notification_created(self, db_session, test_user, test_requisition):
-        """When draft offers are extracted, offer_pending_review ActivityLog is created."""
+        """When draft offers are extracted, offer_pending_review ActivityLog is
+        created."""
         from app.models import Requirement
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
@@ -1505,7 +1508,8 @@ class TestPollInbox:
 
     @pytest.mark.asyncio
     async def test_delta_failure_clears_stale_token(self, db_session, test_user, test_requisition):
-        """When delta query fails (e.g. 410), the stale delta_token is cleared from SyncState."""
+        """When delta query fails (e.g. 410), the stale delta_token is cleared from
+        SyncState."""
         sync = SyncState(
             user_id=test_user.id,
             folder="inbox",
@@ -2068,7 +2072,8 @@ class TestPollInbox:
 
     @pytest.mark.asyncio
     async def test_delta_success_empty_messages_no_fallback(self, db_session, test_user, test_requisition):
-        """Delta returns empty messages list — still counts as used_delta, no fallback."""
+        """Delta returns empty messages list — still counts as used_delta, no
+        fallback."""
         mock_gc = AsyncMock()
         mock_gc.delta_query.return_value = ([], "new-token")
 

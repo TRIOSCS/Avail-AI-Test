@@ -1,5 +1,4 @@
-"""
-routers/vendor_inquiry.py — Vendor stock inquiry endpoint.
+"""routers/vendor_inquiry.py — Vendor stock inquiry endpoint.
 
 Finds vendors who have (or had) specific parts, collects their emails from
 all internal sources + external enrichment, and optionally blasts stock
@@ -57,9 +56,9 @@ async def vendor_email_lookup(
 ):
     """Find all vendor emails for specific parts.
 
-    Queries sightings, vendor cards, contacts, email intelligence,
-    material history, and past RFQs. Optionally enriches vendors
-    missing emails via Apollo, Hunter, RocketReach, and AI.
+    Queries sightings, vendor cards, contacts, email intelligence, material history, and
+    past RFQs. Optionally enriches vendors missing emails via Apollo, Hunter,
+    RocketReach, and AI.
     """
     mpns = [p.mpn for p in payload.parts]
     results = await find_vendors_for_parts(

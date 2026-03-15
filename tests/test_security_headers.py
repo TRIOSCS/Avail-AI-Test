@@ -1,5 +1,4 @@
-"""
-tests/test_security_headers.py — Tests for security headers on responses
+"""tests/test_security_headers.py — Tests for security headers on responses.
 
 Validates that the request_id_middleware in main.py sets all expected
 security headers (OWASP recommended) on every response.
@@ -72,7 +71,8 @@ def test_request_id_uniqueness(client):
 
 
 def test_global_exception_handler_format(client):
-    """The global exception handler returns JSON with error, type, and request_id fields."""
+    """The global exception handler returns JSON with error, type, and request_id
+    fields."""
     # We verify the handler's response structure by checking the health
     # endpoint structure (which is always available) — the global handler
     # is tested implicitly by all 500-triggering edge cases.

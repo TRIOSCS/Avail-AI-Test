@@ -43,7 +43,10 @@ _SYSTEM = "You are an expert electronic component classifier. Return only valid 
 
 
 async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
-    """Batch MPNs via Gradient (free) with Anthropic fallback. Parse structured JSON response."""
+    """Batch MPNs via Gradient (free) with Anthropic fallback.
+
+    Parse structured JSON response.
+    """
     from app.services.gradient_service import gradient_json
 
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
@@ -92,7 +95,10 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # prag
 
 
 def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple[int, int]:  # pragma: no cover
-    """Apply classification results to DB. Returns (matched, unknown) counts."""
+    """Apply classification results to DB.
+
+    Returns (matched, unknown) counts.
+    """
     matched = 0
     unknown = 0
     mpn_to_result = {c["mpn"].lower(): c for c in classified}

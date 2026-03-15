@@ -41,8 +41,8 @@ class QuoteStatus(str, enum.Enum):
 class RequirementSourcingStatus(str, enum.Enum):
     """Per-part sourcing status within a requisition.
 
-    Tracks where each individual part is in the sourcing → quoting pipeline.
-    Parts within one requisition can be at different stages.
+    Tracks where each individual part is in the sourcing → quoting pipeline. Parts
+    within one requisition can be at different stages.
     """
 
     open = "open"  # Not yet being sourced

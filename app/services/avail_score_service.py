@@ -815,7 +815,10 @@ def _rank_and_bonus(results):
 
 
 def _upsert_snapshot(db: Session, result: dict, month: date) -> int:
-    """Upsert an AvailScoreSnapshot row. Returns 1 if saved."""
+    """Upsert an AvailScoreSnapshot row.
+
+    Returns 1 if saved.
+    """
     existing = (
         db.query(AvailScoreSnapshot)
         .filter(

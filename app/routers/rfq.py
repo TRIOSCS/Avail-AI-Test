@@ -1,5 +1,4 @@
-"""
-rfq.py — RFQ, Contacts, Responses, Activity & Follow-ups Router
+"""rfq.py — RFQ, Contacts, Responses, Activity & Follow-ups Router.
 
 Batch RFQ email sending, inbox polling, vendor response tracking,
 requisition activity feed, and follow-up management.
@@ -510,7 +509,8 @@ async def rfq_prepare(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Return vendor card data + exhaustion info for selected vendors before RFQ send."""
+    """Return vendor card data + exhaustion info for selected vendors before RFQ
+    send."""
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
@@ -858,7 +858,10 @@ async def send_follow_up_batch(
 
 # ── Search enrichment with vendor cards ────────────────────────────────
 def _enrich_with_vendor_cards(results: dict, db: Session):
-    """Add vendor card rating info to search results. No contact lookup."""
+    """Add vendor card rating info to search results.
+
+    No contact lookup.
+    """
     all_vendor_names = set()
     for group in results.values():
         for s in group.get("sightings", []):

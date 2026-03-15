@@ -582,7 +582,10 @@ async def batch_assign(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Assign owner to specific requisitions by ID list. Admin only."""
+    """Assign owner to specific requisitions by ID list.
+
+    Admin only.
+    """
     from . import invalidate_prefix
 
     # Verify the target user exists
@@ -651,7 +654,10 @@ async def claim_requisition_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer claims a requisition for sourcing. Any unclaimed req is open to any buyer."""
+    """Buyer claims a requisition for sourcing.
+
+    Any unclaimed req is open to any buyer.
+    """
     if user.role not in ("buyer", "trader", "manager", "admin"):
         raise HTTPException(403, "Only buyers can claim requisitions")
     req = get_req_for_user(db, user, req_id)
@@ -674,7 +680,10 @@ async def unclaim_requisition_endpoint(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Release buyer's claim on a requisition. Only the claimer or admin can unclaim."""
+    """Release buyer's claim on a requisition.
+
+    Only the claimer or admin can unclaim.
+    """
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")

@@ -1,5 +1,4 @@
-"""
-test_services_activity.py — Tests for activity_service.
+"""test_services_activity.py — Tests for activity_service.
 
 Tests email/phone matching, activity logging, dedup, and query helpers.
 Uses in-memory SQLite via conftest fixtures.

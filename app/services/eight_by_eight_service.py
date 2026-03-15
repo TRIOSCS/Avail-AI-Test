@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 
 import httpx
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 BASE_URL = "https://api.8x8.com/analytics/work/v1"
@@ -64,10 +63,14 @@ def reverse_lookup_phone(phone: str, db: Session) -> dict | None:
         return None
 
     # 1. Check SiteContact phone field
-    contacts = db.query(SiteContact).filter(
-        SiteContact.phone.isnot(None),
-        SiteContact.is_active.is_(True),
-    ).all()
+    contacts = (
+        db.query(SiteContact)
+        .filter(
+            SiteContact.phone.isnot(None),
+            SiteContact.is_active.is_(True),
+        )
+        .all()
+    )
     for contact in contacts:
         if normalize_phone(contact.phone) == normalized:
             # Get company via customer_site
@@ -84,10 +87,14 @@ def reverse_lookup_phone(phone: str, db: Session) -> dict | None:
             }
 
     # 2. Check Company phone field
-    companies = db.query(Company).filter(
-        Company.phone.isnot(None),
-        Company.is_active.is_(True),
-    ).all()
+    companies = (
+        db.query(Company)
+        .filter(
+            Company.phone.isnot(None),
+            Company.is_active.is_(True),
+        )
+        .all()
+    )
     for company in companies:
         if normalize_phone(company.phone) == normalized:
             return {
@@ -100,9 +107,13 @@ def reverse_lookup_phone(phone: str, db: Session) -> dict | None:
             }
 
     # 3. Check VendorCard phones (JSON list)
-    vendors = db.query(VendorCard).filter(
-        VendorCard.is_blacklisted.is_(False),
-    ).all()
+    vendors = (
+        db.query(VendorCard)
+        .filter(
+            VendorCard.is_blacklisted.is_(False),
+        )
+        .all()
+    )
     for vendor in vendors:
         vendor_phones = vendor.phones or []
         for vp in vendor_phones:
@@ -161,8 +172,8 @@ def get_extension_map(token: str, settings) -> dict[str, str]:
 def get_access_token(settings) -> str:
     """Authenticate with 8x8 Analytics API and return an access token.
 
-    POST /oauth/token with API key header + form-encoded credentials.
-    Raises ValueError on auth failure or missing token.
+    POST /oauth/token with API key header + form-encoded credentials. Raises ValueError
+    on auth failure or missing token.
     """
     url = f"{BASE_URL}/oauth/token"
     headers = {

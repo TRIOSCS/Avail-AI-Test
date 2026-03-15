@@ -80,7 +80,10 @@ DEEP_TEST_MPN = "LM317"
 
 
 def _get_connector(source: ApiSource, db: Session):
-    """Get a connector instance for the given source. Returns None if unavailable."""
+    """Get a connector instance for the given source.
+
+    Returns None if unavailable.
+    """
     from ..routers.sources import _get_connector_for_source
 
     try:
@@ -134,11 +137,11 @@ def _check_quota_threshold(source: ApiSource, db: Session):
 async def ping_source(source: ApiSource, db: Session) -> dict:
     """Lightweight health check — verify connector can be instantiated and respond.
 
-    This is the ONLY place that should set source.status to 'live' or 'error'.
-    Status is based on actual API response, not credential presence.
+    This is the ONLY place that should set source.status to 'live' or 'error'. Status is
+    based on actual API response, not credential presence.
 
-    Updates source status, last_ping_at, last_error fields.
-    Returns dict with success, elapsed_ms, error keys.
+    Updates source status, last_ping_at, last_error fields. Returns dict with success,
+    elapsed_ms, error keys.
     """
     now = datetime.now(timezone.utc)
     old_status = source.status
@@ -209,8 +212,8 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
 async def deep_test_source(source: ApiSource, db: Session) -> dict:
     """Full functional test — search a known MPN and verify results.
 
-    Writes an ApiUsageLog entry for every test. Updates source timing fields.
-    Returns dict with success, results_count, elapsed_ms, error keys.
+    Writes an ApiUsageLog entry for every test. Updates source timing fields. Returns
+    dict with success, results_count, elapsed_ms, error keys.
     """
     now = datetime.now(timezone.utc)
     old_status = source.status

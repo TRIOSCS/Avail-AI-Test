@@ -1,5 +1,4 @@
-"""
-test_website_scraper.py — Tests for website_scraper.py
+"""test_website_scraper.py — Tests for website_scraper.py.
 
 Pure functions tested directly; scraping functions mock httpx.
 

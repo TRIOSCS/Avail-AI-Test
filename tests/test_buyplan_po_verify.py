@@ -1,5 +1,4 @@
-"""
-test_buyplan_v3_po_verify.py — Tests for PO verification scanning.
+"""test_buyplan_v3_po_verify.py — Tests for PO verification scanning.
 
 Tests verify_po_sent() which scans buyer Outlook sent folders for PO emails.
 Mocks Graph API interactions to test verification logic in isolation.
@@ -8,22 +7,20 @@ Called by: pytest
 Depends on: app.services.buyplan_workflow.verify_po_sent, conftest fixtures
 """
 
-import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Offer, Quote, Requirement, Requisition, User
+from app.models import Quote, Requisition, User
 from app.models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
 )
 from app.services.buyplan_workflow import verify_po_sent
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

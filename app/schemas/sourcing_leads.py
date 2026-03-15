@@ -40,6 +40,7 @@ class LeadFeedbackIn(BaseModel):
 
 class EvidenceOut(BaseModel):
     """Summary of a single evidence item supporting a lead."""
+
     id: int
     evidence_id: str
     signal_type: str
@@ -60,6 +61,7 @@ class EvidenceOut(BaseModel):
 
 class FeedbackEventOut(BaseModel):
     """Summary of a buyer feedback event."""
+
     id: int
     status: str
     note: str | None = None
@@ -74,6 +76,7 @@ class FeedbackEventOut(BaseModel):
 
 class LeadOut(BaseModel):
     """Buyer-facing lead response with full attribution and scoring."""
+
     id: int
     lead_id: str
     requisition_id: int
@@ -139,5 +142,6 @@ class LeadOut(BaseModel):
 
 class LeadDetailOut(LeadOut):
     """Extended lead response including evidence and feedback history."""
+
     evidence: list[EvidenceOut] = []
     feedback_events: list[FeedbackEventOut] = []

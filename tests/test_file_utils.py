@@ -1,5 +1,4 @@
-"""
-test_file_utils.py — Tests for app/file_utils.py
+"""test_file_utils.py — Tests for app/file_utils.py.
 
 Tests file parsing (CSV, TSV, Excel) and stock row normalization.
 

@@ -1,5 +1,4 @@
-"""
-test_integration_crm.py — Integration tests for CRM endpoints
+"""test_integration_crm.py — Integration tests for CRM endpoints.
 
 Tests Companies, CustomerSites, Offers, and Quotes CRUD.
 

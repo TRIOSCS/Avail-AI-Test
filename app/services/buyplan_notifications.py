@@ -1,5 +1,4 @@
-"""
-buyplan_notifications.py — Buy Plan notification service.
+"""buyplan_notifications.py — Buy Plan notification service.
 
 Handles notifications for all buy plan state transitions:
 - Submit  → email + Teams + in-app to managers
@@ -74,7 +73,10 @@ def _plan_context(plan: BuyPlan, db: Session) -> dict:
 
 
 def _lines_html(plan: BuyPlan) -> tuple[str, float]:
-    """Build HTML table rows for plan lines. Returns (rows_html, total_cost)."""
+    """Build HTML table rows for plan lines.
+
+    Returns (rows_html, total_cost).
+    """
     rows = ""
     total = 0.0
     for line in plan.lines or []:
@@ -161,8 +163,8 @@ def log_buyplan_activity(
 ):
     """Create an ActivityLog entry for a buy plan state change.
 
-    Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores
-    plan linkage in notes this version uses the plan id directly in subject and notes fields.
+    Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores plan
+    linkage in notes this version uses the plan id directly in subject and notes fields.
     """
     db.add(
         ActivityLog(
@@ -457,9 +459,9 @@ async def notify_completed(plan: BuyPlan, db: Session):
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     """Notify logistics/accounting that a stock sale was approved (no PO required).
 
-    Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete,
-    sends an email to the stock_sale_notify_emails list and creates an in-app
-    notification for the submitter. Also posts to the Teams channel.
+    Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete, sends
+    an email to the stock_sale_notify_emails list and creates an in-app notification for
+    the submitter. Also posts to the Teams channel.
     """
     from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient

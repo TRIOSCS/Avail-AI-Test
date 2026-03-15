@@ -1,4 +1,4 @@
-"""test_jobs_email.py — Tests for email-related background jobs
+"""test_jobs_email.py — Tests for email-related background jobs.
 
 Covers: _scan_user_inbox, _mine_vendor_contacts, _scan_outbound_rfqs,
 _sync_user_contacts, _job_contacts_sync,

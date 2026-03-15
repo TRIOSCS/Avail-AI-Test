@@ -1,4 +1,5 @@
-"""test_eight_by_eight_strengthen.py — Tests for 8x8 VoIP reverse lookup and CRM linking.
+"""test_eight_by_eight_strengthen.py — Tests for 8x8 VoIP reverse lookup and CRM
+linking.
 
 Tests reverse_lookup_phone() against SiteContact, Company, and VendorCard.
 Tests phone normalization, CDR→CRM linking, and extension mapping.
@@ -11,7 +12,6 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
 from datetime import datetime, timezone
 from unittest.mock import patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -27,7 +27,6 @@ from app.services.eight_by_eight_service import (
     normalize_phone,
     reverse_lookup_phone,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  PHONE NORMALIZATION
@@ -193,8 +192,8 @@ class TestCdrLinksToCrm:
     def test_cdr_with_known_phone_creates_linked_activity(
         self, db_session: Session, test_company: Company, test_customer_site: CustomerSite
     ):
-        """A CDR whose external phone matches a SiteContact should produce
-        an ActivityLog with company_id and contact_name set."""
+        """A CDR whose external phone matches a SiteContact should produce an
+        ActivityLog with company_id and contact_name set."""
         # Create a user with 8x8 enabled
         user = User(
             email="buyer8x8@trioscs.com",
@@ -247,15 +246,14 @@ class TestCdrLinksToCrm:
         assert result["matched"] == 1
 
         # Verify the ActivityLog was linked
-        activity = db_session.query(ActivityLog).filter(
-            ActivityLog.external_id == "cdr-link-test-001"
-        ).first()
+        activity = db_session.query(ActivityLog).filter(ActivityLog.external_id == "cdr-link-test-001").first()
         assert activity is not None
         assert activity.company_id == test_company.id
         assert activity.contact_name == "Bob Customer"
 
     def test_cdr_with_unknown_phone_creates_unlinked_activity(self, db_session: Session):
-        """A CDR with an unknown phone should create an ActivityLog without CRM links."""
+        """A CDR with an unknown phone should create an ActivityLog without CRM
+        links."""
         user = User(
             email="buyer8x8b@trioscs.com",
             name="8x8 Buyer B",
@@ -294,9 +292,7 @@ class TestCdrLinksToCrm:
         assert result["processed"] == 1
         assert result["matched"] == 0
 
-        activity = db_session.query(ActivityLog).filter(
-            ActivityLog.external_id == "cdr-unknown-test-001"
-        ).first()
+        activity = db_session.query(ActivityLog).filter(ActivityLog.external_id == "cdr-unknown-test-001").first()
         assert activity is not None
         assert activity.company_id is None
         assert activity.vendor_card_id is None
@@ -360,8 +356,8 @@ class TestCdrLinksToRequisition:
         test_company: Company,
         test_customer_site: CustomerSite,
     ):
-        """When a matched company has an open requisition, the ActivityLog
-        should have requisition_id set."""
+        """When a matched company has an open requisition, the ActivityLog should have
+        requisition_id set."""
         user = User(
             email="buyer8x8req@trioscs.com",
             name="8x8 Buyer Req",
@@ -413,9 +409,7 @@ class TestCdrLinksToRequisition:
         assert result["processed"] == 1
         assert result["matched"] == 1
 
-        activity = db_session.query(ActivityLog).filter(
-            ActivityLog.external_id == "cdr-req-link-001"
-        ).first()
+        activity = db_session.query(ActivityLog).filter(ActivityLog.external_id == "cdr-req-link-001").first()
         assert activity is not None
         assert activity.company_id == test_company.id
         assert activity.requisition_id == req.id

@@ -172,7 +172,10 @@ def _parse_employee_range(emp_range: str | None) -> int | None:
 
 
 def match_industry_segment(industry: str | None, naics: str | None) -> tuple[str | None, int]:
-    """Match against ICP segments. Returns (segment_name, score 0-30)."""
+    """Match against ICP segments.
+
+    Returns (segment_name, score 0-30).
+    """
     if not industry and not naics:
         return None, FIT_WEIGHT_INDUSTRY // 3  # neutral: 10
 
@@ -208,7 +211,10 @@ def match_industry_segment(industry: str | None, naics: str | None) -> tuple[str
 
 
 def score_company_size(employee_range: str | None) -> int:
-    """Score based on employee count. Returns 0-20."""
+    """Score based on employee count.
+
+    Returns 0-20.
+    """
     count = _parse_employee_range(employee_range)
     if count is None:
         return SIZE_NEUTRAL
@@ -455,7 +461,10 @@ def classify_readiness(score: int) -> str:
 
 
 def calculate_composite_score(fit: int, readiness: int) -> float:
-    """Weighted composite for sort order. 60% fit, 40% readiness."""
+    """Weighted composite for sort order.
+
+    60% fit, 40% readiness.
+    """
     return round(fit * COMPOSITE_FIT_WEIGHT + readiness * COMPOSITE_READINESS_WEIGHT, 2)
 
 

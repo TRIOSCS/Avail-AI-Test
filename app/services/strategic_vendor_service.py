@@ -72,8 +72,8 @@ def claim_vendor(
 ) -> tuple[StrategicVendor | None, str | None]:
     """Claim a vendor as strategic. Returns (record, error_message).
 
-    When commit=False, flushes instead of committing — caller is responsible
-    for the final commit (used by replace_vendor for atomic swap).
+    When commit=False, flushes instead of committing — caller is responsible for the
+    final commit (used by replace_vendor for atomic swap).
     """
     # Check cap
     count = active_count(db, user_id)
@@ -117,8 +117,8 @@ def claim_vendor(
 def drop_vendor(db: Session, user_id: int, vendor_card_id: int, *, commit: bool = True) -> tuple[bool, str | None]:
     """Drop a strategic vendor back to open pool. Returns (success, error).
 
-    When commit=False, flushes instead of committing — caller is responsible
-    for the final commit (used by replace_vendor for atomic swap).
+    When commit=False, flushes instead of committing — caller is responsible for the
+    final commit (used by replace_vendor for atomic swap).
     """
     record = (
         db.query(StrategicVendor)
@@ -178,8 +178,8 @@ def replace_vendor(
 def record_offer(db: Session, vendor_card_id: int) -> bool:
     """Reset the 39-day clock when an offer comes in for a strategic vendor.
 
-    Called from offer creation (manual + AI-parsed). Returns True if a
-    strategic record was updated.
+    Called from offer creation (manual + AI-parsed). Returns True if a strategic record
+    was updated.
     """
     record = (
         db.query(StrategicVendor)
@@ -205,7 +205,10 @@ def record_offer(db: Session, vendor_card_id: int) -> bool:
 
 
 def expire_stale(db: Session) -> int:
-    """Expire all strategic vendors past their TTL. Returns count expired."""
+    """Expire all strategic vendors past their TTL.
+
+    Returns count expired.
+    """
     now = datetime.now(timezone.utc)
     stale = (
         db.query(StrategicVendor)
@@ -266,7 +269,10 @@ def get_vendor_status(db: Session, vendor_card_id: int) -> dict | None:
 def get_open_pool(
     db: Session, limit: int = 50, offset: int = 0, search: str | None = None
 ) -> tuple[list[VendorCard], int]:
-    """Return vendors not claimed by any buyer. Returns (vendors, total_count)."""
+    """Return vendors not claimed by any buyer.
+
+    Returns (vendors, total_count).
+    """
     claimed_ids = db.query(StrategicVendor.vendor_card_id).filter(StrategicVendor.released_at.is_(None)).subquery()
     q = db.query(VendorCard).filter(VendorCard.id.notin_(claimed_ids))
 

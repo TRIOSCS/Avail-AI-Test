@@ -1,7 +1,7 @@
 """Database connection and session factory.
 
-All naive datetimes from PostgreSQL are auto-tagged as UTC via event
-listener to prevent naive-vs-aware comparison errors.
+All naive datetimes from PostgreSQL are auto-tagged as UTC via event listener to prevent
+naive-vs-aware comparison errors.
 """
 
 from datetime import datetime, timezone
@@ -36,7 +36,7 @@ if _is_sqlite:
         poolclass=StaticPool,
     )
 else:
-    _connect_args = {"connect_timeout": 10}
+    _connect_args: dict[str, object] = {"connect_timeout": 10}
     if settings.database_url.startswith("postgresql"):
         _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
 

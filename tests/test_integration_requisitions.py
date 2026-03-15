@@ -1,5 +1,4 @@
-"""
-test_integration_requisitions.py — Integration tests for Requisitions endpoints
+"""test_integration_requisitions.py — Integration tests for Requisitions endpoints.
 
 Tests full request->DB->response cycle for requisition and requirement CRUD.
 Uses conftest.py fixtures (SQLite + TestClient with auth overrides).

@@ -1,5 +1,4 @@
-"""
-test_alembic.py — Verify Alembic migration setup and structure.
+"""test_alembic.py — Verify Alembic migration setup and structure.
 
 Tests migration file validity, model-metadata consistency,
 and env.py configuration without requiring a live database.
@@ -18,8 +17,8 @@ MIGRATION_DIR = Path(__file__).parent.parent / "alembic" / "versions"
 def _load_migration():
     """Load the initial migration module dynamically.
 
-    Mocks alembic.op and sqlalchemy so migrations can be imported outside
-    of Alembic's runtime context (where op is a stub).
+    Mocks alembic.op and sqlalchemy so migrations can be imported outside of Alembic's
+    runtime context (where op is a stub).
     """
     import sys
     from unittest.mock import MagicMock

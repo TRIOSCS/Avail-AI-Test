@@ -33,7 +33,10 @@ from app.models import (
 
 
 def _sigmoid(x: float, midpoint: float, steepness: float = 1.0) -> float:
-    """Smooth 0–1 curve. Returns ~0.5 at midpoint, asymptotes at 0 and 1."""
+    """Smooth 0–1 curve.
+
+    Returns ~0.5 at midpoint, asymptotes at 0 and 1.
+    """
     return 1 / (1 + math.exp(-steepness * (x - midpoint)))
 
 
@@ -47,12 +50,12 @@ def score_requirement(
 ) -> float:
     """Compute a single requirement's sourcing effort score (0–100).
 
-    Each signal is normalized to 0–1 via sigmoid curves, then combined
-    with equal-ish weighting into a holistic composite.
+    Each signal is normalized to 0–1 via sigmoid curves, then combined with equal-ish
+    weighting into a holistic composite.
 
-    Green (60+) is attainable with thorough, multi-channel effort — RFQs sent,
-    replies received, calls made, and offers in hand. It represents "we worked
-    this part well and can look the customer in the eye."
+    Green (60+) is attainable with thorough, multi-channel effort — RFQs sent, replies
+    received, calls made, and offers in hand. It represents "we worked this part well
+    and can look the customer in the eye."
     """
     # Sightings: found sources at all? More = better, diminishing returns.
     # midpoint=2 means 2 sightings = 50% credit on this factor

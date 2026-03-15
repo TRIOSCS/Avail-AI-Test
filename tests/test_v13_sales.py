@@ -1,5 +1,4 @@
-"""
-test_v13_sales.py — v1.3 Sales & Ownership Endpoint Tests
+"""test_v13_sales.py — v1.3 Sales & Ownership Endpoint Tests.
 
 Tests account ownership, open pool, claim flow, strategic toggle,
 manager digest, and sales notifications.

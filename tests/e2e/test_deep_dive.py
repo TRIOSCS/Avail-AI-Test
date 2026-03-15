@@ -1,5 +1,4 @@
-"""
-100% Deep-Dive Playwright E2E tests for AvailAI.
+"""100% Deep-Dive Playwright E2E tests for AvailAI.
 
 Covers every major view, modal, drawer, navigation path, form interaction,
 keyboard shortcut, API integrity check, mobile responsiveness, and edge case
@@ -1504,7 +1503,7 @@ class TestToastNotifications:
     """Tests for the toast notification system."""
 
     def test_toast_function_exists(self, authed_page, base_url):
-        """showToast function exists."""
+        """ShowToast function exists."""
         wait_for_app(authed_page, base_url)
         exists = authed_page.evaluate("() => typeof showToast === 'function'")
         assert exists

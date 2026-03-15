@@ -1,5 +1,4 @@
-"""
-sanitize.py — Input sanitization utilities for XSS prevention.
+"""sanitize.py — Input sanitization utilities for XSS prevention.
 
 Purpose: Strip dangerous HTML/script content from user-entered and ingested data
          before storing in the database. Prevents stored XSS payload persistence.
@@ -22,8 +21,8 @@ _EVENT_RE = re.compile(r"\bon\w+\s*=", re.IGNORECASE)
 def sanitize_text(value: str | None) -> str | None:
     """Sanitize a text string by escaping HTML entities and stripping tags.
 
-    Returns None if input is None, otherwise returns a safe string.
-    Does NOT modify numeric strings or purely alphanumeric content.
+    Returns None if input is None, otherwise returns a safe string. Does NOT modify
+    numeric strings or purely alphanumeric content.
     """
     if value is None:
         return None
@@ -43,8 +42,8 @@ def sanitize_text(value: str | None) -> str | None:
 def sanitize_dict(data: dict, fields: list[str]) -> dict:
     """Sanitize specific string fields in a dictionary.
 
-    Only processes fields that exist and are strings. Returns the dict
-    with sanitized values (mutates in place for efficiency).
+    Only processes fields that exist and are strings. Returns the dict with sanitized
+    values (mutates in place for efficiency).
     """
     for field in fields:
         if field in data and isinstance(data[field], str):

@@ -1,5 +1,4 @@
-"""
-schemas/responses.py — Shared response models for OpenAPI documentation
+"""schemas/responses.py — Shared response models for OpenAPI documentation.
 
 Provides base response wrappers (pagination, ok) and typed response models
 for the top 30 endpoints. Used as response_model= on router decorators.
@@ -143,8 +142,8 @@ class QuoteDetailResponse(BaseModel, extra="allow"):
 class QuoteSummaryResponse(BaseModel, extra="allow"):
     """Lightweight quote-tab projection for inline requisition view.
 
-    Always populated — never blank. Shows quote status, buy plan linkage,
-    selected offers, and risk flags to drive CTAs.
+    Always populated — never blank. Shows quote status, buy plan linkage, selected
+    offers, and risk flags to drive CTAs.
     """
 
     requisition_id: int

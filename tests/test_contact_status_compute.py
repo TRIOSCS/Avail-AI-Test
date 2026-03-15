@@ -1,5 +1,5 @@
-"""
-test_contact_status_compute.py — Tests for the contact status auto-compute scheduler job.
+"""test_contact_status_compute.py — Tests for the contact status auto-compute scheduler
+job.
 
 Covers:
 - Active contact (activity ≤7 days) → status='active'

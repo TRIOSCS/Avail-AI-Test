@@ -1,4 +1,4 @@
-"""Add ai_prompt column to error_reports
+"""Add ai_prompt column to error_reports.
 
 Revision ID: 005_ai_prompt
 Revises: 004_warranty_coo

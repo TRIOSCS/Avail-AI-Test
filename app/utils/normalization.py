@@ -50,7 +50,10 @@ _CURRENCY_CODES = {
 
 
 def normalize_price(raw: Any) -> float | None:
-    """Parse price string to float. Returns None if ambiguous."""
+    """Parse price string to float.
+
+    Returns None if ambiguous.
+    """
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
@@ -102,7 +105,10 @@ def normalize_price(raw: Any) -> float | None:
 
 
 def detect_currency(raw: Any) -> str:
-    """Detect currency from a price string or currency field. Default USD."""
+    """Detect currency from a price string or currency field.
+
+    Default USD.
+    """
     if not raw:
         return "USD"
     s = str(raw).strip().upper()
@@ -131,7 +137,10 @@ _QTY_MULTIPLIERS = {
 
 
 def normalize_quantity(raw: Any) -> int | None:
-    """Parse quantity. Handles: 50000, "50,000", "50K", "50k". Returns None if ambiguous."""
+    """Parse quantity.
+
+    Handles: 50000, "50,000", "50K", "50k". Returns None if ambiguous.
+    """
     if raw is None:
         return None
     if isinstance(raw, int):
@@ -270,7 +279,10 @@ def normalize_date_code(raw: Any) -> str | None:
 
 
 def normalize_moq(raw: Any) -> int | None:
-    """Parse MOQ. Handles: 10000, "10K", "10K minimum", "MOQ: 500"."""
+    """Parse MOQ.
+
+    Handles: 10000, "10K", "10K minimum", "MOQ: 500".
+    """
     if raw is None:
         return None
     s = str(raw).strip()

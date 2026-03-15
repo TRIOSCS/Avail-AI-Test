@@ -120,8 +120,8 @@ def _build_lines_for_requirement(
 ) -> list[BuyPlanLine]:
     """Build buy plan lines for a single requirement.
 
-    Selects the best offer. If no single offer covers the full qty,
-    auto-splits across multiple vendors (prefer fewest splits, best score).
+    Selects the best offer. If no single offer covers the full qty, auto-splits across
+    multiple vendors (prefer fewest splits, best score).
     """
     target_qty = requirement.target_qty or 1
 

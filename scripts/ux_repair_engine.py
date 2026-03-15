@@ -65,7 +65,8 @@ def _get_db():
 
 
 async def cmd_sweep(areas_json: str | None = None, baseline_file: str | None = None) -> None:
-    """Run SiteTester sweep, optionally filtered by areas and diffed against baseline."""
+    """Run SiteTester sweep, optionally filtered by areas and diffed against
+    baseline."""
     from app.services.site_tester import TEST_AREAS, SiteTester
 
     cookie = _get_session_cookie()

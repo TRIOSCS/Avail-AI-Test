@@ -1,8 +1,8 @@
 """Shared rate limiter with Redis storage and in-memory fallback.
 
-Uses Redis for distributed rate limiting across workers when available.
-Falls back to in-memory storage if Redis is unreachable at startup
-(limits won't be shared across workers in that case).
+Uses Redis for distributed rate limiting across workers when available. Falls back to
+in-memory storage if Redis is unreachable at startup (limits won't be shared across
+workers in that case).
 """
 
 from loguru import logger

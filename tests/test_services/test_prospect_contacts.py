@@ -14,9 +14,6 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
-
 # ── Seniority Classification ────────────────────────────────────────
 
 

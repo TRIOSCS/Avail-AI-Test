@@ -1,5 +1,4 @@
-"""
-sales.py — Sales dashboard v1.3.0 routes
+"""sales.py — Sales dashboard v1.3.0 routes.
 
 Account ownership (my-accounts, at-risk, open-pool, claim, strategic),
 manager digest, and notification endpoints.

@@ -1,4 +1,4 @@
-"""test_jobs_tagging.py — Tests for tagging/material enrichment background jobs
+"""test_jobs_tagging.py — Tests for tagging/material enrichment background jobs.
 
 Covers: _job_material_enrichment, _job_nexar_backfill, _job_connector_enrichment.
 

@@ -1,7 +1,7 @@
 """Integration tests for webhook signature validation + replay protection + rate limits.
 
-Runs against the full FastAPI app with in-memory SQLite, same harness as conftest.
-Tests the HTTP-level behavior end-to-end (not just service functions).
+Runs against the full FastAPI app with in-memory SQLite, same harness as conftest. Tests
+the HTTP-level behavior end-to-end (not just service functions).
 """
 
 import hmac

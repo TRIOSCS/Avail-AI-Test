@@ -1,5 +1,4 @@
-"""
-dependencies.py — Shared FastAPI Dependencies
+"""dependencies.py — Shared FastAPI Dependencies.
 
 Reusable dependency functions for authentication, authorization,
 and common query patterns. All routers import from here instead
@@ -20,7 +19,6 @@ Depends on: models, database, config
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, selectinload
@@ -103,7 +101,9 @@ def require_sales(request: Request, db: Session = Depends(get_db)) -> User:
 
 def user_reqs_query(db: Session, user: User):
     """Base requisition query respecting role-based access.
-    Sales sees own reqs only; all other roles see all."""
+
+    Sales sees own reqs only; all other roles see all.
+    """
     q = db.query(Requisition)
     if user.role == "sales":
         q = q.filter(Requisition.created_by == user.id)
@@ -127,7 +127,12 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
 def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> Quote:
     """Get a single quote with role-based requisition ownership checks."""
     load_opts = options or []
-    q = db.query(Quote).options(*load_opts).join(Requisition, Quote.requisition_id == Requisition.id).filter(Quote.id == quote_id)
+    q = (
+        db.query(Quote)
+        .options(*load_opts)
+        .join(Requisition, Quote.requisition_id == Requisition.id)
+        .filter(Quote.id == quote_id)
+    )
     if user.role == "sales":
         q = q.filter(Requisition.created_by == user.id)
     return q.first()
@@ -139,8 +144,8 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
 async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -> str:
     """Return a valid M365 access token, refreshing proactively if near expiry.
 
-    Tokens stored in DB (not just session) so background jobs can use them.
-    Refreshes when within 15 min of expiry.
+    Tokens stored in DB (not just session) so background jobs can use them. Refreshes
+    when within 15 min of expiry.
     """
     user = get_user(request, db)
     if not user:

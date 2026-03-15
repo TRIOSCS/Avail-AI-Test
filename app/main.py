@@ -313,10 +313,10 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 async def csp_middleware(request: Request, call_next):
     """Add Content-Security-Policy header.
 
-    Uses 'unsafe-inline' for script-src because the app relies on inline
-    onclick handlers throughout the SPA template.  A nonce cannot be used
-    alongside 'unsafe-inline' — browsers that support nonces silently
-    ignore 'unsafe-inline', which breaks all inline event handlers.
+    Uses 'unsafe-inline' for script-src because the app relies on inline onclick
+    handlers throughout the SPA template.  A nonce cannot be used alongside 'unsafe-
+    inline' — browsers that support nonces silently ignore 'unsafe-inline', which breaks
+    all inline event handlers.
     """
     response = await call_next(request)
     csp = (
@@ -508,8 +508,10 @@ async def health(request: Request, db: Session = Depends(get_db)):
 # ── Seed API Sources ─────────────────────────────────────────────────────
 def _seed_api_sources():
     """Seed the api_sources table with all known data sources.
-    Uses a version hash so it only writes when the source list changes.
-    Source definitions live in app/data/api_sources.json."""
+
+    Uses a version hash so it only writes when the source list changes. Source
+    definitions live in app/data/api_sources.json.
+    """
     import hashlib
     import json
     from pathlib import Path
@@ -604,6 +606,7 @@ from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
 from .routers.emails import router as emails_router
 from .routers.error_reports import router as error_reports_router
+from .routers.htmx_views import router as htmx_views_router
 from .routers.ics_admin import router as ics_admin_router
 from .routers.knowledge import insights_router as knowledge_insights_router
 from .routers.knowledge import router as knowledge_router
@@ -628,7 +631,6 @@ from .routers.vendor_analytics import router as vendor_analytics_router
 from .routers.vendor_contacts import router as vendor_contacts_router
 from .routers.vendor_inquiry import router as vendor_inquiry_router
 from .routers.vendors_crud import router as vendors_crud_router
-from .routers.htmx_views import router as htmx_views_router
 
 # Core routers (always active)
 app.include_router(auth_router)
@@ -665,4 +667,3 @@ app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
 app.include_router(htmx_views_router)
-

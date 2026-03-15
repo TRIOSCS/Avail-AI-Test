@@ -205,7 +205,8 @@ class TestPricingHistory:
     def test_pricing_history_matches_by_card_id(
         self, client, db_session, test_requisition, test_customer_site, test_user, material_card
     ):
-        """Pricing history matches line items via material_card_id even with variant MPN strings."""
+        """Pricing history matches line items via material_card_id even with variant MPN
+        strings."""
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=test_customer_site.id,
@@ -244,7 +245,8 @@ class TestQuoteCreationMaterialCard:
     def test_create_quote_from_offers_copies_card_id(
         self, client, db_session, test_requisition, test_customer_site, test_user, material_card
     ):
-        """When creating a quote from offers, material_card_id is copied to line items."""
+        """When creating a quote from offers, material_card_id is copied to line
+        items."""
         test_requisition.customer_site_id = test_customer_site.id
         offer = Offer(
             requisition_id=test_requisition.id,

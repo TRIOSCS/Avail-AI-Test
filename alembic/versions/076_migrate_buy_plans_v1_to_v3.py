@@ -11,7 +11,6 @@ Create Date: 2026-03-13
 
 import json
 
-import sqlalchemy as sa
 from sqlalchemy import text
 
 from alembic import op
@@ -79,8 +78,7 @@ def upgrade():
 
         # Calculate totals from line items
         total_cost = sum(
-            (item.get("cost_price") or 0) * (item.get("plan_qty") or item.get("qty") or 0)
-            for item in line_items
+            (item.get("cost_price") or 0) * (item.get("plan_qty") or item.get("qty") or 0) for item in line_items
         )
         total_revenue = sum(
             (item.get("sell_price") or item.get("cost_price") or 0) * (item.get("plan_qty") or item.get("qty") or 0)
@@ -203,7 +201,10 @@ def upgrade():
 
 
 def downgrade():
-    """Remove migrated V3 records. V1 buy_plans table is untouched."""
+    """Remove migrated V3 records.
+
+    V1 buy_plans table is untouched.
+    """
     conn = op.get_bind()
     # Delete lines first (FK cascade would handle this, but be explicit)
     conn.execute(

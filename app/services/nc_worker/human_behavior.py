@@ -16,7 +16,8 @@ class HumanBehavior:
 
     @staticmethod
     async def random_delay(min_sec: float, max_sec: float):
-        """Sleep for a random duration using gaussian distribution biased toward the middle."""
+        """Sleep for a random duration using gaussian distribution biased toward the
+        middle."""
         mean = (min_sec + max_sec) / 2
         std_dev = (max_sec - min_sec) / 4
         delay = random.gauss(mean, std_dev)
@@ -27,8 +28,8 @@ class HumanBehavior:
     async def human_type(page, locator, text: str):
         """Type text character-by-character with human-like speed variation.
 
-        Simulates variable typing speed (80-200ms per char) with occasional
-        "thinking pauses" (5% chance per character, 0.4-1.2s).
+        Simulates variable typing speed (80-200ms per char) with occasional "thinking
+        pauses" (5% chance per character, 0.4-1.2s).
         """
         await locator.click()
         await asyncio.sleep(random.uniform(0.1, 0.3))
@@ -42,7 +43,8 @@ class HumanBehavior:
 
     @staticmethod
     async def human_click(page, locator):
-        """Click an element at a slightly randomized position within its bounding box."""
+        """Click an element at a slightly randomized position within its bounding
+        box."""
         box = await locator.bounding_box()
         if box:
             x = box["x"] + box["width"] * random.uniform(0.3, 0.7)

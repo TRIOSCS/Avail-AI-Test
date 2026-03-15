@@ -1,8 +1,8 @@
-"""AVAIL v1.2.0 — Unified Enrichment Service
+"""AVAIL v1.2.0 — Unified Enrichment Service.
 
-Shared enrichment workflow for both vendor cards and customer companies.
-Supports Explorium (Vibe Prospecting) and AI (Claude + web search)
-as enrichment providers. AI runs last to fill any remaining gaps.
+Shared enrichment workflow for both vendor cards and customer companies. Supports
+Explorium (Vibe Prospecting) and AI (Claude + web search) as enrichment providers. AI
+runs last to fill any remaining gaps.
 """
 
 import asyncio
@@ -264,7 +264,10 @@ EXPLORIUM_BASE = "https://api.explorium.ai/v1"
 
 
 async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company on Explorium by domain. Returns normalized company data."""
+    """Look up a company on Explorium by domain.
+
+    Returns normalized company data.
+    """
     if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         logger.debug("Explorium API key not configured — skipping")
         return None
@@ -355,7 +358,10 @@ GRADIENT_COMPANY_SYSTEM = (
 
 
 async def _gradient_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company using Gradient AI (LLM knowledge). Returns normalized company data."""
+    """Look up a company using Gradient AI (LLM knowledge).
+
+    Returns normalized company data.
+    """
     from .config import settings
 
     if not getattr(settings, "do_gradient_api_key", ""):
@@ -410,7 +416,10 @@ COMPANY_SEARCH_SYSTEM = (
 
 
 async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company using Claude + web search. Returns normalized company data."""
+    """Look up a company using Claude + web search.
+
+    Returns normalized company data.
+    """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         logger.debug("Anthropic API key not configured — skipping AI enrichment")
         return None
@@ -458,8 +467,8 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
 async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find contacts at a company using Claude + web search.
 
-    Delegates to ai_service.enrich_contacts_websearch() and normalizes
-    the output to match the enrichment service contact shape.
+    Delegates to ai_service.enrich_contacts_websearch() and normalizes the output to
+    match the enrichment service contact shape.
     """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         return []
@@ -584,9 +593,9 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
 async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    Explorium and AI sources run concurrently via asyncio.gather.
-    Returns deduplicated list sorted by relevance. Each contact has:
-    full_name, title, email, phone, linkedin_url, location, source
+    Explorium and AI sources run concurrently via asyncio.gather. Returns deduplicated
+    list sorted by relevance. Each contact has: full_name, title, email, phone,
+    linkedin_url, location, source
     """
 
     # Run all sources concurrently
@@ -652,7 +661,10 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
 
 
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
-    """Apply enrichment data dict to a Company model. Returns list of fields updated."""
+    """Apply enrichment data dict to a Company model.
+
+    Returns list of fields updated.
+    """
     updated = []
     field_map = {
         "domain": "domain",
@@ -680,7 +692,10 @@ def apply_enrichment_to_company(company, data: dict) -> list[str]:
 
 
 def apply_enrichment_to_vendor(card, data: dict) -> list[str]:
-    """Apply enrichment data dict to a VendorCard model. Returns list of fields updated."""
+    """Apply enrichment data dict to a VendorCard model.
+
+    Returns list of fields updated.
+    """
     updated = []
     field_map = {
         "linkedin_url": "linkedin_url",

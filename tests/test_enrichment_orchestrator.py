@@ -7,7 +7,6 @@ Called by: pytest
 Depends on: app.services.enrichment_orchestrator, conftest fixtures
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,7 +17,6 @@ from app.services.enrichment_orchestrator import (
     enrich_on_demand,
     fire_all_sources,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -26,9 +26,9 @@ def register_sourcing_refresh_jobs(scheduler, settings):
 async def _job_refresh_stale_requisitions():
     """Daily 3 AM — re-search requirements on active requisitions with stale sightings.
 
-    A requirement is "stale" if its newest sighting is older than 24 hours.
-    Only processes active/sourcing/offers requisitions, max 20 per run to
-    avoid API rate limit issues.
+    A requirement is "stale" if its newest sighting is older than 24 hours. Only
+    processes active/sourcing/offers requisitions, max 20 per run to avoid API rate
+    limit issues.
     """
     from ..database import SessionLocal
     from ..models import Requirement, Requisition, Sighting

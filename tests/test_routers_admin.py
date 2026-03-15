@@ -1,5 +1,4 @@
-"""
-test_routers_admin.py — Tests for admin router endpoints.
+"""test_routers_admin.py — Tests for admin router endpoints.
 
 Tests user CRUD, config management, health, credentials, CSV import,
 Teams config, and vendor dedup suggestions.
@@ -570,7 +569,8 @@ class TestAdminVendorDedup:
         assert "Arrow Electronic" in names_in_candidates
 
     def test_dedup_suggestions_threshold(self, admin_client, db_session):
-        """Higher threshold should return fewer (or equal) results than lower threshold."""
+        """Higher threshold should return fewer (or equal) results than lower
+        threshold."""
         v1 = VendorCard(
             normalized_name="mouser electronics",
             display_name="Mouser Electronics",

@@ -1,4 +1,4 @@
-"""test_jobs_health.py — Tests for health monitoring background jobs
+"""test_jobs_health.py — Tests for health monitoring background jobs.
 
 Covers: _job_health_ping, _job_health_deep, _job_cleanup_usage_log,
 _job_reset_monthly_usage.

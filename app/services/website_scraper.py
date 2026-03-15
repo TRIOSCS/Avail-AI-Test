@@ -76,7 +76,10 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
 
 
 async def _scrape_vendor(client: httpx.AsyncClient, website: str) -> list[dict]:
-    """Scrape a vendor website for email addresses. Returns list of {email, confidence}."""
+    """Scrape a vendor website for email addresses.
+
+    Returns list of {email, confidence}.
+    """
     # Normalize the website URL
     if not website.startswith(("http://", "https://")):
         website = "https://" + website

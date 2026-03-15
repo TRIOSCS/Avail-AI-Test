@@ -1,5 +1,4 @@
-"""
-cache/decorators.py — Endpoint caching decorator
+"""cache/decorators.py — Endpoint caching decorator.
 
 Wraps get_cached/set_cached from intel_cache.py. Caches the return value
 of an endpoint function by building a key from specified parameters.

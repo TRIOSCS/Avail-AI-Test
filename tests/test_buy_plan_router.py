@@ -1,5 +1,4 @@
-"""
-test_buy_plan_router.py — Buy Plan (unified) API Endpoint Tests
+"""test_buy_plan_router.py — Buy Plan (unified) API Endpoint Tests.
 
 Covers all buy plan endpoints via TestClient: build, get, list, submit,
 approve, verify-so, confirm-po, verify-po, flag-issue, resubmit, offer
@@ -19,10 +18,10 @@ from app.dependencies import require_buyer, require_user
 from app.main import app
 from app.models import Offer, Quote, Requirement, User
 from app.models.buy_plan import (
+    BuyPlan,
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
-    BuyPlan,
     SOVerificationStatus,
     VerificationGroupMember,
 )
@@ -1196,7 +1195,8 @@ class TestVerifyPOV3EdgeCases:
         test_user: User,
         admin_user: User,
     ):
-        """Verify PO on line not in pending_verify → ValueError → 400 (lines 577-578)."""
+        """Verify PO on line not in pending_verify → ValueError → 400 (lines
+        577-578)."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.active.value
         line.status = BuyPlanLineStatus.awaiting_po.value  # not pending_verify

@@ -1,11 +1,10 @@
-"""
-Tests for vendor affinity integration into the search service.
+"""Tests for vendor affinity integration into the search service.
+
 What: Verifies that vendor affinity suggestions are merged into search results
 Called by: pytest
 Depends on: app.search_service.search_requirement, app.services.vendor_affinity_service
 """
 
-import asyncio
 import os
 
 os.environ["TESTING"] = "1"
@@ -19,7 +18,6 @@ from sqlalchemy.orm import Session
 from app.models import Requirement, Requisition, User
 from app.search_service import search_requirement
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -119,7 +117,8 @@ MOCK_STATS = [
 class TestSearchIncludesVendorAffinity:
     @pytest.mark.asyncio
     async def test_search_includes_vendor_affinity(self, db_session):
-        """Affinity suggestions appear in search results with source_type='vendor_affinity'."""
+        """Affinity suggestions appear in search results with
+        source_type='vendor_affinity'."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn)

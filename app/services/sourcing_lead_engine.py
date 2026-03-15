@@ -218,14 +218,10 @@ def _compute_vendor_safety(
             risk_flags.append("missing_company_phone")
 
     source_emails = {
-        e["observed_values"].get("vendor_email")
-        for e in evidence
-        if e["observed_values"].get("vendor_email")
+        e["observed_values"].get("vendor_email") for e in evidence if e["observed_values"].get("vendor_email")
     }
     source_phones = {
-        e["observed_values"].get("vendor_phone")
-        for e in evidence
-        if e["observed_values"].get("vendor_phone")
+        e["observed_values"].get("vendor_phone") for e in evidence if e["observed_values"].get("vendor_phone")
     }
     if source_emails or source_phones:
         score += 4
@@ -246,8 +242,7 @@ def _compute_vendor_safety(
 
     score = max(0, min(100, int(round(score))))
     caution_summary = (
-        "Use caution: "
-        + "; ".join(notes[:3])
+        "Use caution: " + "; ".join(notes[:3])
         if notes
         else "Use caution: limited safety evidence, validate vendor identity before commitment"
     )
@@ -343,9 +338,7 @@ def build_requirement_lead_cards(
             responses_by_vendor.setdefault(key, []).append(r)
     for values in responses_by_vendor.values():
         values.sort(
-            key=lambda x: (
-                x.received_at or x.created_at or datetime.min.replace(tzinfo=timezone.utc)
-            ),
+            key=lambda x: x.received_at or x.created_at or datetime.min.replace(tzinfo=timezone.utc),
             reverse=True,
         )
 
@@ -377,16 +370,16 @@ def build_requirement_lead_cards(
         action = _suggested_next_action(buyer_status, risk_flags)
         source_types = sorted({(s.get("source_type") or "unknown") for s in group_sorted})
         reasons = [e["explanation"] for e in evidence if e["explanation"]]
-        reason_summary = reasons[0] if reasons else (
-            f"{_source_label(representative.get('source_type') or 'unknown')} signal found for this vendor."
+        reason_summary = (
+            reasons[0]
+            if reasons
+            else (f"{_source_label(representative.get('source_type') or 'unknown')} signal found for this vendor.")
         )
         if len(source_types) > 1:
             reason_summary = f"{reason_summary} Corroborated by {len(source_types)} source types."
 
         created_times = [
-            _safe_parse_dt(s.get("created_at"))
-            for s in group_sorted
-            if _safe_parse_dt(s.get("created_at")) is not None
+            _safe_parse_dt(s.get("created_at")) for s in group_sorted if _safe_parse_dt(s.get("created_at")) is not None
         ]
         first_seen = min(created_times).isoformat() if created_times else None
         last_seen = max(created_times).isoformat() if created_times else None
@@ -427,13 +420,7 @@ def build_requirement_lead_cards(
                     "updated_at": now.isoformat(),
                 },
                 "feedback_outcome_history": {
-                    "buyer_outcomes": sorted(
-                        {
-                            s.get("buyer_outcome")
-                            for s in group_sorted
-                            if s.get("buyer_outcome")
-                        }
-                    ),
+                    "buyer_outcomes": sorted({s.get("buyer_outcome") for s in group_sorted if s.get("buyer_outcome")}),
                     "contact_count": len(vendor_contacts),
                     "response_count": len(vendor_responses),
                     "latest_response_classification": latest_response_cls,

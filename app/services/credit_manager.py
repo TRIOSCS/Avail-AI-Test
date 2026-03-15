@@ -50,7 +50,10 @@ def _get_or_create_row(db: Session, provider: str, month: str) -> EnrichmentCred
 
 
 def get_monthly_usage(db: Session, provider: str) -> dict:
-    """Get current month's usage for a provider. Returns {used, limit, remaining}."""
+    """Get current month's usage for a provider.
+
+    Returns {used, limit, remaining}.
+    """
     month = _current_month()
     row = _get_or_create_row(db, provider, month)
     return {
@@ -70,7 +73,10 @@ def can_use_credits(db: Session, provider: str, count: int = 1) -> bool:
 
 
 def record_credit_usage(db: Session, provider: str, count: int = 1) -> None:
-    """Record that credits were consumed. Call after a successful API call."""
+    """Record that credits were consumed.
+
+    Call after a successful API call.
+    """
     month = _current_month()
     row = _get_or_create_row(db, provider, month)
     row.credits_used += count

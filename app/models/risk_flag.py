@@ -1,5 +1,4 @@
-"""
-risk_flag.py — Structured risk flag model for deal intelligence.
+"""risk_flag.py — Structured risk flag model for deal intelligence.
 
 Purpose: Tracks risk flags attached to buy plan lines and offers.
          Replaces ad-hoc JSON ai_flags with queryable, auditable records.
@@ -44,8 +43,8 @@ class RiskFlagSeverity(str, enum.Enum):
 class RiskFlag(Base):
     """Structured risk flag attached to a buy plan line or source offer.
 
-    Replaces the JSON ai_flags field on BuyPlan with queryable records.
-    Risk flags can be raised by AI analysis, rule-based checks, or manual review.
+    Replaces the JSON ai_flags field on BuyPlan with queryable records. Risk flags can
+    be raised by AI analysis, rule-based checks, or manual review.
     """
 
     __tablename__ = "risk_flags"

@@ -1,5 +1,4 @@
-"""
-test_logging_config.py — Tests for app/logging_config.py
+"""test_logging_config.py — Tests for app/logging_config.py.
 
 Verifies Loguru setup, stdlib logging interception, and request
 context binding. Uses loguru's sink capture for assertions.

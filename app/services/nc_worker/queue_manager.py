@@ -28,9 +28,9 @@ _config = NcConfig()
 def enqueue_for_nc_search(requirement_id: int, db: Session) -> NcSearchQueue | None:
     """Queue a requirement for NetComponents search.
 
-    Checks for dedup (same normalized MPN searched within dedup window).
-    If deduped, links existing NC sightings to this requirement's material card.
-    Returns the queue item or None if deduped/skipped.
+    Checks for dedup (same normalized MPN searched within dedup window). If deduped,
+    links existing NC sightings to this requirement's material card. Returns the queue
+    item or None if deduped/skipped.
     """
     req = db.get(Requirement, requirement_id)
     if not req or not req.primary_mpn:

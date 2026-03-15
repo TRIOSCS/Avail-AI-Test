@@ -1,5 +1,4 @@
-"""
-Deep Playwright E2E tests for AvailAI.
+"""Deep Playwright E2E tests for AvailAI.
 
 Tests cover:
 - Page load and auth
@@ -42,8 +41,8 @@ def switch_to_active_bucket(page: Page):
 def nav_click(page: Page, nav_id: str):
     """Click a sidebar nav button and wait for the view transition.
 
-    Uses JS click to bypass Playwright's viewport check — sidebar buttons
-    may be positioned outside the viewport via CSS but are still functional.
+    Uses JS click to bypass Playwright's viewport check — sidebar buttons may be
+    positioned outside the viewport via CSS but are still functional.
     """
     clicked = page.evaluate(f"""() => {{
         const el = document.getElementById('{nav_id}');

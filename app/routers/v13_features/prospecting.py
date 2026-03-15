@@ -1,5 +1,4 @@
-"""
-prospecting.py — Prospecting pool v1.3.0 routes
+"""prospecting.py — Prospecting pool v1.3.0 routes.
 
 Site-level ownership (pool, claim, release, my-sites, at-risk, assign owner),
 accounts-first hierarchy, and capacity management.

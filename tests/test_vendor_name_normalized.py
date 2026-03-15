@@ -240,7 +240,8 @@ def test_normalize_vendor_name_consistency(raw, expected):
 
 
 def test_vendor_score_fallback_uses_normalized(db_session: Session, requisition, material_card, vendor_card):
-    """vendor_score fallback path uses Offer.vendor_name_normalized, not func.lower()."""
+    """vendor_score fallback path uses Offer.vendor_name_normalized, not
+    func.lower()."""
     # Create offers without vendor_card_id (triggers fallback)
     for i in range(6):
         db_session.add(

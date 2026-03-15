@@ -1,5 +1,4 @@
-"""
-test_claude_client.py — Tests for app/utils/claude_client.py
+"""test_claude_client.py — Tests for app/utils/claude_client.py.
 
 Mock HTTP calls and credential lookups to test Claude API wrappers.
 

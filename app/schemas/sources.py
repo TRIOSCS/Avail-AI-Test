@@ -1,5 +1,4 @@
-"""
-schemas/sources.py — Pydantic models for Source & Mining endpoints
+"""schemas/sources.py — Pydantic models for Source & Mining endpoints.
 
 Validates API source toggles and mining lookback parameters.
 
@@ -24,6 +23,9 @@ class SourceStatusToggle(BaseModel):
 
 
 class MiningOptions(BaseModel):
-    """Optional params for inbox/sent mining. All fields have defaults."""
+    """Optional params for inbox/sent mining.
+
+    All fields have defaults.
+    """
 
     lookback_days: int = Field(default=30, ge=1, le=365)

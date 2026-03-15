@@ -1,5 +1,4 @@
-"""
-routers/vendors_crud.py — Vendor Card CRUD & Review endpoints.
+"""routers/vendors_crud.py — Vendor Card CRUD & Review endpoints.
 
 Handles vendor listing, search, duplicate checking, update, blacklist,
 delete, and vendor review management.
@@ -37,8 +36,8 @@ async def check_vendor_duplicate(
 ):
     """Check for duplicate vendors by name (exact + fuzzy).
 
-    Returns exact and fuzzy matches (threshold 80 for suggestions).
-    Used by frontend before vendor creation to warn about duplicates.
+    Returns exact and fuzzy matches (threshold 80 for suggestions). Used by frontend
+    before vendor creation to warn about duplicates.
     """
     norm = normalize_vendor_name(name)
     matches = []
@@ -91,7 +90,8 @@ async def list_vendors(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List vendor cards with search, pagination, tier filter, sort, and engagement scores."""
+    """List vendor cards with search, pagination, tier filter, sort, and engagement
+    scores."""
 
     @cached_endpoint(
         prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "tier", "sort", "order", "limit", "offset"]

@@ -1,5 +1,4 @@
-"""
-test_dependencies.py — Tests for shared FastAPI dependencies.
+"""test_dependencies.py — Tests for shared FastAPI dependencies.
 
 Tests auth functions, role-based access, query helpers.
 Uses in-memory SQLite via conftest fixtures.

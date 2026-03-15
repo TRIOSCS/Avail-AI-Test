@@ -1,5 +1,4 @@
-"""
-test_task_service.py — Tests for the Requisition Task Board
+"""test_task_service.py — Tests for the Requisition Task Board.
 
 Tests CRUD operations, auto-generation, auto-close, task completion,
 waiting-on queries, and API endpoints for the simplified task system.

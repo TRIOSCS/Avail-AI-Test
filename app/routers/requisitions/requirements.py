@@ -162,48 +162,46 @@ def _attach_lead_data(requirements: list[Requirement], results: dict, db: Sessio
         req_leads = leads_by_req.get(req_item.id, [])
         lead_cards = []
         for lead in req_leads:
-            lead_cards.append({
-                "lead_id": lead.id,
-                "lead_public_id": lead.lead_id,
-                "vendor_name": lead.vendor_name,
-                "vendor_name_normalized": lead.vendor_name_normalized,
-                "vendor_card_id": lead.vendor_card_id,
-                "part_requested": lead.part_number_requested,
-                "part_matched": lead.part_number_matched,
-                "match_type": lead.match_type,
-                "source_attribution": [lead.primary_source_type],
-                "lead_confidence_pct": int(lead.confidence_score or 0),
-                "lead_confidence_band": lead.confidence_band,
-                "vendor_safety_pct": int(lead.vendor_safety_score or 0),
-                "vendor_safety_band": lead.vendor_safety_band,
-                "reason_summary": lead.reason_summary,
-                "risk_flags": lead.risk_flags or [],
-                "safety_summary": lead.vendor_safety_summary or "",
-                "contact": {
-                    "name": lead.contact_name,
-                    "emails": [lead.contact_email] if lead.contact_email else [],
-                    "phones": [lead.contact_phone] if lead.contact_phone else [],
-                    "url": lead.contact_url,
-                },
-                "suggested_next_action": lead.suggested_next_action,
-                "buyer_status": lead.buyer_status,
-                "evidence_count": lead.evidence_count,
-                "corroborated": lead.corroborated,
-                "timestamps": {
-                    "first_seen_at": lead.source_first_seen_at.isoformat() if lead.source_first_seen_at else None,
-                    "last_seen_at": lead.source_last_seen_at.isoformat() if lead.source_last_seen_at else None,
-                    "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
-                },
-            })
+            lead_cards.append(
+                {
+                    "lead_id": lead.id,
+                    "lead_public_id": lead.lead_id,
+                    "vendor_name": lead.vendor_name,
+                    "vendor_name_normalized": lead.vendor_name_normalized,
+                    "vendor_card_id": lead.vendor_card_id,
+                    "part_requested": lead.part_number_requested,
+                    "part_matched": lead.part_number_matched,
+                    "match_type": lead.match_type,
+                    "source_attribution": [lead.primary_source_type],
+                    "lead_confidence_pct": int(lead.confidence_score or 0),
+                    "lead_confidence_band": lead.confidence_band,
+                    "vendor_safety_pct": int(lead.vendor_safety_score or 0),
+                    "vendor_safety_band": lead.vendor_safety_band,
+                    "reason_summary": lead.reason_summary,
+                    "risk_flags": lead.risk_flags or [],
+                    "safety_summary": lead.vendor_safety_summary or "",
+                    "contact": {
+                        "name": lead.contact_name,
+                        "emails": [lead.contact_email] if lead.contact_email else [],
+                        "phones": [lead.contact_phone] if lead.contact_phone else [],
+                        "url": lead.contact_url,
+                    },
+                    "suggested_next_action": lead.suggested_next_action,
+                    "buyer_status": lead.buyer_status,
+                    "evidence_count": lead.evidence_count,
+                    "corroborated": lead.corroborated,
+                    "timestamps": {
+                        "first_seen_at": lead.source_first_seen_at.isoformat() if lead.source_first_seen_at else None,
+                        "last_seen_at": lead.source_last_seen_at.isoformat() if lead.source_last_seen_at else None,
+                        "updated_at": lead.updated_at.isoformat() if lead.updated_at else None,
+                    },
+                }
+            )
         group["lead_cards"] = lead_cards
         group["lead_summary"] = {
             "total_leads": len(lead_cards),
-            "high_confidence": sum(
-                1 for lc in lead_cards if (lc.get("lead_confidence_pct") or 0) >= 75
-            ),
-            "high_safety": sum(
-                1 for lc in lead_cards if (lc.get("vendor_safety_pct") or 0) >= 75
-            ),
+            "high_confidence": sum(1 for lc in lead_cards if (lc.get("lead_confidence_pct") or 0) >= 75),
+            "high_safety": sum(1 for lc in lead_cards if (lc.get("vendor_safety_pct") or 0) >= 75),
         }
 
 
@@ -1107,10 +1105,15 @@ async def leads_queue(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Cross-requisition buyer follow-up queue. Filterable by buyer_status."""
-    q = db.query(SourcingLead).join(
-        Requisition, SourcingLead.requisition_id == Requisition.id
-    ).filter(Requisition.created_by == user.id)
+    """Cross-requisition buyer follow-up queue.
+
+    Filterable by buyer_status.
+    """
+    q = (
+        db.query(SourcingLead)
+        .join(Requisition, SourcingLead.requisition_id == Requisition.id)
+        .filter(Requisition.created_by == user.id)
+    )
     if status and status != "all":
         q = q.filter(SourcingLead.buyer_status == status)
     q = q.order_by(SourcingLead.updated_at.desc())
@@ -1311,9 +1314,9 @@ async def list_requirement_offers(
 ):
     """List current + historical offers for a single requirement.
 
-    Returns a unified list mixing current offers (on this requisition) and
-    historical offers (from other requisitions for the same material card).
-    Each row carries is_historical and is_substitute flags for the UI.
+    Returns a unified list mixing current offers (on this requisition) and historical
+    offers (from other requisitions for the same material card). Each row carries
+    is_historical and is_substitute flags for the UI.
     """
     req_item = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req_item:

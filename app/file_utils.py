@@ -14,8 +14,7 @@ from loguru import logger
 def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
     """Parse CSV/TSV/Excel file bytes into a list of row dicts.
 
-    All header keys are stripped and lowercased.
-    All values are stripped strings.
+    All header keys are stripped and lowercased. All values are stripped strings.
     Returns empty list on parse failure (logs warning).
     """
     fname = (filename or "").lower()
@@ -116,10 +115,11 @@ CURRENCY_HEADERS = {"currency", "curr", "ccy"}
 
 
 def normalize_stock_row(r: dict) -> dict | None:
-    """Extract mpn/qty/price/manufacturer/condition/packaging/date_code/lead_time from a row.
+    """Extract mpn/qty/price/manufacturer/condition/packaging/date_code/lead_time from a
+    row.
 
-    Returns dict with normalized fields or None if no valid MPN found.
-    Uses normalization functions for robust parsing.
+    Returns dict with normalized fields or None if no valid MPN found. Uses
+    normalization functions for robust parsing.
     """
     from .utils.normalization import detect_currency, normalize_price, normalize_quantity
 

@@ -9,7 +9,6 @@ Depends on: app/routers/requisitions2.py, conftest fixtures
 
 from datetime import datetime, timezone
 
-
 # ── HTMX attributes on page shell ────────────────────────────────────
 
 
@@ -255,12 +254,16 @@ def test_modal_shows_requisition_fields(client, test_requisition):
 def test_pagination_prev_link(client, db_session, test_user):
     """Page 2 shows Prev link."""
     from app.models import Requisition
+
     for i in range(30):
-        db_session.add(Requisition(
-            name=f"PAG-{i:03d}", status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            Requisition(
+                name=f"PAG-{i:03d}",
+                status="active",
+                created_by=test_user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.commit()
 
     resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10", "page": "2"})
@@ -293,10 +296,9 @@ def test_sales_user_no_owner_filter(client, db_session, sales_user):
         resp = client.get("/requisitions2")
         assert "All owners" not in resp.text
     finally:
-        from tests.conftest import TestSessionLocal
-        test_user_row = db_session.query(
-            __import__("app.models", fromlist=["User"]).User
-        ).filter_by(role="buyer").first()
+        test_user_row = (
+            db_session.query(__import__("app.models", fromlist=["User"]).User).filter_by(role="buyer").first()
+        )
         if test_user_row:
             app.dependency_overrides[require_user] = lambda: test_user_row
 
@@ -440,12 +442,16 @@ def test_page_has_css_skeleton(client):
 def test_pagination_links_have_preload(client, db_session, test_user):
     """Pagination links use preload for instant navigation."""
     from app.models import Requisition
+
     for i in range(30):
-        db_session.add(Requisition(
-            name=f"PRE-{i:03d}", status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            Requisition(
+                name=f"PRE-{i:03d}",
+                status="active",
+                created_by=test_user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.commit()
 
     resp = client.get("/requisitions2/table", params={"status": "active", "per_page": "10", "page": "2"})

@@ -1,5 +1,4 @@
-"""
-test_contact_intelligence_service.py — DB-level tests for contact intelligence.
+"""test_contact_intelligence_service.py — DB-level tests for contact intelligence.
 
 Tests the service functions that require a database session:
   - process_inbound_email_contact
@@ -682,10 +681,12 @@ class TestRunSyncHelper:
 
 
 class TestProcessInboundFieldUpdates:
-    """Test individual field updates when contact already exists but fields are blank."""
+    """Test individual field updates when contact already exists but fields are
+    blank."""
 
     def test_updates_blank_fields_on_existing_contact(self, db_session, test_user):
-        """Lines 124, 128, 130, 132, 134, 136: each field fills if contact has empty value."""
+        """Lines 124, 128, 130, 132, 134, 136: each field fills if contact has empty
+        value."""
         card = _make_card(db_session, "FieldCo", "fieldco.com")
         existing = _make_contact(db_session, card, "empty@fieldco.com", full_name="")
         existing.full_name = None

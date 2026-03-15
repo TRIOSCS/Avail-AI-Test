@@ -1,5 +1,4 @@
-"""
-test_buyplan_token.py — Tests for Buy Plan token-based approval
+"""test_buyplan_token.py — Tests for Buy Plan token-based approval.
 
 Tests cover:
   - GET plan by token (valid, invalid, expired)
@@ -21,8 +20,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.main import app
 from app.models import Quote, Requisition, User
-from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus, BuyPlan
-
+from app.models.buy_plan import BuyPlan, BuyPlanStatus
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -132,7 +130,7 @@ class TestGetPlanByToken:
 
 
 class TestApproveByToken:
-    """PUT /api/buy-plans/token/{token}/approve"""
+    """PUT /api/buy-plans/token/{token}/approve."""
 
     def test_approve_success(self, noauth_client: TestClient, pending_plan: BuyPlan, db_session: Session):
         resp = noauth_client.put(
@@ -191,7 +189,7 @@ class TestApproveByToken:
 
 
 class TestRejectByToken:
-    """PUT /api/buy-plans/token/{token}/reject"""
+    """PUT /api/buy-plans/token/{token}/reject."""
 
     def test_reject_success(self, noauth_client: TestClient, pending_plan: BuyPlan, db_session: Session):
         resp = noauth_client.put(

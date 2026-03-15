@@ -11,8 +11,8 @@ from .base import Base
 class DiscoveryBatch(Base):
     """Audit trail for every discovery or enrichment run.
 
-    Tracks API credits consumed, dedup counts, and search filters
-    so runs can be reproduced and costs monitored.
+    Tracks API credits consumed, dedup counts, and search filters so runs can be
+    reproduced and costs monitored.
     """
 
     __tablename__ = "discovery_batches"

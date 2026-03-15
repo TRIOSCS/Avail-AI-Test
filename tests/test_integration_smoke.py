@@ -1,5 +1,4 @@
-"""
-test_integration_smoke.py — Smoke Tests for Test Infrastructure
+"""test_integration_smoke.py — Smoke Tests for Test Infrastructure.
 
 Validates that conftest.py fixtures work: DB session, test client,
 auth overrides, and model creation.

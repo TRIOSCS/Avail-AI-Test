@@ -19,7 +19,8 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 
 class GraphSyncStateExpired(Exception):
-    """Raised when Graph API returns 410 — the delta token is stale and must be discarded."""
+    """Raised when Graph API returns 410 — the delta token is stale and must be
+    discarded."""
 
     pass
 
@@ -46,7 +47,10 @@ class GraphClient:
         }
 
     async def get_json(self, path: str, params: dict | None = None, timeout: int = 30) -> dict:
-        """GET → parsed JSON. Raises on non-200 after retries."""
+        """GET → parsed JSON.
+
+        Raises on non-200 after retries.
+        """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         return await self._request_with_retry("GET", url, params=params, timeout=timeout)
 
@@ -67,7 +71,10 @@ class GraphClient:
         max_items: int = 500,
         timeout: int = 30,
     ) -> list[dict]:
-        """GET with auto-pagination. Returns flat list of items."""
+        """GET with auto-pagination.
+
+        Returns flat list of items.
+        """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         items: list[dict] = []
         while url and len(items) < max_items:
@@ -91,8 +98,8 @@ class GraphClient:
     ) -> tuple[list[dict], str | None]:
         """Run a Delta Query. Returns (items, new_delta_token).
 
-        If delta_token is None, performs a full sync and returns the initial token.
-        On subsequent calls, only returns changes since the last token.
+        If delta_token is None, performs a full sync and returns the initial token. On
+        subsequent calls, only returns changes since the last token.
         """
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         if delta_token:

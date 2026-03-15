@@ -66,8 +66,8 @@ class IcsSessionManager:
     async def check_session_health(self) -> bool:
         """Check if the ICS session is still valid.
 
-        Navigates to the member search page and checks we're not redirected
-        to login or the public home page.
+        Navigates to the member search page and checks we're not redirected to login or
+        the public home page.
         """
         try:
             await self._page.goto(

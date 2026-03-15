@@ -229,9 +229,12 @@ async def import_customers(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Import customers from CSV. Expected columns: company_name, site_name,
+    """Import customers from CSV.
+
+    Expected columns: company_name, site_name,
     contact_name, contact_email, contact_phone, contact_title,
-    address_line1, city, state, zip, country, payment_terms, shipping_terms"""
+    address_line1, city, state, zip, country, payment_terms, shipping_terms
+    """
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")
@@ -340,8 +343,11 @@ async def import_vendors(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Import vendors from CSV. Expected columns: vendor_name, domain, website,
-    contact_name, contact_email, contact_phone, contact_title"""
+    """Import vendors from CSV.
+
+    Expected columns: vendor_name, domain, website,
+    contact_name, contact_email, contact_phone, contact_title
+    """
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")

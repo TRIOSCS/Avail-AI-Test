@@ -18,7 +18,6 @@ from types import SimpleNamespace
 
 from app.search_service import _history_to_result, sighting_to_dict
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
@@ -81,7 +80,8 @@ def _make_history(**overrides) -> dict:
 
 
 def test_results_have_unified_fields():
-    """Every result from sighting_to_dict has source_badge, confidence_pct, confidence_color."""
+    """Every result from sighting_to_dict has source_badge, confidence_pct,
+    confidence_color."""
     s = _make_sighting()
     d = sighting_to_dict(s)
 

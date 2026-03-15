@@ -1,5 +1,4 @@
-"""
-async_helpers.py — Safe async utilities for background task execution.
+"""async_helpers.py — Safe async utilities for background task execution.
 
 Wraps asyncio tasks with error isolation so background work (notifications,
 enrichment, analytics) never crashes the request handler.

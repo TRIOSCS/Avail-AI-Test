@@ -1,4 +1,4 @@
-"""phone normalization sweep — site_contacts + vendor_contacts
+"""Phone normalization sweep — site_contacts + vendor_contacts.
 
 Fixes 2 phone-in-site_name records missed by 055, then normalizes
 international phone numbers across site_contacts and vendor_contacts.
@@ -138,8 +138,8 @@ def _parse_scientific(raw: str) -> str | None:
 def _normalize_intl(raw: str) -> str | None:
     """Normalize an international phone number to E.164.
 
-    Handles numbers without + prefix by matching known country code prefixes.
-    Returns None if unparseable.
+    Handles numbers without + prefix by matching known country code prefixes. Returns
+    None if unparseable.
     """
     if not raw or not raw.strip():
         return None

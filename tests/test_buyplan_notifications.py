@@ -1,5 +1,4 @@
-"""
-test_buyplan_notifications.py — Tests for buy plan notification service.
+"""test_buyplan_notifications.py — Tests for buy plan notification service.
 
 Covers all 10 notify_* functions plus helpers (_plan_context, _lines_html,
 _wrap_email, _send_email, _teams_channel, _teams_dm, run_notify_bg).
@@ -15,8 +14,8 @@ import pytest
 
 from app.models import ActivityLog, User
 from app.models.buy_plan import (
-    BuyPlanLine,
     BuyPlan,
+    BuyPlanLine,
     VerificationGroupMember,
 )
 
@@ -177,7 +176,8 @@ class TestPlanContext:
         assert ctx["submitter"] is None
 
     def test_site_without_company(self, db_session):
-        """When quote.customer_site exists but .company is None, falls back to site_name."""
+        """When quote.customer_site exists but .company is None, falls back to
+        site_name."""
         from app.services.buyplan_notifications import _plan_context
 
         user = _make_user(db_session, "site-test@trioscs.com", "Site User", "buyer")
@@ -953,7 +953,7 @@ class TestNotifyV3StockSaleApproved:
         # Should send to both logistics and accounting
         assert mock_gc.post_json.await_count == 2
         subjects = [call[0][1]["message"]["subject"] for call in mock_gc.post_json.call_args_list]
-        assert all(f"Stock Sale Approved" in s for s in subjects)
+        assert all("Stock Sale Approved" in s for s in subjects)
 
     @pytest.mark.asyncio
     async def test_creates_submitter_activity(self, db_session):

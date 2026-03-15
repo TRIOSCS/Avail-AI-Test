@@ -1,7 +1,7 @@
 """Explorium/Vibe Prospecting discovery service — primary discovery source.
 
-Finds companies matching ICP segments with firmographics + intent/hiring/event
-signals in a single API call. Normalizes results into ProspectAccountCreate schemas.
+Finds companies matching ICP segments with firmographics + intent/hiring/event signals
+in a single API call. Normalizes results into ProspectAccountCreate schemas.
 """
 
 import asyncio

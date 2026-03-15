@@ -1,4 +1,4 @@
-"""increase notification title to 500 chars
+"""Increase notification title to 500 chars.
 
 Revision ID: 050
 Revises: 049

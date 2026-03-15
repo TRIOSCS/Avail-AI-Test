@@ -23,7 +23,10 @@ from app.services.tagging import (
 
 
 async def _query_nexar_batch(mpns: list[str]) -> dict[str, dict]:
-    """Query Nexar for a batch of MPNs. Returns {mpn: {manufacturer, category}}."""
+    """Query Nexar for a batch of MPNs.
+
+    Returns {mpn: {manufacturer, category}}.
+    """
     from app.services.credential_service import get_credential_cached
 
     client_id = get_credential_cached("nexar_api", "NEXAR_CLIENT_ID")

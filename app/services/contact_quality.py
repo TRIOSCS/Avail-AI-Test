@@ -25,7 +25,10 @@ _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 
 def validate_contact(contact: dict) -> tuple[bool, list[str]]:
-    """Validate a contact dict. Returns (is_valid, list_of_issues)."""
+    """Validate a contact dict.
+
+    Returns (is_valid, list_of_issues).
+    """
     issues = []
 
     name = (contact.get("full_name") or "").strip()
@@ -47,7 +50,10 @@ def validate_contact(contact: dict) -> tuple[bool, list[str]]:
 
 
 def dedup_contacts(db: Session, site_id: int) -> int:
-    """Merge duplicate contacts within a site by email. Returns count of merged."""
+    """Merge duplicate contacts within a site by email.
+
+    Returns count of merged.
+    """
     contacts = (
         db.query(SiteContact).filter_by(customer_site_id=site_id, is_active=True).order_by(SiteContact.created_at).all()
     )
@@ -104,7 +110,10 @@ def score_contact_completeness(contact: SiteContact) -> int:
 
 
 def flag_stale_contacts(db: Session, stale_days: int = 180) -> int:
-    """Flag contacts that haven't been enriched in stale_days. Returns count flagged."""
+    """Flag contacts that haven't been enriched in stale_days.
+
+    Returns count flagged.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(days=stale_days)
 
     stale = (

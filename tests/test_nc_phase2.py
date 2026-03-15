@@ -194,7 +194,8 @@ def test_enqueue_no_mpn_returns_none(db_session, test_user):
 
 
 def test_enqueue_already_queued_returns_existing(db_session, test_requisition):
-    """If requirement is already queued, returns existing item without creating duplicate."""
+    """If requirement is already queued, returns existing item without creating
+    duplicate."""
     req = test_requisition.requirements[0]
     item1 = enqueue_for_nc_search(req.id, db_session)
     item2 = enqueue_for_nc_search(req.id, db_session)

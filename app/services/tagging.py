@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
 from app.services.prefix_lookup import lookup_manufacturer_by_prefix
@@ -166,7 +166,10 @@ def classify_material_card(normalized_mpn: str, manufacturer: str | None, catego
 
 
 def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
-    """Find or create a brand Tag. Case-insensitive dedup via func.lower()."""
+    """Find or create a brand Tag.
+
+    Case-insensitive dedup via func.lower().
+    """
     normalized = manufacturer_name.strip()
     tag = db.query(Tag).filter(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand").first()
     if tag:
@@ -179,12 +182,16 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
 
 
 def get_or_create_commodity_tag(commodity_name: str, db: Session) -> Tag | None:
-    """Find a commodity Tag by name. Commodity tags are pre-seeded; don't create new ones."""
+    """Find a commodity Tag by name.
+
+    Commodity tags are pre-seeded; don't create new ones.
+    """
     return db.query(Tag).filter(func.lower(Tag.name) == commodity_name.lower(), Tag.tag_type == "commodity").first()
 
 
 def tag_material_card(material_card_id: int, tags: list[dict], db: Session) -> list[MaterialTag]:
-    """Create MaterialTag records. Upsert — only update if new source has higher confidence.
+    """Create MaterialTag records. Upsert — only update if new source has higher
+    confidence.
 
     Each dict in tags: {tag_id: int, source: str, confidence: float}
     Race-safe: handles concurrent inserts via nested savepoints.
@@ -262,7 +269,10 @@ def recalculate_entity_tag_visibility(entity_type: str, entity_id: int, db: Sess
 def propagate_tags_to_entity(
     entity_type: str, entity_id: int, material_card_id: int, weight: float, db: Session
 ) -> None:
-    """Propagate MaterialTags (confidence >= 0.90) for a part to an entity. Upsert EntityTag counts."""
+    """Propagate MaterialTags (confidence >= 0.90) for a part to an entity.
+
+    Upsert EntityTag counts.
+    """
     material_tags = (
         db.query(MaterialTag).filter_by(material_card_id=material_card_id).filter(MaterialTag.confidence >= 0.90).all()
     )

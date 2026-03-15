@@ -1,5 +1,4 @@
-"""
-routers/auth.py — Authentication & Session Routes
+"""routers/auth.py — Authentication & Session Routes.
 
 Handles Azure AD OAuth login/callback, logout, session status,
 and the main index page. All M365 token management lives here.
@@ -47,8 +46,8 @@ SCOPES = GRAPH_SCOPES
 async def index(request: Request):
     """Redirect root to the HTMX frontend."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/v2", status_code=302)
 
+    return RedirectResponse(url="/v2", status_code=302)
 
 
 @router.get("/auth/login")
@@ -173,8 +172,8 @@ async def logout(request: Request):
 def _password_login_enabled() -> bool:
     """Return True when local/test password login should be allowed.
 
-    Enabled when TESTING=1 or ENABLE_PASSWORD_LOGIN=true in env. Never rely
-    on this for production auth.
+    Enabled when TESTING=1 or ENABLE_PASSWORD_LOGIN=true in env. Never rely on this for
+    production auth.
     """
     if os.getenv("TESTING") == "1":
         return True

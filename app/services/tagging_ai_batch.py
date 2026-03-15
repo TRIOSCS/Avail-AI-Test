@@ -85,8 +85,6 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
         mpn_list = "\n".join(f"- {mpn}" for mpn in mpns)
         prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
-        # custom_id encodes the card IDs for this batch
-        card_ids = [str(row.id) for row in batch]
         custom_id = f"batch_{i // batch_size}"
 
         requests.append(
@@ -379,8 +377,6 @@ async def submit_targeted_backfill(db: Session, limit: int = 50000) -> dict:
     }
 
     # Write requests as JSONL
-    jsonl_lines = "\n".join(json.dumps(r) for r in requests)
-
     resp = await http.post(
         "https://api.anthropic.com/v1/messages/batches",
         headers=headers,
@@ -541,7 +537,10 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
 
 
 def _apply_chunked_batch(classifications: list[dict], db: Session) -> tuple[int, int]:
-    """Apply a small batch of classifications to the DB. Returns (matched, unknown)."""
+    """Apply a small batch of classifications to the DB.
+
+    Returns (matched, unknown).
+    """
     matched = 0
     unknown = 0
 

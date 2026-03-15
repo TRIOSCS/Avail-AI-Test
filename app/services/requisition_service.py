@@ -28,7 +28,10 @@ from ..utils.normalization import (
 
 
 def to_utc(dt: datetime | None) -> datetime | None:
-    """Normalize a datetime to UTC. Returns None for None input."""
+    """Normalize a datetime to UTC.
+
+    Returns None for None input.
+    """
     if dt is None:
         return None
     if dt.tzinfo is None:

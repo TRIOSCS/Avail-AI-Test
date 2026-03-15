@@ -15,7 +15,8 @@ from app.models import ActivityLog
 
 
 class TestBellBadgeCount:
-    """The badge should use /api/sales/notifications/count for ActivityLog-based counts."""
+    """The badge should use /api/sales/notifications/count for ActivityLog-based
+    counts."""
 
     def test_count_zero_when_no_notifications(self, client):
         """No activity logs -> count 0."""

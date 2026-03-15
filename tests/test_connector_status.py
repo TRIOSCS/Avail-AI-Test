@@ -1,5 +1,4 @@
-"""
-test_connector_status.py — Tests for app/connector_status.py
+"""test_connector_status.py — Tests for app/connector_status.py.
 
 Covers uncovered line 35: when all connectors are disabled.
 """

@@ -1,5 +1,4 @@
-"""
-test_services_response_parser.py — Tests for vendor response parser.
+"""test_services_response_parser.py — Tests for vendor response parser.
 
 Tests confidence thresholds, offer extraction, email cleaning,
 cross-validation, and normalization pipeline.
@@ -305,7 +304,8 @@ class TestParseVendorResponse:
 
     @pytest.mark.asyncio
     async def test_extended_thinking_retry_upgrades_confidence(self):
-        """Ambiguous confidence triggers retry with smart model; higher confidence wins."""
+        """Ambiguous confidence triggers retry with smart model; higher confidence
+        wins."""
         from app.services.response_parser import parse_vendor_response
 
         first_result = {

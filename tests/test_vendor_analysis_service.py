@@ -1,5 +1,4 @@
-"""
-test_vendor_analysis_service.py — Tests for vendor_analysis_service.py
+"""test_vendor_analysis_service.py — Tests for vendor_analysis_service.py.
 
 Mock claude_json to return canned responses. Tests material tag
 generation from MaterialVendorHistory and Sighting data.
@@ -150,8 +149,8 @@ class TestAnalyzeVendorMaterials:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     async def test_sighting_loop_body_covers_lines_67_72(self, mock_claude, db_session):
-        """Sightings with matching vendor_name_normalized → loop body runs
-        (lines 67-72) and feeds parts_list to Claude."""
+        """Sightings with matching vendor_name_normalized → loop body runs (lines 67-72)
+        and feeds parts_list to Claude."""
         mock_claude.return_value = {"brands": ["Acme"], "commodities": ["Widgets"]}
 
         card = _make_vendor_card(db_session, "sighting vendor")

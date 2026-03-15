@@ -341,9 +341,9 @@ class TestDanglingFKs:
     def test_detects_dangling_after_card_delete(self, db_session):
         """If a card is deleted and FK goes to a non-existent ID, detect it.
 
-        SQLite enforces FKs, so we temporarily disable them to simulate
-        the dangling state that can occur in PostgreSQL via race conditions
-        or direct SQL manipulation.
+        SQLite enforces FKs, so we temporarily disable them to simulate the dangling
+        state that can occur in PostgreSQL via race conditions or direct SQL
+        manipulation.
         """
         from sqlalchemy import text
 

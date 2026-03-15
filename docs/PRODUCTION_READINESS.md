@@ -23,11 +23,11 @@
 
 **Current state:**
 - **Intel cache** (`app/cache/intel_cache.py`): Redis primary, PostgreSQL fallback; used by `cached_endpoint` decorator.
-- **Endpoints already using `@cached_endpoint`:**  
-  - `vendor_analytics.get_vendor_parts_summary` (2h TTL),  
-  - `performance.list_vendor_scorecards` (4h),  
-  - `performance.get_vendor_detail` (4h),  
-  - `performance.list_buyer_leaderboard` (4h),  
+- **Endpoints already using `@cached_endpoint`:**
+  - `vendor_analytics.get_vendor_parts_summary` (2h TTL),
+  - `performance.list_vendor_scorecards` (4h),
+  - `performance.get_vendor_detail` (4h),
+  - `performance.list_buyer_leaderboard` (4h),
   - `vendor_contacts.vendor_email_metrics` (2h).
 - **Search cache:** `app/search_service.py` caches search results in Redis (15 min TTL) by query key.
 

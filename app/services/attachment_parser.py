@@ -151,8 +151,8 @@ async def _get_or_detect_mapping(
 ) -> dict[int, str]:
     """Get column mapping — check cache, try deterministic, fall back to AI.
 
-    Caching by (vendor_domain, file_fingerprint) so repeat files from
-    the same vendor don't re-invoke AI.
+    Caching by (vendor_domain, file_fingerprint) so repeat files from the same vendor
+    don't re-invoke AI.
     """
     # Step 1: Check cache
     if db and vendor_domain and file_fingerprint:
@@ -282,7 +282,10 @@ def _parse_csv(file_bytes: bytes, filename: str) -> tuple[list[str], list[list[s
 
 
 def _extract_row(row: list[str], mapping: dict[int, str]) -> dict | None:
-    """Extract a single row using the column mapping. Returns dict or None if no MPN."""
+    """Extract a single row using the column mapping.
+
+    Returns dict or None if no MPN.
+    """
     from app.utils.normalization import (
         detect_currency,
         normalize_condition,

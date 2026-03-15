@@ -1,5 +1,5 @@
-"""
-tests/test_routers_vendors_crud.py — Tests for routers/vendors_crud.py and vendor helpers
+"""tests/test_routers_vendors_crud.py — Tests for routers/vendors_crud.py and vendor
+helpers.
 
 Covers: card_to_dict helper, get_or_create_card, VendorCard CRUD,
 VendorReview CRUD, autocomplete, blacklist, check-duplicate, clean_emails/phones,
@@ -355,7 +355,8 @@ def test_get_or_create_card_new():
 
 class TestGetOrCreateCardFuzzyMatch:
     def test_fuzzy_match_returns_existing_card(self, db_session, test_vendor_card):
-        """Fuzzy match with score >= 90 returns existing card and adds alt name (lines 127-143)."""
+        """Fuzzy match with score >= 90 returns existing card and adds alt name (lines
+        127-143)."""
         # test_vendor_card.display_name = "Arrow Electronics"
         result = get_or_create_card("Arrow Electronisc", db_session)  # typo intentional
         assert result is not None
@@ -870,7 +871,8 @@ def test_vendor_list_engagement_score_null():
 
 
 def test_list_vendors_empty(db_session, test_user):
-    """GET /api/vendors with no data returns empty or 500 (response model validation)."""
+    """GET /api/vendors with no data returns empty or 500 (response model
+    validation)."""
     from app.database import get_db
     from app.dependencies import require_buyer, require_user
     from app.main import app
@@ -1233,7 +1235,8 @@ def test_list_vendors_short_query(client, db_session):
 
 
 def test_list_vendors_long_query_fts_fallback(client, db_session):
-    """GET /api/vendors?q=longquery (>= 3 chars) tries FTS, falls back to ILIKE on SQLite."""
+    """GET /api/vendors?q=longquery (>= 3 chars) tries FTS, falls back to ILIKE on
+    SQLite."""
     vc = VendorCard(
         normalized_name="longquery electronics",
         display_name="LongQuery Electronics",
@@ -1544,7 +1547,7 @@ class TestVendorSortBugFix:
     """TT-20260306-011: Sort by name asc/desc must return different orders."""
 
     def test_sort_name_asc_vs_desc(self, client, db_session):
-        """sort=name&order=asc and sort=name&order=desc return opposite orders."""
+        """Sort=name&order=asc and sort=name&order=desc return opposite orders."""
         vc_a = VendorCard(normalized_name="aardvark parts", display_name="Aardvark Parts", sighting_count=1)
         vc_z = VendorCard(normalized_name="zebra electronics", display_name="Zebra Electronics", sighting_count=1)
         db_session.add_all([vc_a, vc_z])
@@ -1575,7 +1578,7 @@ class TestVendorSortBugFix:
         assert names.index("High Count") < names.index("Low Count")
 
     def test_sort_score_desc(self, client, db_session):
-        """sort=score&order=desc puts highest-score vendor first."""
+        """Sort=score&order=desc puts highest-score vendor first."""
         vc_low = VendorCard(
             normalized_name="low score",
             display_name="Low Score",
@@ -1604,7 +1607,7 @@ class TestVendorTierFilterBugFix:
     """TT-20260306-012: Tier filter must actually restrict results."""
 
     def test_tier_proven_filters(self, client, db_session):
-        """tier=proven returns only vendors with score >= 66."""
+        """Tier=proven returns only vendors with score >= 66."""
         vc_proven = VendorCard(
             normalized_name="proven vendor",
             display_name="Proven Vendor",
@@ -1638,7 +1641,7 @@ class TestVendorTierFilterBugFix:
         assert "Caution Vendor" not in names
 
     def test_tier_new_filters(self, client, db_session):
-        """tier=new returns only vendors with no score or is_new_vendor=True."""
+        """Tier=new returns only vendors with no score or is_new_vendor=True."""
         vc_proven = VendorCard(
             normalized_name="proven vendor2",
             display_name="Proven Vendor2",
@@ -1664,7 +1667,7 @@ class TestVendorTierFilterBugFix:
         assert "Proven Vendor2" not in names
 
     def test_tier_caution_filters(self, client, db_session):
-        """tier=caution returns only vendors with score < 33."""
+        """Tier=caution returns only vendors with score < 33."""
         vc_caution = VendorCard(
             normalized_name="caution vendor3",
             display_name="Caution Vendor3",
@@ -1690,7 +1693,7 @@ class TestVendorTierFilterBugFix:
         assert "Proven Vendor3" not in names
 
     def test_tier_developing_filters(self, client, db_session):
-        """tier=developing returns vendors with score 33-65."""
+        """Tier=developing returns vendors with score 33-65."""
         vc_dev = VendorCard(
             normalized_name="dev vendor",
             display_name="Dev Vendor",
@@ -1746,7 +1749,8 @@ class TestVendorScoreConsistencyBugFix:
     """TT-20260306-014: Detail and engagement endpoints must return same score."""
 
     def test_detail_and_engagement_scores_match(self, client, db_session, test_vendor_card):
-        """GET /api/vendors/{id} vendor_score == GET /api/vendors/{id}/engagement vendor_score."""
+        """GET /api/vendors/{id} vendor_score == GET /api/vendors/{id}/engagement
+        vendor_score."""
         test_vendor_card.vendor_score = 65.0
         test_vendor_card.advancement_score = 65.0
         test_vendor_card.is_new_vendor = False

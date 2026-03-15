@@ -1,5 +1,4 @@
-"""
-conftest.py — Shared Test Fixtures for AVAIL AI
+"""conftest.py — Shared Test Fixtures for AVAIL AI.
 
 Provides an in-memory SQLite database, FastAPI TestClient with auth
 overrides, and factory fixtures for core models (User, Requisition,
@@ -72,7 +71,8 @@ TEST_DB_URL = "sqlite://"  # in-memory, fresh per session
 
 
 def _patch_types_for_sqlite():
-    """Register ARRAY → JSON, TSVECTOR → TEXT, JSONB → JSON type adapters so models work on SQLite."""
+    """Register ARRAY → JSON, TSVECTOR → TEXT, JSONB → JSON type adapters so models work
+    on SQLite."""
     from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
     SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "JSON"
@@ -236,8 +236,8 @@ def test_vendor_card(db_session: Session) -> VendorCard:
 def client(db_session: Session, test_user: User) -> TestClient:
     """FastAPI TestClient with auth overridden to return test_user.
 
-    Overrides get_db to use the test session and require_user to
-    skip M365 auth entirely.
+    Overrides get_db to use the test session and require_user to skip M365 auth
+    entirely.
     """
     from app.database import get_db
     from app.dependencies import require_admin, require_buyer, require_fresh_token, require_sales, require_user

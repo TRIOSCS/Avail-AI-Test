@@ -76,9 +76,7 @@ def test_scan_sent_folder(db_session, test_user):
         test_user.m365_connected = True
         db_session.commit()
 
-        result = asyncio.get_event_loop().run_until_complete(
-            scan_sent_folder(test_user, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(scan_sent_folder(test_user, db_session))
 
     # Should create 3 ActivityLog entries
     assert len(result) == 3
@@ -103,10 +101,14 @@ def test_scan_sent_folder(db_session, test_user):
     assert untagged[0].contact_email == "vendor2@example.com"
 
     # Verify delta token stored in SyncState
-    sync = db_session.query(SyncState).filter(
-        SyncState.user_id == test_user.id,
-        SyncState.folder == "sent_items_scan",
-    ).first()
+    sync = (
+        db_session.query(SyncState)
+        .filter(
+            SyncState.user_id == test_user.id,
+            SyncState.folder == "sent_items_scan",
+        )
+        .first()
+    )
     assert sync is not None
     assert sync.delta_token == "new-delta-token-123"
 
@@ -143,15 +145,11 @@ def test_scan_sent_folder_dedup(db_session, test_user):
         test_user.m365_connected = True
         db_session.commit()
 
-        result = asyncio.get_event_loop().run_until_complete(
-            scan_sent_folder(test_user, db_session)
-        )
+        result = asyncio.get_event_loop().run_until_complete(scan_sent_folder(test_user, db_session))
 
     # No new logs created (dedup)
     assert len(result) == 0
-    total_logs = db_session.query(ActivityLog).filter(
-        ActivityLog.user_id == test_user.id
-    ).count()
+    total_logs = db_session.query(ActivityLog).filter(ActivityLog.user_id == test_user.id).count()
     assert total_logs == 1
 
 
@@ -159,18 +157,23 @@ def test_scan_sent_folder_dedup(db_session, test_user):
 
 
 def test_group_by_thread_related():
-    """3 emails with matching In-Reply-To/References headers -> grouped into 1 thread."""
+    """3 emails with matching In-Reply-To/References headers -> grouped into 1
+    thread."""
     from app.services.email_threads import group_by_thread
 
     messages = [
         _make_graph_message(
-            "m1", "RFQ for parts", "vendor@example.com",
+            "m1",
+            "RFQ for parts",
+            "vendor@example.com",
             headers=[
                 {"name": "Message-ID", "value": "<aaa@mail.com>"},
             ],
         ),
         _make_graph_message(
-            "m2", "Re: RFQ for parts", "buyer@trioscs.com",
+            "m2",
+            "Re: RFQ for parts",
+            "buyer@trioscs.com",
             headers=[
                 {"name": "Message-ID", "value": "<bbb@mail.com>"},
                 {"name": "In-Reply-To", "value": "<aaa@mail.com>"},
@@ -178,7 +181,9 @@ def test_group_by_thread_related():
             ],
         ),
         _make_graph_message(
-            "m3", "Re: Re: RFQ for parts", "vendor@example.com",
+            "m3",
+            "Re: Re: RFQ for parts",
+            "vendor@example.com",
             headers=[
                 {"name": "Message-ID", "value": "<ccc@mail.com>"},
                 {"name": "In-Reply-To", "value": "<bbb@mail.com>"},
@@ -198,13 +203,17 @@ def test_group_by_thread_unrelated():
 
     messages = [
         _make_graph_message(
-            "m1", "RFQ for LM317T", "vendor1@example.com",
+            "m1",
+            "RFQ for LM317T",
+            "vendor1@example.com",
             headers=[
                 {"name": "Message-ID", "value": "<xxx@mail.com>"},
             ],
         ),
         _make_graph_message(
-            "m2", "Invoice #4567", "vendor2@example.com",
+            "m2",
+            "Invoice #4567",
+            "vendor2@example.com",
             headers=[
                 {"name": "Message-ID", "value": "<yyy@mail.com>"},
             ],
@@ -230,22 +239,22 @@ def test_group_by_thread_empty():
 def test_detect_attachments_xlsx_flagged():
     """An email with .xlsx attachment is flagged for mining pipeline."""
     mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {
-                "name": "stock_list.xlsx",
-                "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "size": 45000,
-                "isInline": False,
-            },
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "name": "stock_list.xlsx",
+                    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "size": 45000,
+                    "isInline": False,
+                },
+            ]
+        }
+    )
 
     from app.jobs.email_jobs import detect_attachments
 
-    result = asyncio.get_event_loop().run_until_complete(
-        detect_attachments(mock_gc, "msg-123")
-    )
+    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-123"))
 
     assert len(result) == 1
     assert result[0]["name"] == "stock_list.xlsx"
@@ -255,22 +264,22 @@ def test_detect_attachments_xlsx_flagged():
 def test_detect_attachments_pdf_flagged():
     """An email with .pdf attachment is flagged."""
     mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {
-                "name": "quote.pdf",
-                "contentType": "application/pdf",
-                "size": 120000,
-                "isInline": False,
-            },
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "name": "quote.pdf",
+                    "contentType": "application/pdf",
+                    "size": 120000,
+                    "isInline": False,
+                },
+            ]
+        }
+    )
 
     from app.jobs.email_jobs import detect_attachments
 
-    result = asyncio.get_event_loop().run_until_complete(
-        detect_attachments(mock_gc, "msg-456")
-    )
+    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-456"))
 
     assert len(result) == 1
     assert result[0]["name"] == "quote.pdf"
@@ -279,22 +288,22 @@ def test_detect_attachments_pdf_flagged():
 def test_detect_attachments_inline_image_excluded():
     """An inline image is NOT flagged as a file attachment."""
     mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {
-                "name": "logo.png",
-                "contentType": "image/png",
-                "size": 5000,
-                "isInline": True,
-            },
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "name": "logo.png",
+                    "contentType": "image/png",
+                    "size": 5000,
+                    "isInline": True,
+                },
+            ]
+        }
+    )
 
     from app.jobs.email_jobs import detect_attachments
 
-    result = asyncio.get_event_loop().run_until_complete(
-        detect_attachments(mock_gc, "msg-789")
-    )
+    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-789"))
 
     assert len(result) == 0
 
@@ -302,28 +311,28 @@ def test_detect_attachments_inline_image_excluded():
 def test_detect_attachments_mixed():
     """Mixed inline image + file attachment: only file is flagged."""
     mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "value": [
-            {
-                "name": "signature.jpg",
-                "contentType": "image/jpeg",
-                "size": 3000,
-                "isInline": True,
-            },
-            {
-                "name": "inventory.xlsx",
-                "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "size": 80000,
-                "isInline": False,
-            },
-        ]
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "value": [
+                {
+                    "name": "signature.jpg",
+                    "contentType": "image/jpeg",
+                    "size": 3000,
+                    "isInline": True,
+                },
+                {
+                    "name": "inventory.xlsx",
+                    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "size": 80000,
+                    "isInline": False,
+                },
+            ]
+        }
+    )
 
     from app.jobs.email_jobs import detect_attachments
 
-    result = asyncio.get_event_loop().run_until_complete(
-        detect_attachments(mock_gc, "msg-mixed")
-    )
+    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-mixed"))
 
     assert len(result) == 1
     assert result[0]["name"] == "inventory.xlsx"
@@ -389,9 +398,7 @@ def test_401_not_retried():
 
     with patch("app.utils.graph_client.http") as mock_http:
         mock_http.get = mock_get
-        result = asyncio.get_event_loop().run_until_complete(
-            gc.get_json("/me/messages")
-        )
+        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages"))
 
     # Should only be called once (no retries for 401)
     assert call_count == 1
@@ -418,9 +425,7 @@ def test_429_returns_error_in_test_mode():
 
     with patch("app.utils.graph_client.http") as mock_http:
         mock_http.get = mock_get
-        result = asyncio.get_event_loop().run_until_complete(
-            gc.get_json("/me/messages")
-        )
+        result = asyncio.get_event_loop().run_until_complete(gc.get_json("/me/messages"))
 
     # In test mode MAX_RETRIES=0, so only 1 attempt total
     assert call_count == 1

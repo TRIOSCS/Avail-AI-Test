@@ -919,7 +919,8 @@ class TestBackfillSightingVendorNormalized:
             assert r2[0] == "globalpartsllc"
 
     def test_column_not_exists_returns_early(self):
-        """If vendor_name_normalized column doesn't exist, function returns without error."""
+        """If vendor_name_normalized column doesn't exist, function returns without
+        error."""
         from app.startup import _backfill_sighting_vendor_normalized
 
         eng = _make_sqlite_engine()

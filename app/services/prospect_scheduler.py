@@ -74,8 +74,8 @@ DISCOVERY_ROTATION = [
 def get_next_discovery_slice(db: Session) -> dict:
     """Determine the next segment/region to search based on rotation history.
 
-    Queries the last completed explorium batch, finds its position in the
-    rotation, and returns the next slice. Wraps around after month 6.
+    Queries the last completed explorium batch, finds its position in the rotation, and
+    returns the next slice. Wraps around after month 6.
     """
     last_batch = (
         db.query(DiscoveryBatch)

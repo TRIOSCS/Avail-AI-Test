@@ -1,5 +1,4 @@
-"""
-tests/test_requirement_entry_fixes.py — Tests for requirement entry bug fixes
+"""tests/test_requirement_entry_fixes.py — Tests for requirement entry bug fixes.
 
 Covers: blank MPN update prevention, access control on batch ops,
 validation error reporting, condition/packaging normalization on create,
@@ -214,5 +213,3 @@ def test_add_requirement_normalizes_condition(client, test_requisition):
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["created"]) == 1
-
-

@@ -163,7 +163,10 @@ def complete_task(
     db: Session = Depends(get_db),
     user: dict = Depends(require_user),
 ):
-    """Complete a task with a resolution note. Only the assignee can complete."""
+    """Complete a task with a resolution note.
+
+    Only the assignee can complete.
+    """
     task = task_service.get_task(db, task_id)
     if not task:
         raise HTTPException(404, "Task not found")

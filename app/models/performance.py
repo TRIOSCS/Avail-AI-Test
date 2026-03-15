@@ -264,7 +264,10 @@ class MultiplierScoreSnapshot(Base):
 
 
 class BuyerVendorStats(Base):
-    """Per-buyer performance with a specific vendor. Auto-populated."""
+    """Per-buyer performance with a specific vendor.
+
+    Auto-populated.
+    """
 
     __tablename__ = "buyer_vendor_stats"
     id = Column(Integer, primary_key=True)

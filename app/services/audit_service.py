@@ -24,7 +24,10 @@ def log_audit(
     details: dict | None = None,
     created_by: str = "system",
 ) -> MaterialCardAudit:
-    """Write a single audit record. Does not commit."""
+    """Write a single audit record.
+
+    Does not commit.
+    """
     entry = MaterialCardAudit(
         material_card_id=material_card_id,
         action=action,
