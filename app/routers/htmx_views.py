@@ -44,6 +44,7 @@ from ..models import (
 from ..models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.prospect_account import ProspectAccount
 from ..models.vendors import VendorContact
+from ..scoring import classify_lead, confidence_color, explain_lead, score_unified
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["htmx-views"])
@@ -707,6 +708,43 @@ async def search_run(
 
     elapsed = time.time() - start
 
+    # Enrich each result with confidence, lead quality, and reason summary
+    # using scoring functions that already exist in scoring.py.
+    for r in results:
+        unified = score_unified(
+            source_type=r.get("source_type", ""),
+            vendor_score=r.get("vendor_score"),
+            is_authorized=r.get("is_authorized", False),
+            unit_price=r.get("unit_price"),
+            qty_available=r.get("qty_available"),
+            age_hours=r.get("age_hours"),
+            has_price=bool(r.get("unit_price")),
+            has_qty=bool(r.get("qty_available")),
+            has_lead_time=bool(r.get("lead_time")),
+            has_condition=bool(r.get("condition")),
+        )
+        r["confidence_pct"] = unified["confidence_pct"]
+        r["confidence_color"] = unified["confidence_color"]
+        r["source_badge"] = unified["source_badge"]
+        r["lead_quality"] = classify_lead(
+            score=unified["score"],
+            is_authorized=r.get("is_authorized", False),
+            has_price=bool(r.get("unit_price")),
+            has_qty=bool(r.get("qty_available")),
+            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+            evidence_tier=r.get("evidence_tier"),
+        )
+        r["reason"] = explain_lead(
+            vendor_name=r.get("vendor_name"),
+            is_authorized=r.get("is_authorized", False),
+            vendor_score=r.get("vendor_score"),
+            unit_price=r.get("unit_price"),
+            qty_available=r.get("qty_available"),
+            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+            evidence_tier=r.get("evidence_tier"),
+            source_type=r.get("source_type"),
+        )
+
     ctx = _base_ctx(request, user, "search")
     ctx.update({
         "results": results,
@@ -715,6 +753,108 @@ async def search_run(
         "error": error,
     })
     return templates.TemplateResponse("partials/search/results.html", ctx)
+
+
+@router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
+async def search_lead_detail(
+    request: Request,
+    idx: int = Query(0, ge=0),
+    mpn: str = Query(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the lead detail drawer content for a single search result.
+
+    Re-runs the search (cached in search_service) and returns the enriched
+    result at the given index.
+    """
+    if not mpn.strip():
+        return HTMLResponse('<p class="p-4 text-sm text-gray-500">No part number specified.</p>')
+
+    try:
+        from ..search_service import quick_search_mpn
+
+        raw_results = await quick_search_mpn(mpn.strip(), db)
+        results = raw_results if isinstance(raw_results, list) else raw_results.get("sightings", [])
+    except Exception as exc:
+        logger.error("Lead detail search failed for {}: {}", mpn, exc)
+        return HTMLResponse(f'<p class="p-4 text-sm text-red-600">Search error: {exc}</p>')
+
+    if idx >= len(results):
+        return HTMLResponse('<p class="p-4 text-sm text-gray-500">Lead not found.</p>')
+
+    r = results[idx]
+
+    # Enrich the single result with scoring data
+    unified = score_unified(
+        source_type=r.get("source_type", ""),
+        vendor_score=r.get("vendor_score"),
+        is_authorized=r.get("is_authorized", False),
+        unit_price=r.get("unit_price"),
+        qty_available=r.get("qty_available"),
+        age_hours=r.get("age_hours"),
+        has_price=bool(r.get("unit_price")),
+        has_qty=bool(r.get("qty_available")),
+        has_lead_time=bool(r.get("lead_time")),
+        has_condition=bool(r.get("condition")),
+    )
+    r["confidence_pct"] = unified["confidence_pct"]
+    r["confidence_color"] = unified["confidence_color"]
+    r["source_badge"] = unified["source_badge"]
+    r["score_components"] = unified.get("components", {})
+    r["lead_quality"] = classify_lead(
+        score=unified["score"],
+        is_authorized=r.get("is_authorized", False),
+        has_price=bool(r.get("unit_price")),
+        has_qty=bool(r.get("qty_available")),
+        has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+        evidence_tier=r.get("evidence_tier"),
+    )
+    r["reason"] = explain_lead(
+        vendor_name=r.get("vendor_name"),
+        is_authorized=r.get("is_authorized", False),
+        vendor_score=r.get("vendor_score"),
+        unit_price=r.get("unit_price"),
+        qty_available=r.get("qty_available"),
+        has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+        evidence_tier=r.get("evidence_tier"),
+        source_type=r.get("source_type"),
+    )
+
+    # Look up vendor safety data from SourcingLead records if available
+    safety_band = "unknown"
+    safety_score = None
+    safety_summary = "Safety is assessed when leads are sourced through requisitions."
+    safety_flags = []
+    safety_available = False
+
+    vendor_name = r.get("vendor_name", "")
+    if vendor_name:
+        lead_row = (
+            db.query(SourcingLead)
+            .filter(SourcingLead.vendor_name.ilike(vendor_name))
+            .order_by(SourcingLead.created_at.desc())
+            .first()
+        )
+        if lead_row and lead_row.vendor_safety_band:
+            safety_band = lead_row.vendor_safety_band
+            safety_score = lead_row.vendor_safety_score
+            safety_summary = lead_row.vendor_safety_summary or safety_summary
+            safety_flags = lead_row.vendor_safety_flags or []
+            safety_available = True
+
+    ctx = _base_ctx(request, user, "search")
+    ctx.update({
+        "lead": r,
+        "mpn": mpn.strip(),
+        "idx": idx,
+        "safety_band": safety_band,
+        "safety_score": safety_score,
+        "safety_summary": safety_summary,
+        "safety_flags": safety_flags,
+        "safety_available": safety_available,
+    })
+    return templates.TemplateResponse("partials/search/lead_detail.html", ctx)
 
 
 # ── Vendor partials ─────────────────────────────────────────────────────

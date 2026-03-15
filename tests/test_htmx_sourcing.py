@@ -115,7 +115,7 @@ def test_search_form_partial(client):
 
 
 def test_search_run_returns_results(client, db_session):
-    """POST /v2/partials/search/run returns results table."""
+    """POST /v2/partials/search/run returns lead cards with enriched data."""
     with patch("app.search_service.quick_search_mpn", return_value=[
         {"vendor_name": "Acme", "mpn_matched": "LM317T", "manufacturer": "TI",
          "qty_available": 1000, "unit_price": 0.55, "source_type": "brokerbin",
@@ -128,8 +128,8 @@ def test_search_run_returns_results(client, db_session):
     assert resp.status_code == 200
     assert "Acme" in resp.text
     assert "LM317T" in resp.text
-    assert "BrokerBin" in resp.text
-    assert "$0.5500" in resp.text
+    assert "Confidence" in resp.text  # confidence badge present
+    assert "Live Stock" in resp.text  # source badge for live API results
 
 
 def test_search_run_empty_mpn(client):

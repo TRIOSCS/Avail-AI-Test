@@ -1,5 +1,10 @@
-{# Search results partial — returned by the search endpoint.
-   Shows sightings grouped by source with pricing and availability. #}
+{# Search results partial — lead cards with confidence, safety, reason summaries.
+   Replaces old table view with card-based layout per React UI spec.
+   Each card shows the visual hierarchy: vendor → badges → reason → data → contact.
+   Clicking a card opens the lead detail drawer.
+   Called by: search POST handler in htmx_views.py
+   Depends on: scoring.py enrichment (confidence_pct, confidence_color, lead_quality, reason)
+#}
 
 {% if error %}
 <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
@@ -8,54 +13,141 @@
 {% endif %}
 
 {% if results %}
-<div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-  <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-    <h2 class="text-sm font-semibold text-gray-700">
-      {{ results|length }} result{{ "s" if results|length != 1 }} for <span class="font-mono">{{ mpn }}</span>
-    </h2>
-    <span class="text-xs text-gray-500">Searched in {{ "%.1f"|format(elapsed_seconds) }}s</span>
-  </div>
-  <div class="overflow-x-auto">
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Manufacturer</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty Avail</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200">
-        {% for s in results %}
-        <tr class="hover:bg-blue-50 transition-colors">
-          <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ s.vendor_name }}</td>
-          <td class="px-4 py-2 text-sm font-mono text-gray-700">{{ s.mpn_matched or s.mpn or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ s.manufacturer or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-right text-gray-700">
-            {% if s.qty_available %}{{ "{:,}".format(s.qty_available) }}{% else %}—{% endif %}
-          </td>
-          <td class="px-4 py-2 text-sm text-right font-medium {{ 'text-green-700' if s.unit_price else 'text-gray-400' }}">
-            {% if s.unit_price %}${{ "%.4f"|format(s.unit_price) }}{% else %}RFQ{% endif %}
-          </td>
-          <td class="px-4 py-2">
-            {% set source_colors = {"nexar": "bg-purple-100 text-purple-700", "brokerbin": "bg-blue-100 text-blue-700", "digikey": "bg-red-100 text-red-700", "mouser": "bg-green-100 text-green-700", "ebay": "bg-yellow-100 text-yellow-700"} %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ source_colors.get(s.source_type|lower, 'bg-gray-100 text-gray-700') }}">
-              {{ s.source_type or "unknown" }}
-            </span>
-          </td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ s.lead_time or "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+{# Results header with count and search time #}
+<div class="flex items-center justify-between mb-4">
+  <h2 class="text-sm font-semibold text-gray-700">
+    {{ results|length }} lead{{ "s" if results|length != 1 }} for
+    <span class="font-mono text-brand-600">{{ mpn }}</span>
+  </h2>
+  <div class="flex items-center gap-3">
+    <span class="text-xs text-gray-500">{{ "%.1f"|format(elapsed_seconds) }}s</span>
   </div>
 </div>
+
+{# Lead cards grid #}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  {% for s in results %}
+  <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 hover:shadow-md hover:border-brand-300 transition-all cursor-pointer"
+       hx-get="/v2/partials/search/lead-detail?idx={{ loop.index0 }}&mpn={{ mpn|urlencode }}"
+       hx-target="#lead-drawer-content"
+       hx-on::after-request="document.getElementById('lead-drawer').dataset.open = 'true'">
+
+    {# Row 1: Vendor name + Confidence badge #}
+    <div class="flex items-start justify-between mb-2">
+      <div class="flex items-center gap-2 min-w-0">
+        <h3 class="font-semibold text-gray-900 truncate">{{ s.vendor_name }}</h3>
+        {% if s.is_authorized %}
+        <span class="shrink-0 px-2 py-0.5 text-[10px] font-semibold rounded-full bg-brand-100 text-brand-700 uppercase tracking-wide">Authorized</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2 shrink-0 ml-2">
+        {# Confidence badge #}
+        {% if s.confidence_pct is defined %}
+          {% if s.confidence_color == "green" %}
+            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-100 text-emerald-700">High Confidence</span>
+          {% elif s.confidence_color == "amber" %}
+            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">Medium Confidence</span>
+          {% else %}
+            <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-rose-100 text-rose-700">Low Confidence</span>
+          {% endif %}
+        {% endif %}
+        {# Lead quality indicator #}
+        {% if s.lead_quality is defined %}
+          {% if s.lead_quality == "strong" %}
+            <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0" title="Strong lead"></span>
+          {% elif s.lead_quality == "moderate" %}
+            <span class="w-2 h-2 rounded-full bg-amber-500 shrink-0" title="Moderate lead"></span>
+          {% else %}
+            <span class="w-2 h-2 rounded-full bg-gray-300 shrink-0" title="Weak lead"></span>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+
+    {# Row 2: Reason summary — plain English why this lead matters #}
+    {% if s.reason is defined and s.reason %}
+    <p class="text-sm text-gray-600 mb-3 line-clamp-2">{{ s.reason }}</p>
+    {% endif %}
+
+    {# Row 3: Part + Price + Qty in a compact data row #}
+    <div class="flex items-center gap-3 text-sm mb-3">
+      <span class="font-mono text-gray-700 bg-gray-50 px-1.5 py-0.5 rounded text-xs">{{ s.mpn_matched or s.mpn or "—" }}</span>
+      {% if s.manufacturer %}
+      <span class="text-gray-500 text-xs">{{ s.manufacturer }}</span>
+      {% endif %}
+      <span class="text-gray-300">|</span>
+      {% if s.unit_price %}
+        <span class="font-semibold text-emerald-700">${{ "%.4f"|format(s.unit_price) if s.unit_price < 1 else "%.2f"|format(s.unit_price) }}</span>
+      {% else %}
+        <span class="text-gray-400 italic text-xs">RFQ</span>
+      {% endif %}
+      {% if s.qty_available %}
+        <span class="text-gray-600">{{ "{:,}".format(s.qty_available) }} avail</span>
+      {% endif %}
+      {% if s.lead_time %}
+        <span class="text-gray-400 text-xs">{{ s.lead_time }}</span>
+      {% endif %}
+    </div>
+
+    {# Row 4: Source badge + Evidence tier + Contact preview #}
+    <div class="flex items-center gap-2 flex-wrap text-xs">
+      {# Source badge #}
+      {% set src = s.source_type|default("unknown")|lower %}
+      {% set source_colors = {
+        "nexar": "bg-violet-100 text-violet-700",
+        "brokerbin": "bg-sky-100 text-sky-700",
+        "digikey": "bg-orange-100 text-orange-700",
+        "mouser": "bg-teal-100 text-teal-700",
+        "ebay": "bg-yellow-100 text-yellow-700",
+        "oemsecrets": "bg-fuchsia-100 text-fuchsia-700",
+        "sourcengine": "bg-lime-100 text-lime-700",
+        "historical": "bg-gray-100 text-gray-600",
+        "vendor_affinity": "bg-brand-100 text-brand-700",
+        "ai_live_web": "bg-purple-100 text-purple-700"
+      } %}
+      <span class="inline-flex px-2 py-0.5 font-medium rounded-full {{ source_colors.get(src, 'bg-gray-100 text-gray-600') }}">
+        {{ s.source_badge|default(s.source_type|default("unknown")) }}
+      </span>
+
+      {# Evidence tier badge #}
+      {% if s.evidence_tier %}
+        {% set tier = s.evidence_tier|upper %}
+        {% if tier in ("T1", "T2") %}
+          <span class="px-1.5 py-0.5 font-medium rounded bg-brand-50 text-brand-600">Direct Source</span>
+        {% elif tier in ("T3", "T4") %}
+          <span class="px-1.5 py-0.5 font-medium rounded bg-blue-50 text-blue-600">Marketplace</span>
+        {% else %}
+          <span class="px-1.5 py-0.5 font-medium rounded bg-gray-50 text-gray-500">Indirect</span>
+        {% endif %}
+      {% endif %}
+
+      <span class="text-gray-300">|</span>
+
+      {# Contact preview #}
+      {% if s.vendor_email %}
+        <span class="text-gray-500 truncate max-w-[160px]" title="{{ s.vendor_email }}">{{ s.vendor_email }}</span>
+      {% elif s.vendor_phone %}
+        <span class="text-gray-500">{{ s.vendor_phone }}</span>
+      {% else %}
+        <span class="text-gray-400 italic">No contact info</span>
+      {% endif %}
+
+      {# Condition badge if not new #}
+      {% if s.condition and s.condition|lower not in ("new", "") %}
+        <span class="px-1.5 py-0.5 font-medium rounded bg-amber-50 text-amber-600">{{ s.condition }}</span>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
 {% elif results is defined and results|length == 0 %}
+{# Empty state per React spec — show guidance #}
 <div class="bg-white rounded-lg shadow border border-gray-200 p-8 text-center">
-  <p class="text-sm text-gray-500">No results found for <span class="font-mono font-medium">{{ mpn }}</span></p>
+  <svg class="mx-auto h-12 w-12 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+  </svg>
+  <p class="text-sm font-medium text-gray-700">No leads found for <span class="font-mono">{{ mpn }}</span></p>
   <p class="text-xs text-gray-400 mt-1">Try a different part number or check your connector settings.</p>
 </div>
 {% endif %}
