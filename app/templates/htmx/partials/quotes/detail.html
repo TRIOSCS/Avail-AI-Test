@@ -103,6 +103,15 @@
       Mark Lost
     </button>
     {% endif %}
+    {% if quote.status == 'won' %}
+    <button hx-post="/v2/partials/quotes/{{ quote.id }}/build-buy-plan"
+            hx-target="#main-content"
+            hx-confirm="Build a buy plan from this quote?"
+            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+      Build Buy Plan
+    </button>
+    {% endif %}
     {% if quote.status == 'draft' %}
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
             hx-target="#main-content"

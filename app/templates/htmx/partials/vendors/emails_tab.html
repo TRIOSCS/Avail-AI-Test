@@ -60,6 +60,12 @@
           {% if c.parts_included %}
           <span class="truncate max-w-xs">Parts: {{ c.parts_included }}</span>
           {% endif %}
+          {% if c.requisition_id %}
+          <a hx-get="/v2/partials/requisitions/{{ c.requisition_id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ c.requisition_id }}"
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ c.requisition_id }}</a>
+          {% endif %}
         </div>
       </div>
       {% endfor %}
@@ -105,6 +111,12 @@
         <div class="flex items-center gap-3 text-xs text-gray-500">
           <span>From: {{ r.vendor_email or "" }}</span>
           <span>{{ r.received_at.strftime('%b %d, %Y %H:%M') if r.received_at else "" }}</span>
+          {% if r.requisition_id %}
+          <a hx-get="/v2/partials/requisitions/{{ r.requisition_id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ r.requisition_id }}"
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ r.requisition_id }}</a>
+          {% endif %}
         </div>
         {% if r.parsed_data %}
         <div class="mt-1 flex items-center gap-3 text-xs text-gray-400">

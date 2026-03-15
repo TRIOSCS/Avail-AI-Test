@@ -166,7 +166,14 @@
         <tbody class="divide-y divide-gray-200">
           {% for s in sightings[:20] %}
           <tr class="hover:bg-brand-50">
-            <td class="px-4 py-2 text-sm text-gray-900">{{ s.vendor_name or "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-gray-900">
+              {% if s.vendor_name %}
+              <a hx-get="/v2/partials/vendors?q={{ s.vendor_name|urlencode }}"
+                 hx-target="#main-content"
+                 hx-push-url="/v2/vendors?q={{ s.vendor_name|urlencode }}"
+                 class="text-brand-500 hover:text-brand-600 cursor-pointer">{{ s.vendor_name }}</a>
+              {% else %}&mdash;{% endif %}
+            </td>
             <td class="px-4 py-2 text-sm text-gray-600 text-right">{{ "{:,}".format(s.qty_available) if s.qty_available else "&mdash;" }}</td>
             <td class="px-4 py-2 text-sm text-right {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">
               {{ "${:,.4f}".format(s.unit_price) if s.unit_price else "RFQ" }}

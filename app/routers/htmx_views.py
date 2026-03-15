@@ -1635,6 +1635,18 @@ async def search_lead_detail(
             safety_flags = lead_row.vendor_safety_flags or []
             safety_available = True
 
+    # Look up material card for this MPN
+    from ..models.intelligence import MaterialCard
+
+    material_card_id = None
+    mpn_clean = mpn.strip().lower()
+    if mpn_clean:
+        mc = db.query(MaterialCard.id).filter(
+            MaterialCard.normalized_mpn == mpn_clean
+        ).first()
+        if mc:
+            material_card_id = mc.id
+
     ctx = _base_ctx(request, user, "search")
     ctx.update({
         "lead": r,
@@ -1645,6 +1657,7 @@ async def search_lead_detail(
         "safety_summary": safety_summary,
         "safety_flags": safety_flags,
         "safety_available": safety_available,
+        "material_card_id": material_card_id,
     })
     return templates.TemplateResponse("partials/search/lead_detail.html", ctx)
 
@@ -3754,6 +3767,104 @@ async def apply_markup_htmx(
             line.margin_pct = round(markup_pct / multiplier, 2)
     db.commit()
     return await quote_detail_partial(request, quote_id, user, db)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/add-offers-to-quote", response_class=HTMLResponse)
+async def add_offers_to_draft_quote(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add selected offers to an existing draft quote. Returns updated quote detail."""
+    import json as _json
+
+    body = await request.body()
+    try:
+        data = _json.loads(body)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid JSON body")
+
+    offer_ids = [int(x) for x in data.get("offer_ids", []) if x]
+    quote_id = int(data.get("quote_id", 0))
+
+    if not offer_ids or not quote_id:
+        raise HTTPException(400, "Missing offer_ids or quote_id")
+
+    quote = db.query(Quote).filter(Quote.id == quote_id, Quote.requisition_id == req_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if quote.status != "draft":
+        raise HTTPException(400, "Can only add to draft quotes")
+
+    offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
+    for o in offers:
+        existing = db.query(QuoteLine).filter(
+            QuoteLine.quote_id == quote_id, QuoteLine.offer_id == o.id
+        ).first()
+        if existing:
+            continue
+        sell_price = float(o.unit_price or 0)
+        qty = o.qty_available or 1
+        line = QuoteLine(
+            quote_id=quote.id,
+            offer_id=o.id,
+            mpn=o.mpn or "",
+            manufacturer=o.manufacturer or "",
+            qty=qty,
+            cost_price=sell_price,
+            sell_price=sell_price,
+            margin_pct=0.0,
+        )
+        db.add(line)
+
+    # Recalculate totals
+    db.flush()
+    all_lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
+    subtotal = sum(float(l.sell_price or 0) * (l.qty or 1) for l in all_lines)
+    total_cost = sum(float(l.cost_price or 0) * (l.qty or 1) for l in all_lines)
+    quote.subtotal = subtotal
+    quote.total_cost = total_cost
+    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
+    db.commit()
+
+    logger.info("Added {} offers to quote {} by {}", len(offers), quote.quote_number, user.email)
+    return HTMLResponse('<span class="text-emerald-600 text-sm">Offers added to quote</span>')
+
+
+@router.post("/v2/partials/quotes/{quote_id}/build-buy-plan", response_class=HTMLResponse)
+async def build_buy_plan_htmx(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Build a buy plan from a won quote. Returns buy plan detail partial."""
+    from ..services.buyplan_builder import build_buy_plan
+
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if quote.status != "won":
+        raise HTTPException(400, "Quote must be won to build a buy plan")
+
+    try:
+        plan = build_buy_plan(quote_id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+
+    logger.info("Buy plan #{} built from quote #{} by {}", plan.id, quote_id, user.email)
+
+    # Return buy plan detail partial
+    bp_lines = db.query(BuyPlanLine).filter(BuyPlanLine.buy_plan_id == plan.id).all()
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["plan"] = plan
+    ctx["lines"] = bp_lines
+    return templates.TemplateResponse("htmx/partials/buy_plans/detail.html", ctx)
 
 
 # ── Prospecting partials ──────────────────────────────────────────────

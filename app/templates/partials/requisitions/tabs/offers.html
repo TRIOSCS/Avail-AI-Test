@@ -61,7 +61,7 @@
       <button x-show="selectedOffers.length > 0"
               hx-post="/v2/partials/requisitions/{{ req.id }}/create-quote"
               hx-include="[name='offer_ids']"
-              hx-target="#tab-content"
+              hx-target="#main-content"
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
               x-cloak>
         Create Quote from Selected
