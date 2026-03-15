@@ -16,6 +16,9 @@ build/
 node_modules/
 .DS_Store
 
+# Claude Code worktrees
+.claude/worktrees/
+
 # Dev/test artifacts
 .coverage
 coverage.xml
