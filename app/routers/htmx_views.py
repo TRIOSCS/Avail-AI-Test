@@ -138,6 +138,9 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/prospecting/{prospect_id:int}", response_class=HTMLResponse)
 @router.get("/v2/proactive", response_class=HTMLResponse)
 @router.get("/v2/strategic", response_class=HTMLResponse)
+@router.get("/v2/materials", response_class=HTMLResponse)
+@router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
+@router.get("/v2/follow-ups", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
@@ -158,6 +161,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "strategic"
     elif "/settings" in path:
         current_view = "settings"
+    elif "/materials" in path:
+        current_view = "materials"
+    elif "/follow-ups" in path:
+        current_view = "follow-ups"
     elif "/vendors" in path:
         current_view = "vendors"
     elif "/companies" in path:
