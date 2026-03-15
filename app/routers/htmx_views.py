@@ -2203,7 +2203,7 @@ async def vendor_tab(
     if not vendor:
         raise HTTPException(404, "Vendor not found")
 
-    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers"}
+    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -2338,6 +2338,9 @@ async def vendor_tab(
         </div>"""
         return HTMLResponse(html)
 
+    elif tab == "reviews":
+        return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
+
     else:  # offers
         offers = (
             db.query(Offer)
@@ -2376,6 +2379,235 @@ async def vendor_tab(
         else:
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
         return HTMLResponse(html)
+
+
+# ── Sprint 3: Vendor CRUD + Contact Management ────────────────────────
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/edit-form", response_class=HTMLResponse)
+async def vendor_edit_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline edit form for vendor header fields."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+    return templates.TemplateResponse(
+        "partials/vendors/edit_vendor_form.html",
+        {"request": request, "vendor": vendor},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/edit", response_class=HTMLResponse)
+async def edit_vendor(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save vendor edits and return refreshed vendor detail."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    form = await request.form()
+    display_name = form.get("display_name", "").strip()
+    if display_name:
+        vendor.display_name = display_name
+        from ..vendor_utils import normalize_vendor_name
+        vendor.normalized_name = normalize_vendor_name(display_name)
+
+    website = form.get("website", "").strip()
+    vendor.website = website or vendor.website
+
+    emails_raw = form.get("emails", "").strip()
+    if emails_raw:
+        vendor.emails = [e.strip() for e in emails_raw.split(",") if e.strip()]
+
+    phones_raw = form.get("phones", "").strip()
+    if phones_raw:
+        vendor.phones = [p.strip() for p in phones_raw.split(",") if p.strip()]
+
+    vendor.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Vendor {} edited by {}", vendor_id, user.email)
+
+    return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/toggle-blacklist", response_class=HTMLResponse)
+async def toggle_vendor_blacklist(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle blacklist status and return refreshed vendor detail."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    vendor.is_blacklisted = not vendor.is_blacklisted
+    vendor.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    status = "blacklisted" if vendor.is_blacklisted else "un-blacklisted"
+    logger.info("Vendor {} {} by {}", vendor_id, status, user.email)
+
+    return await vendor_detail_partial(request=request, vendor_id=vendor_id, user=user, db=db)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/timeline", response_class=HTMLResponse)
+async def contact_timeline(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return activity timeline for a vendor contact."""
+    from ..models.intelligence import ActivityLog
+
+    contact = db.query(VendorContact).filter(
+        VendorContact.id == contact_id, VendorContact.vendor_card_id == vendor_id
+    ).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    activities = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.contact_email == contact.email)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(20)
+        .all()
+    ) if contact.email else []
+
+    return templates.TemplateResponse(
+        "partials/vendors/contact_timeline.html",
+        {"request": request, "contact": contact, "activities": activities, "vendor_id": vendor_id},
+    )
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/contact-nudges", response_class=HTMLResponse)
+async def vendor_contact_nudges(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return nudge suggestions for dormant vendor contacts."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    contacts = (
+        db.query(VendorContact)
+        .filter(VendorContact.vendor_card_id == vendor_id)
+        .all()
+    )
+    # Contacts with no interaction in 30+ days are nudge candidates
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    nudges = []
+    for c in contacts:
+        if not c.last_interaction_at:
+            nudges.append(c)
+        else:
+            # Handle both tz-aware and tz-naive datetimes
+            last = c.last_interaction_at
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            if last < cutoff:
+                nudges.append(c)
+    return templates.TemplateResponse(
+        "partials/vendors/contact_nudges.html",
+        {"request": request, "nudges": nudges, "vendor": vendor},
+    )
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/reviews", response_class=HTMLResponse)
+async def vendor_reviews(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return reviews section for a vendor."""
+    from ..models import VendorReview
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    reviews = (
+        db.query(VendorReview)
+        .filter(VendorReview.vendor_card_id == vendor_id)
+        .options(joinedload(VendorReview.user))
+        .order_by(VendorReview.created_at.desc())
+        .limit(20)
+        .all()
+    )
+    return templates.TemplateResponse(
+        "partials/vendors/reviews.html",
+        {"request": request, "reviews": reviews, "vendor": vendor, "user": user},
+    )
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/reviews", response_class=HTMLResponse)
+async def add_vendor_review(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a review to a vendor and return refreshed reviews."""
+    from ..models import VendorReview
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    form = await request.form()
+    rating = int(form.get("rating", "3"))
+    comment = form.get("comment", "").strip()
+
+    review = VendorReview(
+        vendor_card_id=vendor_id,
+        user_id=user.id,
+        rating=max(1, min(5, rating)),
+        comment=comment or None,
+    )
+    db.add(review)
+    db.commit()
+    logger.info("Review added for vendor {} by {} (rating={})", vendor_id, user.email, rating)
+
+    return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}/reviews/{review_id}", response_class=HTMLResponse)
+async def delete_vendor_review(
+    request: Request,
+    vendor_id: int,
+    review_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor review (own reviews only) and return refreshed reviews."""
+    from ..models import VendorReview
+
+    review = db.query(VendorReview).filter(
+        VendorReview.id == review_id, VendorReview.vendor_card_id == vendor_id
+    ).first()
+    if not review:
+        raise HTTPException(404, "Review not found")
+    if review.user_id != user.id:
+        raise HTTPException(403, "Can only delete your own reviews")
+
+    db.delete(review)
+    db.commit()
+
+    return await vendor_reviews(request=request, vendor_id=vendor_id, user=user, db=db)
 
 
 # ── AI Contact Finder actions (Phase 3A) ───────────────────────────────

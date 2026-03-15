@@ -1,0 +1,67 @@
+{# reviews.html — Vendor reviews section with add/delete.
+   Receives: reviews (list[VendorReview]), vendor (VendorCard), user (User).
+   Called by: htmx_views.py vendor_reviews / add_vendor_review routes.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-gray-900">Reviews ({{ reviews|length }})</h3>
+  </div>
+
+  {# Add review form #}
+  <form hx-post="/v2/partials/vendors/{{ vendor.id }}/reviews"
+        hx-target="#vendor-reviews"
+        class="bg-gray-50 rounded-lg border border-gray-200 p-3">
+    <div class="flex items-center gap-3 mb-2">
+      <label class="text-xs text-gray-500">Rating:</label>
+      <select name="rating" class="px-2 py-1 text-sm border border-gray-300 rounded">
+        <option value="5">5 — Excellent</option>
+        <option value="4">4 — Good</option>
+        <option value="3" selected>3 — Average</option>
+        <option value="2">2 — Poor</option>
+        <option value="1">1 — Terrible</option>
+      </select>
+    </div>
+    <div class="flex gap-2">
+      <input type="text" name="comment" placeholder="Add a comment (optional)"
+             class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      <button type="submit"
+              class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+        Add Review
+      </button>
+    </div>
+  </form>
+
+  {% if reviews %}
+  <div class="space-y-2">
+    {% for r in reviews %}
+    <div class="bg-white rounded-lg border border-gray-200 p-3 flex items-start justify-between">
+      <div>
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-sm font-medium text-gray-900">
+            {% for i in range(r.rating or 0) %}★{% endfor %}{% for i in range(5 - (r.rating or 0)) %}<span class="text-gray-300">★</span>{% endfor %}
+          </span>
+          <span class="text-xs text-gray-500">{{ r.user.name if r.user else 'Unknown' }}</span>
+          {% if r.created_at %}
+          <span class="text-xs text-gray-400">{{ r.created_at.strftime('%b %d, %Y') }}</span>
+          {% endif %}
+        </div>
+        {% if r.comment %}
+        <p class="text-sm text-gray-600">{{ r.comment }}</p>
+        {% endif %}
+      </div>
+      {% if r.user_id == user.id %}
+      <button hx-delete="/v2/partials/vendors/{{ vendor.id }}/reviews/{{ r.id }}"
+              hx-target="#vendor-reviews"
+              hx-confirm="Delete this review?"
+              class="text-xs text-rose-500 hover:text-rose-700 ml-2">
+        Delete
+      </button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-sm text-gray-400 text-center py-4">No reviews yet. Be the first to review this vendor.</p>
+  {% endif %}
+</div>

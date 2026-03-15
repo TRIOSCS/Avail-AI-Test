@@ -37,9 +37,17 @@
         </div>
       </div>
       <div class="flex items-center gap-3">
-        {% if vendor.is_blacklisted %}
-          <span class="px-3 py-1 text-sm font-medium rounded-full bg-rose-50 text-rose-700">Blacklisted</span>
-        {% endif %}
+        <button hx-post="/v2/partials/vendors/{{ vendor.id }}/toggle-blacklist"
+                hx-target="#main-content"
+                hx-confirm="{{ 'Remove from blacklist?' if vendor.is_blacklisted else 'Add to blacklist?' }}"
+                class="px-3 py-1 text-xs font-medium rounded-full {{ 'bg-rose-50 text-rose-700 hover:bg-rose-100' if vendor.is_blacklisted else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+          {{ 'Blacklisted' if vendor.is_blacklisted else 'Blacklist' }}
+        </button>
+        <button hx-get="/v2/partials/vendors/{{ vendor.id }}/edit-form"
+                hx-target="#main-content"
+                class="px-3 py-1 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100">
+          Edit
+        </button>
         {% if vendor.vendor_score %}
           <div class="text-center">
             <p class="text-2xl font-bold text-emerald-600">{{ "%.0f"|format(vendor.vendor_score) }}</p>
@@ -83,7 +91,7 @@
   <div x-data="{ activeTab: 'overview' }">
     <div class="border-b border-gray-200 mb-4">
       <nav class="flex gap-6 -mb-px">
-        {% for tab_id, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('find_contacts', 'Find Contacts'), ('emails', 'Emails'), ('analytics', 'Analytics'), ('offers', 'Offers')] %}
+        {% for tab_id, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('find_contacts', 'Find Contacts'), ('emails', 'Emails'), ('analytics', 'Analytics'), ('offers', 'Offers'), ('reviews', 'Reviews')] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 hx-get="/v2/partials/vendors/{{ vendor.id }}/tab/{{ tab_id }}"
                 hx-target="#vendor-tab-content"
