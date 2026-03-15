@@ -605,6 +605,271 @@ async def requisition_tab(
         return templates.TemplateResponse("partials/requisitions/tabs/activity.html", ctx)
 
 
+# ── AI Parsing in Requisition Offers (Phase 3B) ───────────────────────
+
+
+@router.get("/v2/partials/requisitions/{req_id}/parse-email-form", response_class=HTMLResponse)
+async def parse_email_form(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the parse-email paste form."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return templates.TemplateResponse("partials/requisitions/tabs/parse_email_form.html", ctx)
+
+
+@router.get("/v2/partials/requisitions/{req_id}/paste-offer-form", response_class=HTMLResponse)
+async def paste_offer_form(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the paste-offer freeform form."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    return templates.TemplateResponse("partials/requisitions/tabs/paste_offer_form.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/parse-email", response_class=HTMLResponse)
+async def parse_email_action(
+    request: Request,
+    req_id: int,
+    email_body: str = Form(""),
+    email_subject: str = Form(""),
+    vendor_name: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse vendor email and return editable offer cards."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    if not email_body.strip():
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "Please paste the email body to parse.</div>"
+        )
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["vendor_name"] = vendor_name
+
+    try:
+        from app.services.ai_email_parser import parse_email
+
+        result = await parse_email(
+            email_body=email_body,
+            email_subject=email_subject,
+            vendor_name=vendor_name,
+        )
+
+        if not result:
+            ctx["quotes"] = []
+            ctx["overall_confidence"] = 0
+            ctx["email_type"] = "unclear"
+        else:
+            ctx["quotes"] = result.get("quotes", [])
+            ctx["overall_confidence"] = result.get("overall_confidence", 0)
+            ctx["email_type"] = result.get("email_type", "unclear")
+
+    except Exception as exc:
+        logger.error(f"Parse email error for req {req_id}: {exc}")
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            f"Parse failed: {exc}</div>"
+        )
+
+    return templates.TemplateResponse(
+        "partials/requisitions/tabs/parsed_email_results.html", ctx
+    )
+
+
+@router.post("/v2/partials/requisitions/{req_id}/parse-offer", response_class=HTMLResponse)
+async def parse_offer_action(
+    request: Request,
+    req_id: int,
+    raw_text: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse freeform vendor text and return editable offer cards."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    if not raw_text.strip():
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "Please paste vendor text to parse.</div>"
+        )
+
+    # Build RFQ context for better matching
+    reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+
+    try:
+        from app.services.freeform_parser_service import parse_freeform_offer
+
+        result = await parse_freeform_offer(raw_text, rfq_context)
+        if not result:
+            ctx["offers"] = []
+        else:
+            ctx["offers"] = result.get("offers", [])
+    except Exception as exc:
+        logger.error(f"Parse offer error for req {req_id}: {exc}")
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            f"Parse failed: {exc}</div>"
+        )
+
+    return templates.TemplateResponse(
+        "partials/requisitions/tabs/parsed_offer_results.html", ctx
+    )
+
+
+@router.post("/v2/partials/requisitions/{req_id}/save-parsed-offers", response_class=HTMLResponse)
+async def save_parsed_offers(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save user-edited parsed offers to the requisition."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    vendor_name = form.get("vendor_name", "")
+
+    # Collect offers from form fields (offers[0].mpn, offers[0].qty_available, etc.)
+    offers_data: list[dict] = []
+    idx = 0
+    while True:
+        mpn = form.get(f"offers[{idx}].mpn")
+        if mpn is None:
+            # Also check vendor_name field for freeform offers
+            vn = form.get(f"offers[{idx}].vendor_name")
+            if vn is None:
+                break
+        offer = {
+            "vendor_name": form.get(f"offers[{idx}].vendor_name", vendor_name),
+            "mpn": form.get(f"offers[{idx}].mpn", ""),
+            "manufacturer": form.get(f"offers[{idx}].manufacturer"),
+            "qty_available": _safe_int(form.get(f"offers[{idx}].qty_available")),
+            "unit_price": _safe_float(form.get(f"offers[{idx}].unit_price")),
+            "lead_time": form.get(f"offers[{idx}].lead_time"),
+            "date_code": form.get(f"offers[{idx}].date_code"),
+            "condition": form.get(f"offers[{idx}].condition", "new"),
+            "moq": _safe_int(form.get(f"offers[{idx}].moq")),
+            "notes": form.get(f"offers[{idx}].notes"),
+        }
+        offers_data.append(offer)
+        idx += 1
+
+    if not offers_data:
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "No offers to save.</div>"
+        )
+
+    # Match MPNs to requirements
+    reqs = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    from app.vendor_utils import normalize_vendor_name
+
+    saved_count = 0
+    for o in offers_data:
+        if not o["mpn"]:
+            continue
+
+        # Find matching requirement
+        req_match_id = None
+        mpn_lower = (o["mpn"] or "").strip().lower()
+        for r in reqs:
+            if r.primary_mpn and r.primary_mpn.strip().lower() == mpn_lower:
+                req_match_id = r.id
+                break
+
+        # Resolve vendor card
+        vn = o.get("vendor_name") or vendor_name or "Unknown"
+        norm_name = normalize_vendor_name(vn)
+        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
+        if not card:
+            card = VendorCard(
+                normalized_name=norm_name,
+                display_name=vn,
+                emails=[],
+                phones=[],
+            )
+            db.add(card)
+            db.flush()
+
+        offer = Offer(
+            requisition_id=req_id,
+            requirement_id=req_match_id,
+            vendor_card_id=card.id,
+            vendor_name=card.display_name,
+            vendor_name_normalized=card.normalized_name,
+            mpn=o["mpn"],
+            manufacturer=o.get("manufacturer"),
+            qty_available=o.get("qty_available"),
+            unit_price=o.get("unit_price"),
+            lead_time=o.get("lead_time"),
+            date_code=o.get("date_code"),
+            condition=o.get("condition") or "new",
+            moq=o.get("moq"),
+            notes=o.get("notes"),
+            source="ai_parsed",
+            entered_by_id=user.id,
+            status="active",
+        )
+        db.add(offer)
+        saved_count += 1
+
+    db.commit()
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["saved_count"] = saved_count
+    return templates.TemplateResponse(
+        "partials/requisitions/tabs/parse_save_success.html", ctx
+    )
+
+
+def _safe_int(val) -> int | None:
+    """Safely convert form value to int."""
+    if not val:
+        return None
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(val) -> float | None:
+    """Safely convert form value to float."""
+    if not val:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 @router.post("/v2/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
 async def requisitions_bulk_action(
     request: Request,
