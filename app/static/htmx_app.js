@@ -1,16 +1,21 @@
 /**
  * HTMX + Alpine.js bootstrap — entry point for the new frontend.
  * Loaded when USE_HTMX=true. Replaces app.js + crm.js.
- * Depends on: htmx.org, alpinejs (npm packages)
+ * Depends on: htmx.org, alpinejs, @alpinejs/trap (npm packages)
  */
 import htmx from 'htmx.org';
 import Alpine from 'alpinejs';
+import trap from '@alpinejs/trap';
+import './styles.css';
+import './htmx_mobile.css';
+
+Alpine.plugin(trap);
 
 window.htmx = htmx;
 window.Alpine = Alpine;
 
 // Global Alpine stores
-Alpine.store('sidebar', { open: true, active: '' });
+Alpine.store('sidebar', { open: true, collapsed: false, active: '' });
 Alpine.store('toast', { message: '', type: 'info', show: false });
 
 // HTMX config
@@ -25,9 +30,11 @@ htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').show = true;
 });
 
-// HTMX afterSettle — re-init Alpine on swapped content
-htmx.on('htmx:afterSettle', () => {
-    // Alpine auto-discovers new x-data elements
+// 401 → redirect to login
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    if (evt.detail.xhr.status === 401) {
+        window.location.href = '/auth/login';
+    }
 });
 
 Alpine.start();
