@@ -193,10 +193,12 @@ All in `app/templates/partials/shared/`:
 **File:** `app/templates/partials/requisitions/detail.html`
 
 - Breadcrumb: "Requisitions > {req.name}"
-- Header card: Name, customer, due date, created by, status badge, urgency badge, edit button
+- Header card: Name (inline editable — click to edit, `hx-put` to save), customer, due date, created by, status badge, urgency badge
 - **Tabs** (Alpine `x-data` for active tab, HTMX loads tab content on click):
   - **Parts** (default): Requirements table
     - Columns: MPN (monospace), Brand, Qty (formatted), Target Price, Status badge, Sightings count
+    - Double-click any cell to edit inline (`hx-trigger="dblclick"`, `hx-put` to update, auto-saves on blur)
+    - Delete requirement via `hx-delete` with `hx-swap="delete"` (row removed from DOM)
     - "Search" action button per row (triggers sourcing, shows spinner)
     - Inline "Add requirement" form at top: MPN, Qty, Manufacturer, Add button
   - **Offers**: Table of offers received — columns: Vendor, MPN, Qty, Unit Price, Lead Time, Date Received, Status badge. Empty state: "No offers received yet."
@@ -249,15 +251,12 @@ All in `app/templates/partials/shared/`:
 **File:** `app/templates/partials/vendors/list.html`
 
 - Search by name (live, 300ms debounce)
-- **Card grid** (3-col desktop, 2-col tablet, 1-col mobile)
-- Blacklisted vendors **are shown** in the list (not filtered out) but visually distinct — rose-tinted card background, blacklisted badge prominent. A "Hide blacklisted" toggle filter is available at the top.
-- Each card:
-  - Vendor name + domain (truncated)
-  - Score badge (emerald) OR blacklisted badge (rose)
-  - 3-stat mini grid: Sightings count, Win Rate %, Location
-  - Industry text (small, muted, truncated)
-  - Entire card clickable → detail
-  - `hover:shadow-md` transition
+- "Hide blacklisted" toggle filter at top
+- Blacklisted vendors shown but visually distinct — rose-tinted row background, blacklisted badge prominent
+- **Table** (dense, scannable — better for managing large vendor lists):
+  - Columns: Vendor Name + Domain, Score badge (emerald) or Blacklisted badge (rose), Sightings count, Win Rate %, Location, Industry
+  - Clickable rows → detail view
+  - Sortable column headers
 - Pagination
 
 ### Detail View
@@ -417,7 +416,7 @@ All in `app/templates/partials/shared/`:
 - Safety: Low Risk / Medium Risk / High Risk toggle pills
 - Freshness: Last 24h / 7 days / 30 days / All
 - Source: Checkboxes per connector (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14)
-- Status: New / Contacted / Replied / All
+- Status: New / Contacted / Has Stock / Bad Lead / All
 - Contactability: Has Email / Has Phone / Any
 - Corroborated: Yes / No / All
 - All filters send `hx-get` with updated params, swap results area
@@ -439,7 +438,6 @@ Each card (`partials/sourcing/lead_card.html`):
   - Has email + new → "Send RFQ"
   - Has phone + no email → "Call vendor"
   - No contact info → "Research contact"
-  - Already contacted → "Follow up"
 - **Quick actions:** Claim, Dismiss, Send RFQ (inline buttons)
 - Clicking card body → lead detail view
 
@@ -486,39 +484,19 @@ Each card (`partials/sourcing/lead_card.html`):
 - Safety band, summary, positive signals, caution signals, recommended action
 
 **Buyer actions panel:**
-- Status update dropdown: new → contacted → replied → has_stock / no_stock / bad_lead / do_not_contact
-- Feedback note: text input + reason code dropdown (price_too_high, lead_time_too_long, wrong_part, no_response, etc.)
-- Contact method selector: email / phone / LinkedIn
+- Status dropdown: new / contacted / has_stock / no_stock / bad_lead / do_not_contact (lightweight — buyer's own notes, not a workflow tracker)
+- Optional note field (free text)
 - "Send RFQ" button (pre-fills from lead data)
+- Claim / Dismiss buttons
 - All actions submit via `hx-post`, update lead card in results view via `hx-swap="outerHTML"` on the card
 
-**Activity timeline:**
-- All `LeadFeedbackEvent` records
-- Each event: timestamp, user avatar, status change, note, contact method
-- Append-only display, newest first
+### Lead Status (Lightweight, Not a Workflow Tracker)
 
-### Buyer Followup Queue
+Lead statuses are buyer notes for their own reference, not an outreach tracking system. Vendors commonly don't respond — there is no "awaiting response" tracking or follow-up cadence.
 
-**File:** `app/templates/partials/sourcing/followup_queue.html`
-**Access:** Tab within requisition detail OR standalone view
+Available statuses: `new`, `contacted`, `has_stock`, `no_stock`, `bad_lead`, `do_not_contact`
 
-**Status tabs:** New, Contacted, Awaiting Response, Replied, All
-
-**Queue table:**
-- Vendor name
-- Part number (monospace)
-- Confidence % (with small colored bar)
-- Safety band badge
-- Last action + timestamp
-- Days since last contact (amber if >3 days, rose if >7 days)
-- Next suggested step (text)
-- Owner (avatar)
-- Sortable by: confidence, freshness, days-since-contact
-
-**Behavior:**
-- Clicking row → lead detail view
-- Designed for rapid triage — buyer works down the list updating statuses
-- Filters and sorts persist via URL params
+Status is set via a simple dropdown on the lead card or lead detail. No escalation, no SLA, no reminders.
 
 ---
 
@@ -709,7 +687,7 @@ module.exports = {
 - `GET /v2/prospecting/{id}` → Prospect detail (NEW)
 - `GET /v2/sourcing/{requirement_id}` → Sourcing results (NEW)
 - `GET /v2/sourcing/leads/{lead_id}` → Lead detail (NEW)
-- `GET /v2/sourcing/followup` → Buyer followup queue (NEW)
+
 
 ### Partial Endpoints (return just the partial, for HTMX swaps)
 
@@ -752,7 +730,7 @@ All prefixed `/v2/partials/`:
 - `GET /partials/sourcing/leads/{lead_id}` — lead detail (NEW)
 - `POST /partials/sourcing/leads/{lead_id}/status` — update buyer status (NEW)
 - `POST /partials/sourcing/leads/{lead_id}/feedback` — add feedback event (NEW)
-- `GET /partials/sourcing/followup` — followup queue, params: status, sort, page (NEW)
+
 
 ### Helper Utilities
 
@@ -820,8 +798,7 @@ app/templates/
 │   │   ├── results.html
 │   │   ├── lead_card.html
 │   │   ├── lead_detail.html
-│   │   ├── search_progress.html    # SSE progress during multi-source search
-│   │   └── followup_queue.html
+│   │   └── search_progress.html    # SSE progress during multi-source search
 │   ├── prospecting/
 │   │   ├── list.html
 │   │   └── detail.html
@@ -872,7 +849,7 @@ From user feedback, applied consistently:
 
 The rebuild is complete when:
 
-1. All 13 page views render correctly (requisitions, companies, vendors, buy plans, quotes, search, sourcing results, lead detail, followup queue, prospecting, settings, dashboard, login)
+1. All 12 page views render correctly (requisitions, companies, vendors, buy plans, quotes, search, sourcing results, lead detail, prospecting, settings, dashboard, login)
 2. AVAIL logo displays in sidebar, login, and mobile header
 3. Brand color system applied consistently — no leftover `gray-900` sidebar, no `blue-600` buttons
 4. All shared components work: modal (open/close/escape), toast (auto-dismiss), pagination, empty states, enrich button, offer card, safety review
