@@ -18,6 +18,7 @@ Called by: all routers
 Depends on: models, database, config
 """
 
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request
@@ -51,7 +52,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         from .config import settings
 
         agent_key = request.headers.get("x-agent-key")
-        if agent_key and settings.agent_api_key and agent_key == settings.agent_api_key:
+        if agent_key and settings.agent_api_key and secrets.compare_digest(agent_key, settings.agent_api_key):
             user = db.query(User).filter_by(email="agent@availai.local").first()
     if not user:
         raise HTTPException(401, "Not authenticated")

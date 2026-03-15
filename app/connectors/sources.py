@@ -154,7 +154,7 @@ def _parse_retry_after(response: httpx.Response) -> float:
     header = response.headers.get("Retry-After", "")
     if header:
         try:
-            return max(float(header), 1.0)
+            return min(max(float(header), 1.0), 300.0)
         except ValueError:
             pass
     # No header or unparseable — default to 5s + jitter

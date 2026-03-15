@@ -91,7 +91,8 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
             )
             reassigned += count
         except Exception as e:
-            logger.debug("Vendor merge: skipped %s.%s reassignment: %s", model.__tablename__, col, e)
+            logger.error("Vendor merge: FK reassignment failed on %s.%s: %s", model.__tablename__, col, e)
+            raise ValueError(f"Vendor merge aborted — failed to reassign {model.__tablename__}.{col}: {e}") from e
 
     # Delete the removed card
     db.delete(remove)
