@@ -265,7 +265,8 @@
   {% endif %}
 
   {# ── Modal overlay ────────────────────────────────────────────── #}
-  <div x-show="showModal" x-cloak
+  <div x-show="showModal" x-cloak x-transition
+       style="display: none;"
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
        @keydown.escape.window="showModal = false">
     <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" @click.outside="showModal = false">
