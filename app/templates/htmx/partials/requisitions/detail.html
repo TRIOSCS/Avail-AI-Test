@@ -45,6 +45,11 @@
         </div>
       </div>
       <div class="flex items-center gap-3">
+        {# Action buttons #}
+        <a href="/api/requisitions/{{ req.id }}/pdf" target="_blank"
+           class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+          Download PDF
+        </a>
         {# Status badge #}
         {% set status_colors = {
           "active": "bg-emerald-50 text-emerald-700",
@@ -93,7 +98,7 @@
   <div x-data="{ activeTab: 'parts' }">
     <div class="border-b border-gray-200 mb-4">
       <nav class="flex gap-6 -mb-px">
-        {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('quotes', 'Quotes'), ('buy_plans', 'Buy Plans'), ('tasks', 'Tasks'), ('activity', 'Activity')] %}
+        {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('responses', 'Responses'), ('quotes', 'Quotes'), ('buy_plans', 'Buy Plans'), ('tasks', 'Tasks'), ('activity', 'Activity')] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"
                 hx-target="#tab-content"

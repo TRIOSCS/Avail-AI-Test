@@ -499,7 +499,7 @@ async def requisition_tab(
     if not req:
         raise HTTPException(404, "Requisition not found")
 
-    valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity"}
+    valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity", "responses"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -524,7 +524,15 @@ async def requisition_tab(
             .order_by(Offer.created_at.desc().nullslast())
             .all()
         )
+        # Check for existing draft quote to show "Add to Quote" button
+        draft_quote = (
+            db.query(Quote)
+            .filter(Quote.requisition_id == req_id, Quote.status == "draft")
+            .order_by(Quote.created_at.desc())
+            .first()
+        )
         ctx["offers"] = offers
+        ctx["draft_quote"] = draft_quote
         return templates.TemplateResponse("partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
@@ -560,6 +568,19 @@ async def requisition_tab(
         ctx["tasks"] = tasks
         ctx["users"] = users
         return templates.TemplateResponse("partials/requisitions/tabs/tasks.html", ctx)
+
+    elif tab == "responses":
+        # Fetch vendor responses for this requisition
+        from ..models.offers import VendorResponse
+
+        responses = (
+            db.query(VendorResponse)
+            .filter(VendorResponse.requisition_id == req_id)
+            .order_by(VendorResponse.received_at.desc().nullslast())
+            .all()
+        )
+        ctx["responses"] = responses
+        return templates.TemplateResponse("partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
         ctx["activities"] = []
@@ -613,6 +634,116 @@ async def requisitions_bulk_action(
         date_from="", date_to="", sort="created_at", dir="desc",
         limit=50, offset=0, user=user, db=db,
     )
+
+
+@router.post("/v2/partials/requisitions/{req_id}/create-quote", response_class=HTMLResponse)
+async def create_quote_from_offers(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new quote from selected offer IDs. Returns quote detail partial."""
+    form = await request.form()
+    offer_ids_raw = form.getlist("offer_ids")
+    offer_ids = [int(x) for x in offer_ids_raw if x]
+
+    if not offer_ids:
+        raise HTTPException(400, "No offers selected")
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
+    if not offers:
+        raise HTTPException(404, "No matching offers found")
+
+    # Build line items from offers
+    import itertools
+
+    quote_number = f"Q-{req_id}-{db.query(Quote).filter(Quote.requisition_id == req_id).count() + 1}"
+    quote = Quote(
+        requisition_id=req_id,
+        quote_number=quote_number,
+        status="draft",
+        created_by_id=user.id,
+        customer_site_id=req.customer_site_id,
+    )
+    db.add(quote)
+    db.flush()
+
+    subtotal = 0.0
+    total_cost = 0.0
+    for o in offers:
+        sell_price = float(o.unit_price or 0)
+        cost_price = sell_price  # Default cost = sell, buyer adjusts
+        qty = o.qty_available or 1
+        margin_pct = 0.0
+
+        line = QuoteLine(
+            quote_id=quote.id,
+            offer_id=o.id,
+            mpn=o.mpn or "",
+            manufacturer=o.manufacturer or "",
+            qty=qty,
+            cost_price=cost_price,
+            sell_price=sell_price,
+            margin_pct=margin_pct,
+        )
+        db.add(line)
+        subtotal += sell_price * qty
+        total_cost += cost_price * qty
+
+    quote.subtotal = subtotal
+    quote.total_cost = total_cost
+    quote.total_margin_pct = ((subtotal - total_cost) / subtotal * 100) if subtotal else 0
+    db.commit()
+    db.refresh(quote)
+
+    logger.info("Created quote {} from {} offers by {}", quote.quote_number, len(offers), user.email)
+
+    # Return the quote detail page
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).all()
+    ctx = _base_ctx(request, user, "quotes")
+    ctx["quote"] = quote
+    ctx["lines"] = lines
+    ctx["offers"] = offers
+    return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/offers/{offer_id}/review", response_class=HTMLResponse)
+async def review_offer(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Approve or reject an offer. Returns refreshed offers tab."""
+    form = await request.form()
+    action = form.get("action", "")
+
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Invalid action")
+
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+
+    if action == "approve":
+        offer.status = "approved"
+        offer.approved_by_id = user.id
+        from datetime import datetime, timezone
+        offer.approved_at = datetime.now(timezone.utc)
+    else:
+        offer.status = "rejected"
+
+    db.commit()
+    logger.info("Offer {} {} by {}", offer_id, action, user.email)
+
+    # Return refreshed offers tab
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
 @router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
