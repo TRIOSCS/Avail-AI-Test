@@ -1319,7 +1319,10 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
                 display_mpn=display,
                 search_count=0,
             )
-            .on_conflict_do_nothing(index_elements=["normalized_mpn"])
+            .on_conflict_do_nothing(
+                index_elements=["normalized_mpn"],
+                index_where=MaterialCard.deleted_at.is_(None),
+            )
         )
         result = db.execute(stmt)
         db.flush()
