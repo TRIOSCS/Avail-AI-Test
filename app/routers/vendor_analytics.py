@@ -40,8 +40,11 @@ async def get_vendor_offer_history(
         raise HTTPException(404, "Vendor not found")
 
     q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "100")), 500)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    try:
+        limit = min(int(request.query_params.get("limit", "100")), 500)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     query = (
         db.query(MaterialVendorHistory, MaterialCard)
@@ -97,8 +100,11 @@ async def get_vendor_confirmed_offers(
         raise HTTPException(404, "Vendor not found")
 
     q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "50")), 200)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    try:
+        limit = min(int(request.query_params.get("limit", "50")), 200)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     query = db.query(Offer).filter(Offer.vendor_card_id == card_id)
     if q:
@@ -175,15 +181,18 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
     q = q.strip().lower()
 
     # Combine sightings and material_vendor_history into a unified parts summary
+    # Use parameterized filtering to avoid SQL injection via f-string interpolation
     params: dict = {"norm": norm, "off": offset, "lim": limit}
-    mpn_filter = ""
     if q:
-        mpn_filter = "AND LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\'"
         safe_q = escape_like(q)
         params["mpn_pattern"] = f"%{safe_q}%"
+        params["has_filter"] = True
+    else:
+        params["mpn_pattern"] = "%"
+        params["has_filter"] = False
 
     rows = db.execute(
-        sqltext(f"""
+        sqltext("""
         SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
         FROM (
             SELECT
@@ -211,7 +220,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) combined
-        WHERE mpn != '' {mpn_filter}
+        WHERE mpn != ''
+          AND (:has_filter = false OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
         ORDER BY last_seen DESC NULLS LAST
         OFFSET :off LIMIT :lim
     """),
@@ -219,12 +229,10 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
     ).fetchall()
 
     # Get total count
-    count_params: dict = {"norm": norm}
-    if q:
-        count_params["mpn_pattern"] = params["mpn_pattern"]
+    count_params: dict = {"norm": norm, "mpn_pattern": params["mpn_pattern"], "has_filter": params["has_filter"]}
     total = (
         db.execute(
-            sqltext(f"""
+            sqltext("""
         SELECT COUNT(*) FROM (
             SELECT DISTINCT COALESCE(mpn_matched, '') as mpn FROM sightings
             WHERE vendor_name_normalized = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
@@ -233,7 +241,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) all_mpns
-        WHERE mpn != '' {mpn_filter}
+        WHERE mpn != ''
+          AND (:has_filter = false OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
     """),
             count_params,
         ).scalar()

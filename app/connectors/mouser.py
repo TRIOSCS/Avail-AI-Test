@@ -37,6 +37,7 @@ class MouserConnector(BaseConnector):
             }
         }
 
+        # Note: Mouser requires apiKey as a URL query param (no header auth option).
         r = await http.post(
             self.SEARCH_URL,
             params={"apiKey": self.api_key},
