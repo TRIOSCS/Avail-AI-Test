@@ -405,3 +405,30 @@ class TestInsightsPanels:
         resp = client.get("/v2/partials/dashboard/pipeline-insights")
         assert resp.status_code == 200
         assert "AI Insights" in resp.text
+
+
+# ── Phase 7: Admin data ops tab ─────────────────────────────────────
+
+
+class TestDataOpsTab:
+    def test_data_ops_tab_forbidden_for_non_admin(self, client: TestClient, test_user: User):
+        """Data ops tab requires admin role."""
+        resp = client.get("/v2/partials/settings/data-ops")
+        assert resp.status_code == 403
+
+    def test_data_ops_tab_renders_for_admin(self, db_session: Session, admin_user):
+        """Data ops tab renders for admin users."""
+        from fastapi.testclient import TestClient as TC
+        from app.dependencies import require_user, get_db
+        from app.main import app
+
+        app.dependency_overrides[require_user] = lambda: admin_user
+        app.dependency_overrides[get_db] = lambda: db_session
+        try:
+            with TC(app) as c:
+                resp = c.get("/v2/partials/settings/data-ops")
+            assert resp.status_code == 200
+            assert "Vendor Duplicates" in resp.text
+            assert "Company Duplicates" in resp.text
+        finally:
+            app.dependency_overrides.clear()
