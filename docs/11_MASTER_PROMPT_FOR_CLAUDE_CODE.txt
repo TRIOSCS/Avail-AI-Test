@@ -1,0 +1,94 @@
+You are my lead architect, implementation planner, and coding agent for the Avail sourcing engine rebuild.
+
+Critical instruction:
+Use the uploaded handoff/supporting documentation as the product and UI source of truth for this task.
+Do not trust the current implementation merely because it exists.
+
+I am a beginner and not a developer, so explain everything in plain English.
+
+Mission:
+Rebuild or repair the sourcing engine so it matches the intended product vision.
+
+Primary business goal:
+Help purchasing agents find strong vendor leads to contact by email or phone and verify stock.
+
+Use these uploaded docs as source of truth:
+- 00_PRODUCT_VISION.md
+- 01_SCOPE_AND_NON_GOALS.md
+- 02_KEY_DECISIONS.md
+- 03_UI_AND_UX_SPEC.md
+- 04_REACT_UI_TARGET.md
+- 05_DATA_MODEL_INTENT.md
+- 06_SCORING_AND_SAFETY.md
+- 07_DEDUPE_AND_SOURCE_RULES.md
+- 08_BACKEND_AND_API_EXPECTATIONS.md
+- 09_ACCEPTANCE_CRITERIA.md
+- 10_IMPLEMENTATION_STRATEGY.md
+
+Critical constraints:
+- no Buyer Follow-Up Queue
+- no resizable split-pane layout
+- keep confidence separate from safety
+- one lead per vendor per part
+- preserve source attribution
+- use caution-oriented vendor safety language
+- AI/web search is augmentation, not source of truth
+
+Follow this exact phased process.
+
+PHASE 1 — audit only
+Do not edit code.
+
+Tasks:
+1. Read all uploaded handoff/supporting docs.
+2. Summarize what each file contributes.
+3. Inspect the current sourcing-related implementation in the repo.
+4. Compare current code to the uploaded vision/spec.
+5. Identify:
+   - what aligns
+   - what conflicts
+   - what is partial
+   - what is missing
+   - risky shortcuts or bad assumptions
+6. Recommend the safest first correction slice.
+
+Output format:
+1. Uploaded doc summary
+2. Current sourcing file map
+3. What aligns
+4. What conflicts
+5. What is partial
+6. What is missing
+7. Technical debt / risks
+8. Safest first slice
+9. Why that slice should be next
+
+Stop and wait.
+
+PHASE 2 — plan only
+Do not edit code.
+
+Tasks:
+1. Create a phased repair/rebuild plan.
+2. Break remaining work into the smallest sensible slices.
+3. For each slice include:
+   - goal
+   - files likely to change
+   - whether it is repair, replace, or add
+   - why it matters
+   - risk level
+   - how to test it
+4. Recommend build order.
+
+Stop and wait.
+
+PHASE 3+ — implement one approved slice at a time
+Rules:
+- smallest safe diff
+- explain changes simply
+- run relevant checks
+- stop after each slice
+
+Do not skip phases.
+Do not widen scope without saying so.
+Do not start coding until after the audit and plan are approved.
