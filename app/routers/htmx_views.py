@@ -583,7 +583,24 @@ async def requisition_tab(
         return templates.TemplateResponse("partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
-        ctx["activities"] = []
+        from ..models.offers import Contact as RfqContact
+        from ..models.intelligence import ActivityLog
+
+        contacts = (
+            db.query(RfqContact)
+            .filter(RfqContact.requisition_id == req_id)
+            .order_by(RfqContact.created_at.desc())
+            .all()
+        )
+        activities = (
+            db.query(ActivityLog)
+            .filter(ActivityLog.requisition_id == req_id)
+            .order_by(ActivityLog.created_at.desc())
+            .all()
+        )
+        ctx["contacts"] = contacts
+        ctx["activities"] = activities
+        ctx["req"] = req
         return templates.TemplateResponse("partials/requisitions/tabs/activity.html", ctx)
 
 
@@ -744,6 +761,166 @@ async def review_offer(
 
     # Return refreshed offers tab
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/log-activity", response_class=HTMLResponse)
+async def log_activity(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual activity (note/call/email) for a requisition."""
+    from ..models.intelligence import ActivityLog
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    activity_type = form.get("activity_type", "note")
+    channel_map = {"note": "note", "phone_call": "phone", "email_sent": "email"}
+
+    log = ActivityLog(
+        user_id=user.id,
+        requisition_id=req_id,
+        activity_type=activity_type,
+        channel=channel_map.get(activity_type, "note"),
+        contact_name=form.get("vendor_name", ""),
+        contact_phone=form.get("contact_phone", ""),
+        contact_email=form.get("contact_email", ""),
+        notes=form.get("notes", ""),
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    logger.info("Activity logged for req {} by {}: {}", req_id, user.email, activity_type)
+
+    # Return refreshed activity tab
+    return await requisition_tab(request=request, req_id=req_id, tab="activity", user=user, db=db)
+
+
+@router.get("/v2/partials/requisitions/{req_id}/rfq-compose", response_class=HTMLResponse)
+async def rfq_compose(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the RFQ compose form for a requisition."""
+    from ..models.offers import Contact as RfqContact
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+
+    # Get unique vendors from sightings for this requisition's parts
+    part_ids = [p.id for p in parts]
+    vendors = []
+    if part_ids:
+        # Get distinct vendor names from sightings, then match to VendorCard
+        vendor_names = (
+            db.query(Sighting.vendor_name_normalized)
+            .filter(Sighting.requirement_id.in_(part_ids), Sighting.vendor_name_normalized.isnot(None))
+            .distinct()
+            .all()
+        )
+        norm_names = [n[0] for n in vendor_names if n[0]]
+        vendor_rows = (
+            db.query(VendorCard)
+            .filter(VendorCard.normalized_name.in_(norm_names))
+            .limit(50)
+            .all()
+        ) if norm_names else []
+        # Check which vendors already have RFQs sent
+        sent_vendor_names = set()
+        existing_contacts = (
+            db.query(RfqContact)
+            .filter(RfqContact.requisition_id == req_id)
+            .all()
+        )
+        for c in existing_contacts:
+            if c.vendor_name_normalized:
+                sent_vendor_names.add(c.vendor_name_normalized)
+
+        for v in vendor_rows:
+            # Get contacts for this vendor
+            v_contacts = (
+                db.query(VendorContact)
+                .filter(VendorContact.vendor_card_id == v.id)
+                .limit(5)
+                .all()
+            )
+            vendors.append({
+                "id": v.id,
+                "display_name": v.display_name,
+                "normalized_name": v.normalized_name,
+                "domain": v.domain,
+                "contacts": v_contacts,
+                "already_asked": v.normalized_name in sent_vendor_names,
+                "emails": [c.email for c in v_contacts if c.email],
+            })
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["parts"] = parts
+    ctx["vendors"] = vendors
+    return templates.TemplateResponse("partials/requisitions/rfq_compose.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
+async def rfq_send(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send RFQs — creates Contact records for each selected vendor."""
+    from ..models.offers import Contact as RfqContact
+    from datetime import datetime, timezone
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    vendor_names = form.getlist("vendor_names")
+    vendor_emails = form.getlist("vendor_emails")
+    subject = form.get("subject", f"RFQ - {req.name}")
+    parts_text = form.get("parts_summary", "")
+
+    if not vendor_names:
+        raise HTTPException(400, "No vendors selected")
+
+    sent = []
+    for name, email in zip(vendor_names, vendor_emails):
+        if not email:
+            continue
+        contact = RfqContact(
+            requisition_id=req_id,
+            user_id=user.id,
+            contact_type="email",
+            vendor_name=name,
+            vendor_name_normalized=name.lower().strip(),
+            vendor_contact=email,
+            parts_included=parts_text,
+            subject=subject,
+            status="sent",
+            status_updated_at=datetime.now(timezone.utc),
+        )
+        db.add(contact)
+        sent.append({"vendor": name, "email": email, "status": "sent"})
+
+    db.commit()
+    logger.info("RFQ sent to {} vendors for req {} by {}", len(sent), req_id, user.email)
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["sent_results"] = sent
+    ctx["total_sent"] = len(sent)
+    return templates.TemplateResponse("partials/requisitions/rfq_results.html", ctx)
 
 
 @router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
@@ -1211,34 +1388,9 @@ async def vendor_tab(
             .limit(50)
             .all()
         )
-        rows = []
-        for c in contacts:
-            phone_html = f'<a href="tel:{c.phone}" class="text-brand-500 hover:text-brand-600">{c.phone}</a>' if c.phone else '<span class="text-gray-500">\u2014</span>'
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.full_name or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.title or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.email or _DASH}</td>
-              <td class="px-4 py-2 text-sm">{phone_html}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.interaction_count or 0}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Interactions</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found for this vendor.</p></div>'
-        return HTMLResponse(html)
+        ctx["contacts"] = contacts
+        ctx["vendor"] = vendor
+        return templates.TemplateResponse("partials/vendors/tabs/contacts.html", ctx)
 
     elif tab == "analytics":
         html = f"""<div class="space-y-6">
