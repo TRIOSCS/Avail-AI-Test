@@ -1132,6 +1132,225 @@ async def reconfirm_offer(
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
+# ── Sprint 2: Offer Management Completion ─────────────────────────────
+
+
+@router.get("/v2/partials/requisitions/{req_id}/offers/{offer_id}/edit-form", response_class=HTMLResponse)
+async def edit_offer_form(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline edit form for an existing offer."""
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    return templates.TemplateResponse(
+        "partials/requisitions/edit_offer_form.html",
+        {"request": request, "offer": offer, "req_id": req_id, "requirements": requirements},
+    )
+
+
+@router.post("/v2/partials/requisitions/{req_id}/offers/{offer_id}/edit", response_class=HTMLResponse)
+async def edit_offer(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save edits to an offer and return refreshed offers tab."""
+    from ..models.intelligence import ChangeLog
+
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+
+    form = await request.form()
+    trackable = ["vendor_name", "qty_available", "unit_price", "lead_time", "condition", "date_code", "moq", "notes"]
+    now = datetime.now(timezone.utc)
+
+    for field in trackable:
+        new_val = form.get(field, "").strip()
+        old_val = str(getattr(offer, field) or "")
+        if new_val != old_val and new_val:
+            if field in ("qty_available", "moq"):
+                try:
+                    setattr(offer, field, int(new_val))
+                except ValueError:
+                    continue
+            elif field == "unit_price":
+                try:
+                    setattr(offer, field, float(new_val))
+                except ValueError:
+                    continue
+            else:
+                setattr(offer, field, new_val)
+            db.add(ChangeLog(
+                entity_type="offer", entity_id=offer_id, user_id=user.id,
+                field_name=field, old_value=old_val, new_value=new_val,
+            ))
+
+    req_id_val = form.get("requirement_id", "")
+    if req_id_val:
+        offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
+
+    offer.updated_at = now
+    offer.updated_by_id = user.id
+    db.commit()
+    logger.info("Offer {} edited by {}", offer_id, user.email)
+
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.delete("/v2/partials/requisitions/{req_id}/offers/{offer_id}", response_class=HTMLResponse)
+async def delete_offer_htmx(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete an offer and return refreshed offers tab."""
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    db.delete(offer)
+    db.commit()
+    logger.info("Offer {} deleted by {}", offer_id, user.email)
+
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/offers/{offer_id}/mark-sold", response_class=HTMLResponse)
+async def mark_offer_sold_htmx(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark an offer as sold and return refreshed offers tab."""
+    from ..models.intelligence import ChangeLog
+
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.status == "sold":
+        return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+    old_status = offer.status
+    offer.status = "sold"
+    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_by_id = user.id
+    db.add(ChangeLog(
+        entity_type="offer", entity_id=offer_id, user_id=user.id,
+        field_name="status", old_value=old_status, new_value="sold",
+    ))
+    db.commit()
+    logger.info("Offer {} marked sold by {}", offer_id, user.email)
+
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.get("/v2/partials/offers/review-queue", response_class=HTMLResponse)
+async def offer_review_queue(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the offer review queue page — medium-confidence AI-parsed offers."""
+    offers = (
+        db.query(Offer)
+        .filter(Offer.status == "pending_review")
+        .order_by(Offer.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return templates.TemplateResponse(
+        "partials/offers/review_queue.html",
+        {"request": request, "offers": offers, "user": user},
+    )
+
+
+@router.post("/v2/partials/offers/{offer_id}/promote", response_class=HTMLResponse)
+async def promote_offer_htmx(
+    request: Request,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Promote a pending_review offer to active and return refreshed queue."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.status != "pending_review":
+        raise HTTPException(400, "Only pending_review offers can be promoted")
+
+    offer.status = "active"
+    offer.approved_by_id = user.id
+    offer.approved_at = datetime.now(timezone.utc)
+    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_by_id = user.id
+    db.commit()
+    logger.info("Offer {} promoted by {}", offer_id, user.email)
+
+    return await offer_review_queue(request=request, user=user, db=db)
+
+
+@router.post("/v2/partials/offers/{offer_id}/reject", response_class=HTMLResponse)
+async def reject_offer_htmx(
+    request: Request,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reject a pending_review offer and return refreshed queue."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.status != "pending_review":
+        raise HTTPException(400, "Only pending_review offers can be rejected")
+
+    offer.status = "rejected"
+    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_by_id = user.id
+    db.commit()
+    logger.info("Offer {} rejected by {}", offer_id, user.email)
+
+    return await offer_review_queue(request=request, user=user, db=db)
+
+
+@router.get("/v2/partials/offers/{offer_id}/changelog", response_class=HTMLResponse)
+async def offer_changelog(
+    request: Request,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render change history for an offer."""
+    from ..models.intelligence import ChangeLog
+
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    rows = (
+        db.query(ChangeLog)
+        .filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer_id)
+        .options(joinedload(ChangeLog.user))
+        .order_by(ChangeLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return templates.TemplateResponse(
+        "partials/offers/changelog.html",
+        {"request": request, "offer": offer, "changes": rows},
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/log-activity", response_class=HTMLResponse)
 async def log_activity(
     request: Request,

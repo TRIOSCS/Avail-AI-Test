@@ -1,0 +1,88 @@
+{# review_queue.html — Review queue for medium-confidence AI-parsed offers.
+   Receives: offers (list[Offer]), user (User).
+   Called by: htmx_views.py offer_review_queue route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold text-gray-900">Offer Review Queue</h2>
+    <span class="text-sm text-gray-500">{{ offers|length }} pending review</span>
+  </div>
+
+  {% if offers %}
+  <div class="space-y-3">
+    {% for o in offers %}
+    <div class="bg-white border border-gray-200 rounded-lg p-4 hover:border-brand-300 transition-colors">
+      <div class="flex items-start justify-between">
+        <div class="flex-1">
+          <div class="flex items-center gap-3 mb-2">
+            <span class="text-sm font-semibold text-gray-900">{{ o.vendor_name or '—' }}</span>
+            <span class="font-mono text-sm text-gray-600">{{ o.mpn or '—' }}</span>
+            {% if o.parse_confidence is not none %}
+            <span class="inline-flex items-center gap-1 text-xs">
+              {% if o.parse_confidence and o.parse_confidence >= 0.8 %}
+              <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+              <span class="text-emerald-700">{{ (o.parse_confidence * 100)|int }}%</span>
+              {% elif o.parse_confidence and o.parse_confidence >= 0.5 %}
+              <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+              <span class="text-amber-700">{{ (o.parse_confidence * 100)|int }}%</span>
+              {% else %}
+              <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+              <span class="text-gray-500">{{ (o.parse_confidence * 100)|int if o.parse_confidence else 0 }}%</span>
+              {% endif %}
+            </span>
+            {% endif %}
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-sm">
+            <div>
+              <span class="text-gray-500">Qty:</span>
+              <span class="text-gray-900">{{ "{:,}".format(o.qty_available) if o.qty_available else '—' }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Price:</span>
+              <span class="text-gray-900">{{ "${:,.4f}".format(o.unit_price) if o.unit_price else 'RFQ' }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Lead:</span>
+              <span class="text-gray-900">{{ o.lead_time or '—' }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Source:</span>
+              <span class="text-gray-900">{{ o.source or '—' }}</span>
+            </div>
+          </div>
+          {% if o.requisition_id %}
+          <div class="mt-1 text-xs text-gray-400">
+            REQ-{{ "%03d"|format(o.requisition_id) }}
+            {% if o.created_at %} · {{ o.created_at.strftime('%b %d, %H:%M') }}{% endif %}
+          </div>
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-2 ml-4">
+          <button hx-post="/v2/partials/offers/{{ o.id }}/promote"
+                  hx-target="#review-queue-content"
+                  class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-500 rounded hover:bg-emerald-600">
+            Approve
+          </button>
+          <button hx-post="/v2/partials/offers/{{ o.id }}/reject"
+                  hx-target="#review-queue-content"
+                  hx-confirm="Reject this offer?"
+                  class="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded hover:bg-rose-100">
+            Reject
+          </button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="p-8 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <p class="text-sm text-gray-500 mt-2">No offers pending review.</p>
+    <p class="text-xs text-gray-400 mt-1">AI-parsed offers with medium confidence appear here for human verification.</p>
+  </div>
+  {% endif %}
+</div>
