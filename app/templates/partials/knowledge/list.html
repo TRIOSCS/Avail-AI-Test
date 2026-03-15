@@ -1,0 +1,58 @@
+{# list.html — Knowledge base entries list.
+   Receives: entries (list[KnowledgeEntry]), q (str).
+   Called by: htmx_views.py knowledge_list route.
+   Depends on: HTMX, Tailwind CSS.
+#}
+<div class="max-w-3xl mx-auto">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-bold text-gray-900">Knowledge Base</h2>
+  </div>
+
+  {# Search #}
+  <div class="mb-4">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search knowledge base..."
+           hx-get="/v2/partials/knowledge"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#knowledge-list"
+           class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-brand-500 focus:border-brand-500">
+  </div>
+
+  {# Add entry form #}
+  <form hx-post="/v2/partials/knowledge"
+        hx-target="#knowledge-list"
+        class="bg-gray-50 rounded-lg border border-gray-200 p-3 mb-4 space-y-2">
+    <div class="flex gap-2">
+      <select name="entry_type" class="px-2 py-1.5 text-sm border border-gray-300 rounded">
+        <option value="note">Note</option>
+        <option value="fact">Fact</option>
+        <option value="question">Question</option>
+      </select>
+    </div>
+    <textarea name="content" rows="2" placeholder="Enter knowledge content..."
+              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"></textarea>
+    <button type="submit"
+            class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+      Add Entry
+    </button>
+  </form>
+
+  <div id="knowledge-list">
+    {% if entries %}
+    <div class="space-y-2">
+      {% for e in entries %}
+      <div class="bg-white rounded-lg border border-gray-200 p-3">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600">{{ e.entry_type }}</span>
+        </div>
+        <p class="text-sm text-gray-600">{{ e.content[:200] }}{{ '...' if e.content|length > 200 }}</p>
+        {% if e.created_at %}
+        <p class="text-xs text-gray-400 mt-1">{{ e.created_at.strftime('%b %d, %Y') }}</p>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 text-center py-6">No knowledge entries found.</p>
+    {% endif %}
+  </div>
+</div>

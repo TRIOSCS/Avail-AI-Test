@@ -1,0 +1,18 @@
+{# stats.html — Prospecting stats summary panel.
+   Receives: total (int), buyer_ready (int).
+   Called by: htmx_views.py prospecting_stats route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-3">Prospecting Stats</h3>
+  <div class="grid grid-cols-2 gap-4">
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Total Prospects</p>
+      <p class="text-xl font-bold text-gray-900">{{ total }}</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Buyer Ready</p>
+      <p class="text-xl font-bold text-emerald-600">{{ buyer_ready }}</p>
+    </div>
+  </div>
+</div>

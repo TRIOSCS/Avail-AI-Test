@@ -1,0 +1,37 @@
+{# insights.html — MPN insights panel with pricing data.
+   Receives: material (MaterialCard), offers (list[Offer]).
+   Called by: htmx_views.py material_insights route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-3">Insights — {{ material.display_mpn }}</h3>
+
+  <div class="grid grid-cols-2 gap-3 mb-3 text-sm">
+    {% if material.manufacturer %}
+    <div>
+      <p class="text-xs text-gray-500">Manufacturer</p>
+      <p class="text-gray-900">{{ material.manufacturer }}</p>
+    </div>
+    {% endif %}
+    {% if material.search_count %}
+    <div>
+      <p class="text-xs text-gray-500">Search Count</p>
+      <p class="text-gray-900">{{ material.search_count }}</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if offers %}
+  <div class="border-t border-gray-200 pt-3">
+    <p class="text-xs font-medium text-gray-700 mb-2">Recent Pricing ({{ offers|length }} offers)</p>
+    {% set prices = offers|map(attribute='unit_price')|list %}
+    <div class="grid grid-cols-3 gap-2 text-center text-sm">
+      <div><p class="text-xs text-gray-500">Low</p><p class="font-medium text-emerald-700">${{ "%.4f"|format(prices|min) }}</p></div>
+      <div><p class="text-xs text-gray-500">Avg</p><p class="font-medium text-gray-900">${{ "%.4f"|format(prices|sum / prices|length) }}</p></div>
+      <div><p class="text-xs text-gray-500">High</p><p class="font-medium text-rose-700">${{ "%.4f"|format(prices|max) }}</p></div>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-sm text-gray-400 text-center py-2">No pricing data available.</p>
+  {% endif %}
+</div>

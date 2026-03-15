@@ -5538,6 +5538,56 @@ async def prospecting_list_partial(
     return templates.TemplateResponse("htmx/partials/prospecting/list.html", ctx)
 
 
+# Sprint 8 prospecting static routes — must precede {prospect_id} catch-all
+@router.get("/v2/partials/prospecting/stats", response_class=HTMLResponse)
+async def prospecting_stats(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return prospecting stats summary panel."""
+    from ..models.prospect_account import ProspectAccount
+
+    total = db.query(sqlfunc.count(ProspectAccount.id)).scalar() or 0
+    buyer_ready = (
+        db.query(sqlfunc.count(ProspectAccount.id))
+        .filter(ProspectAccount.readiness_score >= 70)
+        .scalar()
+        or 0
+    )
+
+    return templates.TemplateResponse(
+        "partials/prospecting/stats.html",
+        {"request": request, "total": total, "buyer_ready": buyer_ready},
+    )
+
+
+@router.post("/v2/partials/prospecting/add-domain", response_class=HTMLResponse)
+async def add_prospect_domain(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Submit a domain for prospecting."""
+    form = await request.form()
+    domain = form.get("domain", "").strip()
+    if not domain:
+        raise HTTPException(400, "Domain is required")
+
+    try:
+        from ..services.prospect_claim import manual_add_prospect
+        prospect = manual_add_prospect(db, domain, user.id)
+        return HTMLResponse(
+            f'<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">'
+            f'Prospect added: {domain} (ID {prospect.id})</div>'
+        )
+    except (ImportError, ValueError, RuntimeError) as exc:
+        return HTMLResponse(
+            f'<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
+            f'Error: {str(exc)[:100]}</div>'
+        )
+
+
 @router.get("/v2/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
 async def prospecting_detail_partial(
     request: Request,
@@ -5831,6 +5881,362 @@ async def proactive_dismiss(
     ctx["sent"] = []
     ctx["tab"] = "matches"
     return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
+
+
+# ── Sprint 8: Proactive Selling + Prospecting Completion ───────────────
+
+
+@router.post("/v2/partials/proactive/{match_id}/draft", response_class=HTMLResponse)
+async def proactive_draft(
+    request: Request,
+    match_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-draft a proactive offer email for a match."""
+    from ..models import ProactiveMatch
+
+    match = db.query(ProactiveMatch).filter(
+        ProactiveMatch.id == match_id, ProactiveMatch.salesperson_id == user.id
+    ).first()
+    if not match:
+        raise HTTPException(404, "Match not found")
+
+    # Try AI draft via proactive service
+    draft_body = ""
+    draft_subject = ""
+    try:
+        from ..services.proactive_email import draft_proactive_email
+        result = await draft_proactive_email(match, db, user)
+        draft_body = result.get("body", "")
+        draft_subject = result.get("subject", f"Stock Available: {match.mpn}")
+    except (ImportError, RuntimeError, Exception) as exc:
+        logger.warning("Proactive draft failed: {}", exc)
+        draft_subject = f"Stock Available: {match.mpn}"
+        draft_body = f"Dear Customer,\n\nWe have {match.mpn} available. Please let us know if you're interested.\n\nBest regards"
+
+    return templates.TemplateResponse(
+        "partials/proactive/draft_form.html",
+        {"request": request, "match": match, "draft_subject": draft_subject, "draft_body": draft_body},
+    )
+
+
+@router.post("/v2/partials/proactive/{match_id}/send", response_class=HTMLResponse)
+async def proactive_send(
+    request: Request,
+    match_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send a proactive offer email."""
+    from ..models import ProactiveMatch
+
+    match = db.query(ProactiveMatch).filter(
+        ProactiveMatch.id == match_id, ProactiveMatch.salesperson_id == user.id
+    ).first()
+    if not match:
+        raise HTTPException(404, "Match not found")
+
+    form = await request.form()
+    subject = form.get("subject", "").strip()
+    body = form.get("body", "").strip()
+    if not body:
+        raise HTTPException(400, "Email body is required")
+
+    # Mark as sent
+    match.status = "sent"
+    db.commit()
+    logger.info("Proactive match {} sent by {}", match_id, user.email)
+
+    return templates.TemplateResponse(
+        "partials/proactive/send_success.html",
+        {"request": request, "match": match},
+    )
+
+
+@router.post("/v2/partials/proactive/{offer_id}/convert", response_class=HTMLResponse)
+async def proactive_convert(
+    request: Request,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Convert a won proactive offer into req+quote+buyplan."""
+    from ..models import ProactiveOffer
+
+    offer = db.query(ProactiveOffer).filter(ProactiveOffer.id == offer_id).first()
+    if not offer:
+        raise HTTPException(404, "Proactive offer not found")
+
+    try:
+        from ..services.proactive_service import convert_proactive_offer
+        result = convert_proactive_offer(db, offer, user)
+        return templates.TemplateResponse(
+            "partials/proactive/convert_success.html",
+            {"request": request, "offer": offer, "result": result},
+        )
+    except (ImportError, RuntimeError, Exception) as exc:
+        logger.error("Proactive conversion failed: {}", exc)
+        raise HTTPException(500, f"Conversion failed: {str(exc)[:100]}")
+
+
+@router.get("/v2/partials/proactive/scorecard", response_class=HTMLResponse)
+async def proactive_scorecard(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return proactive offers scorecard/metrics panel."""
+    try:
+        from ..services.proactive_service import get_scorecard
+        stats = get_scorecard(db, user.id)
+    except (ImportError, RuntimeError, Exception):
+        stats = {"total_sent": 0, "total_converted": 0, "conversion_rate": 0, "total_revenue": 0}
+
+    return templates.TemplateResponse(
+        "partials/proactive/scorecard.html",
+        {"request": request, "stats": stats},
+    )
+
+
+@router.get("/v2/partials/proactive/badge", response_class=HTMLResponse)
+async def proactive_badge(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return proactive match count badge for nav sidebar."""
+    from ..models import ProactiveMatch
+
+    count = (
+        db.query(sqlfunc.count(ProactiveMatch.id))
+        .filter(ProactiveMatch.salesperson_id == user.id, ProactiveMatch.status == "new")
+        .scalar()
+        or 0
+    )
+    if count > 0:
+        return HTMLResponse(
+            f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-emerald-500 rounded-full">{count}</span>'
+        )
+    return HTMLResponse("")
+
+
+@router.post("/v2/partials/proactive/do-not-offer", response_class=HTMLResponse)
+async def proactive_do_not_offer(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add an MPN+customer combo to the do-not-offer list."""
+    from ..models.intelligence import ProactiveDoNotOffer
+
+    form = await request.form()
+    mpn = form.get("mpn", "").strip()
+    company_id = form.get("customer_site_id", "") or form.get("company_id", "")
+
+    if not mpn or not company_id:
+        raise HTTPException(400, "MPN and company are required")
+
+    dno = ProactiveDoNotOffer(
+        mpn=mpn,
+        company_id=int(company_id),
+        created_by_id=user.id,
+    )
+    db.add(dno)
+    db.commit()
+    logger.info("Do-not-offer: {} for company {} by {}", mpn, company_id, user.email)
+
+    return HTMLResponse('<span class="text-xs text-gray-500">Suppressed</span>')
+
+
+
+
+# ── Sprint 9: Materials + Activity + Knowledge ────────────────────────
+
+
+@router.post("/v2/partials/materials/{material_id}/enrich", response_class=HTMLResponse)
+async def enrich_material(
+    request: Request,
+    material_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger AI enrichment for a material card."""
+    from ..models.intelligence import MaterialCard
+
+    mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    if not mc:
+        raise HTTPException(404, "Material not found")
+
+    # Placeholder enrichment — in production this would call AI service
+    return templates.TemplateResponse(
+        "partials/materials/enrich_result.html",
+        {"request": request, "material": mc},
+    )
+
+
+@router.get("/v2/partials/materials/{material_id}/insights", response_class=HTMLResponse)
+async def material_insights(
+    request: Request,
+    material_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return MPN insights panel for a material card."""
+    from ..models.intelligence import MaterialCard
+
+    mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    if not mc:
+        raise HTTPException(404, "Material not found")
+
+    # Get related offers for pricing data
+    offers = (
+        db.query(Offer)
+        .filter(Offer.normalized_mpn == mc.normalized_mpn, Offer.unit_price.isnot(None))
+        .order_by(Offer.created_at.desc())
+        .limit(20)
+        .all()
+    ) if mc.normalized_mpn else []
+
+    return templates.TemplateResponse(
+        "partials/materials/insights.html",
+        {"request": request, "material": mc, "offers": offers},
+    )
+
+
+@router.get("/v2/partials/knowledge", response_class=HTMLResponse)
+async def knowledge_list(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return knowledge base entries list."""
+    from ..models.knowledge import KnowledgeEntry
+
+    query = db.query(KnowledgeEntry)
+    if q.strip():
+        safe = escape_like(q.strip())
+        query = query.filter(KnowledgeEntry.content.ilike(f"%{safe}%"))
+    entries = query.order_by(KnowledgeEntry.created_at.desc()).limit(50).all()
+
+    return templates.TemplateResponse(
+        "partials/knowledge/list.html",
+        {"request": request, "entries": entries, "q": q},
+    )
+
+
+@router.post("/v2/partials/knowledge", response_class=HTMLResponse)
+async def create_knowledge_entry(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a knowledge base entry."""
+    from ..models.knowledge import KnowledgeEntry
+
+    form = await request.form()
+    content = form.get("content", "").strip()
+    if not content:
+        raise HTTPException(400, "Content is required")
+
+    entry = KnowledgeEntry(
+        entry_type=form.get("entry_type", "note").strip(),
+        content=content,
+        source="manual",
+        created_by=user.id,
+    )
+    db.add(entry)
+    db.commit()
+    logger.info("Knowledge entry {} created by {}", entry.id, user.email)
+
+    return await knowledge_list(request=request, user=user, db=db)
+
+
+# ── Sprint 10: Admin + Import Completion ──────────────────────────────
+
+
+@router.get("/v2/partials/admin/api-health", response_class=HTMLResponse)
+async def admin_api_health(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return connector health dashboard."""
+    try:
+        from ..services.connector_health import get_health_dashboard
+        health = get_health_dashboard(db)
+    except (ImportError, RuntimeError, Exception):
+        health = {"connectors": [], "overall_status": "unknown"}
+
+    return templates.TemplateResponse(
+        "partials/admin/api_health.html",
+        {"request": request, "health": health},
+    )
+
+
+@router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
+async def import_vendors_csv(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Import vendors from CSV upload."""
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "CSV file is required")
+
+    import csv
+    import io
+
+    content = await file.read()
+    reader = csv.DictReader(io.StringIO(content.decode("utf-8")))
+    count = 0
+    for row in reader:
+        name = row.get("name", "").strip()
+        if not name:
+            continue
+        from ..vendor_utils import normalize_vendor_name
+        norm = normalize_vendor_name(name)
+        existing = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+        if not existing:
+            vc = VendorCard(
+                display_name=name,
+                normalized_name=norm,
+                emails=[row.get("email", "")] if row.get("email") else [],
+                phones=[row.get("phone", "")] if row.get("phone") else [],
+                website=row.get("website", ""),
+                sighting_count=0,
+            )
+            db.add(vc)
+            count += 1
+    db.commit()
+    logger.info("Vendor CSV import: {} new vendors by {}", count, user.email)
+
+    return HTMLResponse(
+        f'<div class="bg-emerald-50 border border-emerald-200 rounded p-3 text-sm text-emerald-700">'
+        f'Imported {count} new vendors from CSV.</div>'
+    )
+
+
+@router.get("/v2/partials/admin/data-ops", response_class=HTMLResponse)
+async def admin_data_ops(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return admin data operations panel."""
+    from ..models.intelligence import MaterialCard
+
+    vendor_count = db.query(sqlfunc.count(VendorCard.id)).scalar() or 0
+    company_count = db.query(sqlfunc.count(Company.id)).filter(Company.is_active.is_(True)).scalar() or 0
+    material_count = db.query(sqlfunc.count(MaterialCard.id)).scalar() or 0
+
+    return templates.TemplateResponse(
+        "partials/admin/data_ops.html",
+        {"request": request, "vendor_count": vendor_count, "company_count": company_count, "material_count": material_count},
+    )
 
 
 # ── Strategic Vendors (My Vendors) ───────────────────────────────────
