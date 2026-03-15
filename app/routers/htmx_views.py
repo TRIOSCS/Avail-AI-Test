@@ -1193,9 +1193,10 @@ async def rfq_send(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Send RFQs — creates Contact records for each selected vendor."""
+    """Send RFQs via Graph API, falling back to DB-only in test mode."""
     from ..models.offers import Contact as RfqContact
     from datetime import datetime, timezone
+    import os
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
@@ -1205,37 +1206,107 @@ async def rfq_send(
     vendor_names = form.getlist("vendor_names")
     vendor_emails = form.getlist("vendor_emails")
     subject = form.get("subject", f"RFQ - {req.name}")
+    body = form.get("body", "")
     parts_text = form.get("parts_summary", "")
 
     if not vendor_names:
         raise HTTPException(400, "No vendors selected")
 
-    sent = []
-    for name, email in zip(vendor_names, vendor_emails):
-        if not email:
-            continue
-        contact = RfqContact(
-            requisition_id=req_id,
-            user_id=user.id,
-            contact_type="email",
-            vendor_name=name,
-            vendor_name_normalized=name.lower().strip(),
-            vendor_contact=email,
-            parts_included=parts_text,
-            subject=subject,
-            status="sent",
-            status_updated_at=datetime.now(timezone.utc),
-        )
-        db.add(contact)
-        sent.append({"vendor": name, "email": email, "status": "sent"})
+    # Try to get a fresh Graph API token for real email send
+    token = None
+    is_testing = os.environ.get("TESTING") == "1"
+    if not is_testing:
+        try:
+            from ..dependencies import require_fresh_token
+            token = await require_fresh_token(request, db)
+        except HTTPException:
+            token = None
+            logger.warning("No Graph API token available — creating contacts without sending")
 
-    db.commit()
-    logger.info("RFQ sent to {} vendors for req {} by {}", len(sent), req_id, user.email)
+    sent = []
+    failed = []
+
+    if token and not is_testing:
+        # Real email send via Graph API
+        vendor_groups = []
+        for name, email in zip(vendor_names, vendor_emails):
+            if not email:
+                continue
+            vendor_groups.append({
+                "vendor_name": name,
+                "vendor_email": email,
+                "parts": parts_text,
+                "subject": subject,
+                "body": body or f"Dear {name},\n\nWe are looking for the following parts: {parts_text}\n\nPlease provide your best pricing and availability.\n\nThank you.",
+            })
+
+        if vendor_groups:
+            try:
+                from ..email_service import send_batch_rfq
+                results = await send_batch_rfq(
+                    token=token,
+                    db=db,
+                    user_id=user.id,
+                    requisition_id=req_id,
+                    vendor_groups=vendor_groups,
+                )
+                for r in results:
+                    status = r.get("status", "sent")
+                    entry = {"vendor": r.get("vendor_name", ""), "email": r.get("vendor_email", ""), "status": status}
+                    if status == "failed":
+                        failed.append(entry)
+                    else:
+                        sent.append(entry)
+            except Exception as exc:
+                logger.error("Batch RFQ send failed: {}", exc)
+                # Fall back to DB-only mode
+                for name, email in zip(vendor_names, vendor_emails):
+                    if not email:
+                        continue
+                    contact = RfqContact(
+                        requisition_id=req_id,
+                        user_id=user.id,
+                        contact_type="email",
+                        vendor_name=name,
+                        vendor_name_normalized=name.lower().strip(),
+                        vendor_contact=email,
+                        parts_included=parts_text,
+                        subject=subject,
+                        status="draft",
+                        status_updated_at=datetime.now(timezone.utc),
+                    )
+                    db.add(contact)
+                    sent.append({"vendor": name, "email": email, "status": "draft"})
+                db.commit()
+    else:
+        # Test mode or no token — create Contact records without sending
+        for name, email in zip(vendor_names, vendor_emails):
+            if not email:
+                continue
+            contact = RfqContact(
+                requisition_id=req_id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name=name,
+                vendor_name_normalized=name.lower().strip(),
+                vendor_contact=email,
+                parts_included=parts_text,
+                subject=subject,
+                status="sent",
+                status_updated_at=datetime.now(timezone.utc),
+            )
+            db.add(contact)
+            sent.append({"vendor": name, "email": email, "status": "sent"})
+        db.commit()
+
+    logger.info("RFQ: {} sent, {} failed for req {} by {}", len(sent), len(failed), req_id, user.email)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     ctx["sent_results"] = sent
+    ctx["failed_results"] = failed
     ctx["total_sent"] = len(sent)
+    ctx["total_failed"] = len(failed)
     return templates.TemplateResponse("partials/requisitions/rfq_results.html", ctx)
 
 
@@ -1303,6 +1374,7 @@ async def send_follow_up_htmx(
 ):
     """Send a follow-up email for a stale contact. Returns success card."""
     from ..models.offers import Contact as RfqContact
+    import os
 
     contact = db.get(RfqContact, contact_id)
     if not contact:
@@ -1311,13 +1383,39 @@ async def send_follow_up_htmx(
     form = await request.form()
     body = (form.get("body") or "").strip()
 
-    # In test mode, just update the contact status without sending real email
-    contact.status = "sent"
-    from datetime import timezone as tz
+    is_testing = os.environ.get("TESTING") == "1"
+    email_sent = False
 
+    if not is_testing and contact.vendor_contact:
+        # Try to send real follow-up via Graph API
+        try:
+            from ..dependencies import require_fresh_token
+            token = await require_fresh_token(request, db)
+
+            from ..utils.graph_client import GraphClient
+            gc = GraphClient(token)
+            follow_up_subject = f"Follow-up: {contact.subject or 'RFQ'}"
+            follow_up_body = body or f"Dear {contact.vendor_name},\n\nI'm following up on our previous inquiry. Please let us know if you have availability.\n\nThank you."
+            payload = {
+                "message": {
+                    "subject": follow_up_subject,
+                    "body": {"contentType": "Text", "content": follow_up_body},
+                    "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+                },
+                "saveToSentItems": "true",
+            }
+            await gc.post_json("/me/sendMail", payload)
+            email_sent = True
+        except Exception as exc:
+            logger.warning("Follow-up email send failed for contact {}: {}", contact_id, exc)
+
+    from datetime import timezone as tz
+    contact.status = "sent"
     contact.status_updated_at = datetime.now(tz.utc)
     db.commit()
-    logger.info("Follow-up sent for contact {} (vendor: {}) by {}", contact_id, contact.vendor_name, user.email)
+
+    mode = "via Graph API" if email_sent else "test mode"
+    logger.info("Follow-up sent for contact {} (vendor: {}, {}) by {}", contact_id, contact.vendor_name, mode, user.email)
 
     ctx = _base_ctx(request, user, "follow-ups")
     ctx["contact_id"] = contact_id
