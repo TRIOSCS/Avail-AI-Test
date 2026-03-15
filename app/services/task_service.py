@@ -297,7 +297,7 @@ def on_requirement_added(db: Session, requisition_id: int, mpn: str, assigned_to
 
 
 def on_offer_received(db: Session, requisition_id: int, vendor_name: str, mpn: str, offer_id: int):
-    """Auto-generate 'Review offer' task when an offer comes in."""
+    """Auto-generate 'Review offer' task when a new offer comes in."""
     auto_create_task(
         db,
         requisition_id=requisition_id,
@@ -308,53 +308,52 @@ def on_offer_received(db: Session, requisition_id: int, vendor_name: str, mpn: s
     )
 
 
-def on_rfq_sent(db: Session, requisition_id: int, vendor_name: str, rfq_id: int):
-    """Auto-generate 'Awaiting response' task when RFQ is sent."""
+def on_email_offer_parsed(
+    db: Session, requisition_id: int, vendor_name: str, mpn: str, offer_id: int
+):
+    """Auto-generate 'Review email offer' task when email intelligence parses an offer."""
     auto_create_task(
         db,
         requisition_id=requisition_id,
-        title=f"Awaiting response from {vendor_name}",
+        title=f"Email offer from {vendor_name} for {mpn} — review",
         task_type="sourcing",
-        source_ref=f"rfq:{rfq_id}",
-        priority=1,
-        due_at=datetime.now(timezone.utc) + timedelta(days=3),
+        source_ref=f"email_offer:{offer_id}",
+        priority=3,
     )
 
 
-def on_rfq_no_response(db: Session, requisition_id: int, vendor_name: str, rfq_id: int):
-    """Auto-generate 'Follow up RFQ' task when no response after due date."""
+def on_buy_plan_assigned(
+    db: Session,
+    requisition_id: int,
+    buyer_id: int,
+    vendor_name: str,
+    mpn: str,
+    line_id: int,
+):
+    """Auto-generate 'Cut PO' task when a buy plan line is assigned to a buyer."""
     auto_create_task(
         db,
         requisition_id=requisition_id,
-        title=f"Follow up RFQ to {vendor_name}",
+        title=f"Cut PO — {vendor_name} for {mpn}",
+        task_type="buying",
+        source_ref=f"buyline:{line_id}",
+        priority=3,
+        assigned_to_id=buyer_id,
+    )
+
+
+def on_bid_due_soon(
+    db: Session, requisition_id: int, deadline: str, req_name: str
+):
+    """Auto-generate 'Bid due' alert task for a requisition approaching deadline."""
+    auto_create_task(
+        db,
+        requisition_id=requisition_id,
+        title=f"Bid due {deadline} — {req_name}",
         task_type="sourcing",
-        source_ref=f"followup:{rfq_id}",
+        source_ref=f"bid_due:{requisition_id}",
         priority=3,
-    )
-
-
-def on_quote_created(db: Session, requisition_id: int, customer_name: str, quote_id: int):
-    """Auto-generate 'Send quote' task when a quote is built."""
-    auto_create_task(
-        db,
-        requisition_id=requisition_id,
-        title=f"Send quote to {customer_name}",
-        task_type="sales",
-        source_ref=f"quote:{quote_id}",
-        priority=3,
-    )
-
-
-def on_quote_expiring(db: Session, requisition_id: int, quote_id: int):
-    """Auto-generate 'Quote expiring' task 2 days before expiry."""
-    auto_create_task(
-        db,
-        requisition_id=requisition_id,
-        title="Quote expires soon — follow up with customer",
-        task_type="sales",
-        source_ref=f"expiry:{quote_id}",
-        priority=3,
-        due_at=datetime.now(timezone.utc) + timedelta(days=2),
+        due_at=datetime.now(timezone.utc) + timedelta(days=1),
     )
 
 
@@ -411,13 +410,13 @@ For each task, return:
 
 Scoring factors:
 - Due date proximity (overdue = highest)
-- Task type: sales tasks with expiring quotes are urgent
+- Task type: buying tasks (cut PO) are urgent when plan is active
 - Priority level set by buyer
 - How long the task has been open
 - Tasks from system events (auto-generated) should score slightly lower unless overdue
 
 Return JSON array matching input order:
-[{"priority_score": 0.85, "risk_flag": "Quote expires tomorrow"}, ...]
+[{"priority_score": 0.85, "risk_flag": "Bid due tomorrow"}, ...]
 """
 
 

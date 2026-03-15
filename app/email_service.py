@@ -955,6 +955,19 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 db.add(offer)
                 db.flush()
 
+                # Auto-generate task for email-parsed offer
+                try:
+                    from app.services.task_service import on_email_offer_parsed
+
+                    on_email_offer_parsed(
+                        db, offer.requisition_id,
+                        offer.vendor_name or "Unknown",
+                        offer.mpn or "?",
+                        offer.id,
+                    )
+                except Exception:
+                    logger.debug("Task auto-gen for email offer failed", exc_info=True)
+
                 # Auto-capture offer facts into Knowledge Ledger
                 try:
                     from app.services.knowledge_service import capture_offer_fact

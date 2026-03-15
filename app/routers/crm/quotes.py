@@ -232,19 +232,6 @@ async def create_quote(
         db.add(ql)
     db.commit()
 
-    # Auto-generate send-quote task
-    try:
-        from ...services.task_service import on_quote_created
-
-        customer_name = ""
-        if site and hasattr(site, "company") and site.company:
-            customer_name = site.company.name
-        elif site:
-            customer_name = getattr(site, "contact_name", "") or ""
-        on_quote_created(db, req_id, customer_name, quote.id)
-    except Exception:
-        logger.debug("Task auto-gen for quote failed", exc_info=True)
-
     # Auto-advance per-part sourcing status to "quoted"
     try:
         from app.services.requirement_status import on_quote_built
@@ -411,6 +398,7 @@ async def send_quote(
     old_status = req.status if req else None
     if req and req.status not in ("won", "lost", "archived"):
         req.status = "quoted"
+
     db.commit()
     return {
         "ok": True,
