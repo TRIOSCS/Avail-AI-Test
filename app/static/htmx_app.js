@@ -102,8 +102,46 @@ Alpine.store('preferences', Alpine.$persist({
 
 // ── HTMX config ─────────────────────────────────────────────
 htmx.config.defaultSwapStyle = 'innerHTML';
-htmx.config.historyCacheSize = 0;
+htmx.config.historyCacheSize = 10;
 htmx.config.selfRequestsOnly = true;
+
+// ── Derive currentView from URL path ────────────────────────
+function _viewFromPath(path) {
+    if (/\/buy-plans(\/|$)/.test(path)) return 'buy-plans';
+    if (/\/quotes(\/|$)/.test(path)) return 'quotes';
+    if (/\/prospecting(\/|$)/.test(path)) return 'prospecting';
+    if (/\/proactive(\/|$)/.test(path)) return 'proactive';
+    if (/\/strategic(\/|$)/.test(path)) return 'strategic';
+    if (/\/settings(\/|$)/.test(path)) return 'settings';
+    if (/\/vendors(\/|$)/.test(path)) return 'vendors';
+    if (/\/companies(\/|$)/.test(path)) return 'companies';
+    if (/\/search(\/|$)/.test(path)) return 'search';
+    if (/\/tasks(\/|$)/.test(path)) return 'tasks';
+    if (/\/requisitions(\/|$)/.test(path)) return 'requisitions';
+    return 'requisitions';
+}
+
+function _syncSidebarToUrl() {
+    var body = document.body;
+    if (body && body._x_dataStack) {
+        body._x_dataStack[0].currentView = _viewFromPath(window.location.pathname);
+    }
+}
+
+// Sync sidebar on browser back/forward
+window.addEventListener('popstate', function () {
+    _syncSidebarToUrl();
+});
+
+// Sync sidebar after HTMX pushes a new URL (covers all HTMX navigations)
+document.body.addEventListener('htmx:pushedIntoHistory', function () {
+    _syncSidebarToUrl();
+});
+
+// After HTMX restores a cached page on back/forward, re-sync sidebar
+document.body.addEventListener('htmx:historyRestore', function () {
+    _syncSidebarToUrl();
+});
 
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
