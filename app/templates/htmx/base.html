@@ -217,6 +217,18 @@
     <span x-text="$store.toast.message"></span>
   </div>
 
+  {# Icon templates for SSE progress (cloned by Alpine sourcingProgress component) #}
+  <template id="tpl-icon-check">
+    <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+  </template>
+  <template id="tpl-icon-fail">
+    <svg class="w-4 h-4 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    </svg>
+  </template>
+
   {# 401 handler and HTMX config are in htmx_app.js (Vite bundle) #}
 </body>
 </html>

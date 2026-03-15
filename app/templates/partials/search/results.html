@@ -1,0 +1,83 @@
+{# Part Search results — table of sightings with source badges.
+   Loaded via HTMX POST /v2/partials/search/run into #search-results.
+   Called by: htmx_views.search_run
+   Depends on: partials/shared/source_badge.html
+   Context vars: results (list[dict]), mpn (str), elapsed_seconds (float), error (str|None) #}
+
+{% if error %}
+<div class="p-4 bg-rose-50 text-rose-700 rounded-lg border border-rose-200">
+  <p class="font-medium">Search failed</p>
+  <p class="text-sm mt-1">{{ error }}</p>
+  <button hx-post="/v2/partials/search/run"
+          hx-target="#search-results"
+          hx-vals='{"mpn": "{{ mpn }}"}'
+          class="mt-3 text-sm text-brand-500 hover:text-brand-600 font-medium">
+    Retry
+  </button>
+</div>
+{% elif results %}
+<div class="space-y-3">
+  {# Results header #}
+  <div class="flex items-center justify-between">
+    <p class="text-sm text-gray-500">
+      <span class="font-semibold text-gray-900">{{ results|length }}</span> results for
+      <span class="font-mono font-semibold text-gray-900">{{ mpn }}</span>
+      in {{ "%.1f"|format(elapsed_seconds) }}s
+    </p>
+  </div>
+
+  {# Results table #}
+  <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
+    <table class="min-w-full divide-y divide-brand-200">
+      <thead class="bg-brand-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-brand-600 uppercase tracking-wider">Vendor</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-brand-600 uppercase tracking-wider">MPN</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-brand-600 uppercase tracking-wider">Manufacturer</th>
+          <th class="px-4 py-3 text-right text-xs font-semibold text-brand-600 uppercase tracking-wider">Qty Available</th>
+          <th class="px-4 py-3 text-right text-xs font-semibold text-brand-600 uppercase tracking-wider">Unit Price</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-brand-600 uppercase tracking-wider">Source</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-brand-600 uppercase tracking-wider">Lead Time</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% for r in results %}
+        <tr class="hover:bg-brand-50">
+          <td class="px-4 py-3 text-sm font-medium text-gray-900">
+            {{ r.vendor_name or 'Unknown' }}
+          </td>
+          <td class="px-4 py-3 text-sm font-mono text-gray-900">
+            {{ r.mpn_matched or r.mpn or 'n/a' }}
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600">
+            {{ r.manufacturer or 'n/a' }}
+          </td>
+          <td class="px-4 py-3 text-sm text-right text-gray-900">
+            {{ '{:,}'.format(r.qty_available) if r.qty_available else 'n/a' }}
+          </td>
+          <td class="px-4 py-3 text-sm text-right text-gray-900 font-medium">
+            {% if r.unit_price %}${{ '%.4f'|format(r.unit_price) }}{% else %}RFQ{% endif %}
+          </td>
+          <td class="px-4 py-3">
+            {% include "partials/shared/source_badge.html" %}
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-600">
+            {{ r.lead_time or (r.lead_time_days ~ ' days' if r.lead_time_days else 'n/a') }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+{# Empty results #}
+<div class="flex flex-col items-center justify-center py-16 text-gray-400">
+  <svg class="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+  </svg>
+  <p class="mt-4 text-lg">No results found for <span class="font-mono font-semibold">{{ mpn }}</span></p>
+  <p class="text-sm mt-1">Try a different part number or check back later</p>
+</div>
+{% endif %}

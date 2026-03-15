@@ -1,0 +1,50 @@
+{# Part Search form — large input with search button and empty state.
+   Loaded via HTMX GET /v2/partials/search into #main-content.
+   Called by: htmx_views.search_form_partial
+   Depends on: partials/search/results.html (loaded into #search-results by form post) #}
+
+<div id="breadcrumb" hx-swap-oob="true">Part Search</div>
+
+<div class="space-y-6">
+  {# Header #}
+  <h1 class="text-2xl font-bold text-gray-900">Part Search</h1>
+
+  {# Search form #}
+  <form hx-post="/v2/partials/search/run"
+        hx-target="#search-results"
+        hx-indicator="#search-spinner">
+    <div class="flex gap-3">
+      <input type="text" name="mpn"
+             placeholder="Enter part number (e.g. LM317T, STM32F407VG)"
+             class="flex-1 px-4 py-3 text-lg border border-brand-200 rounded-lg
+                    focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+             required
+             x-data x-ref="mpn"
+             @input="$refs.searchBtn.disabled = !$refs.mpn.value.trim()">
+      <button type="submit" x-ref="searchBtn" disabled
+              class="px-6 py-3 bg-brand-500 text-white font-semibold rounded-lg
+                     hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed
+                     flex items-center gap-2">
+        <span id="search-spinner" class="htmx-indicator">
+          <svg class="inline h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </span>
+        Search All Sources
+      </button>
+    </div>
+  </form>
+
+  {# Results container #}
+  <div id="search-results">
+    {# Empty state (shown initially) #}
+    <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+      <svg class="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <p class="mt-4 text-lg">Enter a part number to search all sources</p>
+    </div>
+  </div>
+</div>
