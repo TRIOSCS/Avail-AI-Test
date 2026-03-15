@@ -36,6 +36,7 @@ from ..models import (
     RequisitionTask,
     Requisition,
     Sighting,
+    SiteContact,
     SourcingLead,
     User,
     VendorCard,
@@ -2069,51 +2070,59 @@ async def company_tab(
         raise HTTPException(404, f"Unknown tab: {tab}")
 
     if tab == "sites":
+        from sqlalchemy.orm import joinedload
+
         sites = (
             db.query(CustomerSite)
+            .options(joinedload(CustomerSite.owner))
             .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
             .all()
         )
-        rows = []
-        for s in sites:
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.site_name or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{s.site_type or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{s.city or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{s.country or _DASH}</td>
-            </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No sites found.</p></div>'
-        return HTMLResponse(html)
+        users = db.query(User).order_by(User.name).all()
+        ctx = _base_ctx(request, user, "companies")
+        ctx["company"] = company
+        ctx["sites"] = sites
+        ctx["users"] = users
+        return templates.TemplateResponse("partials/companies/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
-        # Get contacts from company sites
-        sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == company_id)
-            .all()
-        )
+        # Get all SiteContact records across all sites for this company
+        site_ids = [s.id for s in db.query(CustomerSite.id).filter(
+            CustomerSite.company_id == company_id
+        ).all()]
+        contacts = []
+        if site_ids:
+            contacts = (
+                db.query(SiteContact)
+                .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active.is_(True))
+                .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+                .all()
+            )
+        # Build a table with site name
+        site_map = {s.id: s for s in db.query(CustomerSite).filter(
+            CustomerSite.company_id == company_id
+        ).all()}
         rows = []
-        for s in sites:
+        for c in contacts:
+            site = site_map.get(c.customer_site_id)
+            site_name = site.site_name if site else _DASH
+            phone_html = f'<a href="tel:{c.phone}" class="text-brand-500 hover:text-brand-600">{c.phone}</a>' if c.phone else f'<span class="text-gray-500">{_DASH}</span>'
+            primary_badge = ' <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>' if c.is_primary else ''
+            rows.append(f"""<tr class="hover:bg-brand-50">
+              <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.full_name or _DASH}{primary_badge}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{c.title or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{site_name}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{c.email or _DASH}</td>
+              <td class="px-4 py-2 text-sm">{phone_html}</td>
+            </tr>""")
+        # Also include legacy site-level contacts
+        for s in site_map.values():
             if s.contact_name or s.contact_email:
-                phone_html = f'<a href="tel:{s.contact_phone}" class="text-brand-500 hover:text-brand-600">{s.contact_phone}</a>' if getattr(s, 'contact_phone', None) else '<span class="text-gray-500">\u2014</span>'
+                phone_html = f'<a href="tel:{s.contact_phone}" class="text-brand-500">{s.contact_phone}</a>' if s.contact_phone else f'<span class="text-gray-500">{_DASH}</span>'
                 rows.append(f"""<tr class="hover:bg-brand-50">
-                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name or _DASH}</td>
+                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH} <span class="text-[9px] text-gray-400">legacy</span></td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_title or _DASH}</td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name}</td>
                   <td class="px-4 py-2 text-sm text-gray-500">{s.contact_email or _DASH}</td>
                   <td class="px-4 py-2 text-sm">{phone_html}</td>
                 </tr>""")
@@ -2123,6 +2132,7 @@ async def company_tab(
                 <thead class="bg-gray-50">
                   <tr>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site</th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
@@ -2132,7 +2142,7 @@ async def company_tab(
               </table>
             </div>"""
         else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found.</p></div>'
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found. Add contacts via the Sites tab.</p></div>'
         return HTMLResponse(html)
 
     elif tab == "requisitions":
@@ -2174,6 +2184,249 @@ async def company_tab(
     else:  # activity
         html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No activity recorded yet.</p></div>'
         return HTMLResponse(html)
+
+
+# ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
+
+
+@router.post("/v2/partials/companies/{company_id}/sites", response_class=HTMLResponse)
+async def create_site(
+    request: Request,
+    company_id: int,
+    site_name: str = Form(""),
+    site_type: str = Form(""),
+    city: str = Form(""),
+    country: str = Form(""),
+    owner_id: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new site for a company, return the site card partial."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not site_name.strip():
+        return HTMLResponse(
+            '<div class="p-2 text-xs text-rose-600">Site name is required.</div>'
+        )
+
+    site = CustomerSite(
+        company_id=company_id,
+        site_name=site_name.strip(),
+        site_type=site_type or None,
+        city=city or None,
+        country=country or None,
+        owner_id=int(owner_id) if owner_id else None,
+        is_active=True,
+    )
+    db.add(site)
+    db.commit()
+    db.refresh(site)
+
+    # Eager load owner for template
+    if site.owner_id:
+        _ = site.owner
+
+    ctx = _base_ctx(request, user, "companies")
+    ctx["company"] = company
+    ctx["s"] = site
+    return templates.TemplateResponse("partials/companies/tabs/site_card.html", ctx)
+
+
+@router.delete("/v2/partials/companies/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+async def delete_site(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete a site (set is_active=False)."""
+    site = db.query(CustomerSite).filter(
+        CustomerSite.id == site_id, CustomerSite.company_id == company_id
+    ).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    site.is_active = False
+    db.commit()
+    return HTMLResponse("")
+
+
+@router.get(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts",
+    response_class=HTMLResponse,
+)
+async def site_contacts_list(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Load contacts for a specific site."""
+    site = db.query(CustomerSite).filter(
+        CustomerSite.id == site_id, CustomerSite.company_id == company_id
+    ).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "companies")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+
+
+@router.post(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts",
+    response_class=HTMLResponse,
+)
+async def create_site_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    full_name: str = Form(""),
+    email: str = Form(""),
+    title: str = Form(""),
+    phone: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a site contact and return refreshed contacts list."""
+    site = db.query(CustomerSite).filter(
+        CustomerSite.id == site_id, CustomerSite.company_id == company_id
+    ).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    if not full_name.strip():
+        return HTMLResponse(
+            '<div class="p-2 text-xs text-rose-600">Name is required.</div>'
+        )
+
+    # Dedup by email
+    if email:
+        from sqlalchemy import func
+
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                func.lower(SiteContact.email) == email.strip().lower(),
+            )
+            .first()
+        )
+        if existing:
+            # Already exists — just return the list
+            pass
+        else:
+            contact = SiteContact(
+                customer_site_id=site_id,
+                full_name=full_name.strip(),
+                email=email.strip() or None,
+                title=title.strip() or None,
+                phone=phone.strip() or None,
+            )
+            db.add(contact)
+            db.commit()
+    else:
+        contact = SiteContact(
+            customer_site_id=site_id,
+            full_name=full_name.strip(),
+            title=title.strip() or None,
+            phone=phone.strip() or None,
+        )
+        db.add(contact)
+        db.commit()
+
+    # Return refreshed contacts list
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "companies")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+
+
+@router.delete(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}",
+    response_class=HTMLResponse,
+)
+async def delete_site_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a site contact."""
+    contact = db.query(SiteContact).filter(
+        SiteContact.id == contact_id, SiteContact.customer_site_id == site_id
+    ).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    db.delete(contact)
+    db.commit()
+    return HTMLResponse("")
+
+
+@router.post(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/primary",
+    response_class=HTMLResponse,
+)
+async def set_primary_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set a contact as primary for the site (unsets others)."""
+    contact = db.query(SiteContact).filter(
+        SiteContact.id == contact_id, SiteContact.customer_site_id == site_id
+    ).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    # Unset all other primary contacts on this site
+    db.query(SiteContact).filter(
+        SiteContact.customer_site_id == site_id,
+        SiteContact.is_primary.is_(True),
+        SiteContact.id != contact_id,
+    ).update({"is_primary": False})
+    contact.is_primary = True
+    db.commit()
+
+    # Return refreshed contacts list
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "companies")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
 
 
 # ── Dashboard partial ───────────────────────────────────────────────────

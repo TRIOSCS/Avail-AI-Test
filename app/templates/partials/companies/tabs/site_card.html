@@ -1,0 +1,72 @@
+{# site_card.html — Expandable site card with inline contacts.
+   Receives: s (CustomerSite), company (Company).
+   Called by: sites_tab.html loop, and POST /v2/partials/companies/{id}/sites.
+   Depends on: HTMX, Alpine.js.
+#}
+<div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
+  {# Collapsed header #}
+  <div class="px-4 py-3 flex items-center justify-between cursor-pointer" @click="expanded = !expanded">
+    <div class="flex items-center gap-3">
+      <svg class="h-5 w-5 text-gray-400 transition-transform" :class="{ 'rotate-90': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+      <div>
+        <span class="text-sm font-medium text-gray-900">{{ s.site_name }}</span>
+        {% if s.site_type %}
+        <span class="ml-2 px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="flex items-center gap-3 text-xs text-gray-500">
+      {% if s.city %}{{ s.city }}{% if s.country %}, {{ s.country }}{% endif %}{% endif %}
+      {% if s.owner %}<span class="text-brand-500">{{ s.owner.name or s.owner.email }}</span>{% endif %}
+    </div>
+  </div>
+
+  {# Expanded content #}
+  <div x-show="expanded" x-cloak x-transition class="border-t border-gray-200">
+    {# Site details #}
+    <div class="px-4 py-3 bg-gray-50 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+      {% if s.contact_name %}
+      <div><span class="text-gray-500">Primary:</span> {{ s.contact_name }}</div>
+      {% endif %}
+      {% if s.contact_email %}
+      <div><span class="text-gray-500">Email:</span> <a href="mailto:{{ s.contact_email }}" class="text-brand-500">{{ s.contact_email }}</a></div>
+      {% endif %}
+      {% if s.contact_phone %}
+      <div><span class="text-gray-500">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
+      {% endif %}
+      {% if s.payment_terms %}
+      <div><span class="text-gray-500">Terms:</span> {{ s.payment_terms }}</div>
+      {% endif %}
+    </div>
+
+    {# Contacts section — loaded via HTMX on expand #}
+    <div class="px-4 py-3">
+      <div class="flex items-center justify-between mb-2">
+        <h4 class="text-xs font-semibold text-gray-700 uppercase">Contacts</h4>
+        <button hx-get="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}/contacts"
+                hx-target="#site-{{ s.id }}-contacts"
+                hx-swap="innerHTML"
+                hx-trigger="click once"
+                class="text-xs text-brand-500 hover:text-brand-600">
+          Load Contacts
+        </button>
+      </div>
+      <div id="site-{{ s.id }}-contacts">
+        <p class="text-xs text-gray-400">Click "Load Contacts" to see contacts for this site.</p>
+      </div>
+    </div>
+
+    {# Site actions #}
+    <div class="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
+      <button hx-delete="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}"
+              hx-target="#site-{{ s.id }}"
+              hx-swap="outerHTML"
+              hx-confirm="Delete site '{{ s.site_name }}'? This cannot be undone."
+              class="text-xs text-rose-500 hover:text-rose-700">
+        Delete Site
+      </button>
+    </div>
+  </div>
+</div>
