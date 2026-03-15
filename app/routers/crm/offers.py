@@ -379,6 +379,14 @@ async def create_offer(
 
     db.commit()
 
+    # Auto-generate review task for new offer
+    try:
+        from app.services.task_service import on_offer_received
+
+        on_offer_received(db, offer.requisition_id, offer.vendor_name, offer.mpn, offer.id)
+    except Exception:
+        logger.debug("Task auto-gen for offer failed", exc_info=True)
+
     # Phase 1: Notify sales creator that a new offer was entered on their req
     if req.created_by and req.created_by != user.id:
         try:

@@ -221,3 +221,104 @@ def test_sidebar_has_tasks_link(client, test_requisition, test_user):
     # The sidebar is included in the base template
     assert "/tasks" in resp.text
     assert "Tasks" in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Auto-task creation tests (service-level)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_task_on_requirement_added(db_session, test_requisition, test_user):
+    """on_requirement_added creates a sourcing task for the MPN."""
+    from app.services.task_service import on_requirement_added
+
+    on_requirement_added(db_session, test_requisition.id, "NE555P", assigned_to_id=test_user.id)
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "source:NE555P")
+        .first()
+    )
+    assert task is not None
+    assert "NE555P" in task.title
+    assert task.task_type == "sourcing"
+    assert task.assigned_to_id == test_user.id
+    assert task.source == "system"
+
+
+def test_auto_task_on_offer_received(db_session, test_requisition):
+    """on_offer_received creates a review task for the offer."""
+    from app.services.task_service import on_offer_received
+
+    on_offer_received(db_session, test_requisition.id, "Arrow Electronics", "LM317T", 42)
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "offer:42")
+        .first()
+    )
+    assert task is not None
+    assert "Arrow Electronics" in task.title
+    assert "LM317T" in task.title
+    assert task.task_type == "sourcing"
+
+
+def test_auto_task_on_rfq_sent(db_session, test_requisition):
+    """on_rfq_sent creates an awaiting-response task with 3-day due date."""
+    from app.services.task_service import on_rfq_sent
+
+    on_rfq_sent(db_session, test_requisition.id, "Mouser", 99)
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "rfq:99")
+        .first()
+    )
+    assert task is not None
+    assert "Mouser" in task.title
+    assert task.due_at is not None
+    assert task.priority == 1
+
+
+def test_auto_task_on_quote_created(db_session, test_requisition):
+    """on_quote_created creates a send-quote task."""
+    from app.services.task_service import on_quote_created
+
+    on_quote_created(db_session, test_requisition.id, "Acme Corp", 55)
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "quote:55")
+        .first()
+    )
+    assert task is not None
+    assert "Acme Corp" in task.title
+    assert task.task_type == "sales"
+    assert task.priority == 3
+
+
+def test_auto_task_idempotent(db_session, test_requisition):
+    """Calling the same auto-gen helper twice does not create duplicates."""
+    from app.services.task_service import on_requirement_added
+
+    on_requirement_added(db_session, test_requisition.id, "LM317T")
+    on_requirement_added(db_session, test_requisition.id, "LM317T")
+    tasks = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "source:LM317T")
+        .all()
+    )
+    assert len(tasks) == 1
+
+
+def test_auto_task_via_requirement_api(client, test_requisition, test_user, db_session):
+    """Adding a requirement via API auto-creates a sourcing task."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/requirements",
+        json={"primary_mpn": "SN74HC595N", "target_qty": 200},
+    )
+    assert resp.status_code == 200
+    task = (
+        db_session.query(RequisitionTask)
+        .filter(RequisitionTask.source_ref == "source:SN74HC595N")
+        .first()
+    )
+    assert task is not None
+    assert "SN74HC595N" in task.title
+    assert task.source == "system"
