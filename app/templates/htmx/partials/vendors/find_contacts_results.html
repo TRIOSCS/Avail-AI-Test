@@ -1,0 +1,26 @@
+{# find_contacts_results.html — Results after AI contact search.
+   Receives: vendor (VendorCard), prospects (list[ProspectContact]), search_count (int).
+   Called by: vendor_find_contacts POST in htmx_views.py.
+   Depends on: prospect_card.html partial.
+#}
+{% if prospects %}
+<div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+  <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-gray-900">Found Contacts ({{ search_count }} new)</h3>
+    <span class="text-xs text-emerald-600">AI search complete</span>
+  </div>
+  <div class="divide-y divide-gray-200" id="prospect-list">
+    {% for p in prospects %}
+    {% include "htmx/partials/vendors/prospect_card.html" %}
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="p-6 text-center bg-white rounded-lg border border-gray-200">
+  <svg class="mx-auto h-8 w-8 text-amber-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+  </svg>
+  <p class="text-sm text-gray-500">No contacts found for this vendor.</p>
+  <p class="text-xs text-gray-400 mt-1">Try broadening the job title keywords.</p>
+</div>
+{% endif %}

@@ -43,6 +43,7 @@ from ..models import (
 )
 from ..models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.prospect_account import ProspectAccount
+from ..models.enrichment import ProspectContact
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, confidence_color, explain_lead, score_unified
 from ..utils.sql_helpers import escape_like
@@ -1307,6 +1308,8 @@ async def vendor_detail_partial(
         "safety_band": safety_band,
         "safety_summary": safety_summary,
         "safety_flags": safety_flags,
+        "safety_score": None,
+        "safety_available": False,
     })
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)
 
@@ -1324,7 +1327,7 @@ async def vendor_tab(
     if not vendor:
         raise HTTPException(404, "Vendor not found")
 
-    valid_tabs = {"overview", "contacts", "analytics", "offers"}
+    valid_tabs = {"overview", "contacts", "find_contacts", "analytics", "offers"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -1391,6 +1394,19 @@ async def vendor_tab(
         ctx["contacts"] = contacts
         ctx["vendor"] = vendor
         return templates.TemplateResponse("partials/vendors/tabs/contacts.html", ctx)
+
+    elif tab == "find_contacts":
+        prospects = (
+            db.query(ProspectContact)
+            .filter(ProspectContact.vendor_card_id == vendor_id)
+            .order_by(ProspectContact.created_at.desc())
+            .limit(50)
+            .all()
+        )
+        ctx["prospects"] = prospects
+        return templates.TemplateResponse(
+            "htmx/partials/vendors/find_contacts_tab.html", ctx
+        )
 
     elif tab == "analytics":
         html = f"""<div class="space-y-6">
@@ -1462,6 +1478,203 @@ async def vendor_tab(
         else:
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
         return HTMLResponse(html)
+
+
+# ── AI Contact Finder actions (Phase 3A) ───────────────────────────────
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/ai/find-contacts", response_class=HTMLResponse)
+async def vendor_find_contacts(
+    request: Request,
+    vendor_id: int,
+    title_keywords: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger AI web search for contacts at this vendor, return HTML results."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    from ..config import settings as app_settings
+
+    # Check AI feature gate
+    ai_flag = app_settings.ai_features_enabled
+    if ai_flag == "off":
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-amber-600 bg-amber-50 rounded-lg border border-amber-200">'
+            "AI features are currently disabled. Contact your admin to enable them.</div>"
+        )
+
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
+
+    try:
+        from app.services.ai_service import enrich_contacts_websearch
+
+        keywords = title_keywords.strip() if title_keywords else None
+        web_results = await enrich_contacts_websearch(
+            vendor.display_name, vendor.domain, keywords, limit=10
+        )
+
+        # Dedup and save as ProspectContact records
+        seen: set[str] = set()
+        new_count = 0
+        for c in web_results:
+            email = (c.get("email") or "").lower()
+            key = email if email else c.get("full_name", "").lower()
+            if key and key in seen:
+                continue
+            seen.add(key)
+
+            pc = ProspectContact(
+                vendor_card_id=vendor_id,
+                full_name=c["full_name"],
+                title=c.get("title"),
+                email=c.get("email"),
+                email_status=c.get("email_status"),
+                phone=c.get("phone"),
+                linkedin_url=c.get("linkedin_url"),
+                source=c.get("source", "web_search"),
+                confidence=c.get("confidence", "low"),
+            )
+            db.add(pc)
+            new_count += 1
+
+        db.commit()
+    except Exception as exc:
+        logger.error(f"AI contact finder error for vendor {vendor_id}: {exc}")
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            f"AI search failed: {exc}</div>"
+        )
+
+    # Reload all prospects for this vendor
+    prospects = (
+        db.query(ProspectContact)
+        .filter(ProspectContact.vendor_card_id == vendor_id)
+        .order_by(ProspectContact.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    ctx["prospects"] = prospects
+    ctx["search_count"] = new_count
+    return templates.TemplateResponse(
+        "htmx/partials/vendors/find_contacts_results.html", ctx
+    )
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}/save",
+    response_class=HTMLResponse,
+)
+async def vendor_prospect_save(
+    request: Request,
+    vendor_id: int,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a prospect contact as saved."""
+    pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
+    if not pc:
+        raise HTTPException(404, "Prospect contact not found")
+
+    pc.is_saved = True
+    pc.saved_by_id = user.id
+    db.commit()
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
+    ctx["p"] = pc
+    return templates.TemplateResponse(
+        "htmx/partials/vendors/prospect_card.html", ctx
+    )
+
+
+@router.post(
+    "/v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}/promote",
+    response_class=HTMLResponse,
+)
+async def vendor_prospect_promote(
+    request: Request,
+    vendor_id: int,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Promote a prospect contact to a VendorContact."""
+    pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
+    if not pc:
+        raise HTTPException(404, "Prospect contact not found")
+
+    # Dedup: check if email already exists on this vendor
+    existing = None
+    if pc.email:
+        existing = (
+            db.query(VendorContact)
+            .filter_by(vendor_card_id=vendor_id, email=pc.email)
+            .first()
+        )
+
+    if existing:
+        if pc.full_name and not existing.full_name:
+            existing.full_name = pc.full_name
+        if pc.title and not existing.title:
+            existing.title = pc.title
+        if pc.phone and not existing.phone:
+            existing.phone = pc.phone
+        if pc.linkedin_url and not existing.linkedin_url:
+            existing.linkedin_url = pc.linkedin_url
+        vc = existing
+    else:
+        vc = VendorContact(
+            vendor_card_id=vendor_id,
+            full_name=pc.full_name,
+            title=pc.title,
+            email=pc.email,
+            phone=pc.phone,
+            linkedin_url=pc.linkedin_url,
+            source="prospect_promote",
+        )
+        db.add(vc)
+        db.flush()
+
+    pc.promoted_to_type = "vendor_contact"
+    pc.promoted_to_id = vc.id
+    pc.is_saved = True
+    pc.saved_by_id = user.id
+    db.commit()
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
+    ctx["p"] = pc
+    return templates.TemplateResponse(
+        "htmx/partials/vendors/prospect_card.html", ctx
+    )
+
+
+@router.delete(
+    "/v2/partials/vendors/{vendor_id}/ai/prospect/{prospect_id}",
+    response_class=HTMLResponse,
+)
+async def vendor_prospect_delete(
+    request: Request,
+    vendor_id: int,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a prospect contact."""
+    pc = db.query(ProspectContact).filter(ProspectContact.id == prospect_id).first()
+    if not pc:
+        raise HTTPException(404, "Prospect contact not found")
+    db.delete(pc)
+    db.commit()
+    # Return empty string to remove the card from DOM
+    return HTMLResponse("")
 
 
 # ── Company partials ────────────────────────────────────────────────────
