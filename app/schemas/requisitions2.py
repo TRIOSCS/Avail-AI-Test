@@ -79,6 +79,7 @@ class RowActionName(str, Enum):
     activate = "activate"
     won = "won"
     lost = "lost"
+    clone = "clone"
 
 
 class BulkActionName(str, Enum):
