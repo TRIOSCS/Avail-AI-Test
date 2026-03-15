@@ -343,7 +343,7 @@ Each card (`partials/sourcing/lead_card.html`):
 - Safety band badge (emerald=low risk, amber=medium, rose=high risk)
 - Source badges (which connectors found this lead)
 - Freshness indicator ("2 hours ago", "3 days ago" — relative time)
-- Qty available + unit price (or "RFQ") — **data source:** these fields live on `Sighting`, not `SourcingLead`. Query the lead's linked sightings (via `requirement_id` + `vendor`) and display the best available qty and lowest price from the most recent sighting.
+- Qty available + unit price (or "RFQ") — **data source:** these fields live on `Sighting`, not `SourcingLead`. Query the lead's linked sightings (via `requirement_id` + `vendor_name_normalized`) and display the best available qty and lowest price from the most recent sighting.
 - Contact preview: first email or phone, truncated
 - Corroboration badge: if `corroborated=True`, show "Corroborated ({evidence_count} signals)" in emerald
 - **Suggested next action** text (derived from lead state + contact info availability):
@@ -459,7 +459,7 @@ Each card (`partials/sourcing/lead_card.html`):
   - SAM.gov data
   - Google News mentions
   - Signal indicators (hiring, events, intent)
-- Warm intro section (if warm intro data exists in `enrichment_data` JSONB under key `warm_intros`, computed by `app/services/prospect_warm_intros.py`): intro path, suggested one-liner
+- Warm intro section (if warm intro data exists in `enrichment_data` JSONB under key `warm_intro` (singular), computed by `app/services/prospect_warm_intros.py`): intro path, suggested one-liner
 - **Action buttons:**
   - Claim / Release
   - Dismiss
@@ -617,7 +617,7 @@ All prefixed `/v2/partials/`:
 
 ### Helper Utilities
 
-**File:** `app/dependencies.py` — add:
+**File:** `app/dependencies.py` — these helpers already exist (lines 181, 186). No changes needed:
 ```python
 def wants_html(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
