@@ -27,7 +27,7 @@ The Part Search page is a standalone search tool (accessed via sidebar "Part Sea
 
 ### Steps
 
-- [ ] **Step 1: Rewrite `form.html` — search form with large input**
+- [x] **Step 1: Rewrite `form.html` — search form with large input**
 
 File: `app/templates/partials/search/form.html`
 
@@ -80,7 +80,7 @@ Key requirements:
 - Empty state with magnifying glass icon and "Enter a part number to search all sources"
 - Use brand colors: input border `brand-200`, focus ring `brand-500`, button `brand-500`/`brand-600`
 
-- [ ] **Step 2: Rewrite `results.html` — results table with source badges**
+- [x] **Step 2: Rewrite `results.html` — results table with source badges**
 
 File: `app/templates/partials/search/results.html`
 
@@ -164,7 +164,7 @@ Template structure:
 {% endif %}
 ```
 
-- [ ] **Step 3: Create `partials/shared/source_badge.html`**
+- [x] **Step 3: Create `partials/shared/source_badge.html`**
 
 File: `app/templates/partials/shared/source_badge.html`
 
@@ -202,7 +202,7 @@ Template implementation:
 {% endif %}
 ```
 
-- [ ] **Step 4: Move templates to spec directory structure**
+- [x] **Step 4: Move templates to spec directory structure**
 
 Per the spec (Section 14), search templates should be at `app/templates/partials/search/` (not `htmx/partials/search/`). Move:
 - `app/templates/htmx/partials/search/form.html` -> `app/templates/partials/search/form.html`
@@ -212,7 +212,7 @@ Update the router template paths in `htmx_views.py`:
 - `search_form_partial`: change template to `partials/search/form.html`
 - `search_run`: change template to `partials/search/results.html`
 
-- [ ] **Step 5: Verify Part Search**
+- [x] **Step 5: Verify Part Search**
 
 Test manually:
 1. Navigate to `/v2/search` -- form renders with large input, button disabled
@@ -237,7 +237,7 @@ The safety review block is a reusable component used in both vendor detail (Task
 
 ### Steps
 
-- [ ] **Step 1: Create `partials/shared/safety_review.html`**
+- [x] **Step 1: Create `partials/shared/safety_review.html`**
 
 File: `app/templates/partials/shared/safety_review.html`
 
@@ -397,7 +397,7 @@ The SSE channel name convention: `sourcing:{requirement_id}`.
 
 ### Steps
 
-- [ ] **Step 1: Add SSE stream endpoint to router**
+- [x] **Step 1: Add SSE stream endpoint to router**
 
 File: `app/routers/htmx_views.py`
 
@@ -436,7 +436,7 @@ async def sourcing_stream(
     return EventSourceResponse(event_generator())
 ```
 
-- [ ] **Step 2: Add sourcing search trigger endpoint**
+- [x] **Step 2: Add sourcing search trigger endpoint**
 
 File: `app/routers/htmx_views.py`
 
@@ -519,7 +519,7 @@ async def sourcing_search_trigger(
 
 Note: The actual implementation must adapt `search_single_source` from the existing `search_service.py` pattern. The above is a structural guide -- the implementer must verify the exact search service API and sighting creation flow.
 
-- [ ] **Step 3: Create `search_progress.html` partial**
+- [x] **Step 3: Create `search_progress.html` partial**
 
 File: `app/templates/partials/sourcing/search_progress.html`
 
@@ -581,7 +581,7 @@ Template structure:
 </noscript>
 ```
 
-- [ ] **Step 4: Add Alpine.js `sourcingProgress` component**
+- [x] **Step 4: Add Alpine.js `sourcingProgress` component**
 
 File: `app/static/htmx_app.js` (append to existing)
 
@@ -651,7 +651,7 @@ Also add hidden `<template>` elements in `base.html` for the icon SVGs:
 </template>
 ```
 
-- [ ] **Step 5: Install `sse-starlette` dependency**
+- [x] **Step 5: Install `sse-starlette` dependency**
 
 Add to `requirements.txt`:
 ```
@@ -678,7 +678,7 @@ The sourcing results page shows lead cards for a specific requirement, with a ri
 
 ### Steps
 
-- [ ] **Step 1: Add full page + partial routes for sourcing results**
+- [x] **Step 1: Add full page + partial routes for sourcing results**
 
 File: `app/routers/htmx_views.py`
 
@@ -810,7 +810,7 @@ async def sourcing_results_partial(
     return templates.TemplateResponse("partials/sourcing/results.html", ctx)
 ```
 
-- [ ] **Step 2: Create `results.html` template**
+- [x] **Step 2: Create `results.html` template**
 
 File: `app/templates/partials/sourcing/results.html`
 
@@ -1002,7 +1002,7 @@ Template structure:
 </div>
 ```
 
-- [ ] **Step 3: Create `lead_card.html` template**
+- [x] **Step 3: Create `lead_card.html` template**
 
 File: `app/templates/partials/sourcing/lead_card.html`
 
@@ -1140,7 +1140,7 @@ Template structure:
 </div>
 ```
 
-- [ ] **Step 4: Register `timesince` Jinja2 filter**
+- [x] **Step 4: Register `timesince` Jinja2 filter**
 
 File: `app/routers/htmx_views.py` -- add after `templates = Jinja2Templates(...)`:
 
@@ -1185,7 +1185,7 @@ Lead detail shows the full information for a single sourcing lead: summary card,
 
 ### Steps
 
-- [ ] **Step 1: Add lead detail routes**
+- [x] **Step 1: Add lead detail routes**
 
 File: `app/routers/htmx_views.py`
 
@@ -1273,7 +1273,7 @@ async def lead_detail_partial(
     return templates.TemplateResponse("partials/sourcing/lead_detail.html", ctx)
 ```
 
-- [ ] **Step 2: Add lead status update endpoint**
+- [x] **Step 2: Add lead status update endpoint**
 
 File: `app/routers/htmx_views.py`
 
@@ -1336,7 +1336,7 @@ async def lead_status_update(
     return templates.TemplateResponse("partials/sourcing/lead_card.html", ctx)
 ```
 
-- [ ] **Step 3: Add lead feedback endpoint**
+- [x] **Step 3: Add lead feedback endpoint**
 
 File: `app/routers/htmx_views.py`
 
@@ -1369,7 +1369,7 @@ async def lead_feedback(
     return await lead_detail_partial(request, lead_id, user, db)
 ```
 
-- [ ] **Step 4: Create `lead_detail.html` template**
+- [x] **Step 4: Create `lead_detail.html` template**
 
 File: `app/templates/partials/sourcing/lead_detail.html`
 
@@ -1714,7 +1714,7 @@ Template structure:
 </div>
 ```
 
-- [ ] **Step 5: Verify lead detail**
+- [x] **Step 5: Verify lead detail**
 
 Test manually:
 1. Navigate to sourcing results for a requirement with leads
@@ -1743,7 +1743,7 @@ The "Search" button on each requirement row in the requisition detail Parts tab 
 
 ### Steps
 
-- [ ] **Step 1: Update "Search" button on requirement rows**
+- [x] **Step 1: Update "Search" button on requirement rows**
 
 In the requisition detail Parts tab, change each requirement row's "Search" button.
 
@@ -1765,7 +1765,7 @@ To:
 
 This navigates to the full sourcing results view for that requirement, which shows existing leads. The "Re-search" button on the sourcing results page triggers a new multi-source search with SSE progress.
 
-- [ ] **Step 2: Verify wiring**
+- [x] **Step 2: Verify wiring**
 
 1. Open a requisition detail with requirements
 2. Click "Search" on a requirement row
@@ -1783,7 +1783,7 @@ This navigates to the full sourcing results view for that requirement, which sho
 
 ### Steps
 
-- [ ] **Step 1: Create test fixtures**
+- [x] **Step 1: Create test fixtures**
 
 ```python
 import pytest
@@ -1869,7 +1869,7 @@ def sample_lead(db, sample_requisition_with_leads):
     ).first()
 ```
 
-- [ ] **Step 2: Test Part Search form partial**
+- [x] **Step 2: Test Part Search form partial**
 
 ```python
 def test_search_form_partial(client, auth_headers):
@@ -1880,7 +1880,7 @@ def test_search_form_partial(client, auth_headers):
     assert 'name="mpn"' in resp.text
 ```
 
-- [ ] **Step 3: Test Part Search results partial**
+- [x] **Step 3: Test Part Search results partial**
 
 ```python
 def test_search_run_returns_results(client, auth_headers, db, mocker):
@@ -1902,7 +1902,7 @@ def test_search_run_returns_results(client, auth_headers, db, mocker):
     assert "$0.5500" in resp.text
 ```
 
-- [ ] **Step 4: Test sourcing results partial**
+- [x] **Step 4: Test sourcing results partial**
 
 ```python
 def test_sourcing_results_partial(client, auth_headers, db, sample_requisition_with_leads):
@@ -1919,7 +1919,7 @@ def test_sourcing_results_not_found(client, auth_headers):
     assert resp.status_code == 404
 ```
 
-- [ ] **Step 5: Test sourcing results filtering**
+- [x] **Step 5: Test sourcing results filtering**
 
 ```python
 def test_sourcing_filter_confidence(client, auth_headers, db, sample_requisition_with_leads):
@@ -1949,7 +1949,7 @@ def test_sourcing_sort_options(client, auth_headers, db, sample_requisition_with
         assert resp.status_code == 200
 ```
 
-- [ ] **Step 6: Test lead detail partial**
+- [x] **Step 6: Test lead detail partial**
 
 ```python
 def test_lead_detail_partial(client, auth_headers, db, sample_lead):
@@ -1967,7 +1967,7 @@ def test_lead_detail_not_found(client, auth_headers):
     assert resp.status_code == 404
 ```
 
-- [ ] **Step 7: Test lead status update**
+- [x] **Step 7: Test lead status update**
 
 ```python
 def test_lead_status_update(client, auth_headers, db, sample_lead):
@@ -2001,7 +2001,7 @@ def test_lead_status_not_found(client, auth_headers):
     assert resp.status_code == 404
 ```
 
-- [ ] **Step 8: Test lead feedback**
+- [x] **Step 8: Test lead feedback**
 
 ```python
 def test_lead_feedback(client, auth_headers, db, sample_lead):
