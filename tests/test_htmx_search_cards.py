@@ -11,12 +11,7 @@ Depends on: conftest (client, db_session, test_user), app.scoring
 
 from unittest.mock import patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import User
 from app.scoring import classify_lead, explain_lead, score_unified
-
 
 # ── Scoring function unit tests ──────────────────────────────────────
 
@@ -239,12 +234,22 @@ def test_search_results_weak_leads_warning(client):
     """Warning banner shown when all results are weak leads."""
     # All results with very low scores → all classified as "weak"
     weak_results = [
-        {"vendor_name": "Shady Parts", "source_type": "ebay",
-         "vendor_score": None, "unit_price": None, "qty_available": None,
-         "is_authorized": False},
-        {"vendor_name": "Unknown Vendor", "source_type": "ebay",
-         "vendor_score": None, "unit_price": None, "qty_available": None,
-         "is_authorized": False},
+        {
+            "vendor_name": "Shady Parts",
+            "source_type": "ebay",
+            "vendor_score": None,
+            "unit_price": None,
+            "qty_available": None,
+            "is_authorized": False,
+        },
+        {
+            "vendor_name": "Unknown Vendor",
+            "source_type": "ebay",
+            "vendor_score": None,
+            "unit_price": None,
+            "qty_available": None,
+            "is_authorized": False,
+        },
     ]
     with patch("app.search_service.quick_search_mpn", return_value=weak_results):
         resp = client.post("/v2/partials/search/run", data={"mpn": "ZZTEST"})
@@ -255,13 +260,26 @@ def test_search_results_weak_leads_warning(client):
 def test_search_results_no_weak_warning_when_strong(client):
     """No weak-leads warning when at least one result is strong."""
     mixed_results = [
-        {"vendor_name": "Good Vendor", "source_type": "brokerbin",
-         "vendor_score": 80.0, "unit_price": 1.50, "qty_available": 10000,
-         "is_authorized": True, "vendor_email": "sales@good.com",
-         "evidence_tier": "T1", "lead_time": "Stock", "condition": "New"},
-        {"vendor_name": "Weak Vendor", "source_type": "ebay",
-         "vendor_score": None, "unit_price": None, "qty_available": None,
-         "is_authorized": False},
+        {
+            "vendor_name": "Good Vendor",
+            "source_type": "brokerbin",
+            "vendor_score": 80.0,
+            "unit_price": 1.50,
+            "qty_available": 10000,
+            "is_authorized": True,
+            "vendor_email": "sales@good.com",
+            "evidence_tier": "T1",
+            "lead_time": "Stock",
+            "condition": "New",
+        },
+        {
+            "vendor_name": "Weak Vendor",
+            "source_type": "ebay",
+            "vendor_score": None,
+            "unit_price": None,
+            "qty_available": None,
+            "is_authorized": False,
+        },
     ]
     with patch("app.search_service.quick_search_mpn", return_value=mixed_results):
         resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
@@ -271,11 +289,13 @@ def test_search_results_no_weak_warning_when_strong(client):
 
 def test_search_results_source_errors_warning(client):
     """Source failure banner shown when source_errors are returned."""
-    with patch("app.search_service.quick_search_mpn", return_value={
-        "sightings": [{"vendor_name": "Test", "source_type": "nexar",
-                       "unit_price": 1.0, "qty_available": 100}],
-        "source_errors": ["BrokerBin timed out", "DigiKey rate limited"],
-    }):
+    with patch(
+        "app.search_service.quick_search_mpn",
+        return_value={
+            "sightings": [{"vendor_name": "Test", "source_type": "nexar", "unit_price": 1.0, "qty_available": 100}],
+            "source_errors": ["BrokerBin timed out", "DigiKey rate limited"],
+        },
+    ):
         resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "Some sources failed" in resp.text

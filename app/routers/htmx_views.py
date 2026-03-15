@@ -33,18 +33,18 @@ from ..models import (
     Quote,
     QuoteLine,
     Requirement,
-    RequisitionTask,
     Requisition,
+    RequisitionTask,
     Sighting,
     SourcingLead,
     User,
     VendorCard,
     VerificationGroupMember,
 )
-from ..models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from ..models.buy_plan import BuyPlanStatus
 from ..models.prospect_account import ProspectAccount
 from ..models.vendors import VendorContact
-from ..scoring import classify_lead, confidence_color, explain_lead, score_unified
+from ..scoring import classify_lead, explain_lead, score_unified
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["htmx-views"])
@@ -75,6 +75,7 @@ def _timesince_filter(dt):
     if not dt:
         return ""
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -216,25 +217,14 @@ async def global_search(
         safe = escape_like(q.strip())
         results["requisitions"] = (
             db.query(Requisition)
-            .filter(
-                Requisition.name.ilike(f"%{safe}%")
-                | Requisition.customer_name.ilike(f"%{safe}%")
-            )
+            .filter(Requisition.name.ilike(f"%{safe}%") | Requisition.customer_name.ilike(f"%{safe}%"))
             .limit(5)
             .all()
         )
-        results["companies"] = (
-            db.query(Company)
-            .filter(Company.name.ilike(f"%{safe}%"))
-            .limit(5)
-            .all()
-        )
+        results["companies"] = db.query(Company).filter(Company.name.ilike(f"%{safe}%")).limit(5).all()
         results["vendors"] = (
             db.query(VendorCard)
-            .filter(
-                VendorCard.display_name.ilike(f"%{safe}%")
-                | VendorCard.normalized_name.ilike(f"%{safe}%")
-            )
+            .filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.normalized_name.ilike(f"%{safe}%"))
             .limit(5)
             .all()
         )
@@ -272,10 +262,7 @@ async def requisitions_list_partial(
 
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(
-            Requisition.name.ilike(f"%{safe}%")
-            | Requisition.customer_name.ilike(f"%{safe}%")
-        )
+        query = query.filter(Requisition.name.ilike(f"%{safe}%") | Requisition.customer_name.ilike(f"%{safe}%"))
     if status:
         query = query.filter(Requisition.status == status)
     if owner:
@@ -324,22 +311,24 @@ async def requisitions_list_partial(
         users = db.query(User).order_by(User.name).all()
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({
-        "requisitions": reqs,
-        "q": q,
-        "status": status,
-        "owner": owner,
-        "urgency": urgency,
-        "date_from": date_from,
-        "date_to": date_to,
-        "sort": sort,
-        "dir": dir,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "users": users,
-        "user_role": user.role,
-    })
+    ctx.update(
+        {
+            "requisitions": reqs,
+            "q": q,
+            "status": status,
+            "owner": owner,
+            "urgency": urgency,
+            "date_from": date_from,
+            "date_to": date_to,
+            "sort": sort,
+            "dir": dir,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "users": users,
+            "user_role": user.role,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/requisitions/list.html", ctx)
 
 
@@ -507,11 +496,7 @@ async def requisition_tab(
     ctx["req"] = req
 
     if tab == "parts":
-        requirements = (
-            db.query(Requirement)
-            .filter(Requirement.requisition_id == req_id)
-            .all()
-        )
+        requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
@@ -519,10 +504,7 @@ async def requisition_tab(
 
     elif tab == "offers":
         offers = (
-            db.query(Offer)
-            .filter(Offer.requisition_id == req_id)
-            .order_by(Offer.created_at.desc().nullslast())
-            .all()
+            db.query(Offer).filter(Offer.requisition_id == req_id).order_by(Offer.created_at.desc().nullslast()).all()
         )
         # Check for existing draft quote to show "Add to Quote" button
         draft_quote = (
@@ -537,10 +519,7 @@ async def requisition_tab(
 
     elif tab == "quotes":
         quotes = (
-            db.query(Quote)
-            .filter(Quote.requisition_id == req_id)
-            .order_by(Quote.created_at.desc().nullslast())
-            .all()
+            db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.created_at.desc().nullslast()).all()
         )
         ctx["quotes"] = quotes
         return templates.TemplateResponse("partials/requisitions/tabs/quotes.html", ctx)
@@ -583,8 +562,8 @@ async def requisition_tab(
         return templates.TemplateResponse("partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
-        from ..models.offers import Contact as RfqContact
         from ..models.intelligence import ActivityLog
+        from ..models.offers import Contact as RfqContact
 
         contacts = (
             db.query(RfqContact)
@@ -647,9 +626,19 @@ async def requisitions_bulk_action(
     logger.info("Bulk {} applied to {} requisitions by {}", action, len(reqs), user.email)
 
     return await requisitions_list_partial(
-        request=request, q="", status="", owner=0, urgency="",
-        date_from="", date_to="", sort="created_at", dir="desc",
-        limit=50, offset=0, user=user, db=db,
+        request=request,
+        q="",
+        status="",
+        owner=0,
+        urgency="",
+        date_from="",
+        date_to="",
+        sort="created_at",
+        dir="desc",
+        limit=50,
+        offset=0,
+        user=user,
+        db=db,
     )
 
 
@@ -677,7 +666,6 @@ async def create_quote_from_offers(
         raise HTTPException(404, "No matching offers found")
 
     # Build line items from offers
-    import itertools
 
     quote_number = f"Q-{req_id}-{db.query(Quote).filter(Quote.requisition_id == req_id).count() + 1}"
     quote = Quote(
@@ -752,6 +740,7 @@ async def review_offer(
         offer.status = "approved"
         offer.approved_by_id = user.id
         from datetime import datetime, timezone
+
         offer.approved_at = datetime.now(timezone.utc)
     else:
         offer.status = "rejected"
@@ -829,39 +818,31 @@ async def rfq_compose(
         )
         norm_names = [n[0] for n in vendor_names if n[0]]
         vendor_rows = (
-            db.query(VendorCard)
-            .filter(VendorCard.normalized_name.in_(norm_names))
-            .limit(50)
-            .all()
-        ) if norm_names else []
+            (db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).limit(50).all())
+            if norm_names
+            else []
+        )
         # Check which vendors already have RFQs sent
         sent_vendor_names = set()
-        existing_contacts = (
-            db.query(RfqContact)
-            .filter(RfqContact.requisition_id == req_id)
-            .all()
-        )
+        existing_contacts = db.query(RfqContact).filter(RfqContact.requisition_id == req_id).all()
         for c in existing_contacts:
             if c.vendor_name_normalized:
                 sent_vendor_names.add(c.vendor_name_normalized)
 
         for v in vendor_rows:
             # Get contacts for this vendor
-            v_contacts = (
-                db.query(VendorContact)
-                .filter(VendorContact.vendor_card_id == v.id)
-                .limit(5)
-                .all()
+            v_contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == v.id).limit(5).all()
+            vendors.append(
+                {
+                    "id": v.id,
+                    "display_name": v.display_name,
+                    "normalized_name": v.normalized_name,
+                    "domain": v.domain,
+                    "contacts": v_contacts,
+                    "already_asked": v.normalized_name in sent_vendor_names,
+                    "emails": [c.email for c in v_contacts if c.email],
+                }
             )
-            vendors.append({
-                "id": v.id,
-                "display_name": v.display_name,
-                "normalized_name": v.normalized_name,
-                "domain": v.domain,
-                "contacts": v_contacts,
-                "already_asked": v.normalized_name in sent_vendor_names,
-                "emails": [c.email for c in v_contacts if c.email],
-            })
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -878,8 +859,9 @@ async def rfq_send(
     db: Session = Depends(get_db),
 ):
     """Send RFQs — creates Contact records for each selected vendor."""
-    from ..models.offers import Contact as RfqContact
     from datetime import datetime, timezone
+
+    from ..models.offers import Contact as RfqContact
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
@@ -935,9 +917,7 @@ async def delete_requirement(
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
-    item = db.query(Requirement).filter(
-        Requirement.id == item_id, Requirement.requisition_id == req_id
-    ).first()
+    item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
     db.delete(item)
@@ -961,9 +941,7 @@ async def update_requirement(
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
-    item = db.query(Requirement).filter(
-        Requirement.id == item_id, Requirement.requisition_id == req_id
-    ).first()
+    item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
 
@@ -1085,13 +1063,15 @@ async def search_run(
         )
 
     ctx = _base_ctx(request, user, "search")
-    ctx.update({
-        "results": results,
-        "mpn": search_mpn,
-        "elapsed_seconds": elapsed,
-        "error": error,
-        "source_errors": source_errors,
-    })
+    ctx.update(
+        {
+            "results": results,
+            "mpn": search_mpn,
+            "elapsed_seconds": elapsed,
+            "error": error,
+            "source_errors": source_errors,
+        }
+    )
     return templates.TemplateResponse("partials/search/results.html", ctx)
 
 
@@ -1184,16 +1164,18 @@ async def search_lead_detail(
             safety_available = True
 
     ctx = _base_ctx(request, user, "search")
-    ctx.update({
-        "lead": r,
-        "mpn": mpn.strip(),
-        "idx": idx,
-        "safety_band": safety_band,
-        "safety_score": safety_score,
-        "safety_summary": safety_summary,
-        "safety_flags": safety_flags,
-        "safety_available": safety_available,
-    })
+    ctx.update(
+        {
+            "lead": r,
+            "mpn": mpn.strip(),
+            "idx": idx,
+            "safety_band": safety_band,
+            "safety_score": safety_score,
+            "safety_summary": safety_summary,
+            "safety_flags": safety_flags,
+            "safety_available": safety_available,
+        }
+    )
     return templates.TemplateResponse("partials/search/lead_detail.html", ctx)
 
 
@@ -1220,10 +1202,7 @@ async def vendors_list_partial(
 
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(
-            VendorCard.display_name.ilike(f"%{safe}%")
-            | VendorCard.domain.ilike(f"%{safe}%")
-        )
+        query = query.filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.domain.ilike(f"%{safe}%"))
 
     total = query.count()
 
@@ -1240,16 +1219,18 @@ async def vendors_list_partial(
     vendors = query.order_by(order).offset(offset).limit(limit).all()
 
     ctx = _base_ctx(request, user, "vendors")
-    ctx.update({
-        "vendors": vendors,
-        "q": q,
-        "hide_blacklisted": hide_blacklisted,
-        "sort": sort,
-        "dir": dir,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    })
+    ctx.update(
+        {
+            "vendors": vendors,
+            "q": q,
+            "hide_blacklisted": hide_blacklisted,
+            "sort": sort,
+            "dir": dir,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
 
 
@@ -1300,14 +1281,16 @@ async def vendor_detail_partial(
         pass  # SourcingLead may not have data
 
     ctx = _base_ctx(request, user, "vendors")
-    ctx.update({
-        "vendor": vendor,
-        "contacts": contacts,
-        "recent_sightings": recent_sightings,
-        "safety_band": safety_band,
-        "safety_summary": safety_summary,
-        "safety_flags": safety_flags,
-    })
+    ctx.update(
+        {
+            "vendor": vendor,
+            "contacts": contacts,
+            "recent_sightings": recent_sightings,
+            "safety_band": safety_band,
+            "safety_summary": safety_summary,
+            "safety_flags": safety_flags,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)
 
 
@@ -1367,15 +1350,17 @@ async def vendor_tab(
             .limit(20)
             .all()
         )
-        ctx.update({
-            "recent_sightings": recent_sightings,
-            "contacts": contacts,
-            "safety_band": safety_band,
-            "safety_summary": safety_summary,
-            "safety_flags": safety_flags,
-            "safety_score": safety_score,
-            "safety_available": safety_available,
-        })
+        ctx.update(
+            {
+                "recent_sightings": recent_sightings,
+                "contacts": contacts,
+                "safety_band": safety_band,
+                "safety_summary": safety_summary,
+                "safety_flags": safety_flags,
+                "safety_score": safety_score,
+                "safety_available": safety_available,
+            }
+        )
         # Re-use the inline overview from the detail template
         # by rendering just the overview portion
         return templates.TemplateResponse("htmx/partials/vendors/overview_tab.html", ctx)
@@ -1396,15 +1381,15 @@ async def vendor_tab(
         html = f"""<div class="space-y-6">
           <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{'{:.0f}%'.format((vendor.overall_win_rate or 0) * 100)}</p>
+              <p class="text-2xl font-bold text-brand-500">{"{:.0f}%".format((vendor.overall_win_rate or 0) * 100)}</p>
               <p class="text-xs text-gray-500 mt-1">Win Rate</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{'{:.0f}%'.format((vendor.response_rate or 0) * 100)}</p>
+              <p class="text-2xl font-bold text-brand-500">{"{:.0f}%".format((vendor.response_rate or 0) * 100)}</p>
               <p class="text-xs text-gray-500 mt-1">Response Rate</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-brand-500">{'{:.0f}'.format(vendor.vendor_score or 0)}</p>
+              <p class="text-2xl font-bold text-brand-500">{"{:.0f}".format(vendor.vendor_score or 0)}</p>
               <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
@@ -1412,11 +1397,11 @@ async def vendor_tab(
               <p class="text-xs text-gray-500 mt-1">Sightings</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{'{:.0f}'.format(vendor.avg_response_hours or 0)}</p>
+              <p class="text-2xl font-bold text-gray-900">{"{:.0f}".format(vendor.avg_response_hours or 0)}</p>
               <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
             </div>
             <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <p class="text-2xl font-bold text-gray-900">{'{:.0f}'.format(vendor.engagement_score or 0)}</p>
+              <p class="text-2xl font-bold text-gray-900">{"{:.0f}".format(vendor.engagement_score or 0)}</p>
               <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
             </div>
           </div>
@@ -1435,7 +1420,7 @@ async def vendor_tab(
         rows = []
         for o in offers:
             price_str = f"${o.unit_price:,.4f}" if o.unit_price else "RFQ"
-            date_str = o.created_at.strftime('%b %d, %Y') if o.created_at else _DASH
+            date_str = o.created_at.strftime("%b %d, %Y") if o.created_at else _DASH
             qty_str = f"{o.qty_available:,}" if o.qty_available else _DASH
             rows.append(f"""<tr class="hover:bg-brand-50">
               <td class="px-4 py-2 text-sm font-mono text-gray-900">{o.mpn or _DASH}</td>
@@ -1456,7 +1441,7 @@ async def vendor_tab(
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
               </table>
             </div>"""
         else:
@@ -1522,12 +1507,14 @@ async def company_detail_partial(
     )
 
     ctx = _base_ctx(request, user, "companies")
-    ctx.update({
-        "company": company,
-        "sites": sites,
-        "open_req_count": open_req_count,
-        "user": user,
-    })
+    ctx.update(
+        {
+            "company": company,
+            "sites": sites,
+            "open_req_count": open_req_count,
+            "user": user,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
 
 
@@ -1550,9 +1537,7 @@ async def company_tab(
 
     if tab == "sites":
         sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-            .all()
+            db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
         )
         rows = []
         for s in sites:
@@ -1573,7 +1558,7 @@ async def company_tab(
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
               </table>
             </div>"""
         else:
@@ -1582,15 +1567,15 @@ async def company_tab(
 
     elif tab == "contacts":
         # Get contacts from company sites
-        sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == company_id)
-            .all()
-        )
+        sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()
         rows = []
         for s in sites:
             if s.contact_name or s.contact_email:
-                phone_html = f'<a href="tel:{s.contact_phone}" class="text-brand-500 hover:text-brand-600">{s.contact_phone}</a>' if getattr(s, 'contact_phone', None) else '<span class="text-gray-500">\u2014</span>'
+                phone_html = (
+                    f'<a href="tel:{s.contact_phone}" class="text-brand-500 hover:text-brand-600">{s.contact_phone}</a>'
+                    if getattr(s, "contact_phone", None)
+                    else '<span class="text-gray-500">\u2014</span>'
+                )
                 rows.append(f"""<tr class="hover:bg-brand-50">
                   <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH}</td>
                   <td class="px-4 py-2 text-sm text-gray-500">{s.site_name or _DASH}</td>
@@ -1608,7 +1593,7 @@ async def company_tab(
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
               </table>
             </div>"""
         else:
@@ -1625,7 +1610,7 @@ async def company_tab(
         )
         rows = []
         for r in reqs:
-            date_str = r.created_at.strftime('%b %d, %Y') if r.created_at else '\u2014'
+            date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "\u2014"
             rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
                 hx-get="/v2/partials/requisitions/{r.id}"
                 hx-target="#main-content"
@@ -1644,7 +1629,7 @@ async def company_tab(
                     <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
               </table>
             </div>"""
         else:
@@ -1666,9 +1651,12 @@ async def dashboard_partial(
     db: Session = Depends(get_db),
 ):
     """Return dashboard stats partial."""
-    open_reqs = db.query(sqlfunc.count(Requisition.id)).filter(
-        Requisition.status.in_(["open", "active", "sourcing", "draft"])
-    ).scalar() or 0
+    open_reqs = (
+        db.query(sqlfunc.count(Requisition.id))
+        .filter(Requisition.status.in_(["open", "active", "sourcing", "draft"]))
+        .scalar()
+        or 0
+    )
     vendor_count = db.query(sqlfunc.count(VendorCard.id)).scalar() or 0
     company_count = db.query(sqlfunc.count(Company.id)).filter(Company.is_active.is_(True)).scalar() or 0
 
@@ -1682,9 +1670,7 @@ async def dashboard_partial(
 
 def _is_ops_member(user: User, db: Session) -> bool:
     """Check if user is in the ops verification group."""
-    return db.query(VerificationGroupMember).filter_by(
-        user_id=user.id, is_active=True
-    ).first() is not None
+    return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
 
 
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
@@ -1712,8 +1698,7 @@ async def buy_plans_list_partial(
     if q.strip():
         safe = escape_like(q.strip())
         query = query.filter(
-            BuyPlan.sales_order_number.ilike(f"%{safe}%")
-            | BuyPlan.customer_po_number.ilike(f"%{safe}%")
+            BuyPlan.sales_order_number.ilike(f"%{safe}%") | BuyPlan.customer_po_number.ilike(f"%{safe}%")
         )
 
     # Sales users only see their own
@@ -1731,30 +1716,34 @@ async def buy_plans_list_partial(
             co = site.company if hasattr(site, "company") else None
             customer_name = co.name if co else getattr(site, "site_name", None)
 
-        buy_plans.append({
-            "id": p.id,
-            "quote_id": p.quote_id,
-            "quote_number": p.quote.quote_number if p.quote else None,
-            "customer_name": customer_name,
-            "sales_order_number": p.sales_order_number,
-            "status": p.status,
-            "so_status": p.so_status,
-            "total_cost": float(p.total_cost) if p.total_cost else 0,
-            "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
-            "line_count": len(p.lines) if p.lines else 0,
-            "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
-            "auto_approved": p.auto_approved or False,
-            "created_at": str(p.created_at) if p.created_at else None,
-        })
+        buy_plans.append(
+            {
+                "id": p.id,
+                "quote_id": p.quote_id,
+                "quote_number": p.quote.quote_number if p.quote else None,
+                "customer_name": customer_name,
+                "sales_order_number": p.sales_order_number,
+                "status": p.status,
+                "so_status": p.so_status,
+                "total_cost": float(p.total_cost) if p.total_cost else 0,
+                "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
+                "line_count": len(p.lines) if p.lines else 0,
+                "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
+                "auto_approved": p.auto_approved or False,
+                "created_at": str(p.created_at) if p.created_at else None,
+            }
+        )
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({
-        "buy_plans": buy_plans,
-        "q": q,
-        "status": status,
-        "mine": mine,
-        "total": len(buy_plans),
-    })
+    ctx.update(
+        {
+            "buy_plans": buy_plans,
+            "q": q,
+            "status": status,
+            "mine": mine,
+            "total": len(buy_plans),
+        }
+    )
     return templates.TemplateResponse("htmx/partials/buy_plans/list.html", ctx)
 
 
@@ -1784,12 +1773,14 @@ async def buy_plan_detail_partial(
         raise HTTPException(404, "Buy plan not found")
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({
-        "bp": bp,
-        "lines": bp.lines or [],
-        "is_ops_member": _is_ops_member(user, db),
-        "user": user,
-    })
+    ctx.update(
+        {
+            "bp": bp,
+            "lines": bp.lines or [],
+            "is_ops_member": _is_ops_member(user, db),
+            "user": user,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/buy_plans/detail.html", ctx)
 
 
@@ -1801,12 +1792,12 @@ async def buy_plan_submit_partial(
     db: Session = Depends(get_db),
 ):
     """Submit a draft buy plan with SO# — returns refreshed detail partial."""
-    from ..services.buyplan_workflow import submit_buy_plan
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_submitted,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import submit_buy_plan
 
     form = await request.form()
     so = form.get("sales_order_number", "").strip()
@@ -1815,7 +1806,10 @@ async def buy_plan_submit_partial(
 
     try:
         plan = submit_buy_plan(
-            plan_id, so, user, db,
+            plan_id,
+            so,
+            user,
+            db,
             customer_po_number=form.get("customer_po_number") or None,
             salesperson_notes=form.get("salesperson_notes") or None,
         )
@@ -1838,12 +1832,12 @@ async def buy_plan_approve_partial(
     db: Session = Depends(get_db),
 ):
     """Manager approves or rejects a pending buy plan — returns refreshed detail."""
-    from ..services.buyplan_workflow import approve_buy_plan
     from ..services.buyplan_notifications import (
         notify_approved,
         notify_rejected,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import approve_buy_plan
 
     form = await request.form()
     action = form.get("action", "approve")
@@ -1872,19 +1866,22 @@ async def buy_plan_verify_so_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies SO — returns refreshed detail."""
-    from ..services.buyplan_workflow import verify_so
     from ..services.buyplan_notifications import (
         notify_so_rejected,
         notify_so_verified,
         run_notify_bg,
     )
+    from ..services.buyplan_workflow import verify_so
 
     form = await request.form()
     action = form.get("action", "approve")
 
     try:
         plan = verify_so(
-            plan_id, action, user, db,
+            plan_id,
+            action,
+            user,
+            db,
             rejection_note=form.get("rejection_note"),
         )
         db.commit()
@@ -1908,8 +1905,9 @@ async def buy_plan_confirm_po_partial(
 ):
     """Buyer confirms PO — returns refreshed detail."""
     from datetime import datetime
-    from ..services.buyplan_workflow import confirm_po
+
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
+    from ..services.buyplan_workflow import confirm_po
 
     form = await request.form()
     po_number = form.get("po_number", "").strip()
@@ -1946,8 +1944,8 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ..services.buyplan_workflow import check_completion, verify_po
     from ..services.buyplan_notifications import notify_completed, run_notify_bg
+    from ..services.buyplan_workflow import check_completion, verify_po
 
     form = await request.form()
     action = form.get("action", "approve")
@@ -2038,9 +2036,7 @@ async def buy_plan_reset_partial(
 
 
 @router.get("/v2/sourcing/{requirement_id}", response_class=HTMLResponse)
-async def v2_sourcing_page(
-    request: Request, requirement_id: int, db: Session = Depends(get_db)
-):
+async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = Depends(get_db)):
     """Full page load for sourcing results."""
     user = get_user(request, db)
     if not user:
@@ -2051,9 +2047,7 @@ async def v2_sourcing_page(
 
 
 @router.get("/v2/sourcing/leads/{lead_id}", response_class=HTMLResponse)
-async def v2_lead_detail_page(
-    request: Request, lead_id: int, db: Session = Depends(get_db)
-):
+async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depends(get_db)):
     """Full page load for lead detail."""
     user = get_user(request, db)
     if not user:
@@ -2131,39 +2125,35 @@ async def sourcing_search_trigger(
             results = raw if isinstance(raw, list) else raw.get("sightings", [])
             elapsed = int((time.time() - start_t) * 1000)
             count = len(results) if results else 0
-            await broker.publish(channel, "source-complete", json.dumps({
-                "source": source_name, "count": count,
-                "elapsed_ms": elapsed, "status": "done"
-            }))
+            await broker.publish(
+                channel,
+                "source-complete",
+                json.dumps({"source": source_name, "count": count, "elapsed_ms": elapsed, "status": "done"}),
+            )
             return results or []
         except Exception as exc:
             elapsed = int((time.time() - start_t) * 1000)
             logger.error("Sourcing search failed for {} on {}: {}", mpn, source_name, exc)
-            await broker.publish(channel, "source-complete", json.dumps({
-                "source": source_name, "count": 0,
-                "elapsed_ms": elapsed, "status": "failed",
-                "error": str(exc)
-            }))
+            await broker.publish(
+                channel,
+                "source-complete",
+                json.dumps(
+                    {"source": source_name, "count": 0, "elapsed_ms": elapsed, "status": "failed", "error": str(exc)}
+                ),
+            )
             return []
 
-    results_by_source = await asyncio.gather(
-        *[search_source(s) for s in sources],
-        return_exceptions=True
-    )
+    results_by_source = await asyncio.gather(*[search_source(s) for s in sources], return_exceptions=True)
 
     for source_results in results_by_source:
         if isinstance(source_results, list):
             all_sightings.extend(source_results)
 
-    await broker.publish(channel, "search-complete", json.dumps({
-        "total": len(all_sightings),
-        "requirement_id": requirement_id
-    }))
-
-    return HTMLResponse(
-        status_code=200,
-        headers={"HX-Redirect": f"/v2/sourcing/{requirement_id}"}
+    await broker.publish(
+        channel, "search-complete", json.dumps({"total": len(all_sightings), "requirement_id": requirement_id})
     )
+
+    return HTMLResponse(status_code=200, headers={"HX-Redirect": f"/v2/sourcing/{requirement_id}"})
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}", response_class=HTMLResponse)
@@ -2204,6 +2194,7 @@ async def sourcing_results_partial(
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
         from datetime import datetime, timedelta, timezone
+
         now = datetime.now(timezone.utc)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
@@ -2256,23 +2247,25 @@ async def sourcing_results_partial(
                 }
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({
-        "requirement": req,
-        "leads": leads,
-        "lead_sighting_data": lead_sighting_data,
-        "total": total,
-        "page": page,
-        "total_pages": max(1, (total + per_page - 1) // per_page),
-        "per_page": per_page,
-        "f_confidence": confidence,
-        "f_safety": safety,
-        "f_freshness": freshness,
-        "f_source": source,
-        "f_status": status,
-        "f_contactability": contactability,
-        "f_corroborated": corroborated,
-        "f_sort": sort,
-    })
+    ctx.update(
+        {
+            "requirement": req,
+            "leads": leads,
+            "lead_sighting_data": lead_sighting_data,
+            "total": total,
+            "page": page,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+            "per_page": per_page,
+            "f_confidence": confidence,
+            "f_safety": safety,
+            "f_freshness": freshness,
+            "f_source": source,
+            "f_status": status,
+            "f_contactability": contactability,
+            "f_corroborated": corroborated,
+            "f_sort": sort,
+        }
+    )
     return templates.TemplateResponse("partials/sourcing/results.html", ctx)
 
 
@@ -2317,9 +2310,7 @@ async def lead_detail_partial(
         "buyer_feedback": "Buyer Feedback",
     }
 
-    requirement = db.query(Requirement).filter(
-        Requirement.id == lead.requirement_id
-    ).first()
+    requirement = db.query(Requirement).filter(Requirement.id == lead.requirement_id).first()
 
     vendor_card = lead.vendor_card
 
@@ -2334,15 +2325,17 @@ async def lead_detail_partial(
     )
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({
-        "lead": lead,
-        "evidence": evidence,
-        "evidence_by_category": evidence_by_category,
-        "category_labels": category_labels,
-        "requirement": requirement,
-        "vendor_card": vendor_card,
-        "best_sighting": best_sighting,
-    })
+    ctx.update(
+        {
+            "lead": lead,
+            "evidence": evidence,
+            "evidence_by_category": evidence_by_category,
+            "category_labels": category_labels,
+            "requirement": requirement,
+            "vendor_card": vendor_card,
+            "best_sighting": best_sighting,
+        }
+    )
     return templates.TemplateResponse("partials/sourcing/lead_detail.html", ctx)
 
 
@@ -2358,7 +2351,6 @@ async def lead_status_update(
     Returns updated lead card when called from results view (for OOB swap),
     or updated lead detail when called from lead detail page.
     """
-    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import update_lead_status
 
     form = await request.form()
@@ -2367,7 +2359,9 @@ async def lead_status_update(
 
     try:
         lead = update_lead_status(
-            db, lead_id, status_val,
+            db,
+            lead_id,
+            status_val,
             note=note,
             actor_user_id=user.id,
         )
@@ -2418,7 +2412,8 @@ async def lead_feedback(
     contact_method = form.get("contact_method", "").strip() or None
 
     lead = append_lead_feedback(
-        db, lead_id,
+        db,
+        lead_id,
         note=note,
         reason_code=reason_code,
         contact_method=contact_method,
@@ -2469,17 +2464,22 @@ async def quote_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return quote detail as HTML partial."""
-    quote = db.query(Quote).options(
-        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        joinedload(Quote.requisition),
-        joinedload(Quote.created_by),
-    ).filter(Quote.id == quote_id).first()
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(Quote.requisition),
+            joinedload(Quote.created_by),
+        )
+        .filter(Quote.id == quote_id)
+        .first()
+    )
     if not quote:
         raise HTTPException(404, "Quote not found")
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
-    offers = db.query(Offer).filter(
-        Offer.requisition_id == quote.requisition_id
-    ).order_by(Offer.created_at.desc()).all()
+    offers = (
+        db.query(Offer).filter(Offer.requisition_id == quote.requisition_id).order_by(Offer.created_at.desc()).all()
+    )
     ctx = _base_ctx(request, user, "quotes")
     ctx.update({"quote": quote, "lines": lines, "offers": offers})
     return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
@@ -2509,9 +2509,7 @@ async def update_quote_line(
     if "sell_price" in form:
         line.sell_price = float(form["sell_price"])
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
-        line.margin_pct = round(
-            (float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2
-        )
+        line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
     db.commit()
     ctx = _base_ctx(request, user, "quotes")
     ctx["line"] = line
@@ -2726,10 +2724,7 @@ async def prospecting_list_partial(
         query = query.filter(ProspectAccount.status.in_(["suggested", "claimed", "dismissed"]))
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(
-            ProspectAccount.name.ilike(f"%{safe}%")
-            | ProspectAccount.domain.ilike(f"%{safe}%")
-        )
+        query = query.filter(ProspectAccount.name.ilike(f"%{safe}%") | ProspectAccount.domain.ilike(f"%{safe}%"))
     total = query.count()
     if sort == "fit_desc":
         query = query.order_by(ProspectAccount.fit_score.desc())
@@ -2740,10 +2735,18 @@ async def prospecting_list_partial(
     prospects = query.offset((page - 1) * per_page).limit(per_page).all()
     total_pages = (total + per_page - 1) // per_page
     ctx = _base_ctx(request, user, "prospecting")
-    ctx.update({
-        "prospects": prospects, "q": q, "status": status, "sort": sort,
-        "page": page, "per_page": per_page, "total": total, "total_pages": total_pages,
-    })
+    ctx.update(
+        {
+            "prospects": prospects,
+            "q": q,
+            "status": status,
+            "sort": sort,
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/prospecting/list.html", ctx)
 
 
@@ -2755,9 +2758,14 @@ async def prospecting_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return prospect detail as HTML partial."""
-    prospect = db.query(ProspectAccount).options(
-        joinedload(ProspectAccount.claimed_by_user),
-    ).filter(ProspectAccount.id == prospect_id).first()
+    prospect = (
+        db.query(ProspectAccount)
+        .options(
+            joinedload(ProspectAccount.claimed_by_user),
+        )
+        .filter(ProspectAccount.id == prospect_id)
+        .first()
+    )
     if not prospect:
         raise HTTPException(404, "Prospect not found")
     ctx = _base_ctx(request, user, "prospecting")
@@ -2781,9 +2789,14 @@ async def claim_prospect_htmx(
         claim_prospect(prospect_id, user.id, db)
     except (LookupError, ValueError) as e:
         raise HTTPException(400, str(e))
-    prospect = db.query(ProspectAccount).options(
-        joinedload(ProspectAccount.claimed_by_user),
-    ).filter(ProspectAccount.id == prospect_id).first()
+    prospect = (
+        db.query(ProspectAccount)
+        .options(
+            joinedload(ProspectAccount.claimed_by_user),
+        )
+        .filter(ProspectAccount.id == prospect_id)
+        .first()
+    )
     ctx = _base_ctx(request, user, "prospecting")
     ctx["prospect"] = prospect
     return templates.TemplateResponse("htmx/partials/prospecting/_card.html", ctx)

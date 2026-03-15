@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, Requirement, Requisition, User
+from app.models import Company, CustomerSite, Requisition, User
 from app.models.intelligence import ActivityLog
 from app.models.offers import Contact as RfqContact
 
@@ -169,10 +169,14 @@ def test_log_activity_creates_record(client, db_session, req_with_activity):
     assert "Left a voicemail" in html
 
     # Verify record was created
-    logs = db_session.query(ActivityLog).filter(
-        ActivityLog.requisition_id == req.id,
-        ActivityLog.notes == "Left a voicemail",
-    ).all()
+    logs = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.requisition_id == req.id,
+            ActivityLog.notes == "Left a voicemail",
+        )
+        .all()
+    )
     assert len(logs) == 1
     assert logs[0].activity_type == "note"
     assert logs[0].channel == "note"
@@ -192,9 +196,13 @@ def test_log_activity_phone_call(client, db_session, req_with_activity):
     )
     assert resp.status_code == 200
 
-    log = db_session.query(ActivityLog).filter(
-        ActivityLog.notes == "Discussed pricing",
-    ).first()
+    log = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.notes == "Discussed pricing",
+        )
+        .first()
+    )
     assert log.channel == "phone"
     assert log.contact_phone == "+15559876543"
 

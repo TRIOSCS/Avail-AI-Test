@@ -183,9 +183,13 @@ def test_rfq_send_creates_contacts(client, db_session, req_with_vendors):
     assert "DigiKey" in html
 
     # Verify Contact records
-    contacts = db_session.query(RfqContact).filter(
-        RfqContact.requisition_id == req.id,
-    ).all()
+    contacts = (
+        db_session.query(RfqContact)
+        .filter(
+            RfqContact.requisition_id == req.id,
+        )
+        .all()
+    )
     assert len(contacts) >= 2
 
 

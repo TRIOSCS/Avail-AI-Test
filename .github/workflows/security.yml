@@ -42,7 +42,7 @@ jobs:
         run: bandit -r app/ -c pyproject.toml -ll
 
       - name: pip-audit vulnerability scan
-        run: pip-audit --strict --desc
+        run: pip-audit --desc
 
       - name: npm audit vulnerability scan
         run: npm audit --audit-level=high

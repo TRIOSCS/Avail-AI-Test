@@ -9,11 +9,12 @@ Called by: pytest
 Depends on: app.config, app.dependencies, conftest.py fixtures
 """
 
-import pytest
 from unittest.mock import MagicMock
-from app.dependencies import wants_html, is_htmx_boosted
-from app.config import Settings
+
 from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.dependencies import is_htmx_boosted, wants_html
 
 
 class TestWantsHtml:
@@ -54,6 +55,7 @@ class TestUseHtmxFeatureFlag:
 
     def test_default_is_true(self):
         import os
+
         os.environ["TESTING"] = "1"
         os.environ["DATABASE_URL"] = "sqlite:///test.db"
         s = Settings(
@@ -64,6 +66,7 @@ class TestUseHtmxFeatureFlag:
 
     def test_can_disable(self):
         import os
+
         os.environ["TESTING"] = "1"
         os.environ["DATABASE_URL"] = "sqlite:///test.db"
         s = Settings(
@@ -129,6 +132,7 @@ class TestViteManifestReader:
 
     def test_vite_assets_returns_dict(self):
         from app.routers.htmx_views import _vite_assets
+
         result = _vite_assets()
         assert "js_file" in result
         assert "css_files" in result

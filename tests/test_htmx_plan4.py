@@ -17,17 +17,9 @@ import pytest
 
 from app.models import (
     ApiSource,
-    Company,
-    CustomerSite,
-    Offer,
-    Quote,
     QuoteLine,
-    Requirement,
-    Requisition,
-    User,
 )
 from app.models.prospect_account import ProspectAccount
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
