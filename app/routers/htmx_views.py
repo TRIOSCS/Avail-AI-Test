@@ -167,7 +167,10 @@ async def global_search(
         )
         results["vendors"] = (
             db.query(VendorCard)
-            .filter(VendorCard.name.ilike(f"%{safe}%"))
+            .filter(
+                VendorCard.display_name.ilike(f"%{safe}%")
+                | VendorCard.normalized_name.ilike(f"%{safe}%")
+            )
             .limit(5)
             .all()
         )
