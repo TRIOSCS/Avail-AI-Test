@@ -662,9 +662,25 @@ def test_mark_notification_read_wrong_user(client, db_session, test_user):
     assert resp.status_code == 404
 
 
-def test_unmatched_activities_admin_required(client):
+def test_unmatched_activities_admin_required(db_session, sales_user):
     """GET /api/activities/unmatched requires admin."""
-    resp = client.get("/api/activities/unmatched")
+    from app.database import get_db
+    from app.dependencies import require_admin, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = lambda: sales_user
+    # Do NOT override require_admin — let it enforce the check
+    app.dependency_overrides.pop(require_admin, None)
+
+    from fastapi.testclient import TestClient
+
+    with TestClient(app) as c:
+        resp = c.get("/api/activities/unmatched")
+    app.dependency_overrides.clear()
     assert resp.status_code in (401, 403)
 
 

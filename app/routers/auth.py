@@ -30,12 +30,11 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..config import APP_VERSION, GRAPH_SCOPES, settings
+from ..config import GRAPH_SCOPES, settings
 from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
 from ..models import User
-from ..vite import vite_app_url, vite_crm_url, vite_css_tags, vite_js_tags
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -45,28 +44,11 @@ SCOPES = GRAPH_SCOPES
 
 
 @router.get("/", response_class=HTMLResponse)
-async def index(request: Request, db: Session = Depends(get_db)):
-    user = get_user(request, db)
-    is_admin = user.role == "admin" if user else False
-    is_manager = user.role == "manager" if user else False
-    user_role = user.role if user else ""
-    return templates.TemplateResponse(
-        "index.html",
-        {
-            "request": request,
-            "logged_in": user is not None,
-            "user_name": user.name if user else "",
-            "user_email": user.email if user else "",
-            "is_admin": is_admin,
-            "is_manager": is_manager,
-            "user_role": user_role,
-            "app_version": APP_VERSION,
-            "vite_css_tags": vite_css_tags(APP_VERSION),
-            "vite_js_tags": vite_js_tags(APP_VERSION),
-            "vite_app_url": vite_app_url(APP_VERSION),
-            "vite_crm_url": vite_crm_url(APP_VERSION),
-        },
-    )
+async def index(request: Request):
+    """Redirect root to the HTMX frontend."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/v2", status_code=302)
+
 
 
 @router.get("/auth/login")

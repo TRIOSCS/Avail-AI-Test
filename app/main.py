@@ -666,8 +666,3 @@ app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
 app.include_router(htmx_views_router)
 
-# HTMX view router — always registered (HTMX is the default frontend).
-# The old SPA at "/" (index.html) still works as a fallback when USE_HTMX=false.
-from app.routers.views import router as views_router
-
-app.include_router(views_router)
