@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy import func as sqlfunc
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
@@ -619,8 +620,12 @@ async def requisitions_bulk_action(
     elif action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
+            try:
+                owner_id_int = int(owner_id)
+            except (ValueError, TypeError):
+                raise HTTPException(400, "Invalid owner_id — must be a number")
             for r in reqs:
-                r.created_by = int(owner_id)
+                r.created_by = owner_id_int
 
     db.commit()
     logger.info("Bulk {} applied to {} requisitions by {}", action, len(reqs), user.email)
@@ -652,7 +657,10 @@ async def create_quote_from_offers(
     """Create a new quote from selected offer IDs. Returns quote detail partial."""
     form = await request.form()
     offer_ids_raw = form.getlist("offer_ids")
-    offer_ids = [int(x) for x in offer_ids_raw if x]
+    try:
+        offer_ids = [int(x) for x in offer_ids_raw if x]
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid offer ID — all values must be numbers")
 
     if not offer_ids:
         raise HTTPException(400, "No offers selected")
@@ -1221,8 +1229,8 @@ async def vendor_detail_partial(
             safety_summary = lead.vendor_safety_summary
             safety_flags = lead.vendor_safety_flags
             safety_score = lead.vendor_safety_score
-    except Exception:
-        pass  # SourcingLead may not have data
+    except (SQLAlchemyError, ValueError) as exc:
+        logger.warning("Failed to load SourcingLead for vendor {}: {}", vendor.normalized_name, exc)
 
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
@@ -1286,8 +1294,8 @@ async def vendor_tab(
                 safety_flags = lead.vendor_safety_flags
                 safety_score = lead.vendor_safety_score
                 safety_available = True
-        except Exception:
-            pass
+        except (SQLAlchemyError, ValueError) as exc:
+            logger.warning("Failed to load safety data for vendor {}: {}", vendor_id, exc)
         contacts = (
             db.query(VendorContact)
             .filter(VendorContact.vendor_card_id == vendor_id)
@@ -2448,11 +2456,20 @@ async def update_quote_line(
     if "manufacturer" in form:
         line.manufacturer = form["manufacturer"]
     if "qty" in form:
-        line.qty = int(form["qty"])
+        try:
+            line.qty = int(form["qty"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Invalid quantity — must be a whole number")
     if "cost_price" in form:
-        line.cost_price = float(form["cost_price"])
+        try:
+            line.cost_price = float(form["cost_price"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Invalid cost price — must be a number")
     if "sell_price" in form:
-        line.sell_price = float(form["sell_price"])
+        try:
+            line.sell_price = float(form["sell_price"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Invalid sell price — must be a number")
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
         line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
     db.commit()
