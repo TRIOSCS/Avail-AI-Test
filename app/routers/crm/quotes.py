@@ -232,19 +232,6 @@ async def create_quote(
         db.add(ql)
     db.commit()
 
-    # Auto-generate send-quote task
-    try:
-        from ...services.task_service import on_quote_created
-
-        customer_name = ""
-        if site and hasattr(site, "company") and site.company:
-            customer_name = site.company.name
-        elif site:
-            customer_name = getattr(site, "contact_name", "") or ""
-        on_quote_created(db, req_id, customer_name, quote.id)
-    except Exception:
-        logger.debug("Task auto-gen for quote failed", exc_info=True)
-
     # Auto-advance per-part sourcing status to "quoted"
     try:
         from app.services.requirement_status import on_quote_built
@@ -412,14 +399,6 @@ async def send_quote(
     if req and req.status not in ("won", "lost", "archived"):
         req.status = "quoted"
 
-    # Auto-close "Send quote" task now that it's sent
-    try:
-        from ...services.task_service import auto_close_task
-
-        auto_close_task(db, quote.requisition_id, f"quote:{quote.id}")
-    except Exception:
-        pass  # Non-critical
-
     db.commit()
     return {
         "ok": True,
@@ -452,15 +431,6 @@ async def quote_result(
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = payload.result
-
-    # Auto-close quote-related tasks now that result is set
-    try:
-        from ...services.task_service import auto_close_task
-
-        auto_close_task(db, quote.requisition_id, f"expiry:{quote.id}")
-        auto_close_task(db, quote.requisition_id, f"quote:{quote.id}")
-    except Exception:
-        pass  # Non-critical
 
     # CPH hook: record purchase history when quote is won
     if payload.result == "won":

@@ -71,6 +71,7 @@ def submit_buy_plan(
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
         logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, float(plan.total_cost or 0))
+        _generate_buyer_tasks(plan, db)
     else:
         plan.status = BuyPlanStatus.pending.value
         plan.approval_token = secrets.token_urlsafe(32)
@@ -117,6 +118,7 @@ def approve_buy_plan(
         plan.approved_at = now
         plan.approval_notes = notes
         logger.info("Buy plan %d approved by %s", plan_id, user.email)
+        _generate_buyer_tasks(plan, db)
     elif action == "reject":
         plan.status = BuyPlanStatus.draft.value
         plan.approval_notes = notes
@@ -421,6 +423,36 @@ def resubmit_buy_plan(
 
     db.flush()
     return plan
+
+
+# ── Helpers: Buyer Task Generation ────────────────────────────────────
+
+
+def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
+    """Create 'Cut PO' tasks for each assigned buyer line when plan goes active."""
+    try:
+        from app.services.task_service import on_buy_plan_assigned
+
+        for line in plan.lines:
+            if not line.buyer_id:
+                continue
+            vendor_name = ""
+            mpn = ""
+            if line.offer:
+                vendor_name = line.offer.vendor_name or ""
+                mpn = line.offer.mpn or ""
+            elif line.requirement:
+                mpn = line.requirement.primary_mpn or ""
+            on_buy_plan_assigned(
+                db,
+                requisition_id=plan.requisition_id,
+                buyer_id=line.buyer_id,
+                vendor_name=vendor_name,
+                mpn=mpn,
+                line_id=line.id,
+            )
+    except Exception:
+        logger.debug("Task auto-gen for buy plan lines failed", exc_info=True)
 
 
 # ── Helpers: Auto-Approval ───────────────────────────────────────────

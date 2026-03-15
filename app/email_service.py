@@ -709,16 +709,6 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
 
     contact.status_updated_at = now
 
-    # Auto-close RFQ tasks when vendor responds
-    if contact.status in ("responded", "quoted", "declined"):
-        try:
-            from app.services.task_service import auto_close_task
-
-            auto_close_task(db, contact.requisition_id, f"rfq:{contact.id}")
-            auto_close_task(db, contact.requisition_id, f"followup:{contact.id}")
-        except Exception:
-            logger.debug("Auto-close task on contact response failed", exc_info=True)
-
 
 # Noise filter — common non-vendor senders
 NOISE_DOMAINS = {
@@ -964,6 +954,19 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 )
                 db.add(offer)
                 db.flush()
+
+                # Auto-generate task for email-parsed offer
+                try:
+                    from app.services.task_service import on_email_offer_parsed
+
+                    on_email_offer_parsed(
+                        db, offer.requisition_id,
+                        offer.vendor_name or "Unknown",
+                        offer.mpn or "?",
+                        offer.id,
+                    )
+                except Exception:
+                    logger.debug("Task auto-gen for email offer failed", exc_info=True)
 
                 # Auto-capture offer facts into Knowledge Ledger
                 try:

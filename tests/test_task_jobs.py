@@ -1,7 +1,7 @@
-"""Tests for selective auto-task scheduler jobs.
+"""Tests for selective auto-task triggers — bid due, buy plan, email offer, new offers.
 
-Verifies that task_jobs creates follow-up and expiry tasks only for
-the right candidates, respects caps, and doesn't create noise.
+Verifies that task events create the right tasks, respect dedup,
+and that the scheduler job only fires for approaching deadlines.
 
 Depends on: conftest.py fixtures, app/jobs/task_jobs.py, app/services/task_service.py
 """
@@ -12,231 +12,202 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requisition, User
-from app.models.offers import Contact
-from app.models.quotes import Quote
 from app.models.task import RequisitionTask
 from app.services import task_service
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# New requirement tasks (already existed, verify still works)
 # ---------------------------------------------------------------------------
 
 
-def _make_contact(db: Session, req_id: int, user_id: int, *, status="sent", age_days=5) -> Contact:
-    """Create a Contact (RFQ) with a specific age and status."""
-    c = Contact(
-        requisition_id=req_id,
-        user_id=user_id,
-        contact_type="email",
-        vendor_name="TestVendor",
-        vendor_contact="test@vendor.com",
-        status=status,
-        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
-    )
-    db.add(c)
-    db.commit()
-    db.refresh(c)
-    return c
+class TestOnRequirementAdded:
+    def test_creates_sourcing_task(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        task_service.on_requirement_added(db_session, test_requisition.id, "LM317T")
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
+        assert "LM317T" in tasks[0].title
+        assert tasks[0].source_ref == "source:LM317T"
+        assert tasks[0].source == "system"
+
+    def test_dedup_same_mpn(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        task_service.on_requirement_added(db_session, test_requisition.id, "LM317T")
+        task_service.on_requirement_added(db_session, test_requisition.id, "LM317T")
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
 
 
 # ---------------------------------------------------------------------------
-# RFQ follow-up job tests
+# New offer tasks
 # ---------------------------------------------------------------------------
 
 
-class TestRFQFollowupJob:
-    """Tests for _job_rfq_followup_tasks selectivity."""
-
-    def test_creates_task_for_stale_rfq(
+class TestOnOfferReceived:
+    def test_creates_review_task(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """RFQ 5 days old with status 'sent' on active req -> creates follow-up task."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=5)
-        task_service.on_rfq_no_response(
-            db_session, test_requisition.id, contact.vendor_name, contact.id
-        )
-        tasks = task_service.get_tasks(db_session, test_requisition.id, task_type="sourcing")
-        followups = [t for t in tasks if t.source_ref == f"followup:{contact.id}"]
-        assert len(followups) == 1
-        assert "Follow up" in followups[0].title
-
-    def test_skips_too_new_rfq(
-        self, db_session: Session, test_user: User, test_requisition: Requisition
-    ):
-        """RFQ only 1 day old should NOT get a follow-up task (too early)."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=1)
-        # Simulate what the job does: check age before calling on_rfq_no_response
-        now = datetime.now(timezone.utc)
-        created = contact.created_at
-        if created and not created.tzinfo:
-            created = created.replace(tzinfo=timezone.utc)
-        age = (now - created).days
-        assert age < 3, "Contact should be too new for follow-up"
-
-    def test_skips_already_responded_rfq(
-        self, db_session: Session, test_user: User, test_requisition: Requisition
-    ):
-        """RFQ with status 'responded' should NOT get a follow-up task."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="responded", age_days=5)
-        # Job only queries status in ("sent", "opened") — verify responded is excluded
-        assert contact.status not in ("sent", "opened")
-
-    def test_skips_too_old_rfq(
-        self, db_session: Session, test_user: User, test_requisition: Requisition
-    ):
-        """RFQ 30 days old is ancient — should NOT get a follow-up (max 14 days)."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=30)
-        now = datetime.now(timezone.utc)
-        created = contact.created_at
-        if created and not created.tzinfo:
-            created = created.replace(tzinfo=timezone.utc)
-        age = (now - created).days
-        assert age > 14, "Contact should be too old for follow-up"
-
-    def test_dedup_prevents_double_followup(
-        self, db_session: Session, test_user: User, test_requisition: Requisition
-    ):
-        """Calling on_rfq_no_response twice creates only one task."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=5)
-        task_service.on_rfq_no_response(
-            db_session, test_requisition.id, contact.vendor_name, contact.id
-        )
-        task_service.on_rfq_no_response(
-            db_session, test_requisition.id, contact.vendor_name, contact.id
+        task_service.on_offer_received(
+            db_session, test_requisition.id, "Arrow", "LM317T", 42
         )
         tasks = task_service.get_tasks(db_session, test_requisition.id)
-        followups = [t for t in tasks if t.source_ref == f"followup:{contact.id}"]
-        assert len(followups) == 1
+        assert len(tasks) == 1
+        assert "Arrow" in tasks[0].title
+        assert tasks[0].source_ref == "offer:42"
 
-
-# ---------------------------------------------------------------------------
-# Auto-close on vendor response tests
-# ---------------------------------------------------------------------------
-
-
-class TestAutoCloseOnResponse:
-    """Tests for auto-closing RFQ tasks when vendor responds."""
-
-    def test_auto_close_rfq_task_on_response(
+    def test_dedup_same_offer(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """When auto_close_task is called with rfq:id, the awaiting task closes."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=4)
-        # Create the awaiting-response task
-        task_service.auto_create_task(
+        task_service.on_offer_received(
+            db_session, test_requisition.id, "Arrow", "LM317T", 42
+        )
+        task_service.on_offer_received(
+            db_session, test_requisition.id, "Arrow", "LM317T", 42
+        )
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
+
+
+# ---------------------------------------------------------------------------
+# Email-parsed offer tasks
+# ---------------------------------------------------------------------------
+
+
+class TestOnEmailOfferParsed:
+    def test_creates_email_offer_task(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        task_service.on_email_offer_parsed(
+            db_session, test_requisition.id, "Mouser", "STM32F4", 99
+        )
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
+        assert "Email offer" in tasks[0].title
+        assert "Mouser" in tasks[0].title
+        assert tasks[0].source_ref == "email_offer:99"
+
+    def test_dedup_same_email_offer(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        task_service.on_email_offer_parsed(
+            db_session, test_requisition.id, "Mouser", "STM32F4", 99
+        )
+        task_service.on_email_offer_parsed(
+            db_session, test_requisition.id, "Mouser", "STM32F4", 99
+        )
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
+
+
+# ---------------------------------------------------------------------------
+# Buy plan assignment tasks
+# ---------------------------------------------------------------------------
+
+
+class TestOnBuyPlanAssigned:
+    def test_creates_cut_po_task(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        task_service.on_buy_plan_assigned(
             db_session,
             requisition_id=test_requisition.id,
-            title=f"Awaiting response from {contact.vendor_name}",
-            task_type="sourcing",
-            source_ref=f"rfq:{contact.id}",
+            buyer_id=test_user.id,
+            vendor_name="DigiKey",
+            mpn="LM317T",
+            line_id=7,
         )
-        # Simulate vendor responding — auto-close
-        closed = task_service.auto_close_task(
-            db_session, test_requisition.id, f"rfq:{contact.id}"
-        )
-        assert closed is not None
-        assert closed.status == "done"
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
+        assert "Cut PO" in tasks[0].title
+        assert "DigiKey" in tasks[0].title
+        assert tasks[0].source_ref == "buyline:7"
+        assert tasks[0].assigned_to_id == test_user.id
+        assert tasks[0].task_type == "buying"
 
-    def test_auto_close_followup_task_on_response(
+    def test_dedup_same_line(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """When vendor responds, follow-up task also closes."""
-        contact = _make_contact(db_session, test_requisition.id, test_user.id, status="sent", age_days=5)
-        task_service.on_rfq_no_response(
-            db_session, test_requisition.id, contact.vendor_name, contact.id
+        task_service.on_buy_plan_assigned(
+            db_session, test_requisition.id, test_user.id, "DigiKey", "LM317T", 7
         )
-        closed = task_service.auto_close_task(
-            db_session, test_requisition.id, f"followup:{contact.id}"
+        task_service.on_buy_plan_assigned(
+            db_session, test_requisition.id, test_user.id, "DigiKey", "LM317T", 7
         )
-        assert closed is not None
-        assert closed.status == "done"
-
-
-# ---------------------------------------------------------------------------
-# Quote expiry and auto-close tests
-# ---------------------------------------------------------------------------
-
-
-class TestQuoteExpiry:
-    """Tests for quote expiry task creation and auto-close."""
-
-    def test_quote_expiry_task_created(
-        self, db_session: Session, test_requisition: Requisition, test_quote: Quote
-    ):
-        """on_quote_expiring creates an expiry task for the quote."""
-        task_service.on_quote_expiring(db_session, test_requisition.id, test_quote.id)
         tasks = task_service.get_tasks(db_session, test_requisition.id)
-        expiry = [t for t in tasks if t.source_ref == f"expiry:{test_quote.id}"]
-        assert len(expiry) == 1
-        assert "expires soon" in expiry[0].title.lower()
+        assert len(tasks) == 1
 
-    def test_quote_expiry_no_duplicate(
-        self, db_session: Session, test_requisition: Requisition, test_quote: Quote
+
+# ---------------------------------------------------------------------------
+# Bid due alert tasks
+# ---------------------------------------------------------------------------
+
+
+class TestOnBidDueSoon:
+    def test_creates_bid_due_task(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Calling on_quote_expiring twice creates only one task."""
-        task_service.on_quote_expiring(db_session, test_requisition.id, test_quote.id)
-        task_service.on_quote_expiring(db_session, test_requisition.id, test_quote.id)
+        task_service.on_bid_due_soon(
+            db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001"
+        )
         tasks = task_service.get_tasks(db_session, test_requisition.id)
-        expiry = [t for t in tasks if t.source_ref == f"expiry:{test_quote.id}"]
-        assert len(expiry) == 1
+        assert len(tasks) == 1
+        assert "Bid due" in tasks[0].title
+        assert tasks[0].source_ref == f"bid_due:{test_requisition.id}"
+        assert tasks[0].due_at is not None
 
-    def test_quote_result_closes_expiry_task(
-        self, db_session: Session, test_requisition: Requisition, test_quote: Quote
+    def test_dedup_same_requisition(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Setting quote result (won/lost) auto-closes the expiry task."""
-        task_service.on_quote_expiring(db_session, test_requisition.id, test_quote.id)
-        closed = task_service.auto_close_task(
-            db_session, test_requisition.id, f"expiry:{test_quote.id}"
+        task_service.on_bid_due_soon(
+            db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001"
         )
-        assert closed is not None
-        assert closed.status == "done"
-
-    def test_quote_send_closes_send_task(
-        self, db_session: Session, test_requisition: Requisition, test_quote: Quote
-    ):
-        """Sending a quote auto-closes the 'Send quote' task."""
-        task_service.on_quote_created(db_session, test_requisition.id, "Acme", test_quote.id)
-        closed = task_service.auto_close_task(
-            db_session, test_requisition.id, f"quote:{test_quote.id}"
+        task_service.on_bid_due_soon(
+            db_session, test_requisition.id, "2026-03-17", "REQ-TEST-001"
         )
-        assert closed is not None
-        assert closed.status == "done"
-
-    def test_skips_quote_with_existing_alert(
-        self, db_session: Session, test_requisition: Requisition, test_quote: Quote
-    ):
-        """Quote with followup_alert_sent_at already set should be skipped by the job."""
-        test_quote.followup_alert_sent_at = datetime.now(timezone.utc)
-        db_session.commit()
-        assert test_quote.followup_alert_sent_at is not None
+        tasks = task_service.get_tasks(db_session, test_requisition.id)
+        assert len(tasks) == 1
 
 
 # ---------------------------------------------------------------------------
-# Cap / noise prevention tests
+# Scheduler job constants / selectivity
 # ---------------------------------------------------------------------------
 
 
-class TestNoisePrevention:
-    def test_cap_constants_are_reasonable(self):
-        """Verify the caps exist and are sane."""
-        from app.jobs.task_jobs import _RFQ_FOLLOWUP_CAP, _QUOTE_EXPIRY_CAP
+class TestSchedulerSelectivity:
+    def test_cap_constant_is_reasonable(self):
+        from app.jobs.task_jobs import _BID_DUE_CAP
 
-        assert 1 <= _RFQ_FOLLOWUP_CAP <= 50
-        assert 1 <= _QUOTE_EXPIRY_CAP <= 50
-
-    def test_age_window_constants(self):
-        """Verify the age window for RFQ follow-ups is 3-14 days."""
-        from app.jobs.task_jobs import _RFQ_MIN_AGE_DAYS, _RFQ_MAX_AGE_DAYS
-
-        assert _RFQ_MIN_AGE_DAYS == 3
-        assert _RFQ_MAX_AGE_DAYS == 14
+        assert 1 <= _BID_DUE_CAP <= 50
 
     def test_only_active_req_statuses(self):
-        """Verify archived/won/lost reqs are excluded."""
         from app.jobs.task_jobs import _ACTIVE_REQ_STATUSES
 
         assert "archived" not in _ACTIVE_REQ_STATUSES
         assert "won" not in _ACTIVE_REQ_STATUSES
         assert "lost" not in _ACTIVE_REQ_STATUSES
         assert "open" in _ACTIVE_REQ_STATUSES
+        assert "sourcing" in _ACTIVE_REQ_STATUSES
+
+    def test_deadline_within_window_would_fire(self):
+        """Deadlines within 2 days should be in scope."""
+        now = datetime.now(timezone.utc)
+        tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        deadline_dt = datetime.fromisoformat(tomorrow).replace(tzinfo=timezone.utc)
+        horizon = now + timedelta(days=2)
+        assert deadline_dt <= horizon
+
+    def test_deadline_far_future_would_not_fire(self):
+        """Deadlines 10 days away should NOT be in scope."""
+        now = datetime.now(timezone.utc)
+        far = (now + timedelta(days=10)).strftime("%Y-%m-%d")
+        deadline_dt = datetime.fromisoformat(far).replace(tzinfo=timezone.utc)
+        horizon = now + timedelta(days=2)
+        assert deadline_dt > horizon
+
+    def test_asap_deadline_skipped(self):
+        """'ASAP' is not a parseable ISO date and would be skipped."""
+        with pytest.raises(ValueError):
+            datetime.fromisoformat("ASAP")

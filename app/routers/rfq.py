@@ -210,16 +210,6 @@ async def send_rfq(
     except Exception:
         logger.debug("Auto-claim on RFQ send failed", exc_info=True)
 
-    # Auto-generate awaiting-response tasks for sent RFQs
-    try:
-        from ..services.task_service import on_rfq_sent as task_on_rfq_sent
-
-        for r in results:
-            if r.get("status") != "failed":
-                task_on_rfq_sent(db, req_id, r["vendor_name"], r["id"])
-    except Exception:
-        logger.debug("Task auto-gen for RFQ send failed", exc_info=True)
-
     return {"results": results}
 
 
