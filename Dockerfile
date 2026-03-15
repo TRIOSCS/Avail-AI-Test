@@ -29,7 +29,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 # Install Chromium for Playwright/patchright (self-heal site testing)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
-RUN patchright install chromium
+RUN python -m patchright install chromium
 
 # Copy app code and Alembic (for migrations at runtime)
 COPY app/ app/
