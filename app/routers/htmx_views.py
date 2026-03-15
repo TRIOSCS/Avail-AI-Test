@@ -2834,6 +2834,112 @@ async def companies_list_partial(
     return templates.TemplateResponse("htmx/partials/companies/list.html", ctx)
 
 
+# ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
+
+
+@router.get("/v2/partials/companies/create-form", response_class=HTMLResponse)
+async def company_create_form(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return create company form."""
+    users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
+    return templates.TemplateResponse(
+        "partials/companies/create_form.html",
+        {"request": request, "users": users},
+    )
+
+
+@router.post("/v2/partials/companies/create", response_class=HTMLResponse)
+async def create_company(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new company and redirect to its detail page."""
+    form = await request.form()
+    name = form.get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "Company name is required")
+
+    # Duplicate check
+    existing = db.query(Company).filter(sqlfunc.lower(Company.name) == name.lower()).first()
+    if existing:
+        raise HTTPException(409, f"Company '{existing.name}' already exists (ID {existing.id})")
+
+    company = Company(
+        name=name,
+        website=form.get("website", "").strip() or None,
+        industry=form.get("industry", "").strip() or None,
+        notes=form.get("notes", "").strip() or None,
+        is_active=True,
+    )
+    owner_id = form.get("owner_id", "")
+    if owner_id and owner_id.isdigit():
+        company.account_owner_id = int(owner_id)
+    db.add(company)
+    db.flush()
+
+    # Auto-create default site
+    default_site = CustomerSite(
+        company_id=company.id,
+        site_name="HQ",
+        site_type="headquarters",
+        is_active=True,
+    )
+    db.add(default_site)
+    db.commit()
+    logger.info("Company {} created by {}", company.id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company.id, user=user, db=db)
+
+
+@router.get("/v2/partials/companies/typeahead", response_class=HTMLResponse)
+async def company_typeahead(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return company typeahead results as HTML options."""
+    if not q.strip() or len(q.strip()) < 2:
+        return HTMLResponse("")
+
+    safe = escape_like(q.strip())
+    companies = (
+        db.query(Company)
+        .filter(Company.is_active.is_(True), Company.name.ilike(f"%{safe}%"))
+        .order_by(Company.name)
+        .limit(10)
+        .all()
+    )
+    rows = [f'<option value="{c.id}">{c.name}</option>' for c in companies]
+    return HTMLResponse("\n".join(rows))
+
+
+@router.get("/v2/partials/companies/check-duplicate", response_class=HTMLResponse)
+async def check_company_duplicate(
+    request: Request,
+    name: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Check for duplicate company name, return warning HTML if found."""
+    if not name.strip():
+        return HTMLResponse("")
+
+    existing = db.query(Company).filter(
+        Company.is_active.is_(True),
+        sqlfunc.lower(Company.name) == name.strip().lower(),
+    ).first()
+    if existing:
+        return HTMLResponse(
+            f'<p class="text-sm text-amber-600">A company named "{existing.name}" already exists (ID {existing.id}).</p>'
+        )
+    return HTMLResponse("")
+
+
 @router.get("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -3330,6 +3436,322 @@ async def set_primary_contact(
     ctx["contacts"] = contacts
     ctx["company"] = company
     return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+
+
+# ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
+
+
+@router.get("/v2/partials/companies/{company_id}/edit-form", response_class=HTMLResponse)
+async def company_edit_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline edit form for company fields."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
+    return templates.TemplateResponse(
+        "partials/companies/edit_form.html",
+        {"request": request, "company": company, "users": users},
+    )
+
+
+@router.post("/v2/partials/companies/{company_id}/edit", response_class=HTMLResponse)
+async def edit_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save company edits and return refreshed detail."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    name = form.get("name", "").strip()
+    if name:
+        company.name = name
+    website = form.get("website", "").strip()
+    if website:
+        company.website = website
+    industry = form.get("industry", "").strip()
+    company.industry = industry or company.industry
+    notes = form.get("notes", "").strip()
+    company.notes = notes or company.notes
+
+    owner_id = form.get("owner_id", "")
+    if owner_id and owner_id.isdigit():
+        company.account_owner_id = int(owner_id)
+
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Company {} edited by {}", company_id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post("/v2/partials/companies/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
+async def edit_site(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update site fields and return refreshed sites tab."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    form = await request.form()
+    site_name = form.get("site_name", "").strip()
+    if site_name:
+        site.site_name = site_name
+    site.city = form.get("city", "").strip() or site.city
+    site.country = form.get("country", "").strip() or site.country
+    site.site_type = form.get("site_type", "").strip() or site.site_type
+    db.commit()
+    logger.info("Site {} edited by {}", site_id, user.email)
+
+    return await company_tab(request=request, company_id=company_id, tab="sites", user=user, db=db)
+
+
+
+@router.post(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
+    response_class=HTMLResponse,
+)
+async def add_site_contact_note(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a note to a site contact and return updated notes list."""
+    from ..models.intelligence import ActivityLog
+
+    contact = db.query(SiteContact).filter(
+        SiteContact.id == contact_id, SiteContact.customer_site_id == site_id
+    ).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    notes_text = form.get("notes", "").strip()
+    if not notes_text:
+        raise HTTPException(400, "Notes cannot be empty")
+
+    log = ActivityLog(
+        user_id=user.id,
+        activity_type="contact_note",
+        channel="note",
+        contact_name=contact.full_name or "",
+        contact_email=contact.email or "",
+        notes=notes_text,
+    )
+    db.add(log)
+    db.commit()
+    logger.info("Note added for site contact {} by {}", contact_id, user.email)
+
+    # Return refreshed notes
+    return await get_site_contact_notes(
+        request=request, company_id=company_id, site_id=site_id,
+        contact_id=contact_id, user=user, db=db,
+    )
+
+
+@router.get(
+    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
+    response_class=HTMLResponse,
+)
+async def get_site_contact_notes(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return notes timeline for a site contact."""
+    from ..models.intelligence import ActivityLog
+
+    contact = db.query(SiteContact).filter(
+        SiteContact.id == contact_id, SiteContact.customer_site_id == site_id
+    ).first()
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    notes = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.activity_type == "contact_note",
+            ActivityLog.contact_email == contact.email,
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .limit(20)
+        .all()
+    ) if contact.email else []
+
+    return templates.TemplateResponse(
+        "partials/companies/contact_notes.html",
+        {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
+    )
+
+
+# ── Sprint 5: Quote Workflow Completion ────────────────────────────────
+
+
+@router.post("/v2/partials/quotes/{quote_id}/preview", response_class=HTMLResponse)
+async def preview_quote(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render quote email preview before sending."""
+    quote = db.query(Quote).options(
+        joinedload(Quote.quote_lines)
+    ).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+
+    return templates.TemplateResponse(
+        "partials/quotes/preview.html",
+        {"request": request, "quote": quote},
+    )
+
+
+@router.delete("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
+async def delete_quote_htmx(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a draft quote and return refreshed quotes list."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if quote.status != "draft":
+        raise HTTPException(400, "Only draft quotes can be deleted")
+
+    db.delete(quote)
+    db.commit()
+    logger.info("Quote {} deleted by {}", quote_id, user.email)
+
+    return await quotes_list_partial(request=request, user=user, db=db, limit=50, offset=0)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/reopen", response_class=HTMLResponse)
+async def reopen_quote(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reopen a sent/closed quote back to draft."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if quote.status not in ("sent", "won", "lost"):
+        raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
+
+    quote.status = "draft"
+    quote.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Quote {} reopened by {}", quote_id, user.email)
+
+    return await quote_detail_partial(request=request, quote_id=quote_id, user=user, db=db)
+
+
+@router.get("/v2/partials/quotes/recent-terms", response_class=HTMLResponse)
+async def recent_terms(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return recent payment/shipping terms as datalist options."""
+    from sqlalchemy import distinct
+
+    payment_terms = (
+        db.query(distinct(Quote.payment_terms))
+        .filter(Quote.payment_terms.isnot(None), Quote.payment_terms != "")
+        .order_by(Quote.payment_terms)
+        .limit(20)
+        .all()
+    )
+    shipping_terms = (
+        db.query(distinct(Quote.shipping_terms))
+        .filter(Quote.shipping_terms.isnot(None), Quote.shipping_terms != "")
+        .order_by(Quote.shipping_terms)
+        .limit(20)
+        .all()
+    )
+    payment_opts = [f'<option value="{t[0]}">' for t in payment_terms if t[0]]
+    shipping_opts = [f'<option value="{t[0]}">' for t in shipping_terms if t[0]]
+    html = f'<datalist id="payment-terms">{"".join(payment_opts)}</datalist>'
+    html += f'<datalist id="shipping-terms">{"".join(shipping_opts)}</datalist>'
+    return HTMLResponse(html)
+
+
+@router.get("/v2/partials/pricing-history/{mpn}", response_class=HTMLResponse)
+async def pricing_history(
+    request: Request,
+    mpn: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return pricing history table for an MPN."""
+    from ..utils.normalization import normalize_mpn_key
+
+    norm = normalize_mpn_key(mpn)
+    offers = (
+        db.query(Offer)
+        .filter(Offer.normalized_mpn == norm, Offer.unit_price.isnot(None))
+        .order_by(Offer.created_at.desc())
+        .limit(50)
+        .all()
+    ) if norm else []
+
+    return templates.TemplateResponse(
+        "partials/quotes/pricing_history.html",
+        {"request": request, "offers": offers, "mpn": mpn},
+    )
+
+
+@router.post("/v2/partials/quotes/{quote_id}/edit", response_class=HTMLResponse)
+async def edit_quote_metadata(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update quote metadata (payment terms, shipping, notes) and return refreshed detail."""
+    quote = db.query(Quote).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+
+    form = await request.form()
+    if form.get("payment_terms"):
+        quote.payment_terms = form["payment_terms"].strip()
+    if form.get("shipping_terms"):
+        quote.shipping_terms = form["shipping_terms"].strip()
+    if form.get("notes"):
+        quote.notes = form["notes"].strip()
+    if form.get("valid_until"):
+        quote.valid_until = form["valid_until"].strip()
+
+    quote.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Quote {} metadata edited by {}", quote_id, user.email)
+
+    return await quote_detail_partial(request=request, quote_id=quote_id, user=user, db=db)
 
 
 # ── Dashboard partial ───────────────────────────────────────────────────
