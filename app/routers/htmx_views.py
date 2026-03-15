@@ -797,52 +797,15 @@ async def rfq_compose(
     db: Session = Depends(get_db),
 ):
     """Render the RFQ compose form for a requisition."""
-    from ..models.offers import Contact as RfqContact
+
+    from ..services.rfq_compose_service import build_rfq_vendor_list
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
 
     parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
-
-    # Get unique vendors from sightings for this requisition's parts
-    part_ids = [p.id for p in parts]
-    vendors = []
-    if part_ids:
-        # Get distinct vendor names from sightings, then match to VendorCard
-        vendor_names = (
-            db.query(Sighting.vendor_name_normalized)
-            .filter(Sighting.requirement_id.in_(part_ids), Sighting.vendor_name_normalized.isnot(None))
-            .distinct()
-            .all()
-        )
-        norm_names = [n[0] for n in vendor_names if n[0]]
-        vendor_rows = (
-            (db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).limit(50).all())
-            if norm_names
-            else []
-        )
-        # Check which vendors already have RFQs sent
-        sent_vendor_names = set()
-        existing_contacts = db.query(RfqContact).filter(RfqContact.requisition_id == req_id).all()
-        for c in existing_contacts:
-            if c.vendor_name_normalized:
-                sent_vendor_names.add(c.vendor_name_normalized)
-
-        for v in vendor_rows:
-            # Get contacts for this vendor
-            v_contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == v.id).limit(5).all()
-            vendors.append(
-                {
-                    "id": v.id,
-                    "display_name": v.display_name,
-                    "normalized_name": v.normalized_name,
-                    "domain": v.domain,
-                    "contacts": v_contacts,
-                    "already_asked": v.normalized_name in sent_vendor_names,
-                    "emails": [c.email for c in v_contacts if c.email],
-                }
-            )
+    vendors = build_rfq_vendor_list(db, req_id)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -859,9 +822,7 @@ async def rfq_send(
     db: Session = Depends(get_db),
 ):
     """Send RFQs — creates Contact records for each selected vendor."""
-    from datetime import datetime, timezone
-
-    from ..models.offers import Contact as RfqContact
+    from ..services.rfq_compose_service import create_rfq_contacts
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
@@ -876,27 +837,8 @@ async def rfq_send(
     if not vendor_names:
         raise HTTPException(400, "No vendors selected")
 
-    sent = []
-    for name, email in zip(vendor_names, vendor_emails):
-        if not email:
-            continue
-        contact = RfqContact(
-            requisition_id=req_id,
-            user_id=user.id,
-            contact_type="email",
-            vendor_name=name,
-            vendor_name_normalized=name.lower().strip(),
-            vendor_contact=email,
-            parts_included=parts_text,
-            subject=subject,
-            status="sent",
-            status_updated_at=datetime.now(timezone.utc),
-        )
-        db.add(contact)
-        sent.append({"vendor": name, "email": email, "status": "sent"})
-
+    sent = create_rfq_contacts(db, req_id, user.id, vendor_names, vendor_emails, subject, parts_text)
     db.commit()
-    logger.info("RFQ sent to {} vendors for req {} by {}", len(sent), req_id, user.email)
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -1266,6 +1208,7 @@ async def vendor_detail_partial(
     safety_band = None
     safety_summary = None
     safety_flags = None
+    safety_score = None
     try:
         lead = (
             db.query(SourcingLead)
@@ -1277,6 +1220,7 @@ async def vendor_detail_partial(
             safety_band = lead.vendor_safety_band
             safety_summary = lead.vendor_safety_summary
             safety_flags = lead.vendor_safety_flags
+            safety_score = lead.vendor_safety_score
     except Exception:
         pass  # SourcingLead may not have data
 
@@ -1288,7 +1232,8 @@ async def vendor_detail_partial(
             "recent_sightings": recent_sightings,
             "safety_band": safety_band,
             "safety_summary": safety_summary,
-            "safety_flags": safety_flags,
+            "safety_flags": safety_flags or [],
+            "safety_score": safety_score,
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)

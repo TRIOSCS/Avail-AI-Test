@@ -196,7 +196,7 @@ async def send_rfq(
                 on_rfq_sent(req_ids, db, actor=user)
                 db.commit()
     except Exception:
-        logger.debug("Requirement status update on RFQ send failed", exc_info=True)
+        logger.warning("Requirement status update on RFQ send failed", exc_info=True)
 
     # Phase 1: Auto-claim requisition for the buyer if unclaimed
     try:
@@ -207,7 +207,7 @@ async def send_rfq(
             claim_requisition(req, user, db)
             db.commit()
     except Exception:
-        logger.debug("Auto-claim on RFQ send failed", exc_info=True)
+        logger.warning("Auto-claim on RFQ send failed", exc_info=True)
 
     return {"results": results}
 

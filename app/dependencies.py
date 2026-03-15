@@ -21,6 +21,7 @@ Depends on: models, database, config
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
@@ -37,6 +38,7 @@ def get_user(request: Request, db: Session) -> User | None:
     try:
         return db.get(User, uid)
     except Exception:
+        logger.warning("Failed to load user from session (uid={})", uid, exc_info=True)
         request.session.clear()
         return None
 

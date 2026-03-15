@@ -13,6 +13,7 @@ Depends on: services/ai_service.py, services/response_parser.py
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -24,11 +25,8 @@ from ..models import (
     Offer,
     ProspectContact,
     Requirement,
-    Requisition,
-    SiteContact,
     User,
     VendorCard,
-    VendorContact,
     VendorResponse,
 )
 from ..schemas.ai import (
@@ -61,7 +59,9 @@ def _ai_enabled(user: User) -> bool:
         return True
     if flag == "mike_only":
         allowed = {str(e).strip().lower() for e in (settings.admin_emails or []) if str(e).strip()}
-        allowed.add("mike@trioscs.com")
+        if not allowed:
+            logger.warning("ai_features_enabled='mike_only' but admin_emails is empty — denying access")
+            return False
         return (user.email or "").strip().lower() in allowed
     return False
 
@@ -273,76 +273,15 @@ async def promote_prospect_contact(
     db: Session = Depends(get_db),
 ):
     """Promote a prospect contact to a VendorContact or SiteContact."""
-    pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
-    if not pc:
-        raise HTTPException(404, "Prospect contact not found")
+    from ..services.ai_offer_service import promote_prospect_contact as _promote
 
-    if pc.vendor_card_id:
-        # Dedup: check if contact with same email already exists on this vendor
-        existing = None
-        if pc.email:
-            existing = db.query(VendorContact).filter_by(vendor_card_id=pc.vendor_card_id, email=pc.email).first()
-        if existing:
-            # Update existing contact with any new data
-            if pc.full_name and not existing.full_name:
-                existing.full_name = pc.full_name
-            if pc.title and not existing.title:
-                existing.title = pc.title
-            if pc.phone and not existing.phone:
-                existing.phone = pc.phone
-            if pc.linkedin_url and not existing.linkedin_url:
-                existing.linkedin_url = pc.linkedin_url
-            vc = existing
-        else:
-            vc = VendorContact(
-                vendor_card_id=pc.vendor_card_id,
-                full_name=pc.full_name,
-                title=pc.title,
-                email=pc.email,
-                phone=pc.phone,
-                linkedin_url=pc.linkedin_url,
-                source="prospect_promote",
-            )
-            db.add(vc)
-            db.flush()
-        pc.promoted_to_type = "vendor_contact"
-        pc.promoted_to_id = vc.id
-    elif pc.customer_site_id:
-        # Dedup: check if contact with same email already exists on this site
-        existing = None
-        if pc.email:
-            existing = db.query(SiteContact).filter_by(customer_site_id=pc.customer_site_id, email=pc.email).first()
-        if existing:
-            if pc.full_name and not existing.full_name:
-                existing.full_name = pc.full_name
-            if pc.title and not existing.title:
-                existing.title = pc.title
-            if pc.phone and not existing.phone:
-                existing.phone = pc.phone
-            sc = existing
-        else:
-            sc = SiteContact(
-                customer_site_id=pc.customer_site_id,
-                full_name=pc.full_name,
-                title=pc.title,
-                email=pc.email,
-                phone=pc.phone,
-            )
-            db.add(sc)
-            db.flush()
-        pc.promoted_to_type = "site_contact"
-        pc.promoted_to_id = sc.id
-    else:
-        raise HTTPException(400, "Contact has no vendor_card_id or customer_site_id")
-
-    pc.is_saved = True
-    pc.saved_by_id = user.id
+    try:
+        result = _promote(db, contact_id, user.id)
+    except ValueError as e:
+        status = 404 if "not found" in str(e) else 400
+        raise HTTPException(status, str(e))
     db.commit()
-    return {
-        "ok": True,
-        "promoted_to_type": pc.promoted_to_type,
-        "promoted_to_id": pc.promoted_to_id,
-    }
+    return result
 
 
 # ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────
@@ -487,65 +426,19 @@ async def save_parsed_offers(
     db: Session = Depends(get_db),
 ):
     """Save AI-parsed draft offers to the Offers table."""
-    response_id = payload.response_id
-    requisition_id = payload.requisition_id
-    req = get_req_for_user(db, user, requisition_id, options=[])
+    from ..services.ai_offer_service import save_parsed_offers as _save
+
+    req = get_req_for_user(db, user, payload.requisition_id, options=[])
     if not req:
         raise HTTPException(404, "Requisition not found")
-    if response_id:
-        vr = db.query(VendorResponse).filter(VendorResponse.id == response_id).first()
-        if not vr or (vr.requisition_id and vr.requisition_id != requisition_id):
+    if payload.response_id:
+        vr = db.query(VendorResponse).filter(VendorResponse.id == payload.response_id).first()
+        if not vr or (vr.requisition_id and vr.requisition_id != payload.requisition_id):
             raise HTTPException(404, "Vendor response not found")
 
-    created = []
-    for o in payload.offers:
-        req_id = None
-        if o.mpn:
-            from app.utils.normalization import fuzzy_mpn_match
-
-            reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
-            for r in reqs:
-                if fuzzy_mpn_match(o.mpn, r.primary_mpn):
-                    req_id = r.id
-                    break
-
-        # Resolve material card
-        from app.search_service import resolve_material_card
-        from app.utils.normalization import normalize_mpn_key
-
-        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
-
-        from app.vendor_utils import normalize_vendor_name
-
-        offer = Offer(
-            requisition_id=requisition_id,
-            requirement_id=req_id,
-            material_card_id=mat_card.id if mat_card else None,
-            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
-            vendor_name=o.vendor_name,
-            vendor_name_normalized=normalize_vendor_name(o.vendor_name or ""),
-            mpn=o.mpn,
-            manufacturer=o.manufacturer,
-            qty_available=o.qty_available,
-            unit_price=o.unit_price,
-            currency=o.currency,
-            lead_time=o.lead_time,
-            date_code=o.date_code,
-            condition=o.condition,
-            packaging=o.packaging,
-            moq=o.moq,
-            source="ai_parsed",
-            vendor_response_id=response_id,
-            entered_by_id=user.id,
-            notes=o.notes,
-            status="pending_review",
-        )
-        db.add(offer)
-        db.flush()
-        created.append(offer.id)
-
+    result = _save(db, payload.requisition_id, payload.response_id, payload.offers, user.id)
     db.commit()
-    return {"created": len(created), "offer_ids": created}
+    return result
 
 
 # ── Feature 3: Company Intelligence Cards ─────────────────────────────────
@@ -671,55 +564,27 @@ async def ai_apply_freeform_rfq(
     db: Session = Depends(get_db),
 ):
     """Create requisition + requirements from edited RFQ template."""
-    from app.cache.decorators import invalidate_prefix
-    from app.utils.normalization import normalize_mpn_key
+    from ..cache.decorators import invalidate_prefix
+    from ..services.ai_offer_service import apply_freeform_rfq as _apply
 
     if not payload.customer_site_id:
         raise HTTPException(400, "customer_site_id required")
 
-    site = db.query(CustomerSite).filter(CustomerSite.id == payload.customer_site_id).first()
-    if not site:
-        raise HTTPException(404, "Customer site not found")
-
-    req = Requisition(
-        name=payload.name.strip() or "Untitled",
-        customer_site_id=payload.customer_site_id,
-        customer_name=payload.customer_name or site.site_name or site.company.name if site.company else None,
-        deadline=payload.deadline,
-        created_by=user.id,
-        status="draft",
-    )
-    db.add(req)
-    db.flush()
-
-    from app.schemas.requisitions import RequirementCreate
-    from app.search_service import resolve_material_card
-
-    for item in payload.requirements[:50]:
-        try:
-            parsed = RequirementCreate.model_validate(item)
-        except (ValueError, TypeError):
-            continue
-        mat_card = resolve_material_card(parsed.primary_mpn, db) if parsed.primary_mpn else None
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn=parsed.primary_mpn,
-            normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
-            material_card_id=mat_card.id if mat_card else None,
-            target_qty=parsed.target_qty,
-            target_price=parsed.target_price,
-            substitutes=parsed.substitutes[:20],
-            condition=parsed.condition or "",
-            date_codes=parsed.date_codes or "",
-            firmware=parsed.firmware or "",
-            hardware_codes=parsed.hardware_codes or "",
-            packaging=parsed.packaging or "",
-            notes=parsed.notes or "",
+    try:
+        result = _apply(
+            db,
+            name=payload.name,
+            customer_site_id=payload.customer_site_id,
+            customer_name=payload.customer_name,
+            deadline=payload.deadline,
+            requirements=payload.requirements,
+            user_id=user.id,
         )
-        db.add(r)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
     db.commit()
     invalidate_prefix("req_list")
-    return {"id": req.id, "name": req.name, "requirements_added": len(payload.requirements)}
+    return result
 
 
 @router.post("/api/ai/save-freeform-offers")
@@ -731,62 +596,12 @@ async def ai_save_freeform_offers(
     db: Session = Depends(get_db),
 ):
     """Save freeform-parsed offers to a requisition (after user review)."""
-    from app.dependencies import get_req_for_user
-    from app.utils.normalization import fuzzy_mpn_match, normalize_mpn_key
-    from app.vendor_utils import normalize_vendor_name
+    from ..services.ai_offer_service import save_freeform_offers as _save_freeform
 
     req = get_req_for_user(db, user, payload.requisition_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
 
-    reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
-    created = []
-    for o in payload.offers:
-        req_id = None
-        if o.mpn:
-            for r in reqs:
-                if fuzzy_mpn_match(o.mpn, r.primary_mpn):
-                    req_id = r.id
-                    break
-        from app.search_service import resolve_material_card
-
-        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
-        norm_name = normalize_vendor_name(o.vendor_name or "")
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
-        if not card:
-            card = VendorCard(
-                normalized_name=norm_name,
-                display_name=o.vendor_name or "Unknown",
-                emails=[],
-                phones=[],
-            )
-            db.add(card)
-            db.flush()
-        offer = Offer(
-            requisition_id=payload.requisition_id,
-            requirement_id=req_id,
-            material_card_id=mat_card.id if mat_card else None,
-            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
-            vendor_card_id=card.id,
-            vendor_name=card.display_name,
-            vendor_name_normalized=card.normalized_name,
-            mpn=o.mpn,
-            manufacturer=o.manufacturer,
-            qty_available=o.qty_available,
-            unit_price=o.unit_price,
-            currency=o.currency or "USD",
-            lead_time=o.lead_time,
-            date_code=o.date_code,
-            condition=o.condition or "new",
-            packaging=o.packaging,
-            moq=o.moq,
-            source="freeform_parsed",
-            entered_by_id=user.id,
-            notes=o.notes,
-            status="active",
-        )
-        db.add(offer)
-        db.flush()
-        created.append(offer.id)
+    result = _save_freeform(db, payload.requisition_id, payload.offers, user.id)
     db.commit()
-    return {"created": len(created), "offer_ids": created}
+    return result

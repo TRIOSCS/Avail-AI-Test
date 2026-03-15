@@ -11,7 +11,6 @@ import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,176 +22,29 @@ from ..models import (
     MaterialCard,
     MaterialVendorHistory,
     Offer,
-    Requirement,
-    Sighting,
     User,
     VendorCard,
 )
 from ..schemas.vendors import MaterialCardUpdate
 from ..services.credential_service import get_credential_cached
+from ..services.material_card_service import (
+    backfill_missing_manufacturers,
+)
+from ..services.material_card_service import (
+    infer_manufacturer as _infer_manufacturer_from_prefix,
+)
+from ..services.material_card_service import (
+    merge_material_cards as _merge_material_cards_service,
+)
+from ..services.material_card_service import (
+    serialize_material_card as material_card_to_dict,
+)
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
 from ..utils.vendor_helpers import _background_enrich_vendor
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
-
-
-# -- Manufacturer Enrichment Helpers ------------------------------------------
-
-
-def _infer_manufacturer_from_prefix(db: Session, mpn: str) -> str | None:
-    """Walk from longest to shortest prefix to find a known manufacturer."""
-    for length in range(len(mpn) - 1, 6, -1):  # minimum 7-char prefix
-        prefix = mpn[:length]
-        match = (
-            db.query(MaterialCard)
-            .filter(
-                MaterialCard.normalized_mpn == prefix,
-                MaterialCard.manufacturer.isnot(None),
-                MaterialCard.manufacturer != "",
-            )
-            .first()
-        )
-        if match:
-            return match.manufacturer
-    return None
-
-
-def backfill_missing_manufacturers(db: Session) -> int:
-    """Bulk-update all rows where manufacturer IS NULL/empty and a prefix-match donor
-    exists."""
-    null_parts = (
-        db.query(MaterialCard).filter((MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")).all()
-    )
-    updated = 0
-    for part in null_parts:
-        inferred = _infer_manufacturer_from_prefix(db, part.normalized_mpn)
-        if inferred:
-            part.manufacturer = inferred
-            db.add(part)
-            updated += 1
-    db.commit()
-    return updated
-
-
-# -- Material Card Serialization -----------------------------------------------
-
-
-def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
-    """Serialize a material card with vendor history, sightings, and offers."""
-    history = (
-        db.query(MaterialVendorHistory)
-        .filter_by(material_card_id=card.id)
-        .order_by(MaterialVendorHistory.last_seen.desc())
-        .all()
-    )
-
-    # Find sightings and offers for this material card via FK
-    sightings_list = []
-    offers_list = []
-
-    sightings = (
-        db.query(Sighting)
-        .filter(Sighting.material_card_id == card.id)
-        .order_by(Sighting.created_at.desc())
-        .limit(50)
-        .all()
-    )
-    sightings_list = [
-        {
-            "id": s.id,
-            "vendor_name": s.vendor_name,
-            "qty_available": s.qty_available,
-            "unit_price": s.unit_price,
-            "currency": s.currency or "USD",
-            "source_type": s.source_type,
-            "is_authorized": s.is_authorized,
-            "date_code": s.date_code,
-            "condition": s.condition,
-            "lead_time": s.lead_time,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        }
-        for s in sightings
-        if not s.is_unavailable
-    ]
-
-    # Tags (brand + commodity)
-    from ..models.tags import MaterialTag, Tag
-
-    tag_rows = (
-        db.query(Tag.name, Tag.tag_type, MaterialTag.confidence, MaterialTag.source)
-        .join(MaterialTag, MaterialTag.tag_id == Tag.id)
-        .filter(MaterialTag.material_card_id == card.id, MaterialTag.confidence >= 0.70)
-        .order_by(MaterialTag.confidence.desc())
-        .all()
-    )
-    tags_list = [
-        {"name": name, "type": tt, "confidence": round(float(conf), 2), "source": src}
-        for name, tt, conf, src in tag_rows
-    ]
-
-    offers = db.query(Offer).filter(Offer.material_card_id == card.id).order_by(Offer.created_at.desc()).limit(50).all()
-    offers_list = [
-        {
-            "id": o.id,
-            "vendor_name": o.vendor_name,
-            "qty_available": o.qty_available,
-            "unit_price": float(o.unit_price) if o.unit_price else None,
-            "currency": o.currency or "USD",
-            "lead_time": o.lead_time,
-            "date_code": o.date_code,
-            "condition": o.condition,
-            "status": o.status,
-            "source": o.source,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        }
-        for o in offers
-    ]
-
-    return {
-        "id": card.id,
-        "normalized_mpn": card.normalized_mpn,
-        "display_mpn": card.display_mpn,
-        "manufacturer": card.manufacturer,
-        "description": card.description,
-        "search_count": card.search_count or 0,
-        "last_searched_at": card.last_searched_at.isoformat() if card.last_searched_at else None,
-        "vendor_count": len(history),
-        "vendor_history": [
-            {
-                "id": vh.id,
-                "vendor_name": vh.vendor_name,
-                "source_type": vh.source_type,
-                "is_authorized": vh.is_authorized,
-                "first_seen": vh.first_seen.isoformat() if vh.first_seen else None,
-                "last_seen": vh.last_seen.isoformat() if vh.last_seen else None,
-                "times_seen": vh.times_seen or 1,
-                "last_qty": vh.last_qty,
-                "last_price": vh.last_price,
-                "last_currency": vh.last_currency,
-                "last_manufacturer": vh.last_manufacturer,
-                "vendor_sku": vh.vendor_sku,
-            }
-            for vh in history
-        ],
-        "sightings": sightings_list,
-        "offers": offers_list,
-        "tags": tags_list,
-        # Enrichment fields
-        "lifecycle_status": card.lifecycle_status,
-        "package_type": card.package_type,
-        "category": card.category,
-        "rohs_status": card.rohs_status,
-        "pin_count": card.pin_count,
-        "datasheet_url": card.datasheet_url,
-        "cross_references": card.cross_references or [],
-        "specs_summary": card.specs_summary,
-        "enrichment_source": card.enrichment_source,
-        "enriched_at": card.enriched_at.isoformat() if card.enriched_at else None,
-        "created_at": card.created_at.isoformat() if card.created_at else None,
-        "updated_at": card.updated_at.isoformat() if card.updated_at else None,
-    }
 
 
 # -- Material Card CRUD -------------------------------------------------------
@@ -212,6 +64,7 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
             .order_by(MaterialCard.last_searched_at.desc())
         )
         if q:
+            # TODO: Add minimum length validation (e.g., 2 chars) to prevent broad queries
             safe_q = escape_like(q)
             query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
         total = query.count()
@@ -470,147 +323,28 @@ async def restore_material(card_id: int, user: User = Depends(require_admin), db
 
 
 # -- Material Card Merge -------------------------------------------------------
-
-
 @router.post("/api/materials/merge")
 async def merge_material_cards(
     request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Merge two material cards: move all linked records from source to target, then delete source.
-
-    Body: {"source_card_id": int, "target_card_id": int}
-
-    All requirements, sightings, and offers pointing to source_card_id are re-pointed
-    to target_card_id.  Vendor histories are merged (combine counts, keep earliest
-    first_seen, latest last_seen).  The source card is deleted after merge.
-    """
+    """Merge two material cards: move all linked records from source to target, then delete source."""
     body = await request.json()
     source_id = body.get("source_card_id")
     target_id = body.get("target_card_id")
     if not source_id or not target_id:
         raise HTTPException(400, "source_card_id and target_card_id are required")
-    if source_id == target_id:
-        raise HTTPException(400, "Cannot merge a card with itself")
 
-    source = db.get(MaterialCard, source_id)
-    target = db.get(MaterialCard, target_id)
-    if not source:
-        raise HTTPException(404, f"Source card {source_id} not found")
-    if not target:
-        raise HTTPException(404, f"Target card {target_id} not found")
-
-    # 1. Re-point requirements, sightings, offers
-    reassigned = {}
-    for model, name in [(Requirement, "requirements"), (Sighting, "sightings"), (Offer, "offers")]:
-        count = (
-            db.query(model)
-            .filter(model.material_card_id == source_id)
-            .update({model.material_card_id: target_id}, synchronize_session="fetch")
+    try:
+        result = _merge_material_cards_service(
+            db, source_id, target_id, user.email if hasattr(user, "email") else "admin"
         )
-        reassigned[name] = count
+    except ValueError as e:
+        raise HTTPException(400 if "itself" in str(e) else 404, str(e))
 
-    # 2. Merge vendor histories
-    source_vhs = db.query(MaterialVendorHistory).filter_by(material_card_id=source_id).all()
-    target_vhs = {
-        normalize_vendor_name(vh.vendor_name): vh
-        for vh in db.query(MaterialVendorHistory).filter_by(material_card_id=target_id).all()
-    }
-
-    vh_merged = 0
-    vh_moved = 0
-    for svh in source_vhs:  # pragma: no cover
-        vn_key = normalize_vendor_name(svh.vendor_name)
-        tvh = target_vhs.get(vn_key)
-        if tvh:
-            # Merge into existing target record
-            tvh.times_seen = (tvh.times_seen or 1) + (svh.times_seen or 1)
-            if svh.first_seen and (not tvh.first_seen or svh.first_seen < tvh.first_seen):
-                tvh.first_seen = svh.first_seen
-            if svh.last_seen and (not tvh.last_seen or svh.last_seen > tvh.last_seen):
-                tvh.last_seen = svh.last_seen
-                # Update "last" fields from the more recent record
-                if svh.last_qty is not None:
-                    tvh.last_qty = svh.last_qty
-                if svh.last_price is not None:
-                    tvh.last_price = svh.last_price
-                if svh.last_currency:
-                    tvh.last_currency = svh.last_currency
-                if svh.last_manufacturer:
-                    tvh.last_manufacturer = svh.last_manufacturer
-                if svh.vendor_sku:
-                    tvh.vendor_sku = svh.vendor_sku
-            if svh.is_authorized:
-                tvh.is_authorized = True
-            db.delete(svh)
-            vh_merged += 1
-        else:
-            # Move to target card
-            svh.material_card_id = target_id
-            vh_moved += 1
-
-    # 3. Merge card metadata
-    target.search_count = (target.search_count or 0) + (source.search_count or 0)
-    if not target.manufacturer and source.manufacturer:  # pragma: no cover
-        target.manufacturer = source.manufacturer
-    if not target.description and source.description:  # pragma: no cover
-        target.description = source.description
-    # Enrichment: keep target's if present, else take source's
-    for field in (
-        "lifecycle_status",
-        "package_type",
-        "category",
-        "rohs_status",
-        "pin_count",
-        "datasheet_url",
-        "specs_summary",
-    ):
-        if getattr(target, field) is None and getattr(source, field) is not None:  # pragma: no cover
-            setattr(target, field, getattr(source, field))
-
-    # 4. Audit log
-    from ..services.audit_service import log_audit
-
-    log_audit(
-        db,
-        material_card_id=target_id,
-        action="merged",
-        old_card_id=source_id,
-        new_card_id=target_id,
-        normalized_mpn=target.normalized_mpn,
-        details={
-            "source_mpn": source.normalized_mpn,
-            "reassigned": reassigned,
-            "vh_merged": vh_merged,
-            "vh_moved": vh_moved,
-        },
-        created_by=user.email if hasattr(user, "email") else "admin",
-    )
-
-    # 5. Delete source card
-    db.delete(source)
     db.commit()
-
-    logger.info(
-        "MC_METRIC: action=merged source_id=%d target_id=%d source_mpn=%s target_mpn=%s "
-        "reassigned=%s vh_merged=%d vh_moved=%d",
-        source_id,
-        target_id,
-        source.normalized_mpn,
-        target.normalized_mpn,
-        reassigned,
-        vh_merged,
-        vh_moved,
-    )
-    return {
-        "ok": True,
-        "target_card_id": target_id,
-        "source_card_id": source_id,
-        "reassigned": reassigned,
-        "vendor_histories_merged": vh_merged,
-        "vendor_histories_moved": vh_moved,
-    }
+    return result
 
 
 # -- Admin: Backfill Missing Manufacturers ------------------------------------
@@ -621,6 +355,7 @@ async def backfill_manufacturers(user: User = Depends(require_admin), db: Sessio
     """One-time admin endpoint to enrich all material cards missing a manufacturer via
     prefix-match."""
     count = backfill_missing_manufacturers(db)
+    db.commit()
     return {"enriched_records": count}
 
 

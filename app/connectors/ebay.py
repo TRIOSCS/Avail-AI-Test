@@ -1,6 +1,7 @@
 """EBay Browse API connector — searches electronic components on eBay."""
 
 import base64
+import time
 
 from loguru import logger
 
@@ -19,11 +20,15 @@ class EbayConnector(BaseConnector):
         super().__init__(timeout=15.0)
         self.client_id = client_id
         self.client_secret = client_secret
-        self._token = None
+        self._token: str | None = None
+        self._token_expires_at: float = 0  # monotonic time when token expires
 
     async def _get_token(self) -> str:
-        if self._token:
+        # Return cached token if still valid (with 60s safety margin)
+        if self._token and time.monotonic() < self._token_expires_at - 60:
             return self._token
+        self._token = None
+
         creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
         r = await http.post(
             self.TOKEN_URL,
@@ -38,7 +43,11 @@ class EbayConnector(BaseConnector):
             timeout=15,
         )
         r.raise_for_status()
-        self._token = r.json()["access_token"]
+        body = r.json()
+        self._token = body["access_token"]
+        expires_in = int(body.get("expires_in", 7200))
+        self._token_expires_at = time.monotonic() + expires_in
+        logger.debug("eBay: new token acquired, expires in {}s", expires_in)
         return self._token
 
     async def _do_search(self, part_number: str) -> list[dict]:
