@@ -3754,6 +3754,349 @@ async def edit_quote_metadata(
     return await quote_detail_partial(request=request, quote_id=quote_id, user=user, db=db)
 
 
+# ── Sprint 6: RFQ Workflow Depth ────────────────────────────────────────
+
+
+@router.get("/v2/partials/requisitions/{req_id}/rfq-prepare", response_class=HTMLResponse)
+async def rfq_prepare_panel(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return RFQ preparation panel — vendor data + exhaustion check."""
+    from ..models.offers import Contact as RfqContact
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    # Get requirements for this req
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    mpns = [r.primary_mpn for r in requirements if r.primary_mpn]
+
+    # Get vendors already contacted
+    existing_contacts = (
+        db.query(RfqContact.vendor_name_normalized)
+        .filter(RfqContact.requisition_id == req_id)
+        .distinct()
+        .all()
+    )
+    contacted_norms = {c[0] for c in existing_contacts if c[0]}
+
+    # Get suggested vendors from sightings (join on normalized vendor name)
+    from ..models import Sighting
+
+    suggested_vendors = (
+        db.query(
+            VendorCard.id,
+            VendorCard.display_name,
+            VendorCard.normalized_name,
+            sqlfunc.count(Sighting.id).label("sighting_count"),
+        )
+        .join(Sighting, Sighting.vendor_name_normalized == VendorCard.normalized_name)
+        .filter(
+            Sighting.mpn_matched.in_(mpns) if mpns else sqlfunc.literal(False),
+            VendorCard.is_blacklisted.isnot(True),
+        )
+        .group_by(VendorCard.id)
+        .order_by(sqlfunc.count(Sighting.id).desc())
+        .limit(20)
+        .all()
+    ) if mpns else []
+
+    vendors = []
+    for v in suggested_vendors:
+        vendors.append({
+            "id": v.id,
+            "display_name": v.display_name,
+            "normalized_name": v.normalized_name,
+            "sighting_count": v.sighting_count,
+            "already_contacted": v.normalized_name in contacted_norms,
+        })
+
+    return templates.TemplateResponse(
+        "partials/requisitions/rfq_prepare.html",
+        {"request": request, "req": req, "vendors": vendors, "mpns": mpns,
+         "total_contacted": len(contacted_norms)},
+    )
+
+
+@router.post("/v2/partials/requisitions/{req_id}/log-phone", response_class=HTMLResponse)
+async def log_phone_call(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a phone call to a vendor and return updated activity tab."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    vendor_name = form.get("vendor_name", "").strip()
+    vendor_phone = form.get("vendor_phone", "").strip()
+    notes = form.get("notes", "").strip()
+
+    if not vendor_name or not vendor_phone:
+        raise HTTPException(400, "Vendor name and phone are required")
+
+    from ..models.intelligence import ActivityLog
+    from ..models.offers import Contact as RfqContact
+
+    contact = RfqContact(
+        requisition_id=req_id,
+        user_id=user.id,
+        contact_type="phone",
+        vendor_name=vendor_name,
+        vendor_contact=vendor_phone,
+        details=notes or f"Phone call to {vendor_name}",
+        status="completed",
+    )
+    db.add(contact)
+
+    log = ActivityLog(
+        user_id=user.id,
+        activity_type="phone_call",
+        channel="phone",
+        company_id=None,
+        contact_name=vendor_name,
+        contact_email=vendor_phone,
+        notes=notes or f"Called {vendor_name} at {vendor_phone}",
+    )
+    db.add(log)
+    db.commit()
+    logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
+
+    return templates.TemplateResponse(
+        "partials/requisitions/phone_log_success.html",
+        {"request": request, "vendor_name": vendor_name, "vendor_phone": vendor_phone},
+    )
+
+
+@router.post("/v2/partials/follow-ups/send-batch", response_class=HTMLResponse)
+async def send_batch_follow_up(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send follow-ups to all stale contacts at once."""
+    from ..models.offers import Contact as RfqContact
+
+    cfg = getattr(request.app, "state", None)
+    threshold_days = getattr(cfg, "follow_up_days", 2) if cfg else 2
+    threshold = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+
+    stale = (
+        db.query(RfqContact)
+        .filter(
+            RfqContact.contact_type == "email",
+            RfqContact.status.in_(["sent", "opened"]),
+            RfqContact.created_at < threshold,
+        )
+        .limit(50)
+        .all()
+    )
+
+    sent_count = 0
+    for contact in stale:
+        contact.status = "followed_up"
+        contact.status_updated_at = datetime.now(timezone.utc)
+        sent_count += 1
+    db.commit()
+    logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
+
+    return templates.TemplateResponse(
+        "partials/follow_ups/batch_result.html",
+        {"request": request, "sent_count": sent_count},
+    )
+
+
+@router.get("/v2/partials/follow-ups/badge", response_class=HTMLResponse)
+async def follow_up_badge(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return follow-up count badge for nav sidebar."""
+    from ..models.offers import Contact as RfqContact
+
+    threshold = datetime.now(timezone.utc) - timedelta(days=2)
+    count = (
+        db.query(sqlfunc.count(RfqContact.id))
+        .filter(
+            RfqContact.contact_type == "email",
+            RfqContact.status.in_(["sent", "opened"]),
+            RfqContact.created_at < threshold,
+        )
+        .scalar()
+        or 0
+    )
+    if count > 0:
+        return HTMLResponse(
+            f'<span class="ml-auto px-1.5 py-0.5 text-[10px] font-bold text-white bg-amber-500 rounded-full">{count}</span>'
+        )
+    return HTMLResponse("")
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/responses/{response_id}/status", response_class=HTMLResponse)
+async def update_response_status(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update vendor response status (reviewed/rejected/flagged)."""
+    from ..models.offers import VendorResponse
+
+    vr = db.query(VendorResponse).filter(
+        VendorResponse.id == response_id,
+        VendorResponse.requisition_id == req_id,
+    ).first()
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    form = await request.form()
+    new_status = form.get("status", "").strip()
+    valid = {"reviewed", "rejected", "flagged", "new"}
+    if new_status not in valid:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(valid)}")
+
+    vr.status = new_status
+    db.commit()
+    logger.info("Response {} status → {} by {}", response_id, new_status, user.email)
+
+    return templates.TemplateResponse(
+        "partials/requisitions/response_status_badge.html",
+        {"request": request, "response": vr},
+    )
+
+
+# ── Sprint 7: Email Integration ────────────────────────────────────────
+
+
+@router.get("/v2/partials/emails/thread/{conversation_id}", response_class=HTMLResponse)
+async def email_thread_viewer(
+    request: Request,
+    conversation_id: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render email thread viewer with all messages."""
+    messages = []
+    error = None
+    try:
+        from ..dependencies import require_fresh_token as _rft
+        token = await _rft(request, db)
+        from ..services.email_threads import fetch_thread_messages
+        messages = await fetch_thread_messages(conversation_id, token)
+    except HTTPException:
+        error = "M365 connection needs refresh — please reconnect in Settings"
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
+        error = f"Could not load thread: {str(exc)[:100]}"
+
+    return templates.TemplateResponse(
+        "partials/emails/thread_viewer.html",
+        {"request": request, "messages": messages, "conversation_id": conversation_id, "error": error},
+    )
+
+
+@router.post("/v2/partials/emails/reply", response_class=HTMLResponse)
+async def send_email_reply(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send an email reply and return success confirmation."""
+    form = await request.form()
+    to = form.get("to", "").strip()
+    subject = form.get("subject", "").strip()
+    body = form.get("body", "").strip()
+    conversation_id = form.get("conversation_id", "").strip()
+
+    if not to or not body:
+        raise HTTPException(400, "Recipient and message body are required")
+
+    error = None
+    try:
+        from ..dependencies import require_fresh_token as _rft
+        token = await _rft(request, db)
+        from ..email_service import _build_html_body
+        from ..utils.graph_client import GraphClient
+        gc = GraphClient(token)
+        html_body = _build_html_body(body)
+        mail_payload = {
+            "message": {
+                "subject": subject or "Re:",
+                "body": {"contentType": "HTML", "content": html_body},
+                "toRecipients": [{"emailAddress": {"address": to}}],
+            },
+            "saveToSentItems": "true",
+        }
+        result = await gc.post_json("/me/sendMail", mail_payload)
+        if "error" in result:
+            error = f"Send failed: {result.get('detail', 'Unknown error')}"
+    except HTTPException:
+        error = "M365 connection needs refresh"
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
+        error = f"Send failed: {str(exc)[:100]}"
+
+    return templates.TemplateResponse(
+        "partials/emails/reply_result.html",
+        {"request": request, "to": to, "error": error, "conversation_id": conversation_id},
+    )
+
+
+@router.get("/v2/partials/emails/thread/{conversation_id}/summary", response_class=HTMLResponse)
+async def email_thread_summary(
+    request: Request,
+    conversation_id: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return AI-generated summary of an email thread."""
+    summary = None
+    error = None
+    try:
+        from ..dependencies import require_fresh_token as _rft
+        token = await _rft(request, db)
+        from ..services.email_intelligence_service import summarize_thread
+        summary = await summarize_thread(token, conversation_id, db, user.id)
+        if not summary:
+            error = "Could not generate summary"
+    except HTTPException:
+        error = "M365 connection needs refresh"
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
+        error = f"Summary failed: {str(exc)[:100]}"
+
+    return templates.TemplateResponse(
+        "partials/emails/thread_summary.html",
+        {"request": request, "summary": summary, "error": error},
+    )
+
+
+@router.get("/v2/partials/email-intelligence", response_class=HTMLResponse)
+async def email_intelligence_partial(
+    request: Request,
+    classification: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return email intelligence dashboard as HTML partial."""
+    from ..services.email_intelligence_service import get_recent_intelligence
+    from ..services.response_analytics import get_email_intelligence_dashboard
+
+    items = get_recent_intelligence(db, user.id, limit=50, classification=classification or None)
+    dashboard = get_email_intelligence_dashboard(db, user.id, days=7)
+
+    return templates.TemplateResponse(
+        "partials/emails/intelligence_dashboard.html",
+        {"request": request, "items": items, "dashboard": dashboard, "classification": classification},
+    )
+
+
 # ── Dashboard partial ───────────────────────────────────────────────────
 
 

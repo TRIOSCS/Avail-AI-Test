@@ -1,0 +1,76 @@
+{# intelligence_dashboard.html — Email intelligence dashboard.
+   Receives: items (list[dict]), dashboard (dict), classification (str).
+   Called by: htmx_views.py email_intelligence_partial route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="max-w-5xl mx-auto">
+  <h2 class="text-lg font-bold text-gray-900 mb-4">Email Intelligence</h2>
+
+  {# Dashboard stats #}
+  {% if dashboard %}
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Emails Scanned</p>
+      <p class="text-xl font-bold text-gray-900">{{ dashboard.get('total_scanned', 0) }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Offers Detected</p>
+      <p class="text-xl font-bold text-emerald-600">{{ dashboard.get('offers_detected', 0) }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">RFQ Responses</p>
+      <p class="text-xl font-bold text-brand-600">{{ dashboard.get('rfq_responses', 0) }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Needs Action</p>
+      <p class="text-xl font-bold text-amber-600">{{ dashboard.get('needs_action', 0) }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Filter bar #}
+  <div class="flex gap-2 mb-4">
+    {% for cls in ['', 'offer', 'rfq_response', 'stock_list', 'inquiry', 'other'] %}
+    <button hx-get="/v2/partials/email-intelligence?classification={{ cls }}"
+            hx-target="#main-content"
+            class="px-3 py-1 text-xs font-medium rounded-full {{ 'bg-brand-500 text-white' if classification == cls else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+      {{ cls|replace('_', ' ')|title if cls else 'All' }}
+    </button>
+    {% endfor %}
+  </div>
+
+  {# Items list #}
+  {% if items %}
+  <div class="space-y-2">
+    {% for item in items %}
+    <div class="bg-white rounded-lg border border-gray-200 p-3">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-sm font-medium text-gray-900">{{ item.get('vendor_name', 'Unknown') }}</span>
+        <div class="flex items-center gap-2">
+          {% set cls_colors = {
+            'offer': 'bg-emerald-50 text-emerald-700',
+            'rfq_response': 'bg-brand-50 text-brand-700',
+            'stock_list': 'bg-violet-50 text-violet-700',
+            'inquiry': 'bg-amber-50 text-amber-700',
+          } %}
+          <span class="px-2 py-0.5 text-[10px] font-medium rounded-full {{ cls_colors.get(item.get('classification', ''), 'bg-gray-100 text-gray-600') }}">
+            {{ (item.get('classification', '') or 'unknown')|replace('_', ' ')|title }}
+          </span>
+          {% if item.get('confidence') %}
+          <span class="text-[10px] text-gray-400">{{ "%.0f%%"|format(item.confidence * 100) }}</span>
+          {% endif %}
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 truncate">{{ item.get('subject', '') }}</p>
+      {% if item.get('received_at') %}
+      <p class="text-xs text-gray-400 mt-1">{{ item.received_at }}</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
+    <p class="text-sm text-gray-400">No email intelligence records found.</p>
+  </div>
+  {% endif %}
+</div>
