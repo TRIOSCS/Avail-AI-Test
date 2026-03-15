@@ -3,7 +3,7 @@
 **Date:** 2026-03-15
 **Goal:** Rebuild the entire HTMX + Alpine.js frontend to match design documents, replace CDN loading with Vite pipeline, implement brand color system derived from the AVAIL logo, and build all missing UI components including sourcing engine views and prospecting.
 
-**Gated by:** `USE_HTMX` feature flag in `app/config.py` — production stays on old frontend until the full rebuild is ready to flip.
+**Current state:** `USE_HTMX` is already `True` in production — the current HTMX frontend is live but incomplete. This rebuild replaces the current HTMX templates in-place. No feature flag gating needed; the rebuild overwrites existing `/v2` templates and adds missing ones. The old vanilla JS frontend (`app.js` / `crm.js`) has already been removed.
 
 **References:**
 - Phase 3 plan: `docs/superpowers/plans/2026-03-13-phase3-frontend-rewrite.md`
@@ -89,7 +89,8 @@ Defined in `tailwind.config.js` as `brand`:
   - Collapsed: icon only, logo hidden or reduced to mark
 - 7 navigation items with SVG icons:
   - **Active:** Requisitions, Part Search, Buy Plans, Vendors, Companies
-  - **Greyed/disabled:** Quotes (tooltip "Coming soon"), Prospecting (tooltip "Coming soon")
+  - **Active:** Prospecting (backend routes exist, templates being rebuilt)
+  - **Greyed/disabled:** Quotes (tooltip "Coming soon")
 - Section label "Relationships" between Buy Plans and Vendors
 - User avatar + name + email at bottom with logout button
 - Active item: `brand-900` background, white text
@@ -98,11 +99,12 @@ Defined in `tailwind.config.js` as `brand`:
 
 ### Topbar (New)
 
-- **Left:** Breadcrumb trail (e.g., "Requisitions > REQ-2024-0142"), dynamically set by each page partial
+- **Left:** Breadcrumb trail (e.g., "Requisitions > REQ-2024-0142"). **Mechanism:** Each partial includes a `<div id="breadcrumb" hx-swap-oob="true">...</div>` element for out-of-band swap — when HTMX loads any partial, the breadcrumb updates automatically.
 - **Center/Right:** Global search input
   - `hx-get="/v2/partials/search/global"` with `hx-trigger="keyup changed delay:300ms"`
   - Searches across requisitions, companies, vendors
   - Results dropdown grouped by type
+  - Each result row: `hx-get` to relevant detail partial, `hx-target="#main-content"`, `hx-push-url` for history. Clicking a result also closes the dropdown.
 - **Far right:** Notification bell (count badge) + user avatar dropdown (profile, settings, logout)
 - Styling: White background, `brand-200` bottom border, fixed position
 
@@ -170,7 +172,7 @@ All in `app/templates/partials/shared/`:
 
 **File:** `app/templates/partials/requisitions/create_modal.html`
 
-- Form fields: Name (required), Customer, Deadline, Urgency dropdown, Parts textarea (one MPN per line)
+- Form fields: Name (required), Customer, Deadline, Urgency dropdown, Parts textarea (one part per line, format: `MPN, Qty` e.g. `LM317T, 500` — qty defaults to 1 if omitted)
 - `hx-post` to create endpoint
 - On success: `$dispatch('close-modal')`, toast "Requisition created", new row prepended to table
 - Cancel button dispatches `close-modal`
@@ -186,10 +188,10 @@ All in `app/templates/partials/shared/`:
     - Columns: MPN (monospace), Brand, Qty (formatted), Target Price, Status badge, Sightings count
     - "Search" action button per row (triggers sourcing, shows spinner)
     - Inline "Add requirement" form at top: MPN, Qty, Manufacturer, Add button
-  - **Offers**: Offers received for this requisition's parts
-  - **Quotes**: Quotes generated from this requisition
-  - **Buy Plans**: Buy plans linked to this requisition
-  - **Activity**: Timeline of actions (searches, emails, status changes)
+  - **Offers**: Table of offers received — columns: Vendor, MPN, Qty, Unit Price, Lead Time, Date Received, Status badge. Empty state: "No offers received yet."
+  - **Quotes**: Table of quotes generated — columns: Quote #, Customer, Total, Margin %, Status badge, Created date. Empty state: "No quotes generated."
+  - **Buy Plans**: Table of linked buy plans — columns: Buy Plan #, SO#, Status badge, Lines count, Total Cost, Created date. Clickable rows → buy plan detail. Empty state: "No buy plans linked."
+  - **Activity**: Timeline of actions (searches, emails, status changes) — each entry: timestamp, user avatar, action description. Newest first.
 - Each tab loads via `hx-get="/v2/partials/requisitions/{id}/tab/{tab_name}"` into tab content area
 
 ---
@@ -228,6 +230,7 @@ All in `app/templates/partials/shared/`:
 
 - Search by name (live, 300ms debounce)
 - **Card grid** (3-col desktop, 2-col tablet, 1-col mobile)
+- Blacklisted vendors **are shown** in the list (not filtered out) but visually distinct — rose-tinted card background, blacklisted badge prominent. A "Hide blacklisted" toggle filter is available at the top.
 - Each card:
   - Vendor name + domain (truncated)
   - Score badge (emerald) OR blacklisted badge (rose)
@@ -246,10 +249,9 @@ All in `app/templates/partials/shared/`:
 - 4-stat row: Sightings, Win Rate, Total POs, Avg Response Time (white cards)
 - **Safety review block** (reusable partial `partials/shared/safety_review.html`):
   - Safety band indicator with color (emerald=low risk, amber=medium, rose=high)
-  - Summary text (`vendor_safety_summary`)
-  - Positive signals list (checkmark icons, emerald text)
-  - Caution signals list (warning icons, amber/rose text)
-  - Recommended buyer action (bold, in card)
+  - Summary text, positive signals list (checkmarks), caution signals list (warnings), recommended buyer action
+  - **Data source for vendor detail:** Safety fields (`vendor_safety_score`, `vendor_safety_band`, `vendor_safety_summary`, `vendor_safety_flags`) live on `SourcingLead`, not `VendorCard`. For vendor detail view, aggregate safety data from the vendor's most recent `SourcingLead` records. If no leads exist for this vendor, show "No safety data available — safety is assessed when sourcing leads are created."
+  - **Data source for lead detail:** Read directly from the `SourcingLead` record.
 - Contact info card: Website (link), Emails (list), Phones (list)
 - Contacts table: Name, Title, Email, Phone
 - Recent sightings table: MPN, Qty, Price, Source badge, Date
@@ -298,7 +300,19 @@ All in `app/templates/partials/shared/`:
 
 ---
 
-## 8. Sourcing Engine Views
+## 8. Dashboard
+
+**File:** `app/templates/partials/dashboard.html`
+
+- AVAIL logo centered at top (large, brand moment)
+- 3 stat cards in a row: Open Requisitions (count), Active Vendors (count), Companies (count)
+- Each stat card: large number, label, subtle brand-100 background, clickable → navigates to respective list
+- Quick actions card below: "Create Requisition" button, "Search Parts" button
+- Welcome message: "Welcome back, {user_name}"
+
+---
+
+## 9. Sourcing Engine Views (Wireframe Spec)
 
 ### Sourcing Results View
 
@@ -329,7 +343,7 @@ Each card (`partials/sourcing/lead_card.html`):
 - Safety band badge (emerald=low risk, amber=medium, rose=high risk)
 - Source badges (which connectors found this lead)
 - Freshness indicator ("2 hours ago", "3 days ago" — relative time)
-- Qty available + unit price (or "RFQ")
+- Qty available + unit price (or "RFQ") — **data source:** these fields live on `Sighting`, not `SourcingLead`. Query the lead's linked sightings (via `requirement_id` + `vendor`) and display the best available qty and lowest price from the most recent sighting.
 - Contact preview: first email or phone, truncated
 - Corroboration badge: if `corroborated=True`, show "Corroborated ({evidence_count} signals)" in emerald
 - **Suggested next action** text (derived from lead state + contact info availability):
@@ -339,6 +353,12 @@ Each card (`partials/sourcing/lead_card.html`):
   - Already contacted → "Follow up"
 - **Quick actions:** Claim, Dismiss, Send RFQ (inline buttons)
 - Clicking card body → lead detail view
+
+**Empty state:** "No leads found for this part. Try broadening your search or check back after the next sourcing run." with icon.
+
+**Error state:** If search fails, show toast notification "Search failed — please try again" with retry button inline in the results area.
+
+**Loading state:** While search is running, show spinner with "Searching {N} sources..." text, where N = number of enabled connectors.
 
 ### Lead Detail View
 
@@ -405,7 +425,7 @@ Each card (`partials/sourcing/lead_card.html`):
 
 ---
 
-## 9. Prospecting
+## 10. Prospecting
 
 ### List View
 
@@ -439,7 +459,7 @@ Each card (`partials/sourcing/lead_card.html`):
   - SAM.gov data
   - Google News mentions
   - Signal indicators (hiring, events, intent)
-- Warm intro section (if `warm_intro` detected): intro path, suggested one-liner
+- Warm intro section (if warm intro data exists in `enrichment_data` JSONB under key `warm_intros`, computed by `app/services/prospect_warm_intros.py`): intro path, suggested one-liner
 - **Action buttons:**
   - Claim / Release
   - Dismiss
@@ -448,12 +468,12 @@ Each card (`partials/sourcing/lead_card.html`):
 
 ---
 
-## 10. Vite Build Pipeline
+## 11. Vite Build Pipeline
 
 ### Dependencies
 
 ```bash
-npm install htmx.org@^2 alpinejs@^3 tailwindcss@^3 postcss autoprefixer
+npm install htmx.org@^2 alpinejs@^3 @alpinejs/trap@^3 tailwindcss@^3 postcss autoprefixer
 ```
 
 ### Entry Point
@@ -463,6 +483,9 @@ npm install htmx.org@^2 alpinejs@^3 tailwindcss@^3 postcss autoprefixer
 ```js
 import htmx from 'htmx.org';
 import Alpine from 'alpinejs';
+import trap from '@alpinejs/trap';
+
+Alpine.plugin(trap);
 
 window.htmx = htmx;
 window.Alpine = Alpine;
@@ -532,75 +555,65 @@ module.exports = {
 - Hashed filenames for cache busting
 - Base template references built assets via Jinja2 `url_for('static', path='dist/...')`
 
-### Feature Flag
+### Current State
 
-`app/config.py`:
-```python
-use_htmx: bool = False  # Flip to True when rebuild is ready
-```
-
-When `USE_HTMX=true`:
-- `/` redirects to `/v2` (HTMX shell)
-- All navigation uses HTMX partials
-- Vite-built assets loaded
-
-When `USE_HTMX=false`:
-- `/` serves old `index.html` with vanilla JS
-- No HTMX loaded
+`use_htmx` is already `True` in production. The old vanilla JS frontend has been removed. This rebuild replaces the current HTMX templates in-place — no feature flag toggle needed. The Vite pipeline replaces the current CDN script tags.
 
 ---
 
-## 11. HTMX View Router
+## 12. HTMX View Router
 
 **File:** `app/routers/htmx_views.py`
 
+**Note:** Routes marked (EXISTING) already exist in `htmx_views.py` and need template updates. Routes marked (NEW) must be added.
+
 ### Full Page Endpoints (return base.html wrapping a partial)
 
-- `GET /v2` → Dashboard
-- `GET /v2/requisitions` → Requisitions list
-- `GET /v2/requisitions/{id}` → Requisition detail
-- `GET /v2/search` → Part search
-- `GET /v2/vendors` → Vendors list
-- `GET /v2/vendors/{id}` → Vendor detail
-- `GET /v2/companies` → Companies list
-- `GET /v2/companies/{id}` → Company detail
-- `GET /v2/buy-plans` → Buy plans list
-- `GET /v2/buy-plans/{id}` → Buy plan detail
-- `GET /v2/prospecting` → Prospecting list
-- `GET /v2/prospecting/{id}` → Prospect detail
-- `GET /v2/sourcing/{requirement_id}` → Sourcing results for a requirement
-- `GET /v2/sourcing/leads/{lead_id}` → Lead detail
-- `GET /v2/sourcing/followup` → Buyer followup queue
+- `GET /v2` → Dashboard (EXISTING — update template)
+- `GET /v2/requisitions` → Requisitions list (EXISTING — update template)
+- `GET /v2/requisitions/{id}` → Requisition detail (EXISTING — update template)
+- `GET /v2/search` → Part search (EXISTING — update template)
+- `GET /v2/vendors` → Vendors list (EXISTING — update template)
+- `GET /v2/vendors/{id}` → Vendor detail (EXISTING — update template)
+- `GET /v2/companies` → Companies list (EXISTING — update template)
+- `GET /v2/companies/{id}` → Company detail (EXISTING — update template)
+- `GET /v2/buy-plans` → Buy plans list (EXISTING — update template)
+- `GET /v2/buy-plans/{id}` → Buy plan detail (EXISTING — update template)
+- `GET /v2/prospecting` → Prospecting list (NEW)
+- `GET /v2/prospecting/{id}` → Prospect detail (NEW)
+- `GET /v2/sourcing/{requirement_id}` → Sourcing results (NEW)
+- `GET /v2/sourcing/leads/{lead_id}` → Lead detail (NEW)
+- `GET /v2/sourcing/followup` → Buyer followup queue (NEW)
 
 ### Partial Endpoints (return just the partial, for HTMX swaps)
 
 All prefixed `/v2/partials/`:
 
-- `GET /partials/requisitions` — list (params: q, status, sort, dir, page)
-- `GET /partials/requisitions/{id}` — detail
-- `GET /partials/requisitions/create-form` — create modal form
-- `POST /partials/requisitions/create` — create, return new row
-- `POST /partials/requisitions/{id}/requirements` — add requirement
-- `GET /partials/requisitions/{id}/tab/{tab}` — tab content (parts, offers, quotes, buy_plans, activity)
-- `GET /partials/search` — search form
-- `POST /partials/search/run` — execute search, return results
-- `GET /partials/search/global` — global search (topbar), return grouped results dropdown
-- `GET /partials/vendors` — list (params: q, page)
-- `GET /partials/vendors/{id}` — detail
-- `GET /partials/companies` — list (params: search, page)
-- `GET /partials/companies/{id}` — detail
-- `GET /partials/buy-plans` — list (params: status, q, mine, page)
-- `GET /partials/buy-plans/{id}` — detail
-- `GET /partials/prospecting` — list (params: q, status, sort, page)
-- `GET /partials/prospecting/{id}` — detail
-- `POST /partials/prospecting/{id}/claim` — claim prospect
-- `POST /partials/prospecting/{id}/dismiss` — dismiss prospect
-- `POST /partials/prospecting/{id}/enrich` — trigger enrichment
-- `GET /partials/sourcing/{requirement_id}` — sourcing results (params: confidence, safety, freshness, source, status, contactability, corroborated, sort, page)
-- `GET /partials/sourcing/leads/{lead_id}` — lead detail
-- `POST /partials/sourcing/leads/{lead_id}/status` — update buyer status
-- `POST /partials/sourcing/leads/{lead_id}/feedback` — add feedback event
-- `GET /partials/sourcing/followup` — followup queue (params: status, sort, page)
+- `GET /partials/requisitions` — list (EXISTING — update template)
+- `GET /partials/requisitions/{id}` — detail (EXISTING — update template)
+- `GET /partials/requisitions/create-form` — create modal form (NEW)
+- `POST /partials/requisitions/create` — create, return new row (EXISTING — update response)
+- `POST /partials/requisitions/{id}/requirements` — add requirement (EXISTING — update response)
+- `GET /partials/requisitions/{id}/tab/{tab}` — tab content: parts, offers, quotes, buy_plans, activity (NEW)
+- `GET /partials/search` — search form (EXISTING)
+- `POST /partials/search/run` — execute search, return results (EXISTING — update template)
+- `GET /partials/search/global` — global search for topbar, return grouped results dropdown (NEW)
+- `GET /partials/vendors` — list (EXISTING — update template)
+- `GET /partials/vendors/{id}` — detail (EXISTING — update template)
+- `GET /partials/companies` — list (EXISTING — update template)
+- `GET /partials/companies/{id}` — detail (EXISTING — update template)
+- `GET /partials/buy-plans` — list (EXISTING — update template)
+- `GET /partials/buy-plans/{id}` — detail (EXISTING — update template)
+- `GET /partials/prospecting` — list (NEW)
+- `GET /partials/prospecting/{id}` — detail (NEW)
+- `POST /partials/prospecting/{id}/claim` — claim prospect (NEW)
+- `POST /partials/prospecting/{id}/dismiss` — dismiss prospect (NEW)
+- `POST /partials/prospecting/{id}/enrich` — trigger enrichment (NEW)
+- `GET /partials/sourcing/{requirement_id}` — sourcing results, params: confidence, safety, freshness, source, status, contactability, corroborated, sort, page (NEW)
+- `GET /partials/sourcing/leads/{lead_id}` — lead detail (NEW)
+- `POST /partials/sourcing/leads/{lead_id}/status` — update buyer status (NEW)
+- `POST /partials/sourcing/leads/{lead_id}/feedback` — add feedback event (NEW)
+- `GET /partials/sourcing/followup` — followup queue, params: status, sort, page (NEW)
 
 ### Helper Utilities
 
@@ -615,13 +628,13 @@ def is_htmx_boosted(request: Request) -> bool:
 
 ---
 
-## 12. Template Directory Structure
+## 13. Template Directory Structure
 
 ```
 app/templates/
 ├── htmx/
-│   ├── base.html                    # App shell (sidebar, topbar, main content area)
-│   ├── base_page.html               # Simple page wrapper for non-app pages
+│   ├── base.html                    # Full app shell (sidebar, topbar, main content area) — the primary layout
+│   ├── base_page.html               # Minimal wrapper for standalone pages (login, error pages) — no sidebar/topbar
 │   └── login.html                   # Login page (with AVAIL logo)
 ├── partials/
 │   ├── shared/
@@ -670,7 +683,7 @@ app/templates/
 
 ---
 
-## 13. UX Principles (Enforced Throughout)
+## 14. UX Principles (Enforced Throughout)
 
 From user feedback, applied consistently:
 
@@ -684,7 +697,7 @@ From user feedback, applied consistently:
 
 ---
 
-## 14. Mobile Responsive Design
+## 15. Mobile Responsive Design
 
 **Breakpoints:**
 - Mobile: < 768px
@@ -699,13 +712,13 @@ From user feedback, applied consistently:
 - Full-screen modals
 - Safe area insets for notched devices
 
-**File:** `app/static/htmx_mobile.css` — updated to use brand colors
+**File:** `app/static/htmx_mobile.css` — updated to use brand colors. This is a separate hand-written CSS file imported into the Vite entry point (`import './htmx_mobile.css'` in `htmx_app.js`). It uses raw CSS media queries, not Tailwind `@apply` — this is intentional since responsive table-to-card transformations are complex layout overrides that don't map cleanly to utility classes.
 
 ---
 
-## 15. Verification Criteria
+## 16. Verification Criteria
 
-The rebuild is ready to flip `USE_HTMX=true` when:
+The rebuild is complete when:
 
 1. All 10 page views render correctly (requisitions, companies, vendors, buy plans, search, sourcing results, lead detail, followup queue, prospecting, dashboard)
 2. AVAIL logo displays in sidebar, login, and mobile header
