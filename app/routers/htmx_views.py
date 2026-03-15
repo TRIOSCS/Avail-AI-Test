@@ -695,13 +695,18 @@ async def search_run(
     start = time.time()
     results = []
     error = None
+    source_errors: list[str] = []
 
     try:
         # Use the search service to find parts across all connectors
         from ..search_service import quick_search_mpn
 
         raw_results = await quick_search_mpn(search_mpn, db)
-        results = raw_results if isinstance(raw_results, list) else raw_results.get("sightings", [])
+        if isinstance(raw_results, list):
+            results = raw_results
+        else:
+            results = raw_results.get("sightings", [])
+            source_errors = raw_results.get("source_errors", [])
     except Exception as exc:
         logger.error("Search failed for {}: {}", search_mpn, exc)
         error = f"Search error: {exc}"
@@ -751,6 +756,7 @@ async def search_run(
         "mpn": search_mpn,
         "elapsed_seconds": elapsed,
         "error": error,
+        "source_errors": source_errors,
     })
     return templates.TemplateResponse("partials/search/results.html", ctx)
 

@@ -32,6 +32,20 @@
       </span>
     </div>
 
+    {# Buyer status badge (shown when status is not 'new') #}
+    {% set status_styles = {
+      'contacted': 'bg-amber-50 text-amber-700',
+      'rfq_sent': 'bg-purple-50 text-purple-700',
+      'has_stock': 'bg-emerald-50 text-emerald-700',
+      'bad_lead': 'bg-gray-100 text-gray-500',
+    } %}
+    {% if lead.buyer_status and lead.buyer_status != 'new' %}
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full
+                 {{ status_styles.get(lead.buyer_status, 'bg-gray-100 text-gray-600') }}">
+      {{ lead.buyer_status|replace('_', ' ')|title }}
+    </span>
+    {% endif %}
+
     {# Row 2: Confidence score + progress bar #}
     <div>
       <div class="flex items-center justify-between mb-1">
@@ -51,6 +65,11 @@
              style="width: {{ [lead.confidence_score, 100]|min }}%"></div>
       </div>
     </div>
+
+    {# Reason summary #}
+    {% if lead.reason_summary %}
+    <p class="text-sm text-gray-600 line-clamp-2">{{ lead.reason_summary }}</p>
+    {% endif %}
 
     {# Row 3: Source badges #}
     <div class="flex flex-wrap gap-1">
@@ -95,6 +114,23 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
       </svg>
       Corroborated ({{ lead.evidence_count }} signals)
+    </div>
+    {% endif %}
+
+    {# Risk / caution flags #}
+    {% if lead.risk_flags %}
+    <div class="flex flex-wrap gap-1">
+      {% for flag in lead.risk_flags %}
+        {% if flag.startswith('positive:') %}
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-600">
+            {{ flag.replace('positive:', '')|replace('_', ' ')|title }}
+          </span>
+        {% else %}
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-600">
+            {{ flag|replace('_', ' ')|title }}
+          </span>
+        {% endif %}
+      {% endfor %}
     </div>
     {% endif %}
 

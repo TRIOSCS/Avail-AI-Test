@@ -276,3 +276,59 @@ def test_lead_feedback_not_found(client):
         data={"note": "test"},
     )
     assert resp.status_code == 404
+
+
+# ── Lead Card Rendering Tests ────────────────────────────────────────
+
+
+def test_sourcing_lead_card_shows_buyer_status(client, db_session, sample_lead):
+    """Lead card renders buyer_status badge when status is not 'new'."""
+    sample_lead.buyer_status = "contacted"
+    db_session.commit()
+    req_id = sample_lead.requirement_id
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
+    assert resp.status_code == 200
+    assert "Contacted" in resp.text
+
+
+def test_sourcing_lead_card_hides_new_status(client, db_session, sample_lead):
+    """Lead card does NOT show buyer_status badge when status is 'new'."""
+    sample_lead.buyer_status = "new"
+    db_session.commit()
+    req_id = sample_lead.requirement_id
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
+    assert resp.status_code == 200
+    # The word "New" appears in filter bar but NOT as a buyer status badge
+    assert "lead-card-" in resp.text
+
+
+def test_sourcing_lead_card_shows_risk_flags(client, db_session, sample_lead):
+    """Lead card renders risk_flags as colored chips."""
+    sample_lead.risk_flags = ["limited_business_footprint", "positive:contact_channels_present"]
+    db_session.commit()
+    req_id = sample_lead.requirement_id
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
+    assert resp.status_code == 200
+    assert "Limited Business Footprint" in resp.text
+    assert "Contact Channels Present" in resp.text
+
+
+def test_sourcing_lead_card_shows_reason_summary(client, db_session, sample_lead):
+    """Lead card renders reason_summary text."""
+    sample_lead.reason_summary = "Strong BrokerBin listing with verified stock"
+    db_session.commit()
+    req_id = sample_lead.requirement_id
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
+    assert resp.status_code == 200
+    assert "Strong BrokerBin listing with verified stock" in resp.text
+
+
+def test_sourcing_results_weak_leads_warning(client, db_session, sample_lead):
+    """Warning banner shown when all leads have low confidence."""
+    sample_lead.confidence_band = "low"
+    sample_lead.confidence_score = 15.0
+    db_session.commit()
+    req_id = sample_lead.requirement_id
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
+    assert resp.status_code == 200
+    assert "Only weak leads found" in resp.text

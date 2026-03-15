@@ -162,6 +162,20 @@
     </div>
   </div>
 
+  {# Warning: all leads are weak #}
+  {% if leads and leads|selectattr('confidence_band', 'equalto', 'low')|list|length == leads|length %}
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 flex items-start gap-2">
+    <svg class="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+    </svg>
+    <div>
+      <p class="text-sm font-medium text-amber-800">Only weak leads found</p>
+      <p class="text-xs text-amber-600 mt-0.5">All results have low confidence. Consider broadening your search or using additional sources.</p>
+    </div>
+  </div>
+  {% endif %}
+
   {# Lead cards grid #}
   {% if leads %}
   <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="lead-cards">
